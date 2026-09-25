@@ -378,6 +378,15 @@ export function recordWarm(record: WarmRecord): void {
   if (warms.length > MAX_WARM_RECORDS) warms.shift();
 }
 
+/**
+ * The memory this process may use. A container with no memory limit reports the cgroup's "max" as a
+ * number near 2^64 through `process.constrainedMemory()` (the pilot's read 17,592,186,044,416 MB), and a
+ * host without cgroups reports 0 — in both cases the host's total is the real ceiling.
+ */
+export function memoryLimitBytes(constrained: number | undefined, total: number): number {
+  return constrained && constrained > 0 && constrained < total ? constrained : total;
+}
+
 // ── Snapshots ──────────────────────────────────────────────────────────────────────────────────────
 
 /** The public `/health` view: counts and timings only (see WHAT IS PUBLIC above). */
@@ -432,7 +441,7 @@ export function runtimeDetail(now: number = Date.now()) {
     fqmWorkers: sharedFqmPoolSize(),
     // The memory this process may use: the container's cgroup limit where Node can read one, else the
     // host's. What a heap limit on the calculation worker would have to be sized against (#604).
-    memoryLimitMb: Math.round((process.constrainedMemory?.() || totalmem()) / (1024 * 1024)),
+    memoryLimitMb: Math.round(memoryLimitBytes(process.constrainedMemory?.(), totalmem()) / (1024 * 1024)),
     stalls: [...stalls].reverse(),
     warms: [...warms].reverse(),
     inFlight: { total: current.length, requests: current.slice(0, MAX_REPORTED_REQUESTS).map(({ method, path, runningMs }) => ({ method, path, runningMs })) },
