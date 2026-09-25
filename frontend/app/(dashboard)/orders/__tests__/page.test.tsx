@@ -192,6 +192,45 @@ describe("OrdersPage paging + measure labels", () => {
     expect(screen.queryByText(CAVEAT)).not.toBeInTheDocument();
   });
 
+  it("#621: names the measures with no order, and never lets an empty list read as 'nobody at risk'", async () => {
+    let withoutOrder: string[] = ["cms130"];
+    let rows = [proposal(1)];
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", status: "Active", identity: { cmsId: "CMS125", mipsQualityId: "112" } },
+          { id: "cms130", name: "Colorectal Cancer Screening", status: "Active", identity: { cmsId: "CMS130", mipsQualityId: "113" } },
+        ]);
+      }
+      if (url.startsWith("/api/orders/proposals?")) {
+        return Promise.resolve({ proposed: rows, suppressed: [], totals: { proposed: rows.length, suppressed: 0 }, measuresWithoutOrder: withoutOrder });
+      }
+      return Promise.reject(new Error(`unexpected GET ${url}`));
+    });
+
+    const first = render(<OrdersPage />);
+    await waitFor(() => expect(screen.getByText("subj-1")).toBeInTheDocument());
+    expect(screen.getByTestId("measures-without-order")).toHaveTextContent(
+      "No order is defined for MIPS 113 · CMS130 · Colorectal Cancer Screening, so its at-risk patients get no proposal here.",
+    );
+    first.unmount();
+
+    // Filtered to that measure: the empty list says why, not "no proposals for the current scope".
+    rows = [];
+    render(<OrdersPage />);
+    await userEvent.click(await screen.findByRole("combobox", { name: /measure/i }));
+    await userEvent.click(screen.getByRole("option", { name: "Colorectal Cancer Screening" }));
+    await waitFor(() => expect(screen.getByText("No order is defined for this measure, so none is proposed.")).toBeInTheDocument());
+    expect(screen.queryByText("No order proposals for the current scope.")).not.toBeInTheDocument();
+
+    // A measure that has an order, with nobody at risk, keeps the plain empty state and no note.
+    withoutOrder = [];
+    await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
+    await userEvent.click(screen.getByRole("option", { name: "Breast Cancer Screening" }));
+    await waitFor(() => expect(screen.getByText("No order proposals for the current scope.")).toBeInTheDocument());
+    expect(screen.queryByTestId("measures-without-order")).not.toBeInTheDocument();
+  });
+
   it("labels rows from the measure catalog (crosswalk identity) and never reads the programs overview", async () => {
     render(<OrdersPage />);
 

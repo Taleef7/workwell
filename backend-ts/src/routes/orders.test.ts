@@ -16,6 +16,7 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { handleOrders } from "./orders.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 const dbPath = join(tmpdir(), `workwell-orders-route-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -197,4 +198,33 @@ test("#546: a patient outside the measure's initial population gets no proposal,
   // Suppression is a DIFFERENT statement ("a standing order already covers this"), so the skipped
   // patient must not show up there either: totals count exactly one patient for this measure.
   assert.equal(body.totals.proposed + body.totals.suppressed, 1);
+});
+
+test("#621: the measures with no order to propose are named, on the pilot's six-measure scope", () => {
+  // On Maui four of the six routed measures have no catalog order, so their at-risk patients get no
+  // proposal. The page used to show an empty list, which reads as "nobody is at risk"; the route names
+  // them so it can say otherwise. Run in a fresh Maui process: the scope is fixed at module load.
+  const output = runProfileChild(
+    "maui",
+    `
+      import { tmpdir } from "node:os";
+      import { join } from "node:path";
+      import { createSqliteD1 } from "@mieweb/cloud-local";
+      import { RUN_STORE_FLOOR_DDL } from "./src/stores/sqlite/schema.ts";
+      import { handleOrders } from "./src/routes/orders.ts";
+      const db = await createSqliteD1(join(tmpdir(), "workwell-orders-621-" + crypto.randomUUID() + ".sqlite"));
+      await db.exec(RUN_STORE_FLOOR_DDL.split(String.fromCharCode(10)).join(" "));
+      const read = async (qs) => (await (await handleOrders(new Request("http://x/api/orders/proposals" + qs), { DB: db })).json()).measuresWithoutOrder;
+      console.log(JSON.stringify({ all: await read(""), cms130: await read("?measureId=cms130"), cms122: await read("?measureId=cms122") }));
+    `,
+    { WORKWELL_OFFICIAL_MEASURES: "cms122,cms125,cms2,cms130,cms165,cms137", DATABASE_URL: undefined },
+  );
+  assert.deepEqual([...(output.all as string[])].sort(), ["cms130", "cms137", "cms165", "cms2"]);
+  assert.deepEqual(output.cms130, ["cms130"], "filtered to a measure with no order: named, not an empty list");
+  assert.deepEqual(output.cms122, [], "a measure with an order is not named");
+});
+
+test("#621: on the default profile every active measure has an order, so none is named", async () => {
+  const body = (await get("").then((r) => r!.json())) as { measuresWithoutOrder: string[] };
+  assert.deepEqual(body.measuresWithoutOrder, []);
 });

@@ -1,7 +1,8 @@
 /**
  * Order proposals route (#77 E7) — advisory "Action Evaluators → orders" over the latest population
  * run per Active measure. Read-time; no schema. Gated to CASE_MANAGER/ADMIN by the auth matrix
- * (orders are clinical). format=domain (default) → {proposed, suppressed, totals, standingOrdersChecked}, optionally windowed
+ * (orders are clinical). format=domain (default) → {proposed, suppressed, totals, standingOrdersChecked,
+ * measuresWithoutOrder}, optionally windowed
  * by ?limit=1..1000&offset= (both lists, same window; totals are the pre-window counts; proposals are
  * in (subject, measure) order); format=fhir → ServiceRequest Bundle of every proposed order, never windowed.
  *
@@ -20,6 +21,7 @@ import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollu
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { proposeOrders, type AtRiskOutcome } from "../order/order-proposal.ts";
 import { resolveStandingOrderProvider, type StandingOrderEnv } from "../order/standing-order-provider.ts";
+import { orderForMeasure } from "../order/order-catalog.ts";
 import { bundleOf } from "../order/proposed-order.ts";
 import { DEPLOYMENT_PROFILE, isRunnableMeasure } from "../config/deployment-profile.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -109,5 +111,8 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
   // #616: whether orders already placed were looked at. False on every deployment today (no order
   // source is connected), and the page then says a proposal may repeat an order already on the chart.
   const standingOrdersChecked = standingOrders.checksExistingOrders;
-  return json({ proposed: page(proposed), suppressed: page(suppressed), totals, standingOrdersChecked });
+  // #621: a measure with no catalog order proposes nothing for any at-risk patient (`proposeOrders`
+  // skips it). Named here, so the page says so instead of an empty list reading as "nobody at risk".
+  const measuresWithoutOrder = scope.filter((m) => orderForMeasure(m) === null);
+  return json({ proposed: page(proposed), suppressed: page(suppressed), totals, standingOrdersChecked, measuresWithoutOrder });
 }
