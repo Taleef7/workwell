@@ -100,7 +100,7 @@ import {
   type OfficialMeasuresEnv,
 } from "./official-routing.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";
-import { fqmWorkerEnabled, sharedFqmWorker, type BatchCalculator } from "./fqm-worker.ts";
+import { fqmWorkerCount, fqmWorkerEnabled, sharedFqmWorker, type BatchCalculator } from "./fqm-worker.ts";
 
 /** The extended shape the authored engine accepts — diagnostics pass an explicit library to run. */
 export type RoutableInput = EvaluateMeasureInput & { elm?: unknown; metaOverride?: MeasureMeta };
@@ -363,7 +363,7 @@ export async function routedEngineForEnv(
     ...(options.calculateBatch
       ? { calculateBatch: options.calculateBatch }
       : fqmWorkerEnabled(env as Record<string, unknown>)
-        ? { calculateBatch: sharedFqmWorker().calculate }
+        ? { calculateBatch: sharedFqmWorker(fqmWorkerCount(env as Record<string, unknown>)).calculate }
         : {}),
     ...(options.onWarning ? { onWarning: options.onWarning } : {}),
   });

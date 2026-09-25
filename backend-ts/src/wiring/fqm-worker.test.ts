@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createFqmWorker } from "./fqm-worker.ts";
+import { createFqmPool, createFqmWorker, fqmWorkerCount } from "./fqm-worker.ts";
 import { officialMeasureExecutor } from "./official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
@@ -102,4 +102,44 @@ test("chunks submitted together each get their own answer (the worker runs them 
   } finally {
     await worker.close();
   }
+});
+
+test("a pool of two calculates two chunks at the same time (#604 follow-up)", async () => {
+  const pool = createFqmPool(2, { calculatorModule: FIXTURE });
+  try {
+    await Promise.all([pool.calculate(input([{}])), pool.calculate(input([{}]))]); // start both threads first
+    const started = Date.now();
+    await Promise.all([pool.calculate(input([{ mode: "busy", cpuMs: 800 }])), pool.calculate(input([{ mode: "busy", cpuMs: 800 }]))]);
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 1400, `two 800 ms chunks took ${elapsed} ms: one per worker, side by side`);
+    assert.equal(pool.alive, 2);
+    assert.equal(pool.requests, 4);
+  } finally {
+    await pool.close();
+  }
+});
+
+test("an idle worker is released and the next chunk starts a fresh one (#604 follow-up)", async () => {
+  const worker = createFqmWorker({ calculatorModule: FIXTURE, idleMs: 100 });
+  try {
+    await worker.calculate(input([{}]));
+    assert.equal(worker.alive, 1);
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(worker.alive, 0, "released after its idle time, so its memory is too");
+    assert.equal((await worker.calculate(input([{}, {}]))).bySubject.size, 2, "and a new chunk still runs");
+    assert.equal(worker.alive, 1);
+  } finally {
+    await worker.close();
+  }
+});
+
+test("the pool size: 2 by default, WORKWELL_FQM_WORKERS to change it, never more than the cores minus one (#604 follow-up)", () => {
+  assert.equal(fqmWorkerCount({}, 4), 2);
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "3" }, 4), 3);
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "8" }, 4), 3, "the main thread keeps a core");
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "1" }, 4), 1, "the single worker #604 shipped with");
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "0" }, 4), 2, "nonsense falls back to the default");
+  assert.equal(fqmWorkerCount({ WORKWELL_FQM_WORKERS: "abc" }, 4), 2);
+  assert.equal(fqmWorkerCount({}, 2), 1, "a two-core host gets one worker");
+  assert.equal(fqmWorkerCount({}, 1), 1);
 });
