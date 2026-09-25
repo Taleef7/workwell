@@ -86,11 +86,19 @@ healthy_from=99
 [ "$(run)" = 1 ] || fail "still down after the restart must fall back to recreate"
 [ "$(grep -c '^health' "$calls")" = 3 ] || fail "expected the configured 3 health checks"
 
-# 5. The restart request fails: fall back at once, without waiting on health.
+# 5. The restart request's response is lost but the manager applied it: the health wait still runs and
+#    decides, so a restart that happened is not followed by a recreate that deletes the stall report.
 reset
 put_result=1
-[ "$(run)" = 1 ] || fail "a failed restart request must fall back to recreate"
-grep -q '^health' "$calls" && fail "no health wait after a failed restart request"
+[ "$(run)" = 0 ] || fail "an unconfirmed restart that the API comes back from must count as a restart"
+grep -q '^health' "$calls" || fail "a failed restart request must still wait on health"
+
+# 5b. The restart request failed and the API stays down: recreate, after the same wait.
+reset
+put_result=1
+healthy_from=99
+[ "$(run)" = 1 ] || fail "an unconfirmed restart with the API still down must fall back to recreate"
+[ "$(grep -c '^health' "$calls")" = 3 ] || fail "expected the configured 3 health checks"
 
 # 6. Cannot tell which container it is: no PUT at all.
 reset
@@ -104,4 +112,4 @@ registry="EMPTY"
 [ "$(run)" = 1 ] || fail "an absent container must fall back to recreate"
 grep -q '^PUT ' "$calls" && fail "nothing may be restarted when no container is registered"
 
-echo "PASS: mieweb-restart-first (7 cases)"
+echo "PASS: mieweb-restart-first (8 cases)"

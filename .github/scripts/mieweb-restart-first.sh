@@ -35,11 +35,12 @@ restart_in_place() {
   body_file="$(mktemp)"
   printf '{"restart":true}' > "$body_file"
   # One attempt: a restart that times out at the client may still have been applied, and a second
-  # request would only restart it again. The health wait below is what decides either way.
+  # request would only restart it again. A FAILED request is therefore not a verdict (Codex on #708):
+  # mieweb-api-request.sh treats a lost response to a state-changing call as ambiguous, and giving up
+  # here would recreate the container, deleting the stall report, after a restart that did happen.
+  # The health wait below decides either way; it only costs the wait when the request truly failed.
   if ! MIEWEB_REQUEST_ATTEMPTS=1 request PUT "/sites/${SITE_ID}/containers/${id}" "$body_file" >/dev/null; then
-    rm -f "$body_file"
-    echo "::warning::the restart request for ${hostname} failed; falling back to recreate" >&2
-    return 1
+    echo "::warning::the restart request for ${hostname} did not confirm; waiting on health in case it was applied" >&2
   fi
   rm -f "$body_file"
   for attempt in $(seq 1 "$attempts"); do
