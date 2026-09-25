@@ -8,6 +8,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { AccessDenied } from "@/components/access-denied";
 import { canViewOrders } from "@/lib/rbac";
+import { SUBJECT } from "@/lib/terminology";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { OUTCOME_LABELS, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 
@@ -225,7 +226,7 @@ export default function OrdersPage() {
       {withoutOrder.length > 0 ? (
         <p data-testid="measures-without-order" className="text-xs text-neutral-600 dark:text-neutral-400">
           No order is defined for {withoutOrder.map(measureLabel).join(", ")}, so {withoutOrder.length === 1 ? "its" : "their"}{" "}
-          at-risk patients get no proposal here. Their gaps are on the work list.
+          at-risk {SUBJECT.plural} get no proposal here. Their gaps are tracked as cases on the work list.
         </p>
       ) : null}
 

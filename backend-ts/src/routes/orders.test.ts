@@ -207,12 +207,10 @@ test("#621: the measures with no order to propose are named, on the pilot's six-
   const output = runProfileChild(
     "maui",
     `
-      import { tmpdir } from "node:os";
-      import { join } from "node:path";
       import { createSqliteD1 } from "@mieweb/cloud-local";
       import { RUN_STORE_FLOOR_DDL } from "./src/stores/sqlite/schema.ts";
       import { handleOrders } from "./src/routes/orders.ts";
-      const db = await createSqliteD1(join(tmpdir(), "workwell-orders-621-" + crypto.randomUUID() + ".sqlite"));
+      const db = await createSqliteD1(":memory:");
       await db.exec(RUN_STORE_FLOOR_DDL.split(String.fromCharCode(10)).join(" "));
       const read = async (qs) => (await (await handleOrders(new Request("http://x/api/orders/proposals" + qs), { DB: db })).json()).measuresWithoutOrder;
       console.log(JSON.stringify({ all: await read(""), cms130: await read("?measureId=cms130"), cms122: await read("?measureId=cms122") }));

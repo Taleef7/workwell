@@ -617,10 +617,11 @@ Each outcome evidence payload includes:
   `GET /api/runs/{runId}/qrda?format=xml` — well-formed CDA carrying the aggregate population counts +
   performance rate (reuses the MeasureReport `countPopulations`); a stub, not IG-validated (#91 / E3.3).
   See `docs/STANDARDS_CONFORMANCE.md`.
-- **E7 action-evaluator order map (#77):** each runnable measure has a corresponding proposed order
-  code in `backend-ts/src/order/order-catalog.ts`. Codes reuse the `terminology_mappings` seed
-  standards where present: audiogram → CPT 92557; tb_surveillance → CPT 86580; flu_vaccine → CVX 141;
-  hazwoper → `hazwoper-exam` in `urn:workwell:vs:hazwoper-exams`. Measures without a seed mapping
-  (e.g., BMI screening, hypertension, cholesterol, CMS eCQMs) use LOCAL `urn:workwell:orders` codes
-  pending standard terminology alignment. `GET /api/orders/proposals` returns `ProposedOrder` records
+- **E7 action-evaluator order map (#77):** `backend-ts/src/order/order-catalog.ts` maps a measure to
+  the order it proposes. Codes reuse the `terminology_mappings` seed standards where present: audiogram
+  → CPT 92557; tb_surveillance → CPT 86580; flu_vaccine → CVX 141; hazwoper → `hazwoper-exam` in
+  `urn:workwell:vs:hazwoper-exams`. Others use a representative standard code (cms122 → CPT 83036, cms125
+  → CPT 77067) or a LOCAL `urn:workwell:orders` code (BMI). A measure absent from the catalog proposes
+  nothing; on Maui that is cms2, cms130, cms165 and cms137, and the route names them in
+  `measuresWithoutOrder` (#621). `GET /api/orders/proposals` returns `ProposedOrder` records
   (or FHIR R4 `ServiceRequest` bundles) for at-risk subjects; proposals are advisory only.

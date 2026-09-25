@@ -11,8 +11,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   named the four measures it cannot replay (#671). The order catalog still dropped them silently: CMS2,
   CMS130, CMS165 and CMS137 have no catalog order, so their at-risk patients got no proposal, and
   filtering to one showed "No order proposals", which reads as nobody at risk. The route now returns
-  `measuresWithoutOrder`, and the page names those measures and says their gaps are on the work list. No
-  order codes were invented for them; that needs approved mappings (§4A.3, #640).
+  `measuresWithoutOrder`, and the page names those measures and says their gaps are tracked as cases on
+  the work list. No order codes were invented for them: which gaps may be ordered by protocol is the open
+  question in #640.
 - **#616: Order Proposals no longer invents standing orders.** With no order source connected, the
   default made up a standing order for about one patient in five from a hash of the ID. When it matched a
   patient's own gap, their proposal was hidden under "standing order on file" and left out of the FHIR
