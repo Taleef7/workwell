@@ -103,6 +103,34 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
     expect(cells).toEqual(["Not in population", "Missing Data"]);
   });
 
+  it("shows a running run's elapsed time, not '0s', when this page did not start it (#644)", async () => {
+    const started = new Date(Date.now() - 15 * 60_000 - 5_000).toISOString();
+    const running = { ...nightly, runId: "run-3", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: started };
+    answer([running, run]);
+    const listed = get.getMockImplementation()!;
+    get.mockImplementation((url: string) => (url === "/api/runs/run-3" ? Promise.resolve({ ...summary, ...running }) : listed(url)));
+    render(<RunsPage />);
+    const row = (await screen.findAllByText(/^15m \d+s$/))[0]!;
+    expect(row).toBeInTheDocument();
+    expect(screen.queryByText("0s")).not.toBeInTheDocument();
+    // And it keeps counting while the page is open, not frozen at load time.
+    const before = row.textContent;
+    await new Promise((r) => setTimeout(r, 2_100));
+    expect((await screen.findAllByText(/^15m \d+s$/))[0]!.textContent).not.toBe(before);
+  });
+
+  it("a nightly running past an hour shows its time, and only one past three hours reads 'Stalled' (#709)", async () => {
+    const at = (ms: number) => new Date(Date.now() - ms).toISOString();
+    answer([
+      { ...nightly, runId: "run-4", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: at(90 * 60_000) },
+      { ...nightly, runId: "run-5", status: "RUNNING", completedAt: null, durationMs: 0, startedAt: at(4 * 3600_000) },
+    ]);
+    render(<RunsPage />);
+    // The list row, and the detail pane once the first run is selected: never "Stalled" for this one.
+    expect((await screen.findAllByText("1h 30m")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Stalled")).toHaveLength(1);
+  });
+
   it("shows a finished run's duration past an hour, not '-'", async () => {
     render(<RunsPage />);
     expect(await screen.findByText("1h 12m")).toBeInTheDocument();
