@@ -47,7 +47,7 @@ describe("freshnessNotice (#623)", () => {
     expect(freshnessNotice([run("COMPLETED", recent)], NOW)).toBeNull();
   });
 
-  it("no runs at all is not a notice", () => {
-    expect(freshnessNotice([], NOW)).toBeNull();
+  it("no whole-practice run at all says so, rather than staying silent forever (#710, Codex)", () => {
+    expect(freshnessNotice([], NOW)).toEqual({ kind: "none" });
   });
 });

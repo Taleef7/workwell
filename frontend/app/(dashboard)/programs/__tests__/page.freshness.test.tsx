@@ -33,7 +33,7 @@ beforeEach(() => setSubject("patient"));
 
 describe("ProgramsPage says when its numbers are stale (#623)", () => {
   it("asks only for whole-practice runs", async () => {
-    answer([]);
+    answer([{ status: "COMPLETED", startedAt: new Date().toISOString() }]);
     render(<ProgramsPage />);
     await screen.findByText("Programs Overview");
     expect(get.mock.calls.map(([u]) => String(u)).filter((u) => u.startsWith("/api/runs?"))).toEqual(["/api/runs?scopeType=ALL_PROGRAMS&limit=5"]);

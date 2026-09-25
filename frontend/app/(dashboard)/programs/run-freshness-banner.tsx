@@ -21,6 +21,8 @@ export function freshnessMessage(notice: FreshnessNotice): string {
       return `The latest update (${when(notice.latestAt)}) finished with errors for some patients, so some of these numbers may be incomplete.`;
     case "overdue":
       return `No update has run since ${when(notice.latestAt)}, so these numbers may be out of date.`;
+    case "none":
+      return "No update of every measure has run yet, so the numbers below come only from runs started by hand.";
   }
 }
 

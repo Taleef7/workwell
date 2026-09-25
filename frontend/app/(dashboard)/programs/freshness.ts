@@ -20,7 +20,9 @@ export type FreshnessNotice =
   /** The newest update finished, but some patients could not be evaluated. */
   | { kind: "partial"; latestAt: string }
   /** Nothing has run for longer than a nightly cycle allows. */
-  | { kind: "overdue"; latestAt: string };
+  | { kind: "overdue"; latestAt: string }
+  /** No whole-practice update has ever run: whatever is shown came from runs started by hand. */
+  | { kind: "none" };
 
 /** A nightly runs every 24 hours; past 36 without a new one, one has been missed. */
 export const OVERDUE_AFTER_MS = 36 * 60 * 60 * 1000;
@@ -31,7 +33,10 @@ const REPORTABLE = new Set(["COMPLETED", "PARTIAL_FAILURE"]);
 
 export function freshnessNotice(runsNewestFirst: readonly FreshnessRun[], now: number = Date.now()): FreshnessNotice | null {
   const newest = runsNewestFirst[0];
-  if (!newest) return null;
+  // Silence here would last forever on a deployment whose scheduler never created its first run
+  // (Codex on #710). A deployment with the scheduler off (staging) has no update to be late for, and
+  // saying so is still true.
+  if (!newest) return { kind: "none" };
   const status = upper(newest.status);
   if (DID_NOT_FINISH.has(status)) {
     // The dashboard shows the newest REPORTABLE run's results; name it, or say there is none listed.
