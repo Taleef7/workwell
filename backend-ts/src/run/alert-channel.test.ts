@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   alertSummary,
   ALERT_SUMMARY_MAX,
+  webhookBody,
   WORKWELL_ALERT_PREFIX,
   WEBHOOK_TIMEOUT_MS,
   consoleAlertChannel,
@@ -104,7 +105,7 @@ test("webhook channel aborts a hung fetch within the timeout bound (Codex P2)", 
   // A sink that never resolves until aborted — without the timeout, this would hang the run.
   let sawAbort = false;
   const hungFetch = async (_url: string, init?: { signal?: AbortSignal }) => {
-    await new Promise<void>((_resolve, reject) => {
+    return new Promise<never>((_resolve, reject) => {
       const signal = init?.signal;
       if (!signal) return; // hang forever if no signal (test would fail by timeout)
       if (signal.aborted) {
@@ -132,7 +133,7 @@ test("emitAlert swallows a webhook timeout so the run is never failed by a hung 
   const hung: AlertChannel = webhookAlertChannel(
     "https://hooks.example/slow",
     async (_url, init) => {
-      await new Promise<void>((_resolve, reject) => {
+      return new Promise<never>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
       });
     },
@@ -227,4 +228,51 @@ test("the chat line never names a patient or carries raw error text, and stays u
   assert.match(line, /\[EMPLOYEE\]: FAILED/);
   assert.ok(line.length <= ALERT_SUMMARY_MAX);
   assert.ok(alertSummary({ ...sample, runId: "r".repeat(3_000) }).length <= ALERT_SUMMARY_MAX, "capped whatever a field holds");
+});
+
+test("the webhook is sent only fields that cannot name a patient (#623 review)", async () => {
+  // A single-patient run's label and a failure's raw error text both name the patient; the endpoint
+  // receives the whole body, not only the line it shows.
+  const patientRun: RunAlert = {
+    ...sample,
+    kind: "RUN_FAILED",
+    status: "FAILED",
+    scopeType: "EMPLOYEE",
+    scopeLabel: "Patient: pat-01565",
+    message: "Run failed: cms125: Patient pat-01565 has no birthDate",
+    detail: { subjectId: "pat-01565" },
+  };
+  const bodies: string[] = [];
+  await webhookAlertChannel("https://hooks.example/alert", async (_url, init) => {
+    bodies.push(String(init?.body ?? ""));
+    return { ok: true, status: 200 };
+  }).send(patientRun);
+  assert.equal(bodies.length, 1);
+  assert.doesNotMatch(bodies[0]!, /pat-01565/, "no patient identifier anywhere in the request");
+  const sent = JSON.parse(bodies[0]!);
+  assert.deepEqual(sent, webhookBody(patientRun));
+  assert.deepEqual(Object.keys(sent).sort(), ["at", "content", "failures", "kind", "runId", "scopeType", "status", "text", "totalEvaluated"]);
+  assert.equal(sent.text, alertSummary(patientRun));
+});
+
+test("a webhook that answers with an error is a failed delivery, named without the URL (#623 review)", async () => {
+  const secretUrl = "https://script.example/macros/s/SECRET-DEPLOYMENT-ID/exec";
+  const ch = webhookAlertChannel(secretUrl, async () => ({ ok: false, status: 404, body: null }));
+  await assert.rejects(
+    () => ch.send(sample),
+    (err: Error) => /HTTP 404/.test(err.message) && !err.message.includes("SECRET-DEPLOYMENT-ID"),
+  );
+  // And a 2xx (a followed redirect ends 200) is delivered.
+  await webhookAlertChannel(secretUrl, async () => ({ ok: true, status: 200 })).send(sample);
+});
+
+test("a webhook URL that does not parse turns the channel off and is never printed (#623 review)", () => {
+  const malformed = "script.example/macros/s/SECRET-DEPLOYMENT-ID/exec"; // pasted without https://
+  assert.equal(isAlertWebhookConfigured({ WORKWELL_ALERT_WEBHOOK_URL: malformed }), false);
+  const lines: string[] = [];
+  const channels = resolveAlertChannels({ WORKWELL_ALERT_WEBHOOK_URL: malformed }, { log: (l) => lines.push(l) });
+  assert.deepEqual(channels.map((c) => c.name), ["console"]);
+  assert.equal(lines.length, 1, "said once, rather than silently off");
+  assert.match(lines[0]!, /not a URL \(value not logged\)/);
+  assert.ok(!lines.some((l) => l.includes("SECRET-DEPLOYMENT-ID")), "the credential never reaches the log");
 });
