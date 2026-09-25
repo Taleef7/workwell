@@ -1076,7 +1076,20 @@ interface OutlookBase {
   forecastable: boolean;
 }
 
-const EMPTY_OUTLOOK_BASE: OutlookBase = { sites: [], compliantExams: [], forecastable: true };
+const EMPTY_OUTLOOK_BASE: Omit<OutlookBase, "forecastable"> = { sites: [], compliantExams: [] };
+
+/**
+ * Whether an outcome can be projected, decided by the ROWS where they can decide it (#617): official
+ * evidence cannot, authored evidence can. Only where no row settles it (a measure that has never run, a
+ * winner with no visible row, or a peeked row that is an evaluation error, whose evidence was replaced
+ * and so proves nothing) does today's routing answer (Codex on #716). A failed official batch must not
+ * read as authored and put its structural zeros back on screen.
+ */
+function forecastableFrom(measureId: string, peekedEvidence: unknown): boolean {
+  if (peekedEvidence != null && hasOfficialEvidence(peekedEvidence)) return false;
+  const decisive = peekedEvidence != null && (peekedEvidence as { evaluationError?: unknown }).evaluationError == null;
+  return decisive ? true : !isOfficialRouted(measureId);
+}
 
 /** Whether an outcome's evidence is an officially routed measure's (the ADR-046 `official` block). */
 const hasOfficialEvidence = (evidence: unknown): boolean =>
@@ -1202,7 +1215,7 @@ export async function programRiskOutlook(
   //   2. "It saves a row read." No: `readWinnersRows` already returns early on an empty winners list.
   // What it actually saves is one `directoryForRows` call and one memo slot per unrun measure. Keep
   // it or delete it; do not add a claim to it that a test cannot hold.
-  if (winners.length === 0) return render(EMPTY_OUTLOOK_BASE);
+  if (winners.length === 0) return render({ ...EMPTY_OUTLOOK_BASE, forecastable: forecastableFrom(measureId, null) });
 
   // The seam decides which subjects are visible at all, so it keys the memo beside the measure.
   const memoKey = `${measureId}|${webChartConfigured}`;
@@ -1258,7 +1271,7 @@ export async function programRiskOutlook(
   // reports the replacement, so reading the precomputed run would pair an older visible snapshot with
   // evidence from a newer invisible run. Empty when the winner held no row we can see.
   const evidenceRunId = snap.winners[0]?.runId ?? null;
-  let forecastable = true;
+  let forecastable = forecastableFrom(measureId, null);
   if (evidenceRunId) {
     // Whether the winner's outcomes carry a recency define is a fact about THOSE ROWS, not about
     // today's routing flag. Reading the flag instead would zero an authored winner's expirations in a
@@ -1292,7 +1305,7 @@ export async function programRiskOutlook(
     const peek = peekRow
       ? await deps.outcomeStore.listOutcomes(evidenceRunId, { measureId, subjectId: peekRow.subjectId, limit: 1 })
       : [];
-    forecastable = !(peek.length > 0 && hasOfficialEvidence(peek[0]!.evidence));
+    forecastable = forecastableFrom(measureId, peek[0]?.evidence ?? null);
     if (compliantSubjects.length > 0 && peek.length > 0 && forecastable) {
       const evidenceBySubject = new Map<string, unknown>();
       for (const outcome of await deps.outcomeStore.listOutcomes(evidenceRunId, { measureId })) {

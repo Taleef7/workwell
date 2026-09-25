@@ -421,3 +421,60 @@ test("after a visibility fallback the evidence names the run the ROWS came from,
   assert.ok(calls.byRun.length > readsAfterFirst, "a fallback result is recomputed, never served from the memo");
   assert.deepEqual(second!.upcomingExpirations.map((e) => e.externalId), ["emp-006"]);
 });
+
+/** Runs `fn` with `WORKWELL_OFFICIAL_MEASURES` set to `ids`, restoring whatever was there. */
+async function withRouting<T>(ids: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const before = process.env.WORKWELL_OFFICIAL_MEASURES;
+  if (ids === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+  else process.env.WORKWELL_OFFICIAL_MEASURES = ids;
+  try {
+    return await fn();
+  } finally {
+    if (before === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = before;
+  }
+}
+
+test("#617: where no row can decide, routing does — a never-run official measure is not forecastable (Codex on #716)", async () => {
+  // A fresh pilot deployment: every measure official, none run yet. No row says so, so routing must.
+  reset();
+  const routed = await withRouting(MEASURE, () => programRiskOutlook(makeDeps([]).deps, MEASURE, 90));
+  assert.equal(routed!.forecastable, false);
+  reset();
+  const authored = await withRouting(undefined, () => programRiskOutlook(makeDeps([]).deps, MEASURE, 90));
+  assert.equal(authored!.forecastable, true, "an authored measure that has not run yet keeps the panel");
+});
+
+test("#617: a run whose every row is an evaluation error proves nothing, so routing decides (Codex on #716)", async () => {
+  // A failed official batch persists MISSING_DATA rows whose evidence is replaced by the error, with
+  // no `official` block; the PARTIAL_FAILURE run can still win. That must not read as authored.
+  const joined = [joinedRow("run-outage", "2026-09-01T00:00:00.000Z", "emp-006", "MISSING_DATA", { runStatus: "PARTIAL_FAILURE" })];
+  const byRun = { "run-outage": [evidenceRow("run-outage", "emp-006", "MISSING_DATA", { evaluationError: "CQL engine failure", message: "boom" })] };
+
+  reset();
+  const routed = await withRouting(MEASURE, () => programRiskOutlook(makeDeps(joined, byRun).deps, MEASURE, 90));
+  assert.equal(routed!.forecastable, false, "an official measure's outage is not a forecast of zero");
+  reset();
+  const authored = await withRouting(undefined, () => programRiskOutlook(makeDeps(joined, byRun).deps, MEASURE, 90));
+  assert.equal(authored!.forecastable, true);
+});
+
+test("#617: a decisive row outranks routing both ways", async () => {
+  // Rows are facts about the run being described; routing is today's flag. An authored winner still
+  // on screen after a flip to official keeps its forecast, and an official winner after a flip back
+  // does not get one.
+  const authoredRows = [joinedRow("run-a", "2026-09-01T00:00:00.000Z", "emp-006", "COMPLIANT")];
+  reset();
+  const a = await withRouting(MEASURE, () =>
+    programRiskOutlook(makeDeps(authoredRows, { "run-a": [evidenceRow("run-a", "emp-006", "COMPLIANT", authoredEvidence(100))] }).deps, MEASURE, 90));
+  assert.equal(a!.forecastable, true);
+
+  const official = {
+    official: { measurementPeriod: { start: "2026-01-01", end: "2026-12-31" }, populationResults: [] },
+    expressionResults: [{ define: "official:initial-population", result: true }],
+  };
+  reset();
+  const o = await withRouting(undefined, () =>
+    programRiskOutlook(makeDeps(authoredRows, { "run-a": [evidenceRow("run-a", "emp-006", "COMPLIANT", official)] }).deps, MEASURE, 90));
+  assert.equal(o!.forecastable, false);
+});
