@@ -86,9 +86,18 @@ export default function NitroGrid({
     [rows, columns, sourceName],
   );
 
+  // A positioned frame gives the grid's two absolutely positioned pieces that have no positioned ancestor of
+  // their own (the screen-reader "Skip to table" link, and the loading overlay) a containing block INSIDE the
+  // page's scrolling <main>. Without it they were placed against the document: the skip link escaped <main>'s
+  // clipping and stretched the page (on /runs, a second scrollbar into empty space below the app), and the
+  // overlay dimmed a viewport-sized box at the top of the page rather than the grid. The grid's tooltips are
+  // portals (fixed, outside the grid), so the frame does not clip them. `height` still sizes the grid itself,
+  // not this frame: a caller wanting a percentage height needs the frame sized too.
   return (
-    <DataVisNitroContext.Provider value={view}>
-      <DataVisNitroGrid columns={columns} {...gridProps} />
-    </DataVisNitroContext.Provider>
+    <div style={{ position: "relative" }} data-testid="nitro-grid-frame">
+      <DataVisNitroContext.Provider value={view}>
+        <DataVisNitroGrid columns={columns} {...gridProps} />
+      </DataVisNitroContext.Provider>
+    </div>
   );
 }
