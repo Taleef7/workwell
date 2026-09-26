@@ -9,9 +9,10 @@
  *
  * So a FINISHED run's counts are kept until something says they changed, and only a running run's are
  * read each time. Outcome compaction (ADR-073), the one in-process path that changes a finished run's
- * rows, calls `resetRunOutcomeCounts`. A change made from another process is seen at the next restart:
- * the ADR-079 backfill (DEPLOY.md already requires one after it) and the seeding scripts, which create a
- * run COMPLETED and then insert its rows (backfill-trend-history). Kept entries used to expire after ten
+ * rows, calls `resetRunOutcomeCounts` — in its own process only. A change made from another process is
+ * seen at the next restart, which DEPLOY.md requires after each: a manual `pnpm outcomes:compact`, the
+ * ADR-079 backfill, and the seeding scripts, which create a run COMPLETED and then insert its rows
+ * (backfill-trend-history). Kept entries used to expire after ten
  * minutes for that second case, which made nearly every visit a cold one: 48.8 s for the first page on
  * the pilot (2026-09-26), against 0.48 s kept. The counts that do have to be read are read a few at a
  * time, like the runs CSV (export-csv.ts), so a list load can never take the whole pool, and two loads
