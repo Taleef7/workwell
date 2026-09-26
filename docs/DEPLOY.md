@@ -217,7 +217,7 @@ Deploy and reconcile must ship **identical** values (`official-flip-config.test.
 | `WORKWELL_OUTCOME_RETENTION_DAYS` | **`400`** | unset (off) | ADR-073/077. Keeps each subject's newest row per `(measure, period)`, run rows and case-cited rows. Needs the keep-set indexes `schema-pg.ts` creates. |
 
 Clinical facts follow the calendar year of each run's evaluation date. Turning retention on deletes a lot
-at once: run the first pass by hand with `pnpm outcomes:compact`.
+at once: run the first pass by hand with `pnpm outcomes:compact`, then restart the backend (below).
 
 #### Segment repair after adding a tenant, site or routed measure (owner-gated)
 
@@ -330,6 +330,10 @@ From `backend-ts/`, with `DATABASE_URL` set. Idempotent and resumable. Undo SQL 
 | `pnpm outcomes:compact` | one retention pass | also runs after each Maui nightly | none |
 
 A crashed `seed:scale` leaves RUNNING runs that are not auto-swept — roll back before resuming.
+
+These run in their own process, so the running backend keeps the Run History counts it had already read
+(kept until compaction or a restart, `run/run-counts.ts`). After `seed:scale`, `seed:trend-history` or
+`outcomes:compact` against a live database, restart the backend (the re-deploy below).
 
 ### Manual re-deploy (force update existing containers)
 

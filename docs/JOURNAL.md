@@ -5,6 +5,14 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-09-26
+
+- **Run History opens warm.** The list counts each run's outcomes. A finished run's counts were kept for only
+  ten minutes, so nearly every visit was a cold one: 48.8 s for the first page on the pilot, against 0.48 s
+  kept. They are now kept until compaction resets them, or a restart; two loads asking at once (the grid and
+  the app-wide run-status check) share one read; and the read-model warm (boot, and after every run) counts
+  the first page, so after a nightly only the new run is read. #655 checklist item.
+
 ## 2026-09-25
 
 - **Run History no longer has a second scrollbar into empty space.** The outcomes grid's hidden
