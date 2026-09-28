@@ -10,22 +10,28 @@ import { canReconcileIdentity } from "@/lib/rbac";
 import { emitToast } from "@/lib/toast";
 import { SkeletonCard } from "@/components/skeleton-loader";
 import { SUBJECT } from "@/lib/terminology";
-import { OUTCOME_LABELS, labelFor } from "@/lib/status";
+import { COMPLIANCE_STATUS_LABELS, complianceStatusClass, labelFor } from "@/lib/status";
 
-const OUTCOME_CHIP: Record<string, string> = {
-  COMPLIANT: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300",
-  DUE_SOON: "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300",
-  OVERDUE: "bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300",
-  MISSING_DATA: "bg-violet-100 text-violet-800 dark:bg-violet-950/50 dark:text-violet-300",
-  EXCLUDED: "bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400",
-};
-
+/**
+ * The patient page's reading of an outcome (#655, #671): the server's `displayStatus`, so an
+ * out-of-population MISSING_DATA reads "Not in population" here as it does there. The stored bucket is
+ * the fallback for an older backend.
+ */
 function OutcomeChip({ status }: { status: string }) {
   return (
-    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${OUTCOME_CHIP[status] ?? "bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"}`}>
-      {labelFor(OUTCOME_LABELS, status)}
+    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${complianceStatusClass(status)}`}>
+      {labelFor(COMPLIANCE_STATUS_LABELS, status)}
     </span>
   );
+}
+
+/** What started the run a row came from, so two rows on one day read as two runs (#655). */
+function runKindLabel(kind: string): string {
+  if (kind === "SCHEDULED") return "Nightly";
+  if (kind === "MANUAL") return "Manual run";
+  if (kind === "RERUN") return `Single-${SUBJECT.singular} rerun`;
+  if (kind === "SEED") return "Seeded history";
+  return kind;
 }
 
 /**
@@ -50,7 +56,10 @@ type TimelineEntry = {
   measureId: string;
   measureName?: string;
   status: string;
+  displayStatus?: string;
   evaluatedAt: string;
+  runId?: string;
+  runKind?: "SCHEDULED" | "MANUAL" | "RERUN" | "SEED";
   tenantId: string;
   tenantName: string;
   externalId: string;
@@ -79,9 +88,11 @@ type PersonDetail = {
   };
 };
 
+// Date and time: a nightly and a same-day rerun are both evaluations, and without the time they read as
+// a duplicate row (#655).
 const fmt = (iso: string): string => {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString();
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 };
 
 // A calendar date (YYYY-MM-DD, e.g. a move date) is not a wall-clock instant — format it in UTC so a
@@ -236,6 +247,9 @@ export default function PersonDetailPage() {
                 <li key={`${s.tenantId}|${s.externalId}`} className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-neutral-900 dark:text-neutral-100">{s.tenantName}</span>
                   <span className="text-neutral-500 dark:text-neutral-400">{isPatientTerm ? `${s.site} · ${s.externalId}` : `${s.role} · ${s.site} · ${s.externalId}`}</span>
+                  <Link href={`/employees/${encodeURIComponent(s.externalId)}`} className="text-xs text-primary-700 dark:text-primary-400 hover:underline">
+                    Open {SUBJECT.singular} page
+                  </Link>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${s.status === "ACTIVE" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"}`}>
                     {s.status}{s.status === "PRIOR" && s.moveDate ? ` · moved ${fmtDay(s.moveDate)}` : ""}
                   </span>
@@ -329,6 +343,7 @@ export default function PersonDetailPage() {
                       <th scope="col" className="px-3 py-2">Date</th>
                       <th scope="col" className="px-3 py-2">Measure</th>
                       <th scope="col" className="px-3 py-2">Status</th>
+                      <th scope="col" className="px-3 py-2">Run</th>
                       <th scope="col" className="px-3 py-2">System</th>
                     </tr>
                   </thead>
@@ -337,7 +352,8 @@ export default function PersonDetailPage() {
                       <tr key={`${e.externalId}-${e.measureId}-${e.evaluatedAt}-${i}`} className="border-b border-neutral-100 dark:border-neutral-800/60">
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{fmt(e.evaluatedAt)}</td>
                         <td className="px-3 py-2">{e.measureName ?? e.measureId}</td>
-                        <td className="px-3 py-2"><OutcomeChip status={e.status} /></td>
+                        <td className="px-3 py-2"><OutcomeChip status={e.displayStatus ?? e.status} /></td>
+                        <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{e.runKind ? runKindLabel(e.runKind) : "—"}</td>
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">
                           {e.tenantName}
                           {e.sourceStatus === "PRIOR" ? <span className="text-neutral-400"> (prior)</span> : null}

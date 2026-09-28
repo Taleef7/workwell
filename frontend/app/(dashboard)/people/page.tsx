@@ -30,9 +30,19 @@ type Person = {
   personId: string;
   displayName: string;
   nationalId: string | null;
+  dateOfBirth?: string | null;
   crossSystem: boolean;
   sources: SourceLink[];
 };
+
+/**
+ * What tells two people with one name apart (#655): the record's id, date of birth and clinic. The row
+ * was a bare name, and the pilot's roster has several same-named patients.
+ */
+function identifyingLine(p: Person): string {
+  const src = p.sources.find((s) => s.status === "ACTIVE") ?? p.sources[0];
+  return [src?.externalId, p.dateOfBirth ? `born ${p.dateOfBirth}` : null, src?.site].filter(Boolean).join(" · ");
+}
 
 /**
  * A cross-system person is either MOVED (has a PRIOR system — one person, continuous history) or a
@@ -158,6 +168,9 @@ export default function PeoplePage() {
                         </span>
                       ) : null;
                     })()}
+                    <div data-testid="people-row-identity" className="text-xs text-neutral-500 dark:text-neutral-400">
+                      {identifyingLine(p)}
+                    </div>
                   </td>
                   <td className="px-4 py-2 text-neutral-600 dark:text-neutral-400">
                     {p.sources.map((s) => (
