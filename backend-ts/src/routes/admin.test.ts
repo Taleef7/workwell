@@ -15,6 +15,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 import { handleAdmin } from "./admin.ts";
+import { lastWebChartFetch } from "../admin/admin-data.ts";
 
 const dbPath = join(tmpdir(), `workwell-admin-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -45,17 +46,74 @@ after(() => {
   }
 });
 
-test("integrations: list + manual sync; unknown → 404", async () => {
-  const list = (await body("/api/admin/integrations")) as Array<{ integration: string; displayName: string; status: string }>;
-  assert.deepEqual(list.map((i) => i.integration).sort(), ["ai", "fhir", "hris", "mcp"]);
+type Tile = { integration: string; displayName: string; status: string; lastSyncAt: string | null; detail: string };
+
+// #627: the tiles were a hardcoded array whose "last sync" was the boot time, and Manual Sync stamped
+// "Manual sync completed" without contacting anything. They are now derived, and there is no sync.
+test("integrations: derived from config, with a WebChart tile that says it is not connected", async () => {
+  const list = (await body("/api/admin/integrations")) as Tile[];
+  assert.deepEqual(list.map((i) => i.integration).sort(), ["ai", "fhir", "hris", "mcp", "webchart"]);
+  const webchart = list.find((i) => i.integration === "webchart")!;
+  assert.equal(webchart.status, "not-configured");
+  assert.match(webchart.detail, /^Not connected: this deployment evaluates synthetic employees\.$/);
   assert.equal(list.find((i) => i.integration === "hris")!.status, "simulated");
-  const synced = await post("/api/admin/integrations/fhir/sync");
-  assert.equal(synced?.status, 200);
-  assert.ok(((await synced!.json()) as { lastSyncAt: string }).lastSyncAt, "sync stamps lastSyncAt");
-  // The sync must PERSIST so the page's reload reflects it (not revert to null).
-  const reloaded = (await body("/api/admin/integrations")) as Array<{ integration: string; lastSyncAt: string | null }>;
-  assert.ok(reloaded.find((i) => i.integration === "fhir")!.lastSyncAt, "lastSyncAt persisted across the reload");
-  assert.equal((await post("/api/admin/integrations/nope/sync"))?.status, 404);
+  assert.equal(list.find((i) => i.integration === "ai")!.status, "not-configured", "no OPENAI_API_KEY in this env");
+  for (const tile of list) assert.equal(tile.lastSyncAt, null, `${tile.integration}: no time it did not earn`);
+});
+
+test("integrations: there is no Manual Sync to call", async () => {
+  assert.equal(await post("/api/admin/integrations/fhir/sync"), null, "the route is gone (the worker answers 404)");
+});
+
+test("integrations: a configured tenant shows its host and the newest run's fetch", async () => {
+  const events = new SqliteCaseEventStore(env.DB as never);
+  const runCompleted = (payload: Record<string, unknown>) =>
+    events.appendAudit({ eventType: "RUN_COMPLETED", entityType: "run", entityId: crypto.randomUUID(), actor: "scheduler", refRunId: null, refCaseId: null, refMeasureVersionId: null, payload });
+  await runCompleted({ status: "COMPLETED", liveTenant: { host: "tenant.example", fetchedCount: 812, degradedCount: 3, durationMs: 900, status: "COMPLETED" } });
+  await runCompleted({ status: "COMPLETED" }); // a newer run that did not fetch (e.g. a single-subject rerun)
+  const configured = { ...(env as object), WORKWELL_WEBCHART_BASE_URL: "https://tenant.example/webchart.cgi", WORKWELL_WEBCHART_API_KEY: "k" };
+  const res = await handleAdmin(new Request("http://x/api/admin/integrations", { method: "GET" }), configured as never);
+  const list = (await res!.json()) as Tile[];
+  const webchart = list.find((i) => i.integration === "webchart")!;
+  assert.equal(webchart.status, "configured");
+  assert.ok(webchart.lastSyncAt, "the fetch's time is shown");
+  assert.equal(webchart.detail, "Tenant tenant.example. The newest run to fetch from it read 812 employees, 3 degraded, and completed.");
+  assert.equal(list.find((i) => i.integration === "hris")!.status, "configured");
+
+  // A fetch recorded against a different host is not this tenant's.
+  const moved = { ...configured, WORKWELL_WEBCHART_BASE_URL: "https://other.example/webchart.cgi" };
+  const movedList = (await (await handleAdmin(new Request("http://x/api/admin/integrations", { method: "GET" }), moved as never))!.json()) as Tile[];
+  const movedTile = movedList.find((i) => i.integration === "webchart")!;
+  assert.equal(movedTile.lastSyncAt, null);
+  assert.equal(movedTile.detail, "Tenant other.example. None of the last 200 runs fetched from it.");
+});
+
+// The page an operator opens to diagnose a bad WebChart secret must not fail on it.
+test("integrations: a malformed WebChart private key does not take the tile list down", async () => {
+  const badKey = {
+    ...(env as object),
+    WORKWELL_WEBCHART_BASE_URL: "https://tenant.example/webchart.cgi",
+    WORKWELL_WEBCHART_CLIENT_ID: "workwell",
+    WORKWELL_WEBCHART_PRIVATE_KEY_B64: "not base64 !!",
+  };
+  const res = await handleAdmin(new Request("http://x/api/admin/integrations", { method: "GET" }), badKey as never);
+  assert.equal(res?.status, 200);
+  const list = (await res!.json()) as Tile[];
+  assert.equal(list.find((i) => i.integration === "webchart")!.status, "configured");
+});
+
+test("lastWebChartFetch reads the newest fetch from the configured host, skipping runs that fetched nothing", () => {
+  const row = (occurredAt: string, payload: Record<string, unknown>) =>
+    ({ occurredAt, eventType: "RUN_COMPLETED", actor: null, refRunId: null, refCaseId: null, refMeasureVersionId: null, payload });
+  assert.equal(lastWebChartFetch([row("2026-09-28T02:00:00Z", { status: "COMPLETED" })], "h"), null);
+  const rows = [
+    row("2026-09-28T02:00:00Z", { status: "COMPLETED" }),
+    row("2026-09-28T01:00:00Z", { liveTenant: { host: "h", fetchedCount: 5, degradedCount: 0, status: "FAILED" } }),
+    row("2026-09-27T01:00:00Z", { liveTenant: { host: "old", fetchedCount: 9, degradedCount: 0, status: "COMPLETED" } }),
+  ];
+  assert.deepEqual(lastWebChartFetch(rows, "h"), { at: "2026-09-28T01:00:00Z", host: "h", fetchedCount: 5, degradedCount: 0, status: "FAILED" });
+  // Codex on #721: switched back to a tenant used before, whose fetch is older than another tenant's.
+  assert.deepEqual(lastWebChartFetch(rows, "old"), { at: "2026-09-27T01:00:00Z", host: "old", fetchedCount: 9, degradedCount: 0, status: "COMPLETED" });
 });
 
 test("scheduler: status + enable toggle", async () => {

@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { toCaseDetail, deriveWhyFlagged, overdueDays } from "./case-detail-read-model.ts";
-import { simulatedForecaster } from "../engine/immunization/immunization-forecast.ts";
+import type { ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
 import type { CaseRecord } from "../stores/case-store.ts";
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
@@ -34,9 +34,15 @@ const CASE: CaseRecord = {
   closedBy: null,
 };
 
-// The port is async since ADR-029 (the real forecaster is an HTTP call to the ICE sidecar); the
-// simulated one still resolves synchronously in practice, so awaiting it once here is enough.
-const FORECAST = await simulatedForecaster.forecast("emp-006", "2026-06-19");
+// A forecast as a history-backed forecaster would return it (test data: no history source exists yet).
+const FORECAST: ImmunizationForecast = {
+  subjectId: "emp-006",
+  asOf: "2026-06-19",
+  historyAvailable: true,
+  series: [
+    { series: "TDAP", status: "OVERDUE", lastDoseDate: "2014-05-01", nextDueDate: "2024-05-01", dosesReceived: 1, dosesRequired: 1, reason: null },
+  ],
+};
 
 test("the case page names every pilot measure, the four official-only ones included (#659)", () => {
   for (const id of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]) {
@@ -60,7 +66,7 @@ test("toCaseDetail includes immunizationForecast when param is provided", () => 
   assert.ok("immunizationForecast" in detail, "key must be present");
   assert.equal(detail.immunizationForecast?.subjectId, "emp-006");
   assert.equal(detail.immunizationForecast?.asOf, "2026-06-19");
-  assert.equal(detail.immunizationForecast?.series.length, 3, "simulated forecaster always returns 3 series (TDAP/INFLUENZA/HEPB)");
+  assert.deepEqual(detail.immunizationForecast, FORECAST, "passed through unchanged");
 });
 
 test("case status is identical with or without immunizationForecast (forecast is advisory)", () => {

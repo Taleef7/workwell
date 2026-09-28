@@ -580,9 +580,9 @@ test("GET /api/cases/:id for a non-immunization case (audiogram) does NOT includ
   assert.equal("immunizationForecast" in body, false, "non-immunization case must not carry the forecast key");
 });
 
-test("GET /api/cases/:id for an adult_immunization case includes immunizationForecast with 3 series (#76 E6)", async () => {
-  // Seed a minimal adult_immunization case (no outcome evidence needed — the simulated forecaster
-  // draws from its own deterministic synthetic history, independent of the run pipeline).
+test("GET /api/cases/:id for an adult_immunization case says there is no vaccination history (#628)", async () => {
+  // Seed a minimal adult_immunization case. The forecaster used to invent a dose history for it from
+  // a hash of the subject id; with no history source it forecasts nothing and says why.
   const db = env.DB as never;
   const run = await new SqliteRunStore(db).createRun({
     scopeType: "MEASURE",
@@ -601,9 +601,10 @@ test("GET /api/cases/:id for an adult_immunization case includes immunizationFor
   });
   const res = await getPath(`/api/cases/${immzCase!.id}`);
   assert.equal(res?.status, 200);
-  const body = (await res!.json()) as { immunizationForecast?: { series: unknown[] } };
+  const body = (await res!.json()) as { immunizationForecast?: { historyAvailable: boolean; series: unknown[] } };
   assert.ok("immunizationForecast" in body, "adult_immunization case must carry the forecast key");
-  assert.equal(body.immunizationForecast!.series.length, 3, "simulated forecaster returns 3 series (TDAP, INFLUENZA, HEPB)");
+  assert.equal(body.immunizationForecast!.historyAvailable, false);
+  assert.deepEqual(body.immunizationForecast!.series, [], "no invented doses");
 });
 
 // Runs last (seeds extra cases): the current-cycle default is scoped to the OPEN worklist, so the

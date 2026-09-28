@@ -14,9 +14,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { realIceForecaster, syntheticIceHistory } from "./ice-forecaster.ts";
-import { simulatedForecaster } from "./immunization-forecast.ts";
-import { resolveForecaster } from "./resolve-forecaster.ts";
+import { realIceForecaster, type IceDoseHistory } from "./ice-forecaster.ts";
 
 const BASE_URL = (process.env.WORKWELL_IMMZ_ICE_BASE_URL ?? "").trim();
 
@@ -48,15 +46,23 @@ const skip = (await iceReachable())
     ? `ICE sidecar at ${BASE_URL} is not reachable — skipping the live suite`
     : "WORKWELL_IMMZ_ICE_BASE_URL not set — live ICE sidecar not available";
 
-// A forecaster whose fallback THROWS, so a silent degrade can never masquerade as a live pass.
-const strictFallback = {
-  async forecast(): Promise<never> {
-    throw new Error("fell back to simulated — the live ICE call did not succeed");
-  },
+// Test data for the live engine, never served (the app has no history source yet, #628). A failed
+// call answers an empty forecast, so every test below asserts the series are present: a silent
+// degrade can never masquerade as a live pass.
+const HISTORY: IceDoseHistory = {
+  patientId: "emp-006",
+  dob: "1971-06-16",
+  gender: "M",
+  doses: [
+    { cvx: "115", date: "2021-06-25" },
+    { cvx: "141", date: "2021-09-30" },
+    { cvx: "43", date: "2021-11-06" },
+    { cvx: "43", date: "2022-01-05" },
+  ],
 };
 
-test("live ICE: forecasts all three series for a synthetic subject", { skip }, async () => {
-  const f = realIceForecaster({ baseUrl: BASE_URL }, { fallback: strictFallback, timeoutMs: 60_000 });
+test("live ICE: forecasts all three series for a subject with a dose history", { skip }, async () => {
+  const f = realIceForecaster({ baseUrl: BASE_URL }, { historySource: () => HISTORY, timeoutMs: 60_000 });
   const out = await f.forecast("emp-006", new Date().toISOString().slice(0, 10));
 
   assert.equal(out.subjectId, "emp-006");
@@ -70,13 +76,12 @@ test("live ICE: forecasts all three series for a synthetic subject", { skip }, a
     if (s.nextDueDate !== null) assert.match(s.nextDueDate, /^\d{4}-\d{2}-\d{2}$/);
   }
   // The engine saw our doses: the reported last-dose dates come from the history we posted.
-  const history = syntheticIceHistory("emp-006");
   const tdap = out.series.find((s) => s.series === "TDAP");
-  assert.equal(tdap?.lastDoseDate, history.doses.filter((d) => d.cvx === "115").at(-1)?.date);
+  assert.equal(tdap?.lastDoseDate, "2021-06-25");
 });
 
 test("live ICE: an as-of date in the past shifts the engine's own clock", { skip }, async () => {
-  const f = realIceForecaster({ baseUrl: BASE_URL }, { fallback: strictFallback, timeoutMs: 60_000 });
+  const f = realIceForecaster({ baseUrl: BASE_URL }, { historySource: () => HISTORY, timeoutMs: 60_000 });
   const now = await f.forecast("emp-006", new Date().toISOString().slice(0, 10));
   const past = await f.forecast("emp-006", "2020-01-18");
 
@@ -91,7 +96,6 @@ test("live ICE: an injected dose history is what the engine scores", { skip }, a
   const f = realIceForecaster(
     { baseUrl: BASE_URL },
     {
-      fallback: strictFallback,
       timeoutMs: 60_000,
       // No HepB doses at all → ICE must not report the series complete.
       historySource: () => ({
@@ -103,6 +107,7 @@ test("live ICE: an injected dose history is what the engine scores", { skip }, a
     },
   );
   const out = await f.forecast("live-test-1", new Date().toISOString().slice(0, 10));
+  assert.equal(out.series.length, 3, "the live call must succeed (a failure answers no series)");
   const hepb = out.series.find((s) => s.series === "HEPB");
   assert.equal(hepb?.dosesReceived, 0);
   assert.doesNotMatch(String(hepb?.reason), /COMPLETE\b/, "a subject with no HepB doses is not COMPLETE");
@@ -110,12 +115,11 @@ test("live ICE: an injected dose history is what the engine scores", { skip }, a
 
 // Regression (found live 2026-07-13): a subject with NO DTP-family history gets a *product*-coded
 // Tdap proposal (substance CVX 115, focus group 200). An adapter keyed on substanceCode finds no
-// group 200, throws "no proposal for TDAP", and silently degrades the WHOLE forecast to simulated.
+// group 200, throws "no proposal for TDAP", and silently degrades the WHOLE forecast to empty.
 test("live ICE: a subject with no Tdap history still gets a real TDAP forecast", { skip }, async () => {
   const f = realIceForecaster(
     { baseUrl: BASE_URL },
     {
-      fallback: strictFallback,
       timeoutMs: 60_000,
       historySource: () => ({
         patientId: "live-no-tdap",
@@ -131,15 +135,4 @@ test("live ICE: a subject with no Tdap history still gets a real TDAP forecast",
   assert.equal(tdap.dosesReceived, 0);
   assert.match(String(tdap.reason), /^ICE /, "must be an ICE-sourced forecast, not a silent fallback");
   assert.ok(["DUE", "OVERDUE"].includes(tdap.status), `an adult with no Tdap is due; got ${tdap.status}`);
-});
-
-test("live ICE: resolveForecaster with only BASE_URL set reaches the real engine", { skip }, async () => {
-  const f = resolveForecaster({ WORKWELL_IMMZ_ICE_BASE_URL: BASE_URL });
-  assert.notEqual(f, simulatedForecaster);
-  const out = await f.forecast("emp-006", new Date().toISOString().slice(0, 10));
-  // The real adapter stamps ICE's own reason codes; the simulated one never says "ICE ".
-  assert.ok(
-    out.series.every((s) => String(s.reason).startsWith("ICE ")),
-    "every series must carry an ICE-sourced reason (i.e. we did not silently fall back)",
-  );
 });

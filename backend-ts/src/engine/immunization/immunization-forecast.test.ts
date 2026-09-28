@@ -1,38 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  syntheticImmunizationHistory,
-  simulatedForecaster,
-  isIceConfigured,
-  VACCINE_SERIES,
-} from "./immunization-forecast.ts";
+import { emptyForecast, isIceConfigured, noHistoryForecaster } from "./immunization-forecast.ts";
 import { resolveForecaster } from "./resolve-forecaster.ts";
 
-test("synthetic history is deterministic per subject and covers all 3 series", () => {
-  const a = syntheticImmunizationHistory("emp-006");
-  const b = syntheticImmunizationHistory("emp-006");
-  assert.deepEqual(a, b);
-  assert.deepEqual(a.map((h) => h.series).sort(), [...VACCINE_SERIES].sort());
+// #628: the default forecaster used to invent a dose history from a hash of the subject id, and the
+// case page rendered it as the person's record. With no history there is nothing to forecast.
+test("the default forecaster has no history, so it returns no series and says why", async () => {
+  const f = await noHistoryForecaster.forecast("emp-006", "2026-06-19");
+  assert.deepEqual(f, { subjectId: "emp-006", asOf: "2026-06-19", historyAvailable: false, series: [] });
 });
 
-test("simulated forecaster returns a forecast for all 3 series with computed nextDueDate", async () => {
-  const f = await simulatedForecaster.forecast("emp-006", "2026-06-19");
-  assert.equal(f.subjectId, "emp-006");
-  assert.equal(f.asOf, "2026-06-19");
-  assert.equal(f.series.length, 3);
-  for (const s of f.series) {
-    assert.ok(["UP_TO_DATE", "DUE", "OVERDUE", "CONTRAINDICATED", "REFUSED"].includes(s.status));
-  }
+test("emptyForecast distinguishes 'no history' from 'no answer this time'", () => {
+  assert.equal(emptyForecast("s", "2026-01-01", false).historyAvailable, false);
+  assert.equal(emptyForecast("s", "2026-01-01", true).historyAvailable, true);
+  assert.deepEqual(emptyForecast("s", "2026-01-01", true).series, []);
 });
 
-test("Td/Tdap is OVERDUE when asOf is far past the last dose + 10y", async () => {
-  const f = await simulatedForecaster.forecast("emp-006", "2099-01-01");
-  const tdap = f.series.find((s) => s.series === "TDAP")!;
-  assert.equal(tdap.status, "OVERDUE");
-});
-
-test("resolveForecaster returns simulated by default", () => {
-  assert.equal(resolveForecaster({}), simulatedForecaster);
+test("resolveForecaster returns the no-history forecaster by default", () => {
+  assert.equal(resolveForecaster({}), noHistoryForecaster);
 });
 
 // ADR-029: the real ICE adapter is selected by BASE_URL alone — a self-hosted ICE sidecar has no
@@ -50,27 +35,24 @@ test("isIceConfigured is BASE_URL-only; the API key alone never selects ICE", ()
 });
 
 test("resolveForecaster returns the real ICE adapter when BASE_URL is set", () => {
-  assert.equal(resolveForecaster({ WORKWELL_IMMZ_ICE_API_KEY: "k" }), simulatedForecaster);
-  assert.notEqual(resolveForecaster({ WORKWELL_IMMZ_ICE_BASE_URL: "https://ice.example" }), simulatedForecaster);
+  assert.equal(resolveForecaster({ WORKWELL_IMMZ_ICE_API_KEY: "k" }), noHistoryForecaster);
+  assert.notEqual(resolveForecaster({ WORKWELL_IMMZ_ICE_BASE_URL: "https://ice.example" }), noHistoryForecaster);
 });
 
-// Regression: HepB completed series must be UP_TO_DATE with nextDueDate === null, not OVERDUE.
-// emp-001 has hash % 3 === 2, so dosesReceived === 3 (>= dosesRequired 2 after the E11.2c
-// Heplisav-2-dose default).
-test("HepB completed primary series is UP_TO_DATE with nextDueDate null (not OVERDUE)", async () => {
-  const f = await simulatedForecaster.forecast("emp-001", "2026-06-19");
-  const hepb = f.series.find((s) => s.series === "HEPB")!;
-  assert.equal(hepb.status, "UP_TO_DATE");
-  assert.equal(hepb.nextDueDate, null);
-  assert.equal(hepb.dosesReceived, 3);
-  assert.equal(hepb.reason, "primary series complete");
-});
-
-// Regression: TDAP nextDueDate for emp-006 must be exactly 3650 days after lastDoseDate.
-// lastDoseDate = "2021-06-25", nextDueDate = "2031-06-23" (computed and pinned).
-test("TDAP nextDueDate for emp-006 is exactly lastDoseDate + 3650 days (pinned to 2031-06-23)", async () => {
-  const f = await simulatedForecaster.forecast("emp-006", "2026-06-19");
-  const tdap = f.series.find((s) => s.series === "TDAP")!;
-  assert.equal(tdap.lastDoseDate, "2021-06-25");
-  assert.equal(tdap.nextDueDate, "2031-06-23");
+// A configured ICE used to be fed the same invented history. With no history source it must answer
+// "no history" and never dial the sidecar.
+test("a configured ICE with no history source answers 'no history' without dialing", async () => {
+  let dialed = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    dialed += 1;
+    throw new Error("must not dial ICE without a history");
+  }) as typeof fetch;
+  try {
+    const f = await resolveForecaster({ WORKWELL_IMMZ_ICE_BASE_URL: "http://ice.test/x" }).forecast("emp-006", "2026-07-13");
+    assert.deepEqual(f, { subjectId: "emp-006", asOf: "2026-07-13", historyAvailable: false, series: [] });
+    assert.equal(dialed, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

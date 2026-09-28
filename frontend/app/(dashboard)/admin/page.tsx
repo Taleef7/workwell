@@ -142,7 +142,6 @@ export default function AdminPage() {
   const [dataMappings, setDataMappings] = useState<DataElementMapping[]>([]);
   const [terminologyMappings, setTerminologyMappings] = useState<TerminologyMapping[]>([]);
   const [validatingMappings, setValidatingMappings] = useState(false);
-  const [syncing, setSyncing] = useState<string | null>(null);
   const [updatingScheduler, setUpdatingScheduler] = useState(false);
   const [loadingWaivers, setLoadingWaivers] = useState(false);
   const [loadingAudit, setLoadingAudit] = useState(false);
@@ -353,20 +352,6 @@ export default function AdminPage() {
       setError(err instanceof Error ? err.message : "Validation failed");
     } finally {
       setValidatingMappings(false);
-    }
-  }
-
-  async function triggerSync(integration: string) {
-    if (!isAdmin) return;
-    setSyncing(integration);
-    setError(null);
-    try {
-      await api.post(`/api/admin/integrations/${integration}/sync`);
-      await loadIntegrations();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setSyncing(null);
     }
   }
 
@@ -800,22 +785,13 @@ export default function AdminPage() {
                 <p className="mt-2">
                   <span className={statusBadgeClass(item.status)}>{formatStatusLabel(item.status)}</span>
                 </p>
-                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-                  Last sync: {item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : "Never"}
-                </p>
+                {/* Status only (#627): nothing here can be synced, and a time shows only where one is real. */}
+                {item.lastSyncAt ? (
+                  <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                    Last fetch: {new Date(item.lastSyncAt).toLocaleString()}
+                  </p>
+                ) : null}
                 <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{item.detail}</p>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  className="mt-4"
-                  onClick={() => void triggerSync(item.integration)}
-                  disabled={syncing === item.integration}
-                  isLoading={syncing === item.integration}
-                  loadingText="Syncing..."
-                >
-                  Manual Sync
-                </Button>
               </div>
             ))}
           </div>
@@ -1457,7 +1433,7 @@ function mappingStatusBadgeClass(status: string) {
 
 function statusBadgeClass(status: string) {
   const normalized = (status ?? "").toLowerCase();
-  if (normalized === "healthy") {
+  if (normalized === "healthy" || normalized === "configured") {
     return "rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200";
   }
   if (normalized === "simulated") {
