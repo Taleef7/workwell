@@ -61,6 +61,9 @@ describe("Person history (#655)", () => {
     expect(rows[1]).toContain("Not in population");
     expect(rows[1]).toContain("Nightly");
     expect(rows[2]).toContain("Manual run");
+    // Codex on #722: two runs of one kind in one minute are told apart by the run's short id.
+    expect(rows[0]).toContain("run-SUBJ");
+    expect(rows[1]).toContain("run-SCHE");
     expect(within(table).queryByText(/missing data/i)).not.toBeInTheDocument();
     // Two runs on one day are told apart by their time, not only the date.
     const at = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });

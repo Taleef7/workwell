@@ -354,7 +354,11 @@ export default function PersonDetailPage() {
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{fmt(e.evaluatedAt)}</td>
                         <td className="px-3 py-2">{e.measureName ?? e.measureId}</td>
                         <td className="px-3 py-2"><OutcomeChip status={e.displayStatus ?? e.status} /></td>
-                        <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{e.runKind ? runKindLabel(e.runKind) : "—"}</td>
+                        <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">
+                          {e.runKind ? runKindLabel(e.runKind) : "—"}
+                          {/* The run's short id, as Run History shows it: two runs of one kind in one minute still differ. */}
+                          {e.runId ? <span className="ml-1 font-mono text-xs text-neutral-400" title={e.runId}>{e.runId.slice(0, 8)}</span> : null}
+                        </td>
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">
                           {e.tenantName}
                           {e.sourceStatus === "PRIOR" ? <span className="text-neutral-400"> (prior)</span> : null}
