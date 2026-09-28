@@ -73,7 +73,10 @@ export interface IceDoseHistory {
 /** A subject's dose history, or `null` when the source has none for them (no forecast is made). */
 export type IceHistorySource = (subjectId: string) => IceDoseHistory | null;
 
-/** The only history source today: none. WebChart immunizations are the drop-in (E12). */
+/**
+ * The only history source today: none. WebChart immunizations are the intended source (E12); a
+ * network read will need this signature to become async.
+ */
 export const noIceHistory: IceHistorySource = () => null;
 
 /**
@@ -221,7 +224,14 @@ export function realIceForecaster(cfg: IceConfig, opts: IceForecasterOptions): I
     async forecast(subjectId: string, asOf: string): Promise<ImmunizationForecast> {
       // Nothing to forecast from: say so, and do not ask ICE to schedule a person with no doses on file
       // as though that were their record.
-      const history = historySource(subjectId);
+      let history: IceDoseHistory | null;
+      try {
+        history = historySource(subjectId);
+      } catch (err) {
+        // A source that cannot answer must not fail the case read either (the advisory contract above).
+        console.warn(`ICE history read failed for ${subjectId}; showing no forecast: ${(err as Error).message}`);
+        return emptyForecast(subjectId, asOf, true);
+      }
       if (history === null) return emptyForecast(subjectId, asOf, false);
       if (breakerTtlMs > 0 && openedAt !== 0 && now() - openedAt < breakerTtlMs) {
         return emptyForecast(subjectId, asOf, true);

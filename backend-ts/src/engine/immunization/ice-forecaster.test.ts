@@ -278,6 +278,18 @@ test("a history source with nothing for the subject answers 'no history' without
   assert.deepEqual(f, await noHistoryForecaster.forecast("emp-006", "2026-07-13"));
 });
 
+test("a history source that throws answers empty, never fails the read, and does not dial", async () => {
+  const calls: Call[] = [];
+  const f = await realIceForecaster(CFG, {
+    historySource: () => {
+      throw new Error("history store down");
+    },
+    fetchImpl: goldenFetch(calls),
+  }).forecast("emp-006", "2026-07-13");
+  assert.deepEqual(f, failed("emp-006", "2026-07-13"));
+  assert.equal(calls.length, 0);
+});
+
 test("group codes are the ICE vaccine groups the live engine emits", () => {
   assert.deepEqual(ICE_VACCINE_GROUP, { TDAP: "200", INFLUENZA: "800", HEPB: "100" });
 });

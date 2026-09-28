@@ -19,7 +19,9 @@ import { getStores, getBackend } from "../stores/factory.ts";
 import {
   lastWebChartFetch,
   listIntegrations,
+  WEBCHART_RUNS_SCANNED,
   type IntegrationEnv,
+  type WebChartFetch,
   listDataMappings,
   validateDataMappings,
   toAdminAuditRows,
@@ -119,10 +121,16 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   // ---- integrations --------------------------------------------------------
   if (pathname === "/api/admin/integrations" && req.method === "GET") {
     // The WebChart tile's last fetch is what the newest live run recorded; a deployment with no tenant
-    // configured has none, so it reads nothing.
-    const lastFetch = isWebChartConfigured(env)
-      ? lastWebChartFetch(await (await getStores(env)).events.recentAuditEventsByType("RUN_COMPLETED", 50))
-      : null;
+    // configured has none, so it reads nothing. A failed read loses only that line, not the tiles.
+    let lastFetch: WebChartFetch | null = null;
+    if (isWebChartConfigured(env)) {
+      try {
+        const rows = await (await getStores(env)).events.recentAuditEventsByType("RUN_COMPLETED", WEBCHART_RUNS_SCANNED);
+        lastFetch = lastWebChartFetch(rows);
+      } catch (err) {
+        console.warn(`[workwell] integration health: could not read the last WebChart fetch: ${String((err as Error)?.message ?? err)}`);
+      }
+    }
     return json(listIntegrations(env, lastFetch));
   }
 

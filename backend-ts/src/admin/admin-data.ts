@@ -8,7 +8,7 @@
  */
 import type { AuditEventRow } from "../stores/case-event-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { isWebChartConfigured, webChartConfigFromEnv, type DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { DEPLOYMENT_PROFILE, type SubjectTerm } from "../config/deployment-profile.ts";
 
 // ---- integration health ---------------------------------------------------------
@@ -42,6 +42,12 @@ export interface WebChartFetch {
   status: string;
 }
 
+/**
+ * How many recent `RUN_COMPLETED` events the WebChart tile looks through. Only population runs fetch;
+ * single-subject reruns also complete, so the window is wide, and the tile says what it scanned.
+ */
+export const WEBCHART_RUNS_SCANNED = 200;
+
 /** The newest `RUN_COMPLETED` row that fetched from WebChart (rows newest-first), or null. */
 export function lastWebChartFetch(rows: readonly AuditEventRow[]): WebChartFetch | null {
   for (const row of rows) {
@@ -58,13 +64,16 @@ export function lastWebChartFetch(rows: readonly AuditEventRow[]): WebChartFetch
   return null;
 }
 
-function webChartHost(env: IntegrationEnv): string | null {
-  const cfg = webChartConfigFromEnv(env);
-  if (!cfg) return null;
+/**
+ * The tenant's host, from the base URL alone. Not `webChartConfigFromEnv`: that also parses the private
+ * key and throws on a malformed one, which would take down the page an operator opens to diagnose it.
+ */
+function webChartHost(env: IntegrationEnv): string {
+  const baseUrl = (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim();
   try {
-    return new URL(cfg.baseUrl).host;
+    return new URL(baseUrl).host;
   } catch {
-    return cfg.baseUrl;
+    return baseUrl;
   }
 }
 
@@ -80,16 +89,18 @@ export function listIntegrations(
   const plural = subjectTerm === "patient" ? "patients" : "employees";
   const webchart = isWebChartConfigured(env);
   const host = webchart ? webChartHost(env) : null;
+  // A fetch recorded against another host (the tenant was changed since) is not this tenant's.
+  const fetch = webchart && lastFetch && lastFetch.host === host ? lastFetch : null;
   const aiConfigured = !!env.OPENAI_API_KEY?.trim();
-  const fetchLine = lastFetch
-    ? `Last fetch: ${lastFetch.fetchedCount} ${plural}, ${lastFetch.degradedCount} degraded (${lastFetch.status.toLowerCase()}).`
-    : "No run has fetched from it since the audit log began.";
+  const fetchLine = fetch
+    ? `The newest run to fetch from it read ${fetch.fetchedCount} ${plural}, ${fetch.degradedCount} degraded, and ${fetch.status === "FAILED" ? "failed" : "completed"}.`
+    : `None of the last ${WEBCHART_RUNS_SCANNED} runs fetched from it.`;
   return [
     {
       integration: "webchart",
       displayName: "WebChart",
       status: webchart ? "configured" : "not-configured",
-      lastSyncAt: webchart && lastFetch ? lastFetch.at : null,
+      lastSyncAt: fetch ? fetch.at : null,
       detail: webchart
         ? `Tenant ${host}. ${fetchLine}`
         : `Not connected: this deployment evaluates synthetic ${plural}.`,
@@ -100,7 +111,8 @@ export function listIntegrations(
       displayName: "Measure evaluation",
       status: "healthy",
       lastSyncAt: null,
-      detail: `The CQL engine runs in this process, over ${webchart ? `the WebChart feed (${host})` : `synthetic ${plural}`}.`,
+      // A configured tenant's subjects are appended to the synthetic directory, not swapped for it.
+      detail: `The CQL engine runs in this process, over synthetic ${plural}${webchart ? ` and the WebChart feed (${host})` : ""}.`,
       config: {},
     },
     {
@@ -108,7 +120,7 @@ export function listIntegrations(
       displayName: subjectTerm === "patient" ? "Patient directory" : "Employee directory",
       status: webchart ? "configured" : "simulated",
       lastSyncAt: null,
-      detail: webchart ? `${plural[0]!.toUpperCase()}${plural.slice(1)} from WebChart (${host}).` : `Synthetic ${plural}; no live directory.`,
+      detail: webchart ? `Synthetic ${plural}, plus ${plural} from WebChart (${host}).` : `Synthetic ${plural}; no live directory.`,
       config: {},
     },
     {
@@ -133,10 +145,6 @@ export function listIntegrations(
     },
   ];
 }
-
-/** The tile a data-mapping source id names, from an unconfigured view (`fhir`/`hris` are never degraded). */
-const integrationFor = (sourceId: string): IntegrationHealth | undefined =>
-  listIntegrations({}, null, "employee").find((i) => i.integration === sourceId);
 
 // Terminology mappings moved to value-set governance (#108): they are now persisted in the
 // terminology_mappings table (demo rows seeded by value-set-seed.ts) and served from the
@@ -215,35 +223,23 @@ export const listDataMappings = (): DataElementMapping[] =>
   MAPPING_SEED.map((s) => toMapping(s, null)).sort((a, b) => (a.sourceId === b.sourceId ? a.canonicalElement.localeCompare(b.canonicalElement) : a.sourceId.localeCompare(b.sourceId)));
 
 /**
- * POST /api/admin/data-mappings/validate — port of DataReadinessService.validateMappings: a source
- * whose integration health is DEGRADED marks its mappings STALE; HEALTHY restores MAPPED; otherwise
- * unchanged. Stamps last_validated_at = now. (Static seed → computed view, not a persisted mutation.)
+ * POST /api/admin/data-mappings/validate — port of DataReadinessService.validateMappings, which marked
+ * a DEGRADED source's mappings STALE. The mapped sources (`fhir`, `hris`) are in-process and never
+ * degraded (#627 removed the static list that could have said otherwise), so the seed's status stands.
+ * Stamps last_validated_at = now. (Static seed → computed view, not a persisted mutation.)
  */
 export function validateDataMappings(): DataElementMapping[] {
   const now = new Date().toISOString();
-  const sourceStatus = (sourceId: string): string => {
-    const ih = integrationFor(sourceId);
-    if (!ih) return "UNKNOWN";
-    return ih.status === "healthy" ? "HEALTHY" : ih.status === "degraded" ? "DEGRADED" : "UNKNOWN";
-  };
-  return listDataMappings().map((m) => {
-    const status = sourceStatus(m.sourceId) === "DEGRADED" ? "STALE" : m.mappingStatus;
-    return { ...m, mappingStatus: status, lastValidatedAt: now };
-  });
+  return listDataMappings().map((m) => ({ ...m, lastValidatedAt: now }));
 }
 
-/** Freshness for a source from its integration-health last sync (DataReadinessService.computeFreshness). */
+/**
+ * Freshness for a mapping source (DataReadinessService.computeFreshness). The in-process sources
+ * (`fhir`, `hris`) are read live on every request, never synced, so they are always FRESH; anything
+ * else has no freshness to report.
+ */
 export function sourceFreshness(sourceId: string): string {
-  const ih = integrationFor(sourceId);
-  if (!ih) return "UNKNOWN";
-  // In-process synthetic sources (fhir/hris) are live every request — never actually "synced" — so their
-  // freshness must NOT decay with process uptime.
-  if (sourceId === "fhir" || sourceId === "hris") return "FRESH";
-  if (ih.lastSyncAt == null) return "UNKNOWN";
-  const hoursAgo = (Date.now() - new Date(ih.lastSyncAt).getTime()) / 3_600_000;
-  if (hoursAgo <= 24) return "FRESH";
-  if (hoursAgo <= 168) return "STALE";
-  return "VERY_STALE";
+  return sourceId === "fhir" || sourceId === "hris" ? "FRESH" : "UNKNOWN";
 }
 
 // Outreach templates moved to admin write CRUD (#108): persisted in the outreach_templates table

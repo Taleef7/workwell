@@ -1426,13 +1426,14 @@ const VACCINE_SERIES_LABELS: Record<string, string> = {
 };
 
 /**
- * What the forecast panel says when it has no rows (#628): the forecast used to be made up, and with
- * no vaccination history there is nothing to show, so the panel says which of the two it is.
+ * What the forecast panel says when it has no rows (#628): the forecast used to be made up. With no
+ * dose history connected to the forecaster there is nothing to forecast from, which is not the same as
+ * the person having no vaccinations: the measure's own evidence on this page may show one.
  */
 function forecastEmptyMessage(forecast: NonNullable<CaseDetail["immunizationForecast"]>): string | null {
   if (forecast.series.length > 0) return null;
   return forecast.historyAvailable === false
-    ? "WorkWell has no vaccination history for this person, so there is no forecast."
+    ? "No vaccination history is connected to the forecast yet, so there is no forecast."
     : "The forecast is not available right now.";
 }
 

@@ -6,7 +6,7 @@
  * Status remains the sole compliance authority (ADR-012).
  *
  * A forecast is only as real as the dose history it reads, and WorkWell has no source of vaccination
- * history yet (WebChart immunizations are the drop-in, E12). Until #628 the default forecaster made one
+ * history for the forecaster yet (WebChart immunizations are the intended source, E12). Until #628 the default forecaster made one
  * up from a hash of the subject id, and the case page rendered it as the person's record ("Tdap — Last
  * 2021-06-03"); a configured ICE was fed the same invented history. Nothing invents clinical data, so
  * with no history the forecast is empty and says why (`historyAvailable: false`).

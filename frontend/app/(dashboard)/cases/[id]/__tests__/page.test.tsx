@@ -575,7 +575,7 @@ describe("CaseDetailPage immunization forecast with no history (#628)", () => {
     currentRole = "ROLE_ADMIN";
   });
 
-  it("says there is no vaccination history, in both layouts, and shows no dose rows", async () => {
+  it("says no vaccination history is connected, in both layouts, and shows no dose rows", async () => {
     get.mockImplementation((url: string) =>
       url === "/api/cases/case-001"
         ? Promise.resolve(immunizationCase({ subjectId: "emp-101", asOf: "2026-09-28", historyAvailable: false, series: [] }))
@@ -585,7 +585,7 @@ describe("CaseDetailPage immunization forecast with no history (#628)", () => {
     const desktop = await screen.findByTestId("forecast-empty-desktop");
     const mobile = screen.getByTestId("forecast-empty-mobile");
     for (const el of [desktop, mobile]) {
-      expect(el).toHaveTextContent("WorkWell has no vaccination history for this person, so there is no forecast.");
+      expect(el).toHaveTextContent("No vaccination history is connected to the forecast yet, so there is no forecast.");
     }
     expect(screen.queryByText(/Last \d{4}-\d{2}-\d{2}/)).not.toBeInTheDocument();
   });

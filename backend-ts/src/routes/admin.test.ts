@@ -77,8 +77,29 @@ test("integrations: a configured tenant shows its host and the newest run's fetc
   const webchart = list.find((i) => i.integration === "webchart")!;
   assert.equal(webchart.status, "configured");
   assert.ok(webchart.lastSyncAt, "the fetch's time is shown");
-  assert.equal(webchart.detail, "Tenant tenant.example. Last fetch: 812 employees, 3 degraded (completed).");
+  assert.equal(webchart.detail, "Tenant tenant.example. The newest run to fetch from it read 812 employees, 3 degraded, and completed.");
   assert.equal(list.find((i) => i.integration === "hris")!.status, "configured");
+
+  // A fetch recorded against a different host is not this tenant's.
+  const moved = { ...configured, WORKWELL_WEBCHART_BASE_URL: "https://other.example/webchart.cgi" };
+  const movedList = (await (await handleAdmin(new Request("http://x/api/admin/integrations", { method: "GET" }), moved as never))!.json()) as Tile[];
+  const movedTile = movedList.find((i) => i.integration === "webchart")!;
+  assert.equal(movedTile.lastSyncAt, null);
+  assert.equal(movedTile.detail, "Tenant other.example. None of the last 200 runs fetched from it.");
+});
+
+// The page an operator opens to diagnose a bad WebChart secret must not fail on it.
+test("integrations: a malformed WebChart private key does not take the tile list down", async () => {
+  const badKey = {
+    ...(env as object),
+    WORKWELL_WEBCHART_BASE_URL: "https://tenant.example/webchart.cgi",
+    WORKWELL_WEBCHART_CLIENT_ID: "workwell",
+    WORKWELL_WEBCHART_PRIVATE_KEY_B64: "not base64 !!",
+  };
+  const res = await handleAdmin(new Request("http://x/api/admin/integrations", { method: "GET" }), badKey as never);
+  assert.equal(res?.status, 200);
+  const list = (await res!.json()) as Tile[];
+  assert.equal(list.find((i) => i.integration === "webchart")!.status, "configured");
 });
 
 test("lastWebChartFetch skips runs that fetched nothing and reads the newest that did", () => {
