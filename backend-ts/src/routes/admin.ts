@@ -2,7 +2,7 @@
  * Admin route (#108 admin) — the `/admin` dashboard read surface + simple toggles, ported
  * from AdminController. Gated to ADMIN by the security matrix (/api/admin/** → ROLE_ADMIN).
  *
- *   GET  /api/admin/integrations                 + POST /:id/sync
+ *   GET  /api/admin/integrations                 (derived from config; nothing to sync, #627)
  *   GET  /api/admin/scheduler                     + POST ?enabled=
  *   GET  /api/admin/audit-events?scope=&limit=
  *   GET  /api/admin/terminology-mappings
@@ -17,8 +17,9 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores, getBackend } from "../stores/factory.ts";
 import {
+  lastWebChartFetch,
   listIntegrations,
-  syncIntegration,
+  type IntegrationEnv,
   listDataMappings,
   validateDataMappings,
   toAdminAuditRows,
@@ -38,12 +39,11 @@ import {
 import { resetDemoData } from "../admin/demo-reset.ts";
 import { listWaivers, grantWaiver, WaiverError, type WaiverDeps } from "../admin/waivers.ts";
 import { isProductionLike } from "../config/startup-safety.ts";
+import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
 
-interface AdminEnv {
+interface AdminEnv extends IntegrationEnv {
   DB: CloudDatabase;
   DATABASE_URL?: string;
-  /** Live AI-integration signal (M4): the `ai` tile is "healthy" only when this is set. */
-  OPENAI_API_KEY?: string;
   /** Production-like detection (gates off demo-reset, mirroring @Profile("!prod")). */
   SPRING_PROFILES_ACTIVE?: string;
   WORKWELL_ENVIRONMENT?: string;
@@ -117,14 +117,13 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   const q = url.searchParams;
 
   // ---- integrations --------------------------------------------------------
-  if (pathname === "/api/admin/integrations" && req.method === "GET") return json(listIntegrations(env));
-  const syncId = pathname.match(/^\/api\/admin\/integrations\/([^/]+)\/sync$/)?.[1];
-  if (syncId && req.method === "POST") {
-    const h = syncIntegration(syncId);
-    if (!h) return json({ error: "not_found", integration: syncId }, 404);
-    // Fable M6: a state change (integration re-sync) must leave a ledger record of who/when.
-    await auditAdmin(env, "INTEGRATION_SYNCED", actor, { integration: syncId, status: h.status });
-    return json(h);
+  if (pathname === "/api/admin/integrations" && req.method === "GET") {
+    // The WebChart tile's last fetch is what the newest live run recorded; a deployment with no tenant
+    // configured has none, so it reads nothing.
+    const lastFetch = isWebChartConfigured(env)
+      ? lastWebChartFetch(await (await getStores(env)).events.recentAuditEventsByType("RUN_COMPLETED", 50))
+      : null;
+    return json(listIntegrations(env, lastFetch));
   }
 
   // ---- scheduler -----------------------------------------------------------

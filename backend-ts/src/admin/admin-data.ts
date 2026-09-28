@@ -8,63 +8,135 @@
  */
 import type { AuditEventRow } from "../stores/case-event-store.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { isWebChartConfigured, webChartConfigFromEnv, type DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { DEPLOYMENT_PROFILE, type SubjectTerm } from "../config/deployment-profile.ts";
 
-// ---- integration health (DATA_MODEL §3.13 seeded ids: fhir/mcp/ai/hris) ------
+// ---- integration health ---------------------------------------------------------
+/**
+ * One tile on the admin page's integration health card. Every field is read from configuration or
+ * from what a run recorded (#627): until then the list was a hardcoded array whose "last sync" was the
+ * container's boot time, and a Manual Sync button restamped it and wrote "Manual sync completed"
+ * without contacting anything. There is no sync to trigger, so there is no button.
+ */
 export interface IntegrationHealth {
   integration: string;
   displayName: string;
+  /** `healthy` (in-process, running), `configured`, `not-configured` or `simulated`. */
   status: string;
+  /** When the integration last did something real (WebChart: the newest run's fetch); otherwise null. */
   lastSyncAt: string | null;
   detail: string;
   config: Record<string, unknown>;
 }
 
-// The in-process integrations (fhir/mcp/ai) are live from process start, so their "last sync" is the
-// boot time — not "Never", which read as broken/stale. hris stays null: it's a simulated directory with
-// no real sync source. A manual sync (syncIntegration) restamps whichever one is synced.
-const BOOT_TIME = new Date().toISOString();
-
-const INTEGRATIONS: IntegrationHealth[] = [
-  { integration: "fhir", displayName: "FHIR Repository", status: "healthy", lastSyncAt: BOOT_TIME, detail: "In-process CQL/FHIR evaluation (synthetic adapter).", config: {} },
-  { integration: "mcp", displayName: "MCP Server", status: "healthy", lastSyncAt: BOOT_TIME, detail: "Read-only MCP tools over /sse.", config: {} },
-  { integration: "ai", displayName: "AI Services", status: "healthy", lastSyncAt: BOOT_TIME, detail: "OpenAI-backed draft/explain surfaces with deterministic fallback.", config: {} },
-  { integration: "hris", displayName: "HRIS Sync", status: "simulated", lastSyncAt: null, detail: "Synthetic employee directory (no live HRIS).", config: {} },
-];
-const INTEGRATION_IDS = new Set(INTEGRATIONS.map((i) => i.integration));
-
-/**
- * Integration health (M4). fhir/mcp are in-process (always healthy) and hris is the synthetic
- * directory (simulated); the one genuinely-live signal is whether the AI surfaces are configured —
- * `ai` is "healthy" only when OPENAI_API_KEY is set, otherwise "degraded" (deterministic fallbacks).
- */
-export const listIntegrations = (env?: { OPENAI_API_KEY?: string }): IntegrationHealth[] => {
-  const aiConfigured = !!env?.OPENAI_API_KEY?.trim();
-  return INTEGRATIONS.map((i) => {
-    if (i.integration === "ai") {
-      return {
-        ...i,
-        status: aiConfigured ? "healthy" : "degraded",
-        detail: aiConfigured
-          ? "OpenAI-backed draft/explain surfaces with deterministic fallback."
-          : "OPENAI_API_KEY not set — AI surfaces serve deterministic fallbacks only.",
-      };
-    }
-    return { ...i };
-  });
-};
-
-/**
- * Manual sync — whitelisted to {fhir,mcp,ai,hris}; null when unknown (→404). The update is
- * PERSISTED into INTEGRATIONS so the page's subsequent GET /api/admin/integrations reload
- * reflects the new lastSyncAt/detail (the frontend discards the POST body and refetches).
- */
-export function syncIntegration(integration: string): IntegrationHealth | null {
-  const entry = INTEGRATIONS.find((i) => i.integration === integration);
-  if (!entry) return null;
-  entry.lastSyncAt = new Date().toISOString();
-  entry.detail = `Manual sync completed (${entry.status}).`;
-  return { ...entry };
+export interface IntegrationEnv extends DataSourceEnv {
+  OPENAI_API_KEY?: string;
 }
+
+/** The newest run's fetch from the WebChart tenant, read from its `RUN_COMPLETED` audit payload. */
+export interface WebChartFetch {
+  at: string;
+  host: string;
+  fetchedCount: number;
+  degradedCount: number;
+  status: string;
+}
+
+/** The newest `RUN_COMPLETED` row that fetched from WebChart (rows newest-first), or null. */
+export function lastWebChartFetch(rows: readonly AuditEventRow[]): WebChartFetch | null {
+  for (const row of rows) {
+    const t = row.payload.liveTenant as Partial<WebChartFetch> | undefined;
+    if (!t || typeof t !== "object" || typeof t.host !== "string") continue;
+    return {
+      at: row.occurredAt,
+      host: t.host,
+      fetchedCount: Number(t.fetchedCount ?? 0),
+      degradedCount: Number(t.degradedCount ?? 0),
+      status: String(t.status ?? "UNKNOWN"),
+    };
+  }
+  return null;
+}
+
+function webChartHost(env: IntegrationEnv): string | null {
+  const cfg = webChartConfigFromEnv(env);
+  if (!cfg) return null;
+  try {
+    return new URL(cfg.baseUrl).host;
+  } catch {
+    return cfg.baseUrl;
+  }
+}
+
+/**
+ * Integration health, derived. `fhir`, `mcp`, `ai` and `hris` keep their ids because the data-mapping
+ * views key on `fhir`/`hris` (`validateDataMappings`, `sourceFreshness`).
+ */
+export function listIntegrations(
+  env: IntegrationEnv = {},
+  lastFetch: WebChartFetch | null = null,
+  subjectTerm: SubjectTerm = DEPLOYMENT_PROFILE.subjectTerm,
+): IntegrationHealth[] {
+  const plural = subjectTerm === "patient" ? "patients" : "employees";
+  const webchart = isWebChartConfigured(env);
+  const host = webchart ? webChartHost(env) : null;
+  const aiConfigured = !!env.OPENAI_API_KEY?.trim();
+  const fetchLine = lastFetch
+    ? `Last fetch: ${lastFetch.fetchedCount} ${plural}, ${lastFetch.degradedCount} degraded (${lastFetch.status.toLowerCase()}).`
+    : "No run has fetched from it since the audit log began.";
+  return [
+    {
+      integration: "webchart",
+      displayName: "WebChart",
+      status: webchart ? "configured" : "not-configured",
+      lastSyncAt: webchart && lastFetch ? lastFetch.at : null,
+      detail: webchart
+        ? `Tenant ${host}. ${fetchLine}`
+        : `Not connected: this deployment evaluates synthetic ${plural}.`,
+      config: {},
+    },
+    {
+      integration: "fhir",
+      displayName: "Measure evaluation",
+      status: "healthy",
+      lastSyncAt: null,
+      detail: `The CQL engine runs in this process, over ${webchart ? `the WebChart feed (${host})` : `synthetic ${plural}`}.`,
+      config: {},
+    },
+    {
+      integration: "hris",
+      displayName: subjectTerm === "patient" ? "Patient directory" : "Employee directory",
+      status: webchart ? "configured" : "simulated",
+      lastSyncAt: null,
+      detail: webchart ? `${plural[0]!.toUpperCase()}${plural.slice(1)} from WebChart (${host}).` : `Synthetic ${plural}; no live directory.`,
+      config: {},
+    },
+    {
+      integration: "mcp",
+      displayName: "MCP server",
+      status: "healthy",
+      lastSyncAt: null,
+      detail: "Read-only MCP tools, served by this process over /sse.",
+      config: {},
+    },
+    {
+      integration: "ai",
+      displayName: "AI services",
+      status: aiConfigured ? "configured" : "not-configured",
+      lastSyncAt: null,
+      // Whether the key is set, not whether OpenAI answers: nothing probes it, and each AI surface
+      // falls back to deterministic text when the model does not answer.
+      detail: aiConfigured
+        ? "OPENAI_API_KEY is set. Each AI surface falls back to deterministic text if the model does not answer."
+        : "OPENAI_API_KEY is not set, so AI surfaces serve deterministic fallbacks only.",
+      config: {},
+    },
+  ];
+}
+
+/** The tile a data-mapping source id names, from an unconfigured view (`fhir`/`hris` are never degraded). */
+const integrationFor = (sourceId: string): IntegrationHealth | undefined =>
+  listIntegrations({}, null, "employee").find((i) => i.integration === sourceId);
 
 // Terminology mappings moved to value-set governance (#108): they are now persisted in the
 // terminology_mappings table (demo rows seeded by value-set-seed.ts) and served from the
@@ -150,7 +222,7 @@ export const listDataMappings = (): DataElementMapping[] =>
 export function validateDataMappings(): DataElementMapping[] {
   const now = new Date().toISOString();
   const sourceStatus = (sourceId: string): string => {
-    const ih = INTEGRATIONS.find((i) => i.integration === sourceId);
+    const ih = integrationFor(sourceId);
     if (!ih) return "UNKNOWN";
     return ih.status === "healthy" ? "HEALTHY" : ih.status === "degraded" ? "DEGRADED" : "UNKNOWN";
   };
@@ -162,12 +234,10 @@ export function validateDataMappings(): DataElementMapping[] {
 
 /** Freshness for a source from its integration-health last sync (DataReadinessService.computeFreshness). */
 export function sourceFreshness(sourceId: string): string {
-  const ih = INTEGRATIONS.find((i) => i.integration === sourceId);
+  const ih = integrationFor(sourceId);
   if (!ih) return "UNKNOWN";
   // In-process synthetic sources (fhir/hris) are live every request — never actually "synced" — so their
-  // freshness must NOT decay with process uptime. This is independent of the displayed `lastSyncAt` (which
-  // is now seeded to BOOT_TIME for the panel); without this guard, seeding fhir's lastSyncAt would age it
-  // to STALE after 24h of container uptime and spuriously flag clinical measures as stale in data-readiness.
+  // freshness must NOT decay with process uptime.
   if (sourceId === "fhir" || sourceId === "hris") return "FRESH";
   if (ih.lastSyncAt == null) return "UNKNOWN";
   const hoursAgo = (Date.now() - new Date(ih.lastSyncAt).getTime()) / 3_600_000;
