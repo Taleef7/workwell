@@ -448,8 +448,9 @@ tables (including `audit_events`) and returns 403 in production.
 
 `docker run -d -p 32775:8080 --memory=3g hlnconsulting/ice:latest`, then
 `WORKWELL_IMMZ_ICE_BASE_URL=http://localhost:32775/opencds-decision-support-service`. Needs 2–3 GB and a
-slow cold start. Calls time out at 3 s and fall back to the simulated forecast (60 s circuit breaker);
-grep `ICE forecast failed` if forecasts look simulated. Advisory only.
+slow cold start. ICE is dialed only for a subject with a dose history, and there is no history source
+yet (#628), so today it is never dialed. Calls time out at 3 s and answer an empty forecast (60 s
+circuit breaker); grep `ICE forecast failed` if forecasts are missing. Advisory only.
 
 ### Evidence upload persistence (Cloudflare R2) — #167 / ADR-030
 

@@ -276,16 +276,18 @@ Refusal: a `Refused` define in evidence_json flags the refusal; the case stays O
 to a case manager for intervention. Refusal does not trigger an EXCLUDED outcome.
 
 **Advisory immunization forecast:** for `adult_immunization` cases, `GET /api/cases/:id` attaches
-an advisory `immunizationForecast` covering all 3 ACIP series (Td/Tdap, Influenza annual, Hepatitis B
-3-dose). It is computed by the `ImmunizationForecast` port and is **advisory only** — it never affects
-the CQL `Outcome Status` (ADR-012).
+an advisory `immunizationForecast` for the 3 ACIP series (Td/Tdap, Influenza annual, Hepatitis B).
+It is computed by the `ImmunizationForecast` port and is **advisory only** — it never affects the CQL
+`Outcome Status` (ADR-012).
 
-The port has two implementations (ADR-029, 2026-07-13): the **simulated** forecaster (the default —
-ACIP-style windows over its own deterministic synthetic dose history) and a **real** adapter against a
+**WorkWell has no vaccination-history source yet, so today the forecast is empty** (`series: []`,
+`historyAvailable: false`) and the case page says there is no history (#628). Until #628 a default
+forecaster invented each subject's doses from a hash of their id. The real adapter (ADR-029) targets a
 self-hosted **ICE** sidecar (HLN's ACIP-maintained Immunization Calculation Engine), selected by
-`WORKWELL_IMMZ_ICE_BASE_URL` alone and falling back whole to the simulated forecaster on any failure.
-When ICE is on, the forecast carries ICE's own recommendation and reason codes (e.g.
-`ICE RECOMMENDED (DUE_NOW, ADMINISTER_TDAP_OR_TD)`).
+`WORKWELL_IMMZ_ICE_BASE_URL` alone; it forecasts from an injected dose history, answers "no history"
+without dialing ICE when there is none, and answers an empty forecast on any failure. WebChart
+immunizations are the history source it waits for (E12). With a history, the forecast carries ICE's
+own recommendation and reason codes (e.g. `ICE RECOMMENDED (DUE_NOW, ADMINISTER_TDAP_OR_TD)`).
 
 **ICE and a WorkWell measure can legitimately disagree, and that is not a defect.** ICE scores the
 full ACIP schedule for a vaccine *group*; a WorkWell measure scores its own authored rule. A subject
@@ -602,10 +604,10 @@ Each outcome evidence payload includes:
     inert stub until E12 PR-2). FHIR-native-first — adapters feed the unchanged engine (ADR-017).
 - **Immunization forecasting (E6 / #76):** `GET /api/immunization/forecast?subjectId=&asOf=` returns an
   advisory `ImmunizationForecast` (Td/Tdap, Influenza, Hepatitis B next-dose-due) computed by the
-  `ImmunizationForecast` port (`backend-ts/src/engine/immunization/immunization-forecast.ts`). The
-  simulated forecaster is the default; an ICE adapter can be activated by setting
-  `WORKWELL_IMMZ_ICE_API_KEY` + `WORKWELL_IMMZ_ICE_BASE_URL` (inert stub until configured). The
-  forecast is **advisory only** — the CQL `Outcome Status` remains the sole compliance authority (ADR-012).
+  `ImmunizationForecast` port (`backend-ts/src/engine/immunization/immunization-forecast.ts`). With no
+  vaccination-history source it is empty with `historyAvailable: false` (#628); the ICE adapter is
+  selected by `WORKWELL_IMMZ_ICE_BASE_URL` alone (the API key is optional). The forecast is **advisory
+  only** — the CQL `Outcome Status` remains the sole compliance authority (ADR-012).
 - A completed single-measure run can be exported as a FHIR R4 `MeasureReport` (summary + per-subject
   individual + a collection Bundle) via `GET /api/runs/{runId}/measure-report` — built from persisted
   `outcomes` with a proportion population model whose individual membership labels reconcile 1:1 with

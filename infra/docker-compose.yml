@@ -26,8 +26,9 @@ services:
 
   # ICE — HLN's Immunization Calculation Engine (ACIP forecasting), ADR-029. A long-lived sidecar:
   # ~2-3 GB RAM and a tens-of-seconds Drools cold start, so it is never started per request. The
-  # backend reaches it via WORKWELL_IMMZ_ICE_BASE_URL below; with that var unset the simulated
-  # forecaster serves instead and this service is not required (inert-unless-configured).
+  # backend reaches it via WORKWELL_IMMZ_ICE_BASE_URL below; with that var unset this service is not
+  # required (inert-unless-configured). It is dialed only for a subject with a dose history, and no
+  # history source exists yet (#628).
   ice:
     image: hlnconsulting/ice:latest
     restart: unless-stopped
@@ -77,8 +78,8 @@ services:
       DATABASE_URL: jdbc:postgresql://postgres:5432/workwell?user=workwell&password=workwell
       DATABASE_URL_DIRECT: jdbc:postgresql://postgres:5432/workwell?user=workwell&password=workwell
       OPENAI_API_KEY: local-dev-placeholder
-      # Real ACIP forecasts from the ice sidecar above (ADR-029). Remove this line to fall back to
-      # the simulated forecaster. No API key — a self-hosted sidecar has none.
+      # ACIP forecasts from the ice sidecar above (ADR-029), once a dose-history source exists (#628).
+      # No API key — a self-hosted sidecar has none.
       WORKWELL_IMMZ_ICE_BASE_URL: http://ice:8080/opencds-decision-support-service
     ports:
       - "8080:8080"
