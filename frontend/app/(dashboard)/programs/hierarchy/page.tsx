@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { fmtCount } from "@/lib/format";
-import { formatRate } from "@/lib/measure-rate";
-import { useGlobalFilters } from "@/components/global-filter-context";
+import { displayRate, formatRate, type NotationSource } from "@/lib/measure-rate";
+import { SUBJECT } from "@/lib/terminology";
 import { useAuth } from "@/components/auth-provider";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { AccessDenied } from "@/components/access-denied";
@@ -16,7 +16,7 @@ import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 // The rollup root is the cross-system "All Systems" aggregate (E13 PR-1); open it by default.
 const ALL_SYSTEMS_ROOT_KEY = "all:all";
 
-type ProgramSummary = {
+type ProgramSummary = NotationSource & {
   measureId: string;
   measureName: string;
 };
@@ -58,7 +58,6 @@ const nodeKey = (n: Pick<HierarchyNode, "level" | "id">): string => `${n.level}:
 export default function HierarchyPage() {
   const { user } = useAuth();
   const api = useApi();
-  const { from, to } = useGlobalFilters();
   // An engineering view, as Runs and Measures are: in pilot mode a case manager who types the URL gets
   // the same access-denied page, and none of the rollup is fetched (the Programs link is hidden too).
   const mayView = canSeeEngineering(user?.role);
@@ -111,8 +110,7 @@ export default function HierarchyPage() {
       const params = new URLSearchParams();
       if (measureId) params.set("measureId", measureId);
       if (tenant) params.set("tenant", tenant);
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
+      // No date range: the rates are measurement-year figures, as on the Programs cards (#699).
       const qs = params.toString();
       const data = await api.get<HierarchyNode>(`/api/hierarchy/rollup${qs ? `?${qs}` : ""}`);
       setRoot(data);
@@ -124,7 +122,7 @@ export default function HierarchyPage() {
     } finally {
       setLoading(false);
     }
-  }, [api, measureId, tenant, from, to]);
+  }, [api, measureId, tenant]);
 
   useEffect(() => {
     if (!mayView) return;
@@ -150,6 +148,13 @@ export default function HierarchyPage() {
     }
   };
   if (root) walk(root, 0);
+
+  // Every row's rate comes from `displayRate`, the Programs card's reader, with the columns it is made
+  // of beside it: "Evaluated 6 · Compliant 1" read as 50%, 25% or 100% by how many populations the
+  // patient was in (#643). One lower-is-better measure reads as its card does: Poor control, overdue
+  // over the same denominator. Across all measures the rate is compliance.
+  const notation = measureId ? measures.find((m) => m.measureId === measureId) ?? null : null;
+  const lowerIsBetter = notation?.improvementNotation === "decrease";
 
   const isEmpty = !loading && !error && root != null && root.children.length === 0;
 
@@ -209,6 +214,12 @@ export default function HierarchyPage() {
         )}
       </div>
 
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        {lowerIsBetter
+          ? "Poor control is the share of the population with a poorly controlled result. Lower is better."
+          : `Compliance is compliant over the ${SUBJECT.plural} in each measure's population, counted once per measure.`}
+      </p>
+
       {error ? (
         <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           Failed to load hierarchy: {error}
@@ -253,9 +264,9 @@ export default function HierarchyPage() {
             <thead>
               <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                 <th scope="col" className="px-4 py-2 font-semibold">Name</th>
-                <th scope="col" className="px-4 py-2 text-right font-semibold">Evaluated</th>
-                <th scope="col" className="px-4 py-2 text-right font-semibold">Compliant</th>
-                <th scope="col" className="px-4 py-2 text-right font-semibold">Compliance</th>
+                <th scope="col" className="px-4 py-2 text-right font-semibold">In population</th>
+                <th scope="col" className="px-4 py-2 text-right font-semibold">{lowerIsBetter ? "Poorly controlled" : "Compliant"}</th>
+                <th scope="col" className="px-4 py-2 text-right font-semibold">{lowerIsBetter ? "Poor control" : "Compliance"}</th>
                 <th scope="col" className="px-4 py-2 text-right font-semibold">Open Cases</th>
               </tr>
             </thead>
@@ -264,6 +275,7 @@ export default function HierarchyPage() {
                 const hasChildren = node.children.length > 0;
                 const key = nodeKey(node);
                 const isOpen = open.has(key);
+                const rate = displayRate(node.totals, notation);
                 return (
                   <tr
                     key={key}
@@ -300,13 +312,13 @@ export default function HierarchyPage() {
                       </div>
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
-                      {fmtCount(node.totals.evaluated)}
+                      {fmtCount(rate.denominator)}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
-                      {fmtCount(node.totals.compliant)}
+                      {fmtCount(rate.numerator)}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-900 dark:text-neutral-100">
-                      {formatRate(node.totals.complianceRate)}
+                      {formatRate(rate.value)}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
                       {fmtCount(node.totals.openCases)}
