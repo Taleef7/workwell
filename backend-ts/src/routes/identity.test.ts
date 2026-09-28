@@ -37,6 +37,7 @@ before(async () => {
   // Omar's two source records get outcomes in each system.
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "ihn-emp-001", measureId: "flu_vaccine", status: "COMPLIANT", evidence: {} });
+  await runStore.finalizeRun(run.id, "COMPLETED");
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });
 
@@ -77,6 +78,69 @@ test("GET /api/identity/people/:id → unified, system-tagged, newest-first time
   assert.equal(body.timeline.entries.length, 2, "both systems' outcomes unioned");
   assert.ok(body.timeline.move, "mobility annotation present");
   assert.equal(body.timeline.move!.toTenantName, "Indus Hospital Network");
+});
+
+// #655: the history read every outcome of every run, including runs still going or failed, dropped the
+// time of day (so a nightly and a same-day rerun looked like exact duplicates), and showed the stored
+// MISSING_DATA where the patient page shows "Not in population".
+test("the person history keeps finished runs and runnable measures, reads status as the patient page does, and names the run", async () => {
+  const db = env.DB as never;
+  const runStore = new SqliteRunStore(db);
+  const outcomes = new SqliteOutcomeStore(db);
+  const newRun = (scopeType: "ALL_PROGRAMS" | "EMPLOYEE" | "CASE", triggeredBy: string) =>
+    runStore.createRun({ scopeType, triggeredBy, requestedScope: {}, measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z" });
+
+  const nightly = await newRun("ALL_PROGRAMS", "scheduler");
+  // Outside every rate's initial population: stored MISSING_DATA (ADR-078), shown as not in population.
+  await outcomes.recordOutcome({
+    runId: nightly.id, subjectId: "emp-006", measureId: "cms122", evaluationPeriod: "2026-06-13", status: "MISSING_DATA",
+    evidence: { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } },
+    evaluatedAt: "2026-09-24T12:05:00.000Z",
+  });
+  // A measure this deployment no longer runs.
+  await outcomes.recordOutcome({ runId: nightly.id, subjectId: "emp-006", measureId: "retired_measure", status: "OVERDUE", evidence: {}, evaluatedAt: "2026-09-24T12:05:00.000Z" });
+  await runStore.finalizeRun(nightly.id, "COMPLETED");
+
+  const rerun = await newRun("EMPLOYEE", "manual");
+  await outcomes.recordOutcome({ runId: rerun.id, subjectId: "emp-006", measureId: "cms122", evaluationPeriod: "2026-06-13", status: "MISSING_DATA",
+    evidence: { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } },
+    evaluatedAt: "2026-09-24T15:30:00.000Z" });
+  await runStore.finalizeRun(rerun.id, "COMPLETED");
+
+  // A partly failed run is finished (its rows are answers); a case's rerun and seeded history are named.
+  const partial = await newRun("CASE", "manual");
+  await outcomes.recordOutcome({ runId: partial.id, subjectId: "emp-006", measureId: "flu_vaccine", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-09-22T09:00:00.000Z" });
+  await runStore.finalizeRun(partial.id, "PARTIAL_FAILURE");
+  const seeded = await newRun("ALL_PROGRAMS", "seed:trend-history");
+  await outcomes.recordOutcome({ runId: seeded.id, subjectId: "emp-006", measureId: "flu_vaccine", status: "OVERDUE", evidence: {}, evaluatedAt: "2026-07-01T09:00:00.000Z" });
+  await runStore.finalizeRun(seeded.id, "COMPLETED");
+
+  // Still going, and failed: neither is an answer.
+  const running = await newRun("ALL_PROGRAMS", "manual");
+  await outcomes.recordOutcome({ runId: running.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-09-25T09:00:00.000Z" });
+  const failed = await newRun("ALL_PROGRAMS", "manual");
+  await outcomes.recordOutcome({ runId: failed.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-09-25T10:00:00.000Z" });
+  await runStore.finalizeRun(failed.id, "FAILED");
+
+  const omar = ((await (await get("/api/identity/people?q=omar"))!.json()) as Person[])[0]!;
+  const body = (await (await get(`/api/identity/people/${encodeURIComponent(omar.personId)}`))!.json()) as {
+    timeline: { entries: { measureId: string; status: string; displayStatus?: string; evaluatedAt: string; runId?: string; runKind?: string }[] };
+  };
+  const entries = body.timeline.entries;
+  assert.ok(!entries.some((e) => e.runId === running.id || e.runId === failed.id), "no rows from a running or failed run");
+  assert.ok(!entries.some((e) => e.measureId === "retired_measure"), "no rows for a measure the deployment does not run");
+  const cms122 = entries.filter((e) => e.measureId === "cms122");
+  assert.deepEqual(
+    cms122.map((e) => [e.evaluatedAt, e.status, e.displayStatus, e.runId, e.runKind]),
+    [
+      ["2026-09-24T15:30:00.000Z", "MISSING_DATA", "OUT_OF_POPULATION", rerun.id, "SUBJECT"],
+      ["2026-09-24T12:05:00.000Z", "MISSING_DATA", "OUT_OF_POPULATION", nightly.id, "SCHEDULED"],
+    ],
+    "two same-day evaluations are two runs, each with its time, and read as not in population",
+  );
+  assert.equal(entries.find((e) => e.measureId === "audiogram")!.runKind, "MANUAL");
+  assert.equal(entries.find((e) => e.runId === partial.id)?.runKind, "CASE_RERUN", "a PARTIAL_FAILURE run's rows are kept");
+  assert.equal(entries.find((e) => e.runId === seeded.id)?.runKind, "SEED");
 });
 
 test("unknown person → 404; unrelated path/method → null", async () => {

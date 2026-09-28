@@ -107,6 +107,16 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     assert.equal(await store.markRunning("not-a-uuid"), null);
   });
 
+  test(`[${label}] getRunsByIds reads many runs in one call; unknown, malformed and repeated ids are harmless`, async () => {
+    const store = await freshStore();
+    const a = await store.createRun(sampleRun("audiogram"));
+    const b = await store.createRun(sampleRun("flu_vaccine"));
+    const got = await store.getRunsByIds([a.id, b.id, a.id, crypto.randomUUID(), "not-a-uuid"]);
+    assert.deepEqual(got.map((r) => r.id).sort(), [a.id, b.id].sort());
+    assert.deepEqual(got.find((r) => r.id === a.id), a);
+    assert.deepEqual(await store.getRunsByIds([]), []);
+  });
+
   test(`[${label}] appendLog writes, listLogs reads them back oldest-first`, async () => {
     const store = await freshStore();
     const run = await store.createRun(sampleRun());

@@ -7,12 +7,23 @@
  */
 import type { Person, SourceStatus } from "./identity-model.ts";
 
+/**
+ * What started the run an outcome came from: the nightly, an operator's run, a run of this one subject,
+ * a case's rerun to verify, or seeded synthetic history (`seed:trend-history`, never evidence).
+ */
+export type RunKind = "SCHEDULED" | "MANUAL" | "SUBJECT" | "CASE_RERUN" | "SEED";
+
 /** Minimal outcome shape the timeline needs (a projection of an `outcomes` row). */
 export interface TimelineOutcome {
   measureId: string;
   measureName?: string;
+  /** The stored bucket. `displayStatus` is what to show (the measure's reading, `deriveCell`, #671). */
   status: string;
+  displayStatus?: string;
   evaluatedAt: string; // ISO-8601
+  /** The run it came from, so two evaluations on one day read as two runs, not a duplicate. */
+  runId?: string;
+  runKind?: RunKind;
 }
 
 export interface TimelineEntry extends TimelineOutcome {

@@ -15,6 +15,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   "Manual sync completed", and every "Last sync" was the container's boot time. The button is gone; the
   tiles are built from configuration, a WebChart tile says Maui is not connected, and a time appears only
   where one is real (the newest run's WebChart fetch).
+- **People page (#655 items).** Same-named patients now show id, birth date and clinic. A person's history
+  keeps only finished runs and the measures the deployment runs; each row shows its time and run (nightly,
+  manual, one patient, rerun to verify, synthetic seed), and reads "Not in population" as the patient page
+  does. Its runs come from one read (`RunStore.getRunsByIds`), not one per run.
 - Run History checked live after #719: 4.9 s on the first visit a minute after a deploy, 0.2 s after (was 48.8 s).
 
 ## 2026-09-26

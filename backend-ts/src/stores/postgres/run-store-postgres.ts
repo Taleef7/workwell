@@ -100,6 +100,19 @@ export class PgRunStore implements RunStore {
     return rows[0] ? toRecord(rows[0]) : null;
   }
 
+  async getRunsByIds(ids: readonly string[]): Promise<RunRecord[]> {
+    // One array bind, not chunks (a chunked `= ANY` was 10x slower here), and malformed ids dropped
+    // first so the uuid cast cannot throw — the same contract as getRun.
+    const valid = [...new Set(ids)].filter(isUuid);
+    if (valid.length === 0) return [];
+    const { rows } = await this.pool.query<RunRow>(
+      `SELECT ${RUN_COLS}
+         FROM ${T} WHERE id = ANY($1::uuid[])`,
+      [valid],
+    );
+    return rows.map(toRecord);
+  }
+
   async listRuns(limit = 100): Promise<RunRecord[]> {
     const { rows } = await this.pool.query<RunRow>(
       `SELECT ${RUN_COLS}
