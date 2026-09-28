@@ -25,6 +25,7 @@ import { isCatalogActiveRunnable } from "../compliance/panels.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
+import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 
 export interface MeasureOutcomeSummary {
   measureId: string;
@@ -148,6 +149,21 @@ function humanReadable(eventType: string, actor: string | null, measureName: str
   }
 }
 
+/**
+ * One outcome as the roster reads it (#671), shared by the patient page and the People history: the
+ * roster's overlay, in the roster's order, so out of cohort wins over any real outcome (E11.3), and an
+ * out-of-population MISSING_DATA reads OUT_OF_POPULATION. A subject missing from the directory (a live
+ * record not loaded yet) gets no cohort overlay.
+ */
+export function outcomeDisplayStatus(
+  emp: EmployeeProfile | null | undefined,
+  o: { measureId: string; status: string; evidence: unknown; evaluationPeriod: string },
+  segments: HydratedSegment[],
+): DisplayState {
+  if (emp && !isApplicable(emp, o.measureId, segments)) return "NOT_APPLICABLE";
+  return deriveCell(o.status, o.evidence, o.measureId, o.evaluationPeriod).status;
+}
+
 /** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
 export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: string): Promise<EmployeeProfileResponse | null> {
   // Load the subject's persisted history before identity resolution so a configured wc profile can
@@ -193,10 +209,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       measureName: measureNameOf(o.measureId),
       measureVersion: measureVersionOf(o.measureId),
       outcomeStatus: o.status,
-      // The roster's overlay, in the roster's order: out of cohort wins over any real outcome (E11.3).
-      displayStatus: isApplicable(emp, o.measureId, deps.segments ?? [])
-        ? deriveCell(o.status, o.evidence, o.measureId, o.evaluationPeriod).status
-        : "NOT_APPLICABLE",
+      displayStatus: outcomeDisplayStatus(emp, o, deps.segments ?? []),
       lastRunDate: o.evaluatedAt,
       daysSinceLastExam: daysSince,
       daysUntilDue: daysSince !== null && window !== null ? window - daysSince : null,
