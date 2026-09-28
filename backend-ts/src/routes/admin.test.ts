@@ -102,18 +102,18 @@ test("integrations: a malformed WebChart private key does not take the tile list
   assert.equal(list.find((i) => i.integration === "webchart")!.status, "configured");
 });
 
-test("lastWebChartFetch skips runs that fetched nothing and reads the newest that did", () => {
+test("lastWebChartFetch reads the newest fetch from the configured host, skipping runs that fetched nothing", () => {
   const row = (occurredAt: string, payload: Record<string, unknown>) =>
     ({ occurredAt, eventType: "RUN_COMPLETED", actor: null, refRunId: null, refCaseId: null, refMeasureVersionId: null, payload });
-  assert.equal(lastWebChartFetch([row("2026-09-28T02:00:00Z", { status: "COMPLETED" })]), null);
-  assert.deepEqual(
-    lastWebChartFetch([
-      row("2026-09-28T02:00:00Z", { status: "COMPLETED" }),
-      row("2026-09-28T01:00:00Z", { liveTenant: { host: "h", fetchedCount: 5, degradedCount: 0, status: "FAILED" } }),
-      row("2026-09-27T01:00:00Z", { liveTenant: { host: "old", fetchedCount: 9, degradedCount: 0, status: "COMPLETED" } }),
-    ]),
-    { at: "2026-09-28T01:00:00Z", host: "h", fetchedCount: 5, degradedCount: 0, status: "FAILED" },
-  );
+  assert.equal(lastWebChartFetch([row("2026-09-28T02:00:00Z", { status: "COMPLETED" })], "h"), null);
+  const rows = [
+    row("2026-09-28T02:00:00Z", { status: "COMPLETED" }),
+    row("2026-09-28T01:00:00Z", { liveTenant: { host: "h", fetchedCount: 5, degradedCount: 0, status: "FAILED" } }),
+    row("2026-09-27T01:00:00Z", { liveTenant: { host: "old", fetchedCount: 9, degradedCount: 0, status: "COMPLETED" } }),
+  ];
+  assert.deepEqual(lastWebChartFetch(rows, "h"), { at: "2026-09-28T01:00:00Z", host: "h", fetchedCount: 5, degradedCount: 0, status: "FAILED" });
+  // Codex on #721: switched back to a tenant used before, whose fetch is older than another tenant's.
+  assert.deepEqual(lastWebChartFetch(rows, "old"), { at: "2026-09-27T01:00:00Z", host: "old", fetchedCount: 9, degradedCount: 0, status: "COMPLETED" });
 });
 
 test("scheduler: status + enable toggle", async () => {

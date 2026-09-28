@@ -19,6 +19,7 @@ import { getStores, getBackend } from "../stores/factory.ts";
 import {
   lastWebChartFetch,
   listIntegrations,
+  webChartHost,
   WEBCHART_RUNS_SCANNED,
   type IntegrationEnv,
   type WebChartFetch,
@@ -126,7 +127,7 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
     if (isWebChartConfigured(env)) {
       try {
         const rows = await (await getStores(env)).events.recentAuditEventsByType("RUN_COMPLETED", WEBCHART_RUNS_SCANNED);
-        lastFetch = lastWebChartFetch(rows);
+        lastFetch = lastWebChartFetch(rows, webChartHost(env));
       } catch (err) {
         console.warn(`[workwell] integration health: could not read the last WebChart fetch: ${String((err as Error)?.message ?? err)}`);
       }

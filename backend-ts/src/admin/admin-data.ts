@@ -48,11 +48,14 @@ export interface WebChartFetch {
  */
 export const WEBCHART_RUNS_SCANNED = 200;
 
-/** The newest `RUN_COMPLETED` row that fetched from WebChart (rows newest-first), or null. */
-export function lastWebChartFetch(rows: readonly AuditEventRow[]): WebChartFetch | null {
+/**
+ * The newest `RUN_COMPLETED` row (rows newest-first) that fetched from the tenant at `host`, or null.
+ * Matched while scanning, so a fetch from an older tenant cannot hide an earlier one from this one.
+ */
+export function lastWebChartFetch(rows: readonly AuditEventRow[], host: string): WebChartFetch | null {
   for (const row of rows) {
     const t = row.payload.liveTenant as Partial<WebChartFetch> | undefined;
-    if (!t || typeof t !== "object" || typeof t.host !== "string") continue;
+    if (!t || typeof t !== "object" || t.host !== host) continue;
     return {
       at: row.occurredAt,
       host: t.host,
@@ -68,7 +71,7 @@ export function lastWebChartFetch(rows: readonly AuditEventRow[]): WebChartFetch
  * The tenant's host, from the base URL alone. Not `webChartConfigFromEnv`: that also parses the private
  * key and throws on a malformed one, which would take down the page an operator opens to diagnose it.
  */
-function webChartHost(env: IntegrationEnv): string {
+export function webChartHost(env: IntegrationEnv): string {
   const baseUrl = (env.WORKWELL_WEBCHART_BASE_URL ?? "").trim();
   try {
     return new URL(baseUrl).host;
