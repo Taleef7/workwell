@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApi } from '@/lib/api/hooks';
 import { SUBJECT } from '@/lib/terminology';
+import { subjectPath } from '@/lib/subject-path';
 
 interface SearchResult {
   externalId: string;
@@ -79,7 +80,7 @@ export function GlobalSearch() {
   function navigate(externalId: string) {
     setQuery('');
     setOpen(false);
-    router.push(`/employees/${externalId}`);
+    router.push(subjectPath(externalId));
   }
 
   return (

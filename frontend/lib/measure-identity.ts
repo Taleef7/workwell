@@ -93,5 +93,12 @@ export function useMeasureIdentities() {
     [labelFor, measures],
   );
 
-  return { identities, measures, labelFor, labelForId, loading, error, refetch: fetchIdentities };
+  // The short form, for a chip in a table cell (#648): the published identity alone ("MIPS 113 · CMS130"),
+  // or the name for a measure that has none. Pair it with the long form as the chip's accessible name.
+  const shortLabelFor = useCallback(
+    (measureId: string, fallbackName: string): string => formatMeasureIdentity(identities[measureId]) || fallbackName,
+    [identities],
+  );
+
+  return { identities, measures, labelFor, labelForId, shortLabelFor, loading, error, refetch: fetchIdentities };
 }

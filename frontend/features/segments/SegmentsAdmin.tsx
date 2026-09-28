@@ -7,13 +7,14 @@ import { useApi } from "@/lib/api/hooks";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { normalizeEnumValue } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { formatMeasureLabel, type MeasureIdentity } from "@/lib/measure-identity";
 import { canManageSegments } from "@/lib/rbac";
 import { useSegments } from "./hooks/useSegments";
 import { SegmentsList } from "./SegmentsList";
 import { SegmentEditorModal } from "./SegmentEditorModal";
 import type { Segment, SegmentDraft } from "./types";
 
-type MeasureOption = { id: string; name: string; status: string };
+type MeasureOption = { id: string; name: string; status: string; identity?: MeasureIdentity | null };
 
 /** Orchestrates the Configure Groups admin surface: list + create/edit/delete + live member counts. */
 export function SegmentsAdmin() {
@@ -41,9 +42,9 @@ export function SegmentsAdmin() {
           setMeasures(
             rows
               .filter((m) => normalizeEnumValue(m.status) === "ACTIVE")
-              .map((m) => ({ id: m.id, name: m.name }))
+              .map((m) => ({ id: m.id, name: formatMeasureLabel(m.identity, m.name) }))
           );
-          setMeasureNames(Object.fromEntries(rows.map((m) => [m.id, m.name])));
+          setMeasureNames(Object.fromEntries(rows.map((m) => [m.id, formatMeasureLabel(m.identity, m.name)])));
         })
         .catch(() => {
           if (!cancelled) {

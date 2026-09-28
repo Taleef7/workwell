@@ -198,7 +198,7 @@ export async function fetchPanels(request: APIRequestContext, token: string): Pr
  * skeleton is `aria-hidden`, so a row with a patient link is the earliest thing that means "loaded".
  */
 export async function waitForDataRows(page: Page, timeout = 30_000): Promise<void> {
-  await expect(page.locator("tbody tr a[href^='/employees/']").first()).toBeVisible({ timeout });
+  await expect(page.locator("tbody tr a[href^='/patients/']").first()).toBeVisible({ timeout });
 }
 
 /**

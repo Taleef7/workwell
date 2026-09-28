@@ -241,9 +241,9 @@ test.describe("Maui work list — assigning a patient's whole set of gaps", () =
     // makes (name, date of birth) unique, so at 20,000 patients two people can share one — and this
     // row's gaps become the restore list: a collision would assign patient A's gaps and then restore
     // patient B's, leaving A's on the staff account with every assertion still green.
-    const name = (await row!.locator("a[href^='/employees/']").first().innerText()).trim();
-    const profileHref = (await row!.locator("a[href^='/employees/']").first().getAttribute("href")) ?? "";
-    const employeeId = decodeURIComponent(profileHref.replace("/employees/", ""));
+    const name = (await row!.locator("a[href^='/patients/']").first().innerText()).trim();
+    const profileHref = (await row!.locator("a[href^='/patients/']").first().getAttribute("href")) ?? "";
+    const employeeId = decodeURIComponent(profileHref.replace("/patients/", ""));
     expect(employeeId, "the row links the patient it renders").not.toBe("");
     const listRes = await request.get(
       `${API_BASE}/api/worklist/patients?status=open&limit=25&search=${encodeURIComponent(employeeId)}`,

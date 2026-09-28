@@ -86,14 +86,35 @@ describe("WorklistPage", () => {
 
     expect(await screen.findByRole("link", { name: "Lisa Carter" })).toBeInTheDocument();
     // The two gaps are on the one row — that is the whole difference from /cases.
-    expect(await screen.findByRole("link", { name: "Breast Cancer Screening" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Diabetes HbA1c" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /^Breast Cancer Screening — / })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Diabetes HbA1c — / })).toBeInTheDocument();
     // And the row is one row, not two.
     expect(screen.getAllByRole("link", { name: "Lisa Carter" })).toHaveLength(1);
     // A second identifier beside the name: two patients can share a name, a clinic and a provider (#660).
     expect(screen.getByTestId("worklist-patient-id")).toHaveTextContent("maui-pat-00001");
     // Singular for one. "1 patients with open gaps" is the kind of thing a pilot user screenshots.
     expect(screen.getByText(/1 (patient|employee) with open gaps/i)).toBeInTheDocument();
+  });
+
+  it("names each gap chip by its short identity, with the full label as its accessible name (#648)", async () => {
+    get.mockImplementation((url: string) => {
+      if (url.startsWith("/api/measures")) {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112" } },
+          { id: "cms122", name: "Diabetes HbA1c", identity: null },
+        ]);
+      }
+      if (url.startsWith("/api/users/assignable")) return Promise.resolve(ASSIGNABLE);
+      if (url.startsWith("/api/providers")) return Promise.resolve(PROVIDERS);
+      if (url.startsWith("/api/payers")) return Promise.resolve(PAYERS);
+      return Promise.resolve([]);
+    });
+    render(<WorklistPage />);
+    const chip = await screen.findByRole("link", { name: /^MIPS 112 · CMS125 · Breast Cancer Screening — Overdue/ });
+    expect(chip).toHaveTextContent(/^MIPS 112 · CMS125$/);
+    expect(chip).toHaveAttribute("title", expect.stringMatching(/^MIPS 112 · CMS125 · Breast Cancer Screening — /));
+    // A measure with no published identity keeps its name on the chip.
+    expect(screen.getByRole("link", { name: /^Diabetes HbA1c — / })).toHaveTextContent(/^Diabetes HbA1c$/);
   });
 
   it("assigns every open gap of the selected PATIENTS in one call, and says so on the button", async () => {
@@ -227,10 +248,10 @@ describe("WorklistPage", () => {
 
     // The wording is carried on each gap chip's tooltip, and it follows the LIVE outcome: saying
     // "still counted by CQL" about the verified one would be false.
-    const stillCounted = await screen.findByRole("link", { name: "Breast Cancer Screening" });
+    const stillCounted = await screen.findByRole("link", { name: /^Breast Cancer Screening — / });
     expect(stillCounted).toHaveAttribute("title", expect.stringContaining("still counted by CQL"));
     expect(stillCounted).toHaveAttribute("title", expect.stringContaining("nurse@example.org"));
-    const verified = screen.getByRole("link", { name: "Diabetes HbA1c" });
+    const verified = screen.getByRole("link", { name: /^Diabetes HbA1c — / });
     expect(verified).toHaveAttribute("title", expect.stringContaining("verified compliant"));
     expect(verified.getAttribute("title")).not.toContain("still counted by CQL");
   });
@@ -266,7 +287,7 @@ describe("WorklistPage", () => {
       headers: new Headers({ "X-Total-Count": "1" }),
     });
     render(<WorklistPage />);
-    const other = await screen.findByRole("link", { name: "Diabetes HbA1c" });
+    const other = await screen.findByRole("link", { name: /^Diabetes HbA1c — / });
     // The patient is on the list because of the FIRST gap; the second is shown (one call can close
     // both) but marked as not the filtered assignee's.
     expect(other.getAttribute("title")).toMatch(/not the filtered assignee/i);

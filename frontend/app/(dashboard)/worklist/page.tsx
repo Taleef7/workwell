@@ -26,6 +26,8 @@ import { ChevronRight } from "lucide-react";
 import { emitToast } from "@/lib/toast";
 import { OUTCOME_LABELS, PRIORITY_LABELS, labelFor, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
@@ -138,6 +140,7 @@ export default function WorklistPage() {
   const { user } = useAuth();
   const canManage = canManageCases(user?.role);
   const { siteId, from, to } = useGlobalFilters();
+  const { labelFor: measureLabelFor, shortLabelFor } = useMeasureIdentities();
 
   const { options: providerOptions, nameFor: providerNameFor } = usePanelProviders();
   const { options: payerOptions, groups: payerGroups, available: payersAvailable, nameFor: payerNameFor } = usePanelPayers();
@@ -757,7 +760,7 @@ export default function WorklistPage() {
                       </td>
                     ) : null}
                     <td className="p-3">
-                      <Link href={`/employees/${encodeURIComponent(row.employeeId)}`} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
+                      <Link href={subjectPath(row.employeeId)} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
                         {row.employeeName}
                       </Link>
                       {/* A second identifier beside the name: two patients can share a name, a clinic and a
@@ -781,18 +784,21 @@ export default function WorklistPage() {
                             ? (gap.liveDisplayStatus ?? gap.liveOutcomeStatus ?? gap.outcomeStatus)
                             : gap.outcomeStatus;
                           const closureNote = gapClosureNote(gap);
+                          // The chip carries the short form ("MIPS 113 · CMS130", #648); the full label,
+                          // status and next action are its tooltip and its accessible name.
+                          const longLabel = measureLabelFor(gap.measureId, gap.measureName);
+                          const describe = gap.otherAssignee
+                            ? `${longLabel} — ${labelFor(OUTCOME_LABELS, shown)} (assigned to ${gap.assignee ?? "nobody"}, not the filtered assignee)`
+                            : `${longLabel} — ${labelFor(OUTCOME_LABELS, shown)}${closureNote ? ` (${closureNote})` : ""}${gap.nextAction ? `: ${gap.nextAction}` : ""}`;
                           return (
                             <Link
                               key={gap.caseId}
                               href={`/cases/${encodeURIComponent(gap.caseId)}`}
                               className={`rounded px-1.5 py-0.5 text-xs ${outcomeStatusClass(shown)} ${gap.otherAssignee ? "opacity-60" : ""}`}
-                              title={
-                                gap.otherAssignee
-                                  ? `${gap.measureName} — ${labelFor(OUTCOME_LABELS, shown)} (assigned to ${gap.assignee ?? "nobody"}, not the filtered assignee)`
-                                  : `${gap.measureName} — ${labelFor(OUTCOME_LABELS, shown)}${closureNote ? ` (${closureNote})` : ""}${gap.nextAction ? `: ${gap.nextAction}` : ""}`
-                              }
+                              title={describe}
+                              aria-label={describe}
                             >
-                              {gap.measureName}
+                              {shortLabelFor(gap.measureId, gap.measureName)}
                             </Link>
                           );
                         })}
@@ -828,7 +834,7 @@ export default function WorklistPage() {
                       )}
                     </td>
                     <td className="p-3">
-                      <Link href={`/employees/${encodeURIComponent(row.employeeId)}`} aria-label={`Open ${row.employeeName}`}>
+                      <Link href={subjectPath(row.employeeId)} aria-label={`Open ${row.employeeName}`}>
                         <ChevronRight className="h-4 w-4 text-neutral-400" />
                       </Link>
                     </td>

@@ -12,6 +12,7 @@ import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridCli
 import type { RowData, TableColumn } from "datavis/src/components/table/types";
 import { SegmentsAdmin } from "@/features/segments/SegmentsAdmin";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
+import { formatMeasureLabel, type MeasureIdentity } from "@/lib/measure-identity";
 
 type IntegrationHealth = {
   integration: string;
@@ -34,6 +35,7 @@ type MeasureOption = {
   id: string;
   name: string;
   status: string;
+  identity?: MeasureIdentity | null;
 };
 
 type WaiverRecord = {
@@ -599,7 +601,7 @@ export default function AdminPage() {
   const waiverMeasureFilterOptions = useMemo(
     () => [
       { value: "", label: "All measures" },
-      ...measures.map((measure) => ({ value: measure.id, label: measure.name })),
+      ...measures.map((measure) => ({ value: measure.id, label: formatMeasureLabel(measure.identity, measure.name) })),
     ],
     [measures],
   );
@@ -614,7 +616,7 @@ export default function AdminPage() {
   const waiverGrantMeasureOptions = useMemo(
     () => [
       { value: "", label: "Select measure" },
-      ...measures.map((measure) => ({ value: measure.id, label: measure.name })),
+      ...measures.map((measure) => ({ value: measure.id, label: formatMeasureLabel(measure.identity, measure.name) })),
     ],
     [measures],
   );

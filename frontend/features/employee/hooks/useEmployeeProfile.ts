@@ -60,7 +60,7 @@ export function useEmployeeProfile(externalId: string) {
     setLoading(true);
     setError(null);
     try {
-      setProfile(await api.get<EmployeeProfile>(`/api/employees/${externalId}/profile`));
+      setProfile(await api.get<EmployeeProfile>(`/api/employees/${encodeURIComponent(externalId)}/profile`));
     } catch (e) {
       setError((e as Error).message ?? "Failed to load profile");
     } finally {

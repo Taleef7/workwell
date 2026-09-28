@@ -159,7 +159,8 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
 - `/lists` - attributed patient lists (ADR-082).
 - `/campaigns` - bulk outreach. `/orders` - advisory order proposals.
 - `/people`, `/people/[personId]` - cross-system people.
-- `/employees/[externalId]` - subject profile, per-measure status, simulate-as-of.
+- `/employees/[externalId]` - subject profile, per-measure status, simulate-as-of. `/patients/[externalId]`
+  is the same page under the patient deployment's name (links use `subjectPath`).
 - `/measures` - catalog. `/studio/[id]` - authoring tabs (Spec, CQL, Rule Builder, Value Sets,
   Tests, Standards). `/studio/elm` - compiled ELM beside its CQL.
 - `/runs` - run history and outcomes. `/admin` - operations, governance, outreach, audit, groups.

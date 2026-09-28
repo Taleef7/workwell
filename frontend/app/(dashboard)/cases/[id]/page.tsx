@@ -7,6 +7,7 @@ import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, 
 import { emitToast } from "@/lib/toast";
 import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
@@ -571,7 +572,7 @@ export default function CaseDetailPage() {
                 {isPatientTerm ? `Measurement year: ${formatEvaluationPeriod(caseDetail.evaluationPeriod)}` : `Period: ${caseDetail.evaluationPeriod}`}
               </p>
               <p className="text-xs text-neutral-700 dark:text-neutral-300">{caseDetail.nextAction}</p>
-              <Link href={`/employees/${caseDetail.employeeId}`} className="text-xs font-semibold text-primary-700 dark:text-primary-400 hover:underline">
+              <Link href={subjectPath(caseDetail.employeeId)} className="text-xs font-semibold text-primary-700 dark:text-primary-400 hover:underline">
                 {`Open ${SUBJECT.Singular} Profile`}
               </Link>
             </div>
@@ -720,7 +721,7 @@ export default function CaseDetailPage() {
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{measureLabelFor(caseDetail.measureId, caseDetail.measureName)}</p>
                   <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
-                    <Link href={`/employees/${caseDetail.employeeId}`} className="hover:underline hover:text-primary-700 dark:text-primary-400">
+                    <Link href={subjectPath(caseDetail.employeeId)} className="hover:underline hover:text-primary-700 dark:text-primary-400">
                       {caseDetail.employeeName}
                     </Link>
                   </h3>

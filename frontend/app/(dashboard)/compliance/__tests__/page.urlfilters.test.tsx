@@ -170,6 +170,10 @@ describe("CompliancePage URL filters", () => {
     await waitFor(() => {
       expect(screen.getByText(/Scoped to/i)).toBeInTheDocument();
     });
+    // The measure's own label, never its id twice ("MIPS 112 · CMS125 · cms125", #648).
+    await waitFor(() =>
+      expect(screen.getByText(/Scoped to/i)).toHaveTextContent("Scoped to MIPS 112 · CMS125 · Breast Cancer Screening"),
+    );
     expect(screen.getByRole("button", { name: /Clear/i })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Clear/i }));

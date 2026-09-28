@@ -10,6 +10,8 @@ import { canReconcileIdentity } from "@/lib/rbac";
 import { emitToast } from "@/lib/toast";
 import { SkeletonCard } from "@/components/skeleton-loader";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 import { COMPLIANCE_STATUS_LABELS, complianceStatusClass, labelFor } from "@/lib/status";
 
 /**
@@ -112,6 +114,7 @@ export default function PersonDetailPage() {
   const api = useApi();
   const router = useRouter();
   const { user } = useAuth();
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
   const mayReconcile = canReconcileIdentity(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
   const [detail, setDetail] = useState<PersonDetail | null>(null);
@@ -248,7 +251,7 @@ export default function PersonDetailPage() {
                 <li key={`${s.tenantId}|${s.externalId}`} className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-neutral-900 dark:text-neutral-100">{s.tenantName}</span>
                   <span className="text-neutral-500 dark:text-neutral-400">{isPatientTerm ? `${s.site} · ${s.externalId}` : `${s.role} · ${s.site} · ${s.externalId}`}</span>
-                  <Link href={`/employees/${encodeURIComponent(s.externalId)}`} className="text-xs text-primary-700 dark:text-primary-400 hover:underline">
+                  <Link href={subjectPath(s.externalId)} className="text-xs text-primary-700 dark:text-primary-400 hover:underline">
                     Open {SUBJECT.singular} page
                   </Link>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${s.status === "ACTIVE" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"}`}>
@@ -352,7 +355,7 @@ export default function PersonDetailPage() {
                     {detail.timeline.entries.map((e, i) => (
                       <tr key={`${e.externalId}-${e.measureId}-${e.evaluatedAt}-${i}`} className="border-b border-neutral-100 dark:border-neutral-800/60">
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{fmt(e.evaluatedAt)}</td>
-                        <td className="px-3 py-2">{e.measureName ?? e.measureId}</td>
+                        <td className="px-3 py-2">{measureLabelFor(e.measureId, e.measureName ?? e.measureId)}</td>
                         <td className="px-3 py-2"><OutcomeChip status={e.displayStatus ?? e.status} /></td>
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">
                           {e.runKind ? runKindLabel(e.runKind) : "—"}

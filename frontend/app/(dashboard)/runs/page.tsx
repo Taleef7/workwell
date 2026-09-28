@@ -21,6 +21,7 @@ import {
   triggerBadgeClass
 } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
@@ -663,7 +664,7 @@ export default function RunsPage() {
         return (
           <span>
             <a
-              href={`/employees/${String(row.employeeExternalId ?? "")}`}
+              href={subjectPath(String(row.employeeExternalId ?? ""))}
               className="font-medium text-neutral-800 hover:text-primary-700 hover:underline dark:text-neutral-200 dark:hover:text-primary-400"
               onClick={(event) => event.stopPropagation()}
             >

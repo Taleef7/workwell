@@ -2,6 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { ComplianceChip } from "./ComplianceChip";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
 import type { RosterColumn, RosterRow, RosterCell } from "./types";
 
 const NA_FALLBACK: RosterCell = { status: "NA", method: "Not evaluated" };
@@ -35,7 +36,7 @@ export function RosterMobileCards({
       {rows.map((r) => (
         <li key={r.subject.externalId} className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
           <Link
-            href={`/employees/${encodeURIComponent(r.subject.externalId)}`}
+            href={subjectPath(r.subject.externalId)}
             className="font-medium text-blue-600 hover:underline dark:text-blue-400"
           >
             {r.subject.name}

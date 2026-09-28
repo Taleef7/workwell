@@ -54,6 +54,9 @@ beforeEach(() => {
   get.mockImplementation((path: string) => {
     if (path.startsWith("/api/hierarchy/rollup")) return Promise.resolve(tree);
     if (path.startsWith("/api/programs/overview")) return Promise.resolve(programs);
+    if (path === "/api/measures") {
+      return Promise.resolve([{ id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112" } }]);
+    }
     return Promise.resolve([]);
   });
 });
@@ -92,6 +95,11 @@ describe("HierarchyPage — each row shows the numbers its rate is made of (#643
     // Patient B: 3 overdue of 4 in population = 75.0%, not the 25.0% compliance shown before.
     expect(cells("Patient B").slice(1, 4)).toEqual(["4", "3", "75.0%"]);
     expect(screen.getByText(/Lower is better/)).toBeInTheDocument();
+  });
+
+  it("names each measure in the filter by the label the Programs cards use (#648)", async () => {
+    render(<HierarchyPage />);
+    expect(await screen.findByRole("option", { name: "MIPS 112 · CMS125 · Breast Cancer Screening" })).toBeInTheDocument();
   });
 
   it("does not send the global date range: the rates are measurement-year figures (#699)", async () => {

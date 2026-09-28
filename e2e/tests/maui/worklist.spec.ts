@@ -206,10 +206,10 @@ test.describe("Maui work list — the default view", () => {
     // it would silently compare one person's row with another person's gaps.
     const firstRow = page
       .locator("tbody tr")
-      .filter({ has: page.locator("a[href^='/employees/']") })
+      .filter({ has: page.locator("a[href^='/patients/']") })
       .first();
-    const profileHref = (await firstRow.locator("a[href^='/employees/']").first().getAttribute("href")) ?? "";
-    const employeeId = decodeURIComponent(profileHref.replace("/employees/", ""));
+    const profileHref = (await firstRow.locator("a[href^='/patients/']").first().getAttribute("href")) ?? "";
+    const employeeId = decodeURIComponent(profileHref.replace("/patients/", ""));
     expect(employeeId, "the row links the patient it renders").not.toBe("");
     const { rows: matched } = await fetchWorklist(request, token, `&search=${encodeURIComponent(employeeId)}`);
     const subject = matched.find((r) => r.employeeId === employeeId);
