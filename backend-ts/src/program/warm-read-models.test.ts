@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
-import { MAX_CONSECUTIVE_PANEL_FAILURES, warmReadModels } from "./warm-read-models.ts";
+import { MAX_CONSECUTIVE_PANEL_FAILURES, RUN_LIST_WARM, warmReadModels } from "./warm-read-models.ts";
+import { resetRunOutcomeCounts, runOutcomeCountsFor } from "../run/run-counts.ts";
 import { programOverview, programRiskOutlook, __overviewMemo, __chartMemos, __sitesMemo } from "./program-read-models.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 import { __resetRuntimeHealth, runtimeDetail, runtimeHealth } from "../admin/runtime-health.ts";
@@ -143,4 +144,28 @@ test("a database that is not answering stops the pass after a few failures, not 
   assert.equal(result.ok, false);
   assert.equal(reads, 1 + MAX_CONSECUTIVE_PANEL_FAILURES, "the overview, then the breaker's worth of panels, then stop");
   assert.ok(result.failedMeasures.length > 1, "every measure it did not reach is reported unwarmed");
+});
+
+test("Run History's first page is warmed, so its first visitor after a deploy does not count every run (2026-09-26)", async () => {
+  // The list counts each run's outcomes; cold, the first page took 48.8 s on the pilot.
+  clearAll();
+  resetRunOutcomeCounts();
+  const runs = Array.from({ length: RUN_LIST_WARM + 5 }, (_, i) => ({
+    id: `run-${String(i).padStart(2, "0")}`, status: "COMPLETED", scopeType: "ALL_PROGRAMS", triggeredBy: "manual",
+    startedAt: `2026-09-${String(25 - (i % 20)).padStart(2, "0")}T12:00:00.000Z`, requestedScope: {},
+  }));
+  const counted: string[] = [];
+  const countOutcomesByStatus = async (runId: string) => {
+    counted.push(runId);
+    return [{ status: "COMPLIANT", count: 1, latestEvaluatedAt: null }];
+  };
+  const deps = { ...makeDeps({ countOutcomesByStatus } as Partial<OutcomeStore>), runStore: { listRuns: async () => runs } as unknown as RunStore };
+  await warmReadModels(deps);
+  const firstPage = runs.slice(0, RUN_LIST_WARM);
+  assert.deepEqual([...counted].sort(), firstPage.map((r) => r.id), "exactly the first page, newest first as the store lists them");
+
+  // What the list then asks for is already there.
+  counted.length = 0;
+  await runOutcomeCountsFor({ countOutcomesByStatus }, firstPage);
+  assert.equal(counted.length, 0, "the first visitor reads no counts");
 });

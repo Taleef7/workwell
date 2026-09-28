@@ -21,6 +21,8 @@ import {
   type ProgramDeps,
 } from "./program-read-models.ts";
 import { recordWarm, type WarmRecord } from "../admin/runtime-health.ts";
+import { runCandidates } from "../run/read-models.ts";
+import { runOutcomeCountsFor } from "../run/run-counts.ts";
 
 /**
  * The filter set the dashboard opens with — no site, no tenant, no date window. Deliberately the
@@ -38,6 +40,13 @@ const UNFILTERED = { site: null, tenant: null } as const;
  * pass. Three failures in a row is a database that is not answering; the rest are reported unwarmed.
  */
 export const MAX_CONSECUTIVE_PANEL_FAILURES = 3;
+
+/**
+ * Run History's first page (the page's `RUN_PAGE_SIZE`), whose outcome counts are warmed too. Its
+ * finished runs' counts are kept until compaction (run-counts.ts), so after a nightly only the new run
+ * is read; after a deploy it is all twenty, which cost the first visitor 48.8 s on the pilot.
+ */
+export const RUN_LIST_WARM = 20;
 
 /**
  * What the pass achieved, so a CALLER can tell success from failure (review of #610).
@@ -133,6 +142,16 @@ async function warmPass(deps: ProgramDeps): Promise<WarmResult> {
       }
     }
     if (failed) failedMeasures.push(measureId);
+  }
+  // Last, after the dashboard it serves less often, and not at all once the database has stopped
+  // answering. A failure is a WARN only: the list reads its own counts on demand either way.
+  if (consecutiveFailures < MAX_CONSECUTIVE_PANEL_FAILURES) {
+    try {
+      const firstPage = (await runCandidates(deps.runStore, {})).slice(0, RUN_LIST_WARM);
+      await runOutcomeCountsFor(deps.outcomeStore, firstPage);
+    } catch (err) {
+      console.warn(`[workwell] read-model warm failed for the run list: ${String((err as Error)?.message ?? err)}`);
+    }
   }
   return error ? { ok: false, error, failedMeasures } : { ok: true, failedMeasures };
 }

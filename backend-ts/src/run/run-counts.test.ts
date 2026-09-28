@@ -4,7 +4,7 @@
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { COUNTS_TTL_MS, resetRunOutcomeCounts, runOutcomeCounts, runOutcomeCountsFor } from "./run-counts.ts";
+import { resetRunOutcomeCounts, runOutcomeCounts, runOutcomeCountsFor } from "./run-counts.ts";
 import { compactOutcomes } from "./outcome-compaction.ts";
 import type { OutcomeStatusCount } from "../stores/outcome-store.ts";
 
@@ -27,10 +27,10 @@ test("a finished run is counted once and then kept; a running run is counted eve
   const store = countingStore();
   const done = { id: "r-done", status: "COMPLETED" };
   const running = { id: "r-live", status: "RUNNING" };
-  const first = await runOutcomeCounts(store, done, 1_000);
-  assert.deepEqual(await runOutcomeCounts(store, done, 2_000), first, "the second load is the kept answer");
-  await runOutcomeCounts(store, running, 1_000);
-  await runOutcomeCounts(store, running, 2_000);
+  const first = await runOutcomeCounts(store, done);
+  assert.deepEqual(await runOutcomeCounts(store, done), first, "the second load is the kept answer");
+  await runOutcomeCounts(store, running);
+  await runOutcomeCounts(store, running);
   assert.deepEqual(store.reads, ["r-done", "r-live", "r-live"]);
 });
 
@@ -43,14 +43,59 @@ test("every finished status is kept, whatever its case (#644)", async () => {
   assert.equal(store.reads.length, 4, "one read per finished run");
 });
 
-test("a kept count expires, so a change made from another process is seen within the TTL (#644)", async () => {
+test("a kept count does not expire: only a reset, or a restart, reads it again (2026-09-26)", async (t) => {
+  // The ten-minute expiry this replaces made nearly every visit cold: 48.8 s for the first page on the
+  // pilot. Mock time forward a day to show nothing time-based remains.
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
   const store = countingStore();
   const done = { id: "r-done", status: "COMPLETED" };
-  await runOutcomeCounts(store, done, 0);
-  await runOutcomeCounts(store, done, COUNTS_TTL_MS - 1);
-  assert.equal(store.reads.length, 1);
-  await runOutcomeCounts(store, done, COUNTS_TTL_MS);
-  assert.equal(store.reads.length, 2, "read again once the TTL has passed");
+  await runOutcomeCounts(store, done);
+  t.mock.timers.tick(24 * 60 * 60_000);
+  await runOutcomeCounts(store, done);
+  assert.equal(store.reads.length, 1, "still the kept answer a day later");
+});
+
+test("two loads asking for the same run at once share one read (2026-09-26)", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const reads: string[] = [];
+  const store = {
+    async countOutcomesByStatus(runId: string) {
+      reads.push(runId);
+      await gate;
+      return counted(7);
+    },
+  };
+  const done = { id: "r-done", status: "COMPLETED" };
+  const a = runOutcomeCounts(store, done);
+  const b = runOutcomeCounts(store, done);
+  release();
+  assert.deepEqual(await a, await b);
+  assert.deepEqual(reads, ["r-done"], "one count, not one per load");
+  await runOutcomeCounts(store, done);
+  assert.equal(reads.length, 1, "and the shared answer is kept");
+});
+
+test("a finished run never joins a read that began while it was running (2026-09-26)", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const store = countingStore();
+  let calls = 0;
+  const slow = {
+    async countOutcomesByStatus(runId: string) {
+      calls += 1;
+      if (calls === 1) await gate; // the read begun while the run was running is still outstanding
+      return store.countOutcomesByStatus(runId);
+    },
+  };
+  const whileRunning = runOutcomeCounts(slow, { id: "r-1", status: "RUNNING" });
+  const finishedLoad = runOutcomeCounts(slow, { id: "r-1", status: "COMPLETED" });
+  release();
+  await whileRunning;
+  const onceFinished = await finishedLoad;
+  assert.equal(calls, 2, "the finished load read for itself");
+  assert.deepEqual(await runOutcomeCounts(slow, { id: "r-1", status: "COMPLETED" }), onceFinished, "and its answer is the kept one");
+  assert.equal(calls, 2);
 });
 
 test("outcome compaction resets the kept counts, since it is what changes a finished run's rows (#644)", async () => {
@@ -116,8 +161,22 @@ test("a count that was in flight when compaction reset the counts is not kept (#
   const done = { id: "r-done", status: "COMPLETED" };
   const inFlight = runOutcomeCounts(store, done);
   resetRunOutcomeCounts(); // compaction lands while that read is outstanding
+  const afterReset = runOutcomeCounts(store, done); // asked before the stale read has even returned
   release();
   await inFlight;
+  await afterReset;
+  assert.equal(reads.length, 2, "a load after the reset did not join the stale read");
   await runOutcomeCounts(store, done);
-  assert.equal(reads.length, 2, "the stale read was not kept, so the next load counts again");
+  assert.equal(reads.length, 2, "and the fresh read, not the stale one, is what was kept");
+});
+
+test("a count is kept only for the status it was read under (2026-09-26)", async () => {
+  // Boot recovery can mark a run FAILED, then restore it for a retry when its audit write fails.
+  const store = countingStore();
+  await runOutcomeCounts(store, { id: "r-1", status: "FAILED" });
+  const final = await runOutcomeCounts(store, { id: "r-1", status: "COMPLETED" });
+  assert.equal(store.reads.length, 2, "the run that finished for real is counted again");
+  assert.equal(final[0]!.count, 2);
+  assert.deepEqual(await runOutcomeCounts(store, { id: "r-1", status: "completed" }), final, "whatever the status's case");
+  assert.equal(store.reads.length, 2);
 });
