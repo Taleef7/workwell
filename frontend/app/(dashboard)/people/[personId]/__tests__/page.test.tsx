@@ -46,7 +46,7 @@ describe("Person history (#655)", () => {
       },
       timeline: {
         entries: [
-          entry("2026-09-24T15:30:00.000Z", "RERUN"),
+          entry("2026-09-24T15:30:00.000Z", "SUBJECT"),
           entry("2026-09-24T12:05:00.000Z", "SCHEDULED"),
           entry("2026-09-23T12:05:00.000Z", "MANUAL", { measureId: "cms2", measureName: "Depression screening", status: "COMPLIANT", displayStatus: "COMPLIANT" }),
         ],
@@ -57,7 +57,7 @@ describe("Person history (#655)", () => {
     const table = (await screen.findAllByText("Breast Cancer Screening", { selector: "td" }))[0]!.closest("table")!;
     const rows = within(table).getAllByRole("row").slice(1).map((r) => r.textContent ?? "");
     expect(rows[0]).toContain("Not in population");
-    expect(rows[0]).toContain("Single-patient rerun");
+    expect(rows[0]).toContain("Single-patient run");
     expect(rows[1]).toContain("Not in population");
     expect(rows[1]).toContain("Nightly");
     expect(rows[2]).toContain("Manual run");

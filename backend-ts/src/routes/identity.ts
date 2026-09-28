@@ -21,15 +21,18 @@ import { measureDisplayName } from "../measure/measure-name.ts";
 import { employeeById } from "../config/deployment-profile.ts";
 import { normalizePair, type PersonLinkRef } from "../stores/person-link-store.ts";
 import { isCatalogActiveRunnable } from "../compliance/panels.ts";
-import { outcomeDisplayStatus } from "../run/employee-profile.ts";
+import { deriveCell } from "../compliance/roster-vocabulary.ts";
 import { triggerTypeOf } from "../run/read-models.ts";
 import type { RunRecord } from "../stores/run-store.ts";
+import type { EmployeeOutcomeRow } from "../stores/outcome-store.ts";
 
 /** Runs whose outcomes are an answer (the compliance API's rule, `compliance-api.ts`). */
 const FINISHED_RUN: ReadonlySet<string> = new Set(["COMPLETED", "PARTIAL_FAILURE"]);
 
+/** Run History's trigger vocabulary (`triggerTypeOf`), with the one-subject scopes told apart. */
 function runKindOf(run: RunRecord): RunKind {
-  if (run.scopeType === "EMPLOYEE" || run.scopeType === "CASE") return "RERUN";
+  if (run.scopeType === "CASE") return "CASE_RERUN";
+  if (run.scopeType === "EMPLOYEE") return "SUBJECT";
   const trigger = triggerTypeOf(run);
   return trigger === "SCHEDULED" || trigger === "SEED" ? trigger : "MANUAL";
 }
@@ -107,37 +110,43 @@ export async function handleIdentity(req: Request, env: IdentityEnv, actor: stri
     const decodedId = safeDecode(detailId);
     const person = decodedId === null ? null : personById(decodedId, undefined, links);
     if (!person) return json({ error: "not_found", message: "person not found" }, 404);
-    const segments = await s.segments.listSegments();
-    const runs = new Map<string, RunRecord | null>();
-    const outcomesByExternalId = new Map<string, TimelineOutcome[]>();
+    // Full per-source history (matches the employee-profile read) — a low cap would silently drop
+    // older outcomes (e.g. after the weekly trend-history backfill), rendering "compliance history
+    // (all systems)" incomplete. Demo-scale; the real read is paginated behind the E12 adapter (PR-3).
+    // Only the measures this deployment runs, as on the patient page (#671): a retired measure's past
+    // rows read as one more measure the practice is scored on.
+    const rowsBySource = new Map<string, EmployeeOutcomeRow[]>();
     for (const src of person.sources) {
-      // Full per-source history (matches the employee-profile read) — a low cap would silently drop
-      // older outcomes (e.g. after the weekly trend-history backfill), rendering "compliance history
-      // (all systems)" incomplete. Demo-scale; the real read is paginated behind the E12 adapter (PR-3).
-      // Only the measures this deployment runs, as on the patient page (#671).
-      const rows = (await s.outcomes.listOutcomesForEmployee(src.externalId, 100000)).filter((r) =>
-        isCatalogActiveRunnable(r.measureId),
-      );
-      // One read per distinct run, in turn: a person has a few dozen, and a burst would take the pool.
-      for (const r of rows) if (!runs.has(r.runId)) runs.set(r.runId, await s.runs.getRun(r.runId));
-      const emp = employeeById(src.externalId);
+      const rows = await s.outcomes.listOutcomesForEmployee(src.externalId, 100000);
+      rowsBySource.set(src.externalId, rows.filter((r) => isCatalogActiveRunnable(r.measureId)));
+    }
+    // The runs behind them in one read: a person has one per nightly, and more on a stack that never
+    // compacts, so one round trip each grew without bound.
+    const runs = new Map(
+      (await s.runs.getRunsByIds([...rowsBySource.values()].flat().map((r) => r.runId))).map((r) => [r.id, r]),
+    );
+    const outcomesByExternalId = new Map<string, TimelineOutcome[]>();
+    for (const [externalId, rows] of rowsBySource) {
       const entries: TimelineOutcome[] = [];
       for (const r of rows) {
         // Only finished runs, the compliance API's rule: a running run's row is a partial answer, and a
         // failed or cancelled run's is not an answer at all.
         const run = runs.get(r.runId);
-        if (!run || !FINISHED_RUN.has(run.status)) continue;
+        if (!run || !FINISHED_RUN.has(run.status.toUpperCase())) continue;
         entries.push({
           measureId: r.measureId,
           measureName: measureDisplayName(r.measureId),
           status: r.status,
-          displayStatus: outcomeDisplayStatus(emp, r, segments),
+          // The measure's own reading of the row (the patient page's `deriveCell`, #671), so an
+          // out-of-population MISSING_DATA reads OUT_OF_POPULATION. Not today's cohort overlay: that
+          // would rewrite every past row whenever a segment or a role changes.
+          displayStatus: deriveCell(r.status, r.evidence, r.measureId, r.evaluationPeriod).status,
           evaluatedAt: r.evaluatedAt,
           runId: r.runId,
           runKind: runKindOf(run),
         });
       }
-      outcomesByExternalId.set(src.externalId, entries);
+      outcomesByExternalId.set(externalId, entries);
     }
     return json({ person, timeline: mergedComplianceTimeline(person, outcomesByExternalId) });
   }

@@ -87,7 +87,7 @@ test("the person history keeps finished runs and runnable measures, reads status
   const db = env.DB as never;
   const runStore = new SqliteRunStore(db);
   const outcomes = new SqliteOutcomeStore(db);
-  const newRun = (scopeType: "ALL_PROGRAMS" | "EMPLOYEE", triggeredBy: string) =>
+  const newRun = (scopeType: "ALL_PROGRAMS" | "EMPLOYEE" | "CASE", triggeredBy: string) =>
     runStore.createRun({ scopeType, triggeredBy, requestedScope: {}, measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z" });
 
   const nightly = await newRun("ALL_PROGRAMS", "scheduler");
@@ -107,6 +107,14 @@ test("the person history keeps finished runs and runnable measures, reads status
     evaluatedAt: "2026-09-24T15:30:00.000Z" });
   await runStore.finalizeRun(rerun.id, "COMPLETED");
 
+  // A partly failed run is finished (its rows are answers); a case's rerun and seeded history are named.
+  const partial = await newRun("CASE", "manual");
+  await outcomes.recordOutcome({ runId: partial.id, subjectId: "emp-006", measureId: "flu_vaccine", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-09-22T09:00:00.000Z" });
+  await runStore.finalizeRun(partial.id, "PARTIAL_FAILURE");
+  const seeded = await newRun("ALL_PROGRAMS", "seed:trend-history");
+  await outcomes.recordOutcome({ runId: seeded.id, subjectId: "emp-006", measureId: "flu_vaccine", status: "OVERDUE", evidence: {}, evaluatedAt: "2026-07-01T09:00:00.000Z" });
+  await runStore.finalizeRun(seeded.id, "COMPLETED");
+
   // Still going, and failed: neither is an answer.
   const running = await newRun("ALL_PROGRAMS", "manual");
   await outcomes.recordOutcome({ runId: running.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", evidence: {}, evaluatedAt: "2026-09-25T09:00:00.000Z" });
@@ -125,12 +133,14 @@ test("the person history keeps finished runs and runnable measures, reads status
   assert.deepEqual(
     cms122.map((e) => [e.evaluatedAt, e.status, e.displayStatus, e.runId, e.runKind]),
     [
-      ["2026-09-24T15:30:00.000Z", "MISSING_DATA", "OUT_OF_POPULATION", rerun.id, "RERUN"],
+      ["2026-09-24T15:30:00.000Z", "MISSING_DATA", "OUT_OF_POPULATION", rerun.id, "SUBJECT"],
       ["2026-09-24T12:05:00.000Z", "MISSING_DATA", "OUT_OF_POPULATION", nightly.id, "SCHEDULED"],
     ],
     "two same-day evaluations are two runs, each with its time, and read as not in population",
   );
   assert.equal(entries.find((e) => e.measureId === "audiogram")!.runKind, "MANUAL");
+  assert.equal(entries.find((e) => e.runId === partial.id)?.runKind, "CASE_RERUN", "a PARTIAL_FAILURE run's rows are kept");
+  assert.equal(entries.find((e) => e.runId === seeded.id)?.runKind, "SEED");
 });
 
 test("unknown person → 404; unrelated path/method → null", async () => {

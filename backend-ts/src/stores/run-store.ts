@@ -101,6 +101,8 @@ export interface RecoveredRun {
 export interface RunStore {
   createRun(input: CreateRunInput): Promise<RunRecord>;
   getRun(id: string): Promise<RunRecord | null>;
+  /** The runs with these ids, in one read (no order; unknown and malformed ids are simply absent). */
+  getRunsByIds(ids: readonly string[]): Promise<RunRecord[]>;
   /** Runs newest-first (by started_at), capped at `limit` — the /api/runs list read model. */
   listRuns(limit?: number): Promise<RunRecord[]>;
   /**

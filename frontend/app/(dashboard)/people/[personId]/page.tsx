@@ -29,8 +29,9 @@ function OutcomeChip({ status }: { status: string }) {
 function runKindLabel(kind: string): string {
   if (kind === "SCHEDULED") return "Nightly";
   if (kind === "MANUAL") return "Manual run";
-  if (kind === "RERUN") return `Single-${SUBJECT.singular} rerun`;
-  if (kind === "SEED") return "Seeded history";
+  if (kind === "SUBJECT") return `Single-${SUBJECT.singular} run`;
+  if (kind === "CASE_RERUN") return "Rerun to verify";
+  if (kind === "SEED") return "Seed (synthetic)";
   return kind;
 }
 
@@ -59,7 +60,7 @@ type TimelineEntry = {
   displayStatus?: string;
   evaluatedAt: string;
   runId?: string;
-  runKind?: "SCHEDULED" | "MANUAL" | "RERUN" | "SEED";
+  runKind?: "SCHEDULED" | "MANUAL" | "SUBJECT" | "CASE_RERUN" | "SEED";
   tenantId: string;
   tenantName: string;
   externalId: string;

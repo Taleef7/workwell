@@ -95,6 +95,16 @@ export class SqliteRunStore implements RunStore {
     return row ? toRecord(row) : null;
   }
 
+  async getRunsByIds(ids: readonly string[]): Promise<RunRecord[]> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    const { results } = await this.db
+      .prepare(`SELECT ${RUN_COLS} FROM runs WHERE id IN (SELECT value FROM json_each(?))`)
+      .bind(JSON.stringify(unique))
+      .all<RunRow>();
+    return (results ?? []).map(toRecord);
+  }
+
   async listRuns(limit = 100): Promise<RunRecord[]> {
     const { results } = await this.db
       .prepare(`SELECT ${RUN_COLS} FROM runs ORDER BY started_at DESC, id DESC LIMIT ?`)
