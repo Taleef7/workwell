@@ -73,6 +73,14 @@ const nav = [
 
 const ENGINEERING_HREFS = new Set(["/measures", "/studio", "/runs", "/api-docs"]);
 
+/**
+ * The Programs pages report measurement-year figures, so a date range has nothing to scope there, and
+ * scoping only some of a card's numbers set them against each other (#699). The control is hidden on
+ * them; a range chosen elsewhere is kept in the URL for the pages that use it.
+ */
+const usesDateRange = (pathname: string | null): boolean =>
+  !(pathname === "/programs" || (pathname?.startsWith("/programs/") ?? false));
+
 const DATE_PRESETS = [
   { value: "7d", label: "Last 7 days" },
   { value: "30d", label: "Last 30 days" },
@@ -188,6 +196,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return <div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />;
   }
 
+  const showDateRange = usesDateRange(pathname);
+
   const navItems = nav.filter((item) => {
     if (ENGINEERING_HREFS.has(item.href) && !canSeeEngineering(user?.role)) {
       return false;
@@ -288,14 +298,16 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                   size="sm"
                   className="w-36"
                 />
-                <Select
-                  aria-label="Date range"
-                  value={datePreset}
-                  onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
-                  options={[...DATE_PRESETS]}
-                  size="sm"
-                  className="w-36"
-                />
+                {showDateRange ? (
+                  <Select
+                    aria-label="Date range"
+                    value={datePreset}
+                    onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
+                    options={[...DATE_PRESETS]}
+                    size="sm"
+                    className="w-36"
+                  />
+                ) : null}
               </GlobalFilterGroup>
               <RunStatusIndicator />
               {canSeeEngineering(user?.role) && <ThemeBrandSwitcher />}
@@ -313,14 +325,16 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 size="sm"
                 className="flex-1"
               />
-              <Select
-                aria-label="Date range"
-                value={datePreset}
-                onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
-                options={[...DATE_PRESETS]}
-                size="sm"
-                className="flex-1"
-              />
+              {showDateRange ? (
+                <Select
+                  aria-label="Date range"
+                  value={datePreset}
+                  onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
+                  options={[...DATE_PRESETS]}
+                  size="sm"
+                  className="flex-1"
+                />
+              ) : null}
             </GlobalFilterGroup>
           </div>
 

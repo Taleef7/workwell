@@ -19,6 +19,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   keeps only finished runs and the measures the deployment runs; each row shows its time and run (nightly,
   manual, one patient, rerun to verify, synthetic seed), and reads "Not in population" as the patient page
   does. Its runs come from one read (`RunStore.getRunsByIds`), not one per run.
+- **Programs has no date range (#699).** The range scoped each card's "Open cases" but not the rate or
+  chips beside it ("Overdue 1,643" by "Open cases (364)"). Rates are measurement-year figures, so Programs
+  and the hierarchy ignore the range and the header hides it there. "Open cases" now carries the site, so
+  Cases shows the card's count for a chosen clinic.
+- **The hierarchy shows what its rate is made of (#643).** In population replaces Evaluated, and each row's
+  rate is the Programs card's (`displayRate`); one lower-is-better measure reads Poor control, as its card
+  does (CMS122 showed Compliance 53.9% beside a card reading Poor control 46.1%).
 - Run History checked live after #719: 4.9 s on the first visit a minute after a deploy, 0.2 s after (was 48.8 s).
 
 ## 2026-09-26
