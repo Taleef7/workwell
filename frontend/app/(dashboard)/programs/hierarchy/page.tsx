@@ -214,10 +214,11 @@ export default function HierarchyPage() {
         )}
       </div>
 
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+      <p id="hierarchy-rate-note" className="text-xs text-neutral-500 dark:text-neutral-400">
         {lowerIsBetter
           ? "Poor control is the share of the population with a poorly controlled result. Lower is better."
-          : `Compliance is compliant over the ${SUBJECT.plural} in each measure's population, counted once per measure.`}
+          : `Compliance is compliant over the ${SUBJECT.plural} in each measure's population, counted once per measure.`}{" "}
+        Exclusions are left out of the population, as on the measure cards.
       </p>
 
       {error ? (
@@ -260,7 +261,7 @@ export default function HierarchyPage() {
 
       {!loading && !error && root && root.children.length > 0 ? (
         <div className="overflow-x-auto rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-          <table className="w-full border-collapse text-sm">
+          <table aria-describedby="hierarchy-rate-note" className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                 <th scope="col" className="px-4 py-2 font-semibold">Name</th>

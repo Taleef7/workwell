@@ -59,7 +59,7 @@ describe("DashboardLayout date range (#699)", () => {
     (path) => {
       renderAt(path);
       expect(screen.queryAllByLabelText("Date range")).toHaveLength(0);
-      // The site filter still applies there.
+      // Only the range goes; the site selector is untouched.
       expect(screen.getAllByLabelText("Filter by site")).toHaveLength(2);
     },
   );

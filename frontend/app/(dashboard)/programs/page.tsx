@@ -410,7 +410,9 @@ function chipHref(
 }
 
 /** The card's open-case count is site-scoped, so its link carries the site: without it Cases answered
- *  for every site and reset the site filter ("Open cases (340)" opened 1,643, #699). */
+ *  for every site and reset the site filter ("Open cases (340)" opened 1,643, #699). Cases has no
+ *  System filter, so with a System selected (an engineering view) the destination still spans every
+ *  system. */
 function openCasesHref(measureId: string, siteId: string): string {
   const params = new URLSearchParams();
   params.set("measureId", measureId);

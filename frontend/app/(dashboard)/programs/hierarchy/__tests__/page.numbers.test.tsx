@@ -24,7 +24,8 @@ const totals = (t: { compliant: number; dueSoon?: number; overdue: number; missi
 });
 
 // Two patients who both read "Evaluated 6 · Compliant 1": one is in two measures' populations, the
-// other in four, so their rates are 50% and 25% (#643).
+// other in four, so their rates are 50% and 25% (#643). Patient A's other four rows are one exclusion
+// and three outside the population, none of which is in the population the rate divides by.
 const tree = {
   level: "all",
   id: "all",
@@ -32,7 +33,7 @@ const tree = {
   parentId: null,
   totals: { ...totals({ compliant: 2, overdue: 4, complianceRate: 33.3 }), evaluated: 12 },
   children: [
-    { level: "patient", id: "pat-a", name: "Patient A", parentId: "all", totals: totals({ compliant: 1, overdue: 1, complianceRate: 50 }), children: [] },
+    { level: "patient", id: "pat-a", name: "Patient A", parentId: "all", totals: { ...totals({ compliant: 1, overdue: 1, excluded: 1, complianceRate: 50 }), notInPopulation: 3 }, children: [] },
     { level: "patient", id: "pat-b", name: "Patient B", parentId: "all", totals: totals({ compliant: 1, overdue: 3, complianceRate: 25 }), children: [] },
   ],
 };
