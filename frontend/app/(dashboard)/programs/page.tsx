@@ -74,7 +74,9 @@ export default function ProgramsPage() {
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role) && canSeeEngineering(user?.role);
   const { isActive: runActive, startTracking } = useRunStatus();
-  const { siteId, from, to } = useGlobalFilters();
+  // No date range: a card reports measurement-year figures, and scoping only its open cases to a range
+  // set "Overdue 1,643" beside "Open cases (364)" (#699). The header hides the range on this page.
+  const { siteId } = useGlobalFilters();
   const isPatientTerm = SUBJECT.singular === "patient";
   const { identities, labelFor: measureLabelFor } = useMeasureIdentities();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
@@ -102,8 +104,6 @@ export default function ProgramsPage() {
     const params = new URLSearchParams();
     if (siteId) params.set("site", siteId);
     if (tenant) params.set("tenant", tenant);
-    if (from) params.set("from", from);
-    if (to) params.set("to", to);
     const suffix = params.toString() ? `?${params.toString()}` : "";
 
     // TWO requests: the cheap overview paints the page, then the trends fill in place.
@@ -133,7 +133,7 @@ export default function ProgramsPage() {
       setTrendByMeasure({});
     }
     if (reqId === reqIdRef.current) setDetailsLoading(false);
-  }, [api, siteId, tenant, from, to]);
+  }, [api, siteId, tenant]);
 
   // Tenants/systems for the optional System filter (E13 PR-1). Best-effort; never blocks the overview.
   useEffect(() => {
@@ -336,7 +336,7 @@ export default function ProgramsPage() {
                       key={bucket}
                       label={text}
                       tone={tone}
-                      href={chipHref(program.measureId, bucket, { siteId, tenant, from, to })}
+                      href={chipHref(program.measureId, bucket, { siteId, tenant })}
                       ariaLabel={`${label}: ${text}`}
                     />
                   );
@@ -353,7 +353,7 @@ export default function ProgramsPage() {
               </div>
 
               <div className="relative z-10 mt-4">
-                <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
+                <Link href={openCasesHref(program.measureId, siteId)} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
                   Open cases ({program.openCaseCount})
                 </Link>
               </div>
@@ -390,7 +390,7 @@ function KpiCard({ label, value }: { label: string; value: string }) {
 function chipHref(
   measureId: string,
   bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED",
-  scope: { siteId: string; tenant: string; from: string; to: string },
+  scope: { siteId: string; tenant: string },
 ): string | undefined {
   // The generated scale tenant has counts but NO roster: `buildRoster` excludes scale runs and
   // subjects entirely, so every chip would land on an empty grid under a badge reading thousands.
@@ -402,13 +402,20 @@ function chipHref(
   const params = new URLSearchParams();
   params.set("measureId", measureId);
   params.set("status", bucket);
-  // The roster honours site; it has no date filter, so forwarding from/to would imply a scope it
-  // cannot apply and the destination would not reproduce the clicked count.
   if (scope.siteId) params.set("site", scope.siteId);
   // The card's counts are tenant-scoped when the System selector is set, so the destination has to
   // be too — otherwise the roster answers across every system and contradicts the clicked number.
   if (scope.tenant) params.set("tenant", scope.tenant);
   return `/compliance?${params.toString()}`;
+}
+
+/** The card's open-case count is site-scoped, so its link carries the site: without it Cases answered
+ *  for every site and reset the site filter ("Open cases (340)" opened 1,643, #699). */
+function openCasesHref(measureId: string, siteId: string): string {
+  const params = new URLSearchParams();
+  params.set("measureId", measureId);
+  if (siteId) params.set("site", siteId);
+  return `/cases?${params.toString()}`;
 }
 
 function Badge({ label, tone, href, ariaLabel }: { label: string; tone: "green" | "amber" | "red" | "slate" | "violet" | "neutral"; href?: string; ariaLabel?: string }) {
