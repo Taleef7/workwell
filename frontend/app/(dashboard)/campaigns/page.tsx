@@ -7,6 +7,7 @@ import { AccessDenied } from "@/components/access-denied";
 import { canRunCampaigns } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SUBJECT } from "@/lib/terminology";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 
 // ── Backend contract (issue #75 E5 — outreach at scale) ────────────────────────
 type ProgramSummary = {
@@ -82,6 +83,7 @@ export default function CampaignsPage() {
 
   // Filter sources (shared with /programs).
   const [measures, setMeasures] = useState<ProgramSummary[]>([]);
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [sites, setSites] = useState<string[]>([]);
 
   // Launcher form state.
@@ -296,7 +298,7 @@ export default function CampaignsPage() {
               <option value="">All measures</option>
               {measures.map((m) => (
                 <option key={m.measureId} value={m.measureId}>
-                  {m.measureName}
+                  {measureLabelFor(m.measureId, m.measureName)}
                 </option>
               ))}
             </select>

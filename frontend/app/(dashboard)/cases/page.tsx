@@ -15,6 +15,7 @@ import {
   outcomeStatusClass
 } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
@@ -408,8 +409,8 @@ export default function CasesPage() {
   const allFilteredSelected = filteredCases.length > 0 && filteredCases.every((item) => selectedCaseIds.includes(item.caseId));
 
   const measureOptions = useMemo(
-    () => [{ value: "", label: "All Active Measures" }, ...measures.map((m) => ({ value: m.id, label: m.name }))],
-    [measures]
+    () => [{ value: "", label: "All Active Measures" }, ...measures.map((m) => ({ value: m.id, label: measureLabelFor(m.id, m.name) }))],
+    [measures, measureLabelFor]
   );
   const priorityOptions = useMemo(
     () => [
@@ -938,7 +939,7 @@ export default function CasesPage() {
               <div className="mt-2">
                 <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{measureLabelFor(item.measureId, item.measureName)}</p>
                 <h4 className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
-                  <Link href={`/employees/${item.employeeId}`} className="hover:text-primary-700 hover:underline dark:hover:text-primary-400">
+                  <Link href={subjectPath(item.employeeId)} className="hover:text-primary-700 hover:underline dark:hover:text-primary-400">
                     {item.employeeName}
                   </Link>
                 </h4>

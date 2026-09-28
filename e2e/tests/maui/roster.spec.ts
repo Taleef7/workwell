@@ -108,7 +108,7 @@ test.describe("Maui compliance roster", () => {
     // into the spec ("Ari Wren"), which is a patient of the 48-person CI corpus and nobody at all on
     // the pilot's 20,000 — so the search returned an empty list and the floor assertion below reported
     // a working filter as broken.
-    const someone = (await page.locator("a[href^='/employees/']").first().innerText()).trim();
+    const someone = (await page.locator("a[href^='/patients/']").first().innerText()).trim();
     expect(someone.length, "the roster renders a patient to search for").toBeGreaterThan(0);
 
     // The server's answer for this exact search, so the page is checked against a number rather than
@@ -122,10 +122,10 @@ test.describe("Maui compliance roster", () => {
     await expect.poll(() => statedRosterTotal(page), { timeout: 20_000 }).toBe(matches);
 
     await searchInput.fill("");
-    const patientLink = page.locator("a[href^='/employees/']").filter({ visible: true }).first();
+    const patientLink = page.locator("a[href^='/patients/']").filter({ visible: true }).first();
     await expect(patientLink).toBeVisible({ timeout: 20_000 });
     await patientLink.click();
-    await expect(page).toHaveURL(/\/employees\//);
+    await expect(page).toHaveURL(/\/patients\//);
     await expectNoErrorPage(page);
 
     // WAIT for the measure content rather than reading the body the instant the route resolves. The

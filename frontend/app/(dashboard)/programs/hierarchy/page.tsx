@@ -6,12 +6,14 @@ import { useApi } from "@/lib/api/hooks";
 import { fmtCount } from "@/lib/format";
 import { displayRate, formatRate, type NotationSource } from "@/lib/measure-rate";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
 import { useAuth } from "@/components/auth-provider";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { AccessDenied } from "@/components/access-denied";
 import type { TenantOption } from "@/features/compliance/types";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 
 // The rollup root is the cross-system "All Systems" aggregate (E13 PR-1); open it by default.
 const ALL_SYSTEMS_ROOT_KEY = "all:all";
@@ -66,6 +68,7 @@ export default function HierarchyPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [measures, setMeasures] = useState<ProgramSummary[]>([]);
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [measureId, setMeasureId] = useState("");
   const [tenant, setTenant] = useState("");
   const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
@@ -187,7 +190,7 @@ export default function HierarchyPage() {
           <option value="">All measures</option>
           {measures.map((m) => (
             <option key={m.measureId} value={m.measureId}>
-              {m.measureName}
+              {measureLabelFor(m.measureId, m.measureName)}
             </option>
           ))}
         </select>
@@ -299,7 +302,7 @@ export default function HierarchyPage() {
                         )}
                         {node.level === "patient" ? (
                           <Link
-                            href={`/employees/${node.id}`}
+                            href={subjectPath(node.id)}
                             className="font-medium text-primary-700 hover:underline dark:text-primary-400"
                           >
                             {node.name}

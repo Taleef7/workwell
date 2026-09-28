@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth-provider";
 import { AccessDenied } from "@/components/access-denied";
 import { canViewOrders } from "@/lib/rbac";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { OUTCOME_LABELS, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 
@@ -159,9 +160,9 @@ export default function OrdersPage() {
       // A row without a status (older fixtures) is kept rather than silently dropped.
       ...measures
         .filter((m) => m.status == null || m.status === "Active")
-        .map((m) => ({ value: m.id, label: m.name })),
+        .map((m) => ({ value: m.id, label: measureLabelFor(m.id, m.name) })),
     ],
-    [measures],
+    [measures, measureLabelFor],
   );
 
   function measureLabel(id: string): string {
@@ -277,7 +278,7 @@ export default function OrdersPage() {
                       >
                         <td className="px-3 py-2">
                           <Link
-                            href={`/employees/${o.subjectId}`}
+                            href={subjectPath(o.subjectId)}
                             className="font-medium text-primary-700 hover:underline dark:text-primary-400"
                           >
                             {o.subjectId}

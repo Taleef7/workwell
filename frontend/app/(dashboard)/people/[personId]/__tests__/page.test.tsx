@@ -69,6 +69,6 @@ describe("Person history (#655)", () => {
     const at = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
     expect(rows[0]).toContain(at("2026-09-24T15:30:00.000Z"));
     expect(rows[1]).toContain(at("2026-09-24T12:05:00.000Z"));
-    expect(screen.getByRole("link", { name: "Open patient page" })).toHaveAttribute("href", "/employees/pat-04403");
+    expect(screen.getByRole("link", { name: "Open patient page" })).toHaveAttribute("href", "/patients/pat-04403");
   });
 });

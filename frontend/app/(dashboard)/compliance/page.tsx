@@ -13,6 +13,7 @@ import { emitToast } from "@/lib/toast";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { subjectPath } from "@/lib/subject-path";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { payerFilterLabel, payerGroupButtonLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
 import { Button } from "@mieweb/ui";
@@ -757,7 +758,7 @@ export default function CompliancePage() {
             <span>
               Scoped to{" "}
               <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-                {measureLabelFor(measureId, measureId)}
+                {measureLabelForId(measureId)}
               </span>
             </span>
             <span>—</span>
@@ -884,7 +885,7 @@ export default function CompliancePage() {
                       </td>
                     ) : null}
                     <th scope="row" className="sticky left-0 z-10 bg-white px-3 py-2 text-left font-normal dark:bg-neutral-950">
-                      <Link href={`/employees/${encodeURIComponent(r.subject.externalId)}`} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
+                      <Link href={subjectPath(r.subject.externalId)} className="font-medium text-blue-600 hover:underline dark:text-blue-400">
                         {r.subject.name}
                       </Link>
                       <div className="text-[11px] text-neutral-500 dark:text-neutral-400">

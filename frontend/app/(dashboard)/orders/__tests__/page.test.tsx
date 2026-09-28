@@ -146,7 +146,7 @@ describe("OrdersPage paging + measure labels", () => {
     await waitFor(() => expect(proposalsQuery(proposalCalls().at(-1)!).get("offset")).toBe("100"));
 
     await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
-    await userEvent.click(screen.getByRole("option", { name: "Breast Cancer Screening" }));
+    await userEvent.click(screen.getByRole("option", { name: "MIPS 112 · CMS125 · Breast Cancer Screening" }));
     await waitFor(() => {
       const latest = proposalsQuery(proposalCalls().at(-1)!);
       expect(latest.get("measureId")).toBe("cms125");
@@ -223,7 +223,7 @@ describe("OrdersPage paging + measure labels", () => {
     rows = [];
     render(<OrdersPage />);
     await userEvent.click(await screen.findByRole("combobox", { name: /measure/i }));
-    await userEvent.click(screen.getByRole("option", { name: "Colorectal Cancer Screening" }));
+    await userEvent.click(screen.getByRole("option", { name: "MIPS 113 · CMS130 · Colorectal Cancer Screening" }));
     await waitFor(() => expect(proposalsQuery(proposalCalls().at(-1)!).get("measureId")).toBe("cms130"));
     await waitFor(() => {
       expect(screen.getByText("No order is defined for this measure, so none is proposed.")).toBeInTheDocument();
@@ -241,7 +241,7 @@ describe("OrdersPage paging + measure labels", () => {
     await userEvent.click(screen.getByRole("option", { name: "All measures" }));
     await waitFor(() => expect(screen.getByTestId("measures-without-order")).toBeInTheDocument());
     await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
-    await userEvent.click(screen.getByRole("option", { name: "Breast Cancer Screening" }));
+    await userEvent.click(screen.getByRole("option", { name: "MIPS 112 · CMS125 · Breast Cancer Screening" }));
     await waitFor(() => expect(proposalsQuery(proposalCalls().at(-1)!).get("measureId")).toBe("cms125"));
     expect(screen.queryByTestId("measures-without-order")).not.toBeInTheDocument();
     await act(async () => release());

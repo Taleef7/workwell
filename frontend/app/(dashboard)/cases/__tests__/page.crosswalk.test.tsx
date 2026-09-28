@@ -1,6 +1,7 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import CasesPage from "../page";
@@ -210,5 +211,22 @@ describe("CasesPage crosswalk identity rendering", () => {
     render(<CasesPage />);
     await screen.findByRole("heading", { name: "Alice Walker" });
     expect(screen.getByRole("heading", { name: "Cases" }).parentElement).toHaveTextContent(copy);
+  });
+
+  it("offers each measure in the Measure filter by the label the cards use (#648)", async () => {
+    render(<CasesPage />);
+    await screen.findByRole("heading", { name: "Alice Walker" });
+    await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
+    expect(await screen.findByRole("option", { name: "MIPS 112 · CMS125 · Breast Cancer Screening" })).toBeInTheDocument();
+    // A measure with no published identity keeps its plain name.
+    expect(screen.getByRole("option", { name: "Annual Audiogram Completed" })).toBeInTheDocument();
+  });
+
+  it("links a patient to /patients/<id> on a patient deployment (#648)", async () => {
+    setSubject("patient");
+    render(<CasesPage />);
+    const heading = await screen.findByRole("heading", { name: "Alice Walker" });
+    // The card's name opens the patient's page (the table's opens the case).
+    expect(within(heading).getByRole("link", { name: "Alice Walker" })).toHaveAttribute("href", "/patients/emp-101");
   });
 });

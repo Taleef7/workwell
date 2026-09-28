@@ -26,6 +26,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **The hierarchy shows what its rate is made of (#643).** In population replaces Evaluated, and each row's
   rate is the Programs card's (`displayRate`); one lower-is-better measure reads Poor control, as its card
   does (CMS122 showed Compliance 53.9% beside a card reading Poor control 46.1%).
+- **One name per measure (#648).** Every measure picker (Cases, Orders, Campaigns, the hierarchy, groups,
+  Admin waivers) and the roster's "Scoped to" line use the card's label, `MIPS 113 · CMS130 · Colorectal
+  Cancer Screening` (the roster printed the id twice). Work list gap chips carry the short form
+  `MIPS 113 · CMS130`, the full label as tooltip and accessible name. Patient links are `/patients/<id>` on
+  a patient deployment; `/employees/<id>` still opens.
 - Run History checked live after #719: 4.9 s on the first visit a minute after a deploy, 0.2 s after (was 48.8 s).
 
 ## 2026-09-26

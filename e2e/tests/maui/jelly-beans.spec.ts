@@ -128,7 +128,7 @@ test.describe("Maui status chips (jelly beans)", () => {
       // would pass. Every one of these buckets is a real patient with a real row.
       if (chip.count > 0) {
         await expect(
-          page.locator("a[href^='/employees/']").filter({ visible: true }).first(),
+          page.locator("a[href^='/patients/']").filter({ visible: true }).first(),
           `a non-empty ${chip.bucket} chip must list patients`,
         ).toBeVisible({ timeout: 30_000 });
       }

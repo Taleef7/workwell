@@ -40,10 +40,10 @@ test.describe("Maui terminology — the quality lead's pages", () => {
     await expectNoErrorPage(page);
 
     await page.goto("/compliance");
-    const patientLink = page.locator("a[href^='/employees/']").filter({ visible: true }).first();
+    const patientLink = page.locator("a[href^='/patients/']").filter({ visible: true }).first();
     await expect(patientLink).toBeVisible({ timeout: 20_000 });
     await patientLink.click();
-    await expect(page).toHaveURL(/\/employees\//);
+    await expect(page).toHaveURL(/\/patients\//);
     await expectNoEmployeeWording(page);
     await expectNoErrorPage(page);
   });
@@ -58,10 +58,10 @@ test.describe("Maui terminology — the quality lead's pages", () => {
       if (/\/simulate\b/.test(req.url())) simulateCalls.push(req.url());
     });
     await page.goto("/compliance");
-    const patientLink = page.locator("a[href^='/employees/']").filter({ visible: true }).first();
+    const patientLink = page.locator("a[href^='/patients/']").filter({ visible: true }).first();
     await expect(patientLink).toBeVisible({ timeout: 20_000 });
     await patientLink.click();
-    await expect(page).toHaveURL(/\/employees\//);
+    await expect(page).toHaveURL(/\/patients\//);
 
     const posture = page.getByText("Compliance Posture", { exact: true }).locator("..");
     await expect(posture.getByRole("link").first()).toBeVisible({ timeout: 20_000 });
