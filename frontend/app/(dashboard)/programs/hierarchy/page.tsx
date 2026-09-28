@@ -61,7 +61,8 @@ export default function HierarchyPage() {
   const { user } = useAuth();
   const api = useApi();
   // An engineering view, as Runs and Measures are: in pilot mode a case manager who types the URL gets
-  // the same access-denied page, and none of the rollup is fetched (the Programs link is hidden too).
+  // the same access-denied page, and none of the rollup is fetched (the Programs link is hidden too); only
+  // the measure catalog every page reads for its labels is.
   const mayView = canSeeEngineering(user?.role);
 
   const [root, setRoot] = useState<HierarchyNode | null>(null);

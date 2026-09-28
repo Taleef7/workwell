@@ -253,7 +253,7 @@ export default function CampaignsPage() {
 
   function measureLabel(id: string | null): string {
     if (!id) return "All measures";
-    return measureNameById.get(id) ?? id;
+    return measureLabelFor(id, measureNameById.get(id) ?? id);
   }
 
   // Deep-link guard: the sidebar already hides Campaigns from non-CM roles, but a pasted URL would

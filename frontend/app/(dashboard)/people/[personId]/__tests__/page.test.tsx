@@ -71,4 +71,26 @@ describe("Person history (#655)", () => {
     expect(rows[1]).toContain(at("2026-09-24T12:05:00.000Z"));
     expect(screen.getByRole("link", { name: "Open patient page" })).toHaveAttribute("href", "/patients/pat-04403");
   });
+
+  it("names each row's measure by the label the cards use (#648)", async () => {
+    setSubject("patient");
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([{ id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112" } }]);
+      }
+      return Promise.resolve({
+        person: {
+          personId: "person-40c16184",
+          displayName: "Adriana Aoki",
+          nationalId: null,
+          dateOfBirth: "1996-09-24",
+          crossSystem: false,
+          sources: [{ tenantId: "maui", tenantName: "Maui Pilot Clinic", externalId: "pat-04403", name: "Adriana Aoki", role: "", site: "Kahului", status: "ACTIVE" }],
+        },
+        timeline: { entries: [entry("2026-09-24T12:05:00.000Z", "SCHEDULED")], move: null },
+      });
+    });
+    render(<PersonDetailPage />);
+    expect(await screen.findByText("MIPS 112 · CMS125 · Breast Cancer Screening", { selector: "td" })).toBeInTheDocument();
+  });
 });

@@ -11,6 +11,7 @@ import { emitToast } from "@/lib/toast";
 import { SkeletonCard } from "@/components/skeleton-loader";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
+import { useMeasureIdentities } from "@/lib/measure-identity";
 import { COMPLIANCE_STATUS_LABELS, complianceStatusClass, labelFor } from "@/lib/status";
 
 /**
@@ -113,6 +114,7 @@ export default function PersonDetailPage() {
   const api = useApi();
   const router = useRouter();
   const { user } = useAuth();
+  const { labelFor: measureLabelFor } = useMeasureIdentities();
   const mayReconcile = canReconcileIdentity(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
   const [detail, setDetail] = useState<PersonDetail | null>(null);
@@ -353,7 +355,7 @@ export default function PersonDetailPage() {
                     {detail.timeline.entries.map((e, i) => (
                       <tr key={`${e.externalId}-${e.measureId}-${e.evaluatedAt}-${i}`} className="border-b border-neutral-100 dark:border-neutral-800/60">
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{fmt(e.evaluatedAt)}</td>
-                        <td className="px-3 py-2">{e.measureName ?? e.measureId}</td>
+                        <td className="px-3 py-2">{measureLabelFor(e.measureId, e.measureName ?? e.measureId)}</td>
                         <td className="px-3 py-2"><OutcomeChip status={e.displayStatus ?? e.status} /></td>
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">
                           {e.runKind ? runKindLabel(e.runKind) : "—"}
