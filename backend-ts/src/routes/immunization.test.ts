@@ -6,12 +6,13 @@ const env = {} as never;
 const get = (qs: string) =>
   handleImmunizationForecast(new Request(`http://x/api/immunization/forecast${qs}`, { method: "GET" }), env);
 
-test("returns a forecast for a subject", async () => {
+test("returns an empty forecast that says there is no history (#628)", async () => {
   const res = await get("?subjectId=emp-006");
   assert.equal(res!.status, 200);
-  const body = await res!.json() as { subjectId: string; series: unknown[] };
+  const body = await res!.json() as { subjectId: string; historyAvailable: boolean; series: unknown[] };
   assert.equal(body.subjectId, "emp-006");
-  assert.equal(body.series.length, 3);
+  assert.equal(body.historyAvailable, false);
+  assert.deepEqual(body.series, []);
 });
 
 test("400 on missing subjectId", async () => {

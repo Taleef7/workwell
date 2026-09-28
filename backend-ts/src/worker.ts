@@ -98,7 +98,7 @@ export interface Env {
   OPENAI_API_KEY?: string;
   WORKWELL_AI_OPENAI_MODEL?: string;
   WORKWELL_AI_OPENAI_FALLBACK_MODEL?: string;
-  /** Immunization forecasting (#76 E6) — ICE API config. Inert stub unless both are set. */
+  /** Immunization forecasting (#76 E6) — the ICE sidecar, selected by BASE_URL alone (the key is optional). */
   WORKWELL_IMMZ_ICE_API_KEY?: string;
   WORKWELL_IMMZ_ICE_BASE_URL?: string;
   /** Order generation EH FHIR seam (#77 E7) — standing-order dedupe. Inert stub unless both are set. */
@@ -423,7 +423,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const outcomesResponse = await handleOutcomes(req, env);
   if (outcomesResponse) return outcomesResponse;
 
-  // Immunization forecast — advisory ICE-ready forecasting over the synthetic history (#76 E6).
+  // Immunization forecast — advisory ICE-ready forecasting (#76 E6); empty until a history source exists (#628).
   const immunizationResponse = await handleImmunizationForecast(req, env);
   if (immunizationResponse) return immunizationResponse;
 

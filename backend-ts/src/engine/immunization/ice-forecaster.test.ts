@@ -3,16 +3,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  noIceHistory,
   realIceForecaster,
-  syntheticIceHistory,
-  ICE_DOSE_CVX,
   ICE_SERIES_CVX,
   ICE_VACCINE_GROUP,
   type IceDoseHistory,
 } from "./ice-forecaster.ts";
 import { cvxCodesForMeasure } from "../ingress/webchart/terminology.ts";
 import { parseCdsOutputProposals } from "./ice-vmr.ts";
-import { simulatedForecaster, type ImmunizationForecast } from "./immunization-forecast.ts";
+import { noHistoryForecaster } from "./immunization-forecast.ts";
 import { resolveForecaster } from "./resolve-forecaster.ts";
 
 const GOLDEN = JSON.parse(
@@ -60,10 +59,30 @@ function goldenFetch(calls: Call[]): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
+/**
+ * A fixed dose history for the adapter tests: test data, never served. (It is the history the golden
+ * response was captured against; the app has no history source yet, #628.)
+ */
+const FIXTURE: IceDoseHistory = {
+  patientId: "emp-006",
+  dob: "1971-06-16",
+  gender: "M",
+  doses: [
+    { cvx: "115", date: "2021-06-25" }, // Tdap
+    { cvx: "141", date: "2021-09-30" }, // influenza, seasonal, injectable
+    { cvx: "43", date: "2021-11-06" }, // HepB, adult (the traditional 3-dose formulation)
+    { cvx: "43", date: "2022-01-05" },
+  ],
+};
+const fixtureHistory = () => FIXTURE;
+
+/** What any failure answers: no series, but there was a history (so not "no history"). */
+const failed = (subjectId: string, asOf: string) => ({ subjectId, asOf, historyAvailable: true, series: [] });
+
 // The golden response's DTP (Tdap) proposal is RECOMMENDED due 2026-03-15, influenza RECOMMENDED
 // due 2026-07-01, HepB NOT_RECOMMENDED (COMPLETE).
 const forecasterOn = (fetchImpl: typeof fetch) =>
-  realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl });
+  realIceForecaster(CFG, { historySource: fixtureHistory, fetchImpl });
 
 test("maps the live ICE proposals onto the three port series", async () => {
   const calls: Call[] = [];
@@ -71,6 +90,7 @@ test("maps the live ICE proposals onto the three port series", async () => {
 
   assert.equal(f.subjectId, "emp-006");
   assert.equal(f.asOf, "2026-07-13");
+  assert.equal(f.historyAvailable, true);
   assert.deepEqual(
     f.series.map((s) => s.series),
     ["TDAP", "INFLUENZA", "HEPB"],
@@ -119,10 +139,9 @@ test("the posted CDSInput carries the subject's dose history as CVX-coded events
   const calls: Call[] = [];
   await forecasterOn(goldenFetch(calls)).forecast("emp-006", "2026-07-13");
   const xml = postedCdsInput(calls, 0);
-  const history = syntheticIceHistory("emp-006");
-  assert.equal((xml.match(/<substanceAdministrationEvent>/g) ?? []).length, history.doses.length);
-  assert.match(xml, new RegExp(`substanceCode code="${ICE_DOSE_CVX.TDAP}"`));
-  assert.match(xml, new RegExp(`<birthTime value="${history.dob}"/>`));
+  assert.equal((xml.match(/<substanceAdministrationEvent>/g) ?? []).length, FIXTURE.doses.length);
+  assert.match(xml, /substanceCode code="115"/);
+  assert.match(xml, new RegExp(`<birthTime value="${FIXTURE.dob}"/>`));
 });
 
 test("no API key ⇒ no Authorization header; an API key ⇒ bearer", async () => {
@@ -132,44 +151,43 @@ test("no API key ⇒ no Authorization header; an API key ⇒ bearer", async () =
 
   const keyed = realIceForecaster(
     { ...CFG, apiKey: "sekret" },
-    { fallback: simulatedForecaster, fetchImpl: goldenFetch(calls) },
+    { historySource: fixtureHistory, fetchImpl: goldenFetch(calls) },
   );
   await keyed.forecast("emp-006", "2026-07-13");
   assert.equal(callAt(calls, 1).headers.authorization, "Bearer sekret");
 });
 
-test("transport error falls back to the simulated forecaster (advisory surface never errors)", async () => {
+test("a transport error answers an empty forecast, never an invented one (the panel never errors)", async () => {
   const boom = (async () => {
     throw new Error("ECONNREFUSED");
   }) as unknown as typeof fetch;
-  const f = await realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl: boom }).forecast(
+  const f = await realIceForecaster(CFG, { historySource: fixtureHistory, fetchImpl: boom }).forecast(
     "emp-006",
     "2026-07-13",
   );
-  const expected: ImmunizationForecast = await simulatedForecaster.forecast("emp-006", "2026-07-13");
-  assert.deepEqual(f, expected);
+  assert.deepEqual(f, failed("emp-006", "2026-07-13"));
 });
 
-test("non-2xx falls back", async () => {
+test("non-2xx answers empty", async () => {
   const five = (async () => new Response("boom", { status: 503 })) as unknown as typeof fetch;
-  const f = await realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl: five }).forecast(
+  const f = await realIceForecaster(CFG, { historySource: fixtureHistory, fetchImpl: five }).forecast(
     "emp-006",
     "2026-07-13",
   );
-  assert.deepEqual(f, await simulatedForecaster.forecast("emp-006", "2026-07-13"));
+  assert.deepEqual(f, failed("emp-006", "2026-07-13"));
 });
 
-test("an unparseable body falls back", async () => {
+test("an unparseable body answers empty", async () => {
   const junk = (async () =>
     new Response(JSON.stringify({ nope: true }), { status: 200 })) as unknown as typeof fetch;
-  const f = await realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl: junk }).forecast(
+  const f = await realIceForecaster(CFG, { historySource: fixtureHistory, fetchImpl: junk }).forecast(
     "emp-006",
     "2026-07-13",
   );
-  assert.deepEqual(f, await simulatedForecaster.forecast("emp-006", "2026-07-13"));
+  assert.deepEqual(f, failed("emp-006", "2026-07-13"));
 });
 
-test("a response missing one of our three vaccine groups falls back (never a half-empty forecast)", async () => {
+test("a response missing one of our three vaccine groups answers empty (never a half-empty forecast)", async () => {
   const goldenXmlStripped = JSON.parse(JSON.stringify(GOLDEN)) as Record<string, unknown>;
   // Rebuild the payload with the influenza (800) proposal removed.
   const walk = (o: unknown): string[] | undefined => {
@@ -206,24 +224,24 @@ test("a response missing one of our three vaccine groups falls back (never a hal
 
   const partial = (async () =>
     new Response(JSON.stringify(goldenXmlStripped), { status: 200 })) as unknown as typeof fetch;
-  const f = await realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl: partial }).forecast(
+  const f = await realIceForecaster(CFG, { historySource: fixtureHistory, fetchImpl: partial }).forecast(
     "emp-006",
     "2026-07-13",
   );
-  assert.deepEqual(f, await simulatedForecaster.forecast("emp-006", "2026-07-13"));
+  assert.deepEqual(f, failed("emp-006", "2026-07-13"));
 });
 
-test("a hanging sidecar times out and falls back", async () => {
+test("a hanging sidecar times out and answers empty", async () => {
   const hang = ((_url: string, init?: RequestInit) =>
     new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
     })) as unknown as typeof fetch;
   const f = await realIceForecaster(CFG, {
-    fallback: simulatedForecaster,
+    historySource: fixtureHistory,
     fetchImpl: hang,
     timeoutMs: 20,
   }).forecast("emp-006", "2026-07-13");
-  assert.deepEqual(f, await simulatedForecaster.forecast("emp-006", "2026-07-13"));
+  assert.deepEqual(f, failed("emp-006", "2026-07-13"));
 });
 
 test("the history source is injectable (the WebChart drop-in seam)", async () => {
@@ -235,7 +253,6 @@ test("the history source is injectable (the WebChart drop-in seam)", async () =>
     doses: [{ cvx: "115", date: "2010-05-05" }],
   };
   const f = realIceForecaster(CFG, {
-    fallback: simulatedForecaster,
     fetchImpl: goldenFetch(calls),
     historySource: () => custom,
   });
@@ -243,21 +260,22 @@ test("the history source is injectable (the WebChart drop-in seam)", async () =>
   const xml = postedCdsInput(calls, 0);
   assert.match(xml, /<birthTime value="1975-04-02"\/>/);
   assert.match(xml, /extension="wc-42"/);
-  // dose counts on the result come from the injected history, not the synthetic one
+  // dose counts on the result come from the injected history
   assert.equal(out.series.find((s) => s.series === "TDAP")?.dosesReceived, 1);
   assert.equal(out.series.find((s) => s.series === "TDAP")?.lastDoseDate, "2010-05-05");
 });
 
-test("syntheticIceHistory expands multi-dose series and is deterministic", () => {
-  const a = syntheticIceHistory("emp-006");
-  const b = syntheticIceHistory("emp-006");
-  assert.deepEqual(a, b);
-  assert.match(a.dob, /^\d{4}-\d{2}-\d{2}$/);
-  // emp-006 has 2 HepB doses in the shared synthetic history ⇒ 2 HepB events
-  assert.equal(a.doses.filter((d) => d.cvx === ICE_DOSE_CVX.HEPB).length, 2);
-  // events are chronologically ordered
-  const dates = a.doses.map((d) => d.date);
-  assert.deepEqual(dates, [...dates].sort());
+// #628: with nothing on file for the subject, ICE is not asked to schedule them as though that were
+// their record, and the forecast says there is no history (the case page shows that, not a forecast).
+test("a history source with nothing for the subject answers 'no history' without dialing", async () => {
+  const calls: Call[] = [];
+  const f = await realIceForecaster(CFG, { historySource: noIceHistory, fetchImpl: goldenFetch(calls) }).forecast(
+    "emp-006",
+    "2026-07-13",
+  );
+  assert.deepEqual(f, { subjectId: "emp-006", asOf: "2026-07-13", historyAvailable: false, series: [] });
+  assert.equal(calls.length, 0);
+  assert.deepEqual(f, await noHistoryForecaster.forecast("emp-006", "2026-07-13"));
 });
 
 test("group codes are the ICE vaccine groups the live engine emits", () => {
@@ -265,7 +283,7 @@ test("group codes are the ICE vaccine groups the live engine emits", () => {
 });
 
 // An unhealthy sidecar (hung / restarting / OOM-thrashing) must not charge EVERY case-detail read the
-// full timeout. After one failure the breaker serves the fallback without dialing, until its TTL.
+// full timeout. After one failure the breaker answers empty without dialing, until its TTL.
 test("the circuit breaker stops dialing an unhealthy ICE for the TTL, then retries", async () => {
   let attempts = 0;
   const failing = (async () => {
@@ -275,7 +293,7 @@ test("the circuit breaker stops dialing an unhealthy ICE for the TTL, then retri
 
   let clock = 1_000_000;
   const f = realIceForecaster(CFG, {
-    fallback: simulatedForecaster,
+    historySource: fixtureHistory,
     fetchImpl: failing,
     breakerTtlMs: 60_000,
     now: () => clock,
@@ -285,8 +303,9 @@ test("the circuit breaker stops dialing an unhealthy ICE for the TTL, then retri
   assert.equal(attempts, 1, "the first call dials ICE");
 
   await f.forecast("emp-007", "2026-07-13");
-  await f.forecast("emp-008", "2026-07-13");
+  const whileOpen = await f.forecast("emp-008", "2026-07-13");
   assert.equal(attempts, 1, "while the breaker is open, subsequent calls do NOT dial ICE");
+  assert.deepEqual(whileOpen, failed("emp-008", "2026-07-13"), "an open breaker answers empty");
 
   clock += 60_001; // TTL elapsed
   await f.forecast("emp-009", "2026-07-13");
@@ -303,7 +322,7 @@ test("a healthy call after a failure closes the breaker again", async () => {
 
   let clock = 5_000_000;
   const f = realIceForecaster(CFG, {
-    fallback: simulatedForecaster,
+    historySource: fixtureHistory,
     fetchImpl: flaky,
     breakerTtlMs: 1_000,
     now: () => clock,
@@ -315,7 +334,7 @@ test("a healthy call after a failure closes the breaker again", async () => {
   const recovered = await f.forecast("emp-006", "2026-07-13"); // retries, succeeds
   assert.ok(
     recovered.series.every((s) => String(s.reason).startsWith("ICE ")),
-    "the recovered forecast must come from ICE, not the fallback",
+    "the recovered forecast must come from ICE",
   );
   // Breaker is closed: the next call dials immediately, without waiting out any TTL.
   const again = await f.forecast("emp-006", "2026-07-13");
@@ -347,7 +366,7 @@ test("duplicate proposals for one group: the first in document order wins", asyn
     return new Response(JSON.stringify(envelope), { status: 200 });
   }) as unknown as typeof fetch;
 
-  const f = await realIceForecaster(CFG, { fallback: simulatedForecaster, fetchImpl: dup }).forecast(
+  const f = await realIceForecaster(CFG, { historySource: fixtureHistory, fetchImpl: dup }).forecast(
     "emp-006",
     "2026-07-13",
   );
@@ -355,15 +374,13 @@ test("duplicate proposals for one group: the first in document order wins", asyn
   assert.match(String(flu?.reason), /^ICE RECOMMENDED \(FIRST\)$/, "the FIRST influenza proposal wins");
 });
 
-// The doses ICE scores are CVX 43 (traditional adult HepB, a 3-dose ACIP series). Reporting
-// dosesRequired: 2 (the Heplisav model the simulated forecaster uses) would render the
-// self-contradictory card "2 of 2 doses — OVERDUE".
+// The fixture's HepB doses are CVX 43 (traditional adult HepB, a 3-dose ACIP series). Reporting
+// dosesRequired: 2 (the Heplisav model) would render the self-contradictory card "2 of 2 doses — OVERDUE".
 test("HepB dosesRequired on the ICE path matches the CVX actually reported (3, not the Heplisav 2)", async () => {
   const f = await forecasterOn(goldenFetch([])).forecast("emp-006", "2026-07-13");
   const hepb = f.series.find((s) => s.series === "HEPB");
-  assert.equal(ICE_DOSE_CVX.HEPB, "43", "we report HepB doses as the traditional adult formulation");
-  assert.equal(hepb?.dosesRequired, 3, "so ICE's series length is 3");
-  assert.equal(hepb?.dosesReceived, 2, "emp-006 has 2 HepB doses in the shared synthetic history");
+  assert.equal(hepb?.dosesRequired, 3, "CVX 43 is the traditional 3-dose series");
+  assert.equal(hepb?.dosesReceived, 2, "the fixture has 2 HepB doses");
 });
 
 // ICE scores whatever codes it is given. A history source supplying REAL-WORLD codes (Td 09/113/196,
@@ -385,7 +402,6 @@ test("doses are counted across the WHOLE CVX set for a series, not just the repr
     ],
   };
   const f = realIceForecaster(CFG, {
-    fallback: simulatedForecaster,
     fetchImpl: goldenFetch([]),
     historySource: () => realWorld,
   });
@@ -425,7 +441,6 @@ test("dosesReceived is progress toward the requirement, not a lifetime tally (ne
     ],
   };
   const out = await realIceForecaster(CFG, {
-    fallback: simulatedForecaster,
     fetchImpl: goldenFetch([]),
     historySource: () => many,
   }).forecast("wc-many", "2026-07-13");
@@ -451,7 +466,6 @@ test("a pure Heplisav-B history is reported as the 2-dose series it is", async (
     ],
   };
   const out = await realIceForecaster(CFG, {
-    fallback: simulatedForecaster,
     fetchImpl: goldenFetch([]),
     historySource: () => heplisav,
   }).forecast("wc-heplisav", "2026-07-13");
@@ -469,16 +483,14 @@ test("the ICE series CVX sets are sourced from the WebChart crosswalk", () => {
     [...ICE_SERIES_CVX.HEPB].sort(),
     [...cvxCodesForMeasure("hepatitis_b_vaccination_series")].sort(),
   );
-  // And the code the synthetic generator emits must itself be a member of its series' set.
-  for (const s of ["TDAP", "INFLUENZA", "HEPB"] as const) {
-    assert.ok(ICE_SERIES_CVX[s].has(ICE_DOSE_CVX[s]), `${s}: the emitted code must be in the recognized set`);
-  }
+  // And the fixture's codes must be members of their series' sets.
+  assert.ok(ICE_SERIES_CVX.TDAP.has("115") && ICE_SERIES_CVX.INFLUENZA.has("141") && ICE_SERIES_CVX.HEPB.has("43"));
 });
 
-test("resolveForecaster: simulated by default, real ICE when BASE_URL is set (key optional)", async () => {
-  assert.equal(resolveForecaster({}), simulatedForecaster);
-  assert.equal(resolveForecaster({ WORKWELL_IMMZ_ICE_API_KEY: "k" }), simulatedForecaster, "key alone does not select");
-  assert.equal(resolveForecaster({ WORKWELL_IMMZ_ICE_BASE_URL: "   " }), simulatedForecaster, "blank is not set");
+test("resolveForecaster: no-history by default, real ICE when BASE_URL is set (key optional)", async () => {
+  assert.equal(resolveForecaster({}), noHistoryForecaster);
+  assert.equal(resolveForecaster({ WORKWELL_IMMZ_ICE_API_KEY: "k" }), noHistoryForecaster, "key alone does not select");
+  assert.equal(resolveForecaster({ WORKWELL_IMMZ_ICE_BASE_URL: "   " }), noHistoryForecaster, "blank is not set");
   const real = resolveForecaster({ WORKWELL_IMMZ_ICE_BASE_URL: "http://ice:8080/x" });
-  assert.notEqual(real, simulatedForecaster);
+  assert.notEqual(real, noHistoryForecaster);
 });

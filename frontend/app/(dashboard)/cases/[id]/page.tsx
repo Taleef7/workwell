@@ -91,6 +91,8 @@ type CaseDetail = {
   immunizationForecast?: {
     subjectId: string;
     asOf: string;
+    /** False: no dose history to forecast from, so `series` is empty (#628). Absent on an older backend. */
+    historyAvailable?: boolean;
     series: Array<{
       series: "TDAP" | "INFLUENZA" | "HEPB";
       status: "UP_TO_DATE" | "DUE" | "OVERDUE" | "CONTRAINDICATED" | "REFUSED";
@@ -679,6 +681,11 @@ export default function CaseDetailPage() {
             <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
               <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Immunization Forecast</summary>
               <p className="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400">Advisory — as of {caseDetail.immunizationForecast.asOf}</p>
+              {forecastEmptyMessage(caseDetail.immunizationForecast) ? (
+                <p data-testid="forecast-empty-mobile" className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
+                  {forecastEmptyMessage(caseDetail.immunizationForecast)}
+                </p>
+              ) : null}
               <div className="mt-2 space-y-2">
                 {caseDetail.immunizationForecast.series.map((s) => (
                   <div key={s.series} className="flex items-center justify-between gap-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-2">
@@ -1153,6 +1160,11 @@ export default function CaseDetailPage() {
                 <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                   Advisory only — not a compliance decision. As of {caseDetail.immunizationForecast.asOf}.
                 </p>
+                {forecastEmptyMessage(caseDetail.immunizationForecast) ? (
+                  <p data-testid="forecast-empty-desktop" className="mt-4 text-sm text-neutral-600 dark:text-neutral-400">
+                    {forecastEmptyMessage(caseDetail.immunizationForecast)}
+                  </p>
+                ) : null}
                 <div className="mt-4 space-y-2">
                   {caseDetail.immunizationForecast.series.map((s) => (
                     <div key={s.series} className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-3">
@@ -1412,6 +1424,17 @@ const VACCINE_SERIES_LABELS: Record<string, string> = {
   INFLUENZA: "Influenza",
   HEPB: "Hepatitis B",
 };
+
+/**
+ * What the forecast panel says when it has no rows (#628): the forecast used to be made up, and with
+ * no vaccination history there is nothing to show, so the panel says which of the two it is.
+ */
+function forecastEmptyMessage(forecast: NonNullable<CaseDetail["immunizationForecast"]>): string | null {
+  if (forecast.series.length > 0) return null;
+  return forecast.historyAvailable === false
+    ? "WorkWell has no vaccination history for this person, so there is no forecast."
+    : "The forecast is not available right now.";
+}
 
 function forecastStatusClass(status: string) {
   switch (status) {
