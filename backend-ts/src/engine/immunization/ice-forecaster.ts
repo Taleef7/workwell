@@ -8,11 +8,14 @@
  * - **Advisory only (ADR-012):** a forecast never sets or overrides an `Outcome Status`. CQL stays
  *   the sole compliance authority — this adapter feeds the advisory panel on `/cases/[id]` and
  *   `GET /api/immunization/forecast`, nothing else.
- * - **Deterministic fallback:** ANY failure (transport error, non-2xx, timeout, unparseable body,
- *   a vaccine group missing from the response) falls back to the injected `simulatedForecaster`.
- *   The advisory panel degrades; it never errors the case-detail read.
- * - **Injected fallback + transport + history:** no import cycle, and the sidecar is testable
- *   without a container.
+ * - **No history, no forecast (#628):** the dose history is injected, and a source with nothing
+ *   for the subject (`null`) returns an empty forecast without dialing ICE. No history source exists
+ *   yet, so `resolveForecaster` injects `noIceHistory`; WebChart immunizations are the drop-in (E12).
+ * - **Empty on failure:** ANY failure (transport error, non-2xx, timeout, unparseable body, a
+ *   vaccine group missing from the response) returns an empty forecast. The advisory panel says it
+ *   has no forecast; it never errors the case-detail read, and it never shows one ICE did not make.
+ * - **Injected transport + history:** no import cycle, and the sidecar is testable without a
+ *   container.
  * - No new deps: plain `fetch` + `AbortController`.
  */
 import { cvxCodesForMeasure } from "../ingress/webchart/terminology.ts";
@@ -25,9 +28,8 @@ import {
   type IceProposal,
 } from "./ice-vmr.ts";
 import {
-  SCHEDULE,
   VACCINE_SERIES,
-  syntheticImmunizationHistory,
+  emptyForecast,
   type ForecastStatus,
   type ImmunizationForecast,
   type ImmunizationForecaster,
@@ -43,26 +45,14 @@ export const ICE_VACCINE_GROUP: Record<VaccineSeries, string> = {
 };
 
 /**
- * WorkWell series → the CVX code the SYNTHETIC history emits for a dose (CDC CVX,
- * 2.16.840.1.113883.12.292). This is what we *write*; it is NOT the set we *recognize* — see
- * `ICE_SERIES_CVX`.
- */
-export const ICE_DOSE_CVX: Record<VaccineSeries, string> = {
-  TDAP: "115", // Tdap
-  INFLUENZA: "141", // Influenza, seasonal, injectable
-  HEPB: "43", // HepB, adult 3-dose (the traditional adult formulation ICE scores against)
-};
-
-/**
  * Every CVX code that COUNTS toward each series, sourced from the WebChart crosswalk — the repo's
  * single authority on vaccine-code membership (2026 currency audit).
  *
- * Why this must be a set and not `ICE_DOSE_CVX`: ICE scores whatever codes it is given, so a history
- * source that supplies real-world codes — Td `09`/`113`/`196`, any of the 19 active seasonal flu
- * codes, Heplisav `189` or HepB `08`/`44`/`45` — produces a correct ICE recommendation. If the
- * display fields only counted the one representative code the synthetic generator happens to emit,
- * the panel would claim "no prior dose" for those subjects while ICE's own recommendation was
- * plainly based on them. That mismatch lands the moment the E12 WebChart history source is injected.
+ * Why this must be a set and not one representative code per series: ICE scores whatever codes it
+ * is given, so a history source that supplies real-world codes — Td `09`/`113`/`196`, any of the 19
+ * active seasonal flu codes, Heplisav `189` or HepB `08`/`44`/`45` — produces a correct ICE
+ * recommendation. If the display fields only counted one code per series, the panel would claim
+ * "no prior dose" for those subjects while ICE's own recommendation was plainly based on them.
  */
 export const ICE_SERIES_CVX: Record<VaccineSeries, ReadonlySet<string>> = {
   TDAP: new Set(cvxCodesForMeasure("adult_immunization")),
@@ -73,8 +63,6 @@ export const ICE_SERIES_CVX: Record<VaccineSeries, ReadonlySet<string>> = {
 /** Heplisav-B — a 2-dose primary series, unlike every other HepB formulation (3 doses). */
 const HEPLISAV_CVX = "189";
 
-const DOSE_SPACING_DAYS = 60; // back-spacing for earlier doses of a multi-dose series
-
 export interface IceDoseHistory {
   patientId: string;
   dob: string; // YYYY-MM-DD
@@ -82,53 +70,24 @@ export interface IceDoseHistory {
   doses: IceDose[];
 }
 
-export type IceHistorySource = (subjectId: string) => IceDoseHistory;
-
-function addDaysUtc(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function hash(s: string): number {
-  let h = 0;
-  for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return h;
-}
+/** A subject's dose history, or `null` when the source has none for them (no forecast is made). */
+export type IceHistorySource = (subjectId: string) => IceDoseHistory | null;
 
 /**
- * The demo history source: the SAME deterministic per-subject dose history the simulated
- * forecaster uses (`syntheticImmunizationHistory`), re-expressed as CVX-coded dose events ICE can
- * score. A multi-dose series is expanded backwards from its last dose at a fixed spacing, so N
- * doses on file become N dated events. Demographics are derived from the same subject hash (ICE
- * requires a dob + gender to run its schedule).
- *
- * Real WebChart-sourced immunization history is the production drop-in (E12) — swap this source.
+ * The only history source today: none. WebChart immunizations are the intended source (E12); a
+ * network read will need this signature to become async.
  */
-export function syntheticIceHistory(subjectId: string): IceDoseHistory {
-  const h = hash(subjectId);
-  const birthYear = 1965 + (h % 35); // 1965..1999 — an adult working population
-  const dob = addDaysUtc(`${birthYear}-01-01`, h % 365);
-  const doses: IceDose[] = [];
-  for (const d of syntheticImmunizationHistory(subjectId)) {
-    for (let i = 0; i < d.dosesReceived; i += 1) {
-      // i = 0 is the most recent dose; earlier doses back-space by DOSE_SPACING_DAYS.
-      doses.push({ cvx: ICE_DOSE_CVX[d.series], date: addDaysUtc(d.lastDoseDate, -i * DOSE_SPACING_DAYS) });
-    }
-  }
-  doses.sort((a, b) => a.date.localeCompare(b.date));
-  return { patientId: subjectId, dob, gender: h % 2 === 0 ? "F" : "M", doses };
-}
+export const noIceHistory: IceHistorySource = () => null;
 
 /**
  * Doses required, as ICE would score them — derived from the CVX codes the subject's history
- * ACTUALLY carries, not from the simulated forecaster's schedule.
+ * ACTUALLY carries.
  *
- * HepB is the one that matters. `SCHEDULE.HEPB_DOSES_REQUIRED` is **2** (the Heplisav model the
- * simulated forecaster and the `hepatitis_b_vaccination_series` measure default to), but the ACIP
- * primary series is **3** doses for every HepB formulation *except* Heplisav-B (CVX 189). Reporting
- * the simulated 2 against a traditional 3-dose history renders the self-contradictory card
- * "2 of 2 doses — OVERDUE"; hardcoding 3 would misreport a genuine Heplisav history.
+ * HepB is the one that matters. The `hepatitis_b_vaccination_series` measure defaults to the
+ * 2-dose Heplisav model, but the ACIP primary series is **3** doses for every HepB formulation
+ * *except* Heplisav-B (CVX 189). Reporting 2 against a traditional 3-dose history renders the
+ * self-contradictory card "2 of 2 doses — OVERDUE"; hardcoding 3 would misreport a genuine Heplisav
+ * history.
  */
 function iceDosesRequired(series: VaccineSeries, seriesDoses: IceDose[]): number {
   if (series !== "HEPB") return 1;
@@ -158,8 +117,7 @@ function toSeriesForecast(
   history: IceDoseHistory,
   asOf: string,
 ): SeriesForecast {
-  // Count EVERY code that belongs to the series (ICE scored them all), not just the representative
-  // code the synthetic generator emits — see ICE_SERIES_CVX.
+  // Count EVERY code that belongs to the series (ICE scored them all) — see ICE_SERIES_CVX.
   const seriesDoses = history.doses.filter((d) => ICE_SERIES_CVX[series].has(d.cvx));
   const lastDoseDate = seriesDoses[seriesDoses.length - 1]?.date ?? null;
   const reason = `ICE ${proposal.recommendation}${proposal.interpretations.length ? ` (${proposal.interpretations.join(", ")})` : ""}`;
@@ -194,10 +152,9 @@ export interface IceConfig {
 }
 
 export interface IceForecasterOptions {
-  /** Required: the forecaster to fall back to on ANY failure (injected — avoids an import cycle). */
-  fallback: ImmunizationForecaster;
+  /** Required, so no caller can end up with a made-up history by leaving it out. */
+  historySource: IceHistorySource;
   fetchImpl?: typeof fetch;
-  historySource?: IceHistorySource;
   /** Per-call budget. Defaults to a REQUEST-path budget — see DEFAULT_TIMEOUT_MS. */
   timeoutMs?: number;
   /** Negative-cache TTL after a failure (ms). 0 disables the breaker. */
@@ -214,7 +171,7 @@ export interface IceForecasterOptions {
 const DEFAULT_TIMEOUT_MS = 3_000;
 
 /**
- * After a failure, stop dialing ICE for this long and serve the fallback immediately. Without it, an
+ * After a failure, stop dialing ICE for this long and answer empty immediately. Without it, an
  * unhealthy sidecar (hung, OOM-thrashing, restarting) costs EVERY case-detail read the full timeout,
  * forever — an interactive-latency incident whose only symptom is a slow page.
  */
@@ -250,26 +207,36 @@ async function postDss(
 
 /**
  * The real ICE forecaster. Selected by `resolveForecaster` when `WORKWELL_IMMZ_ICE_BASE_URL` is
- * set; otherwise the simulated forecaster serves (inert-unless-configured).
+ * set; otherwise `noHistoryForecaster` serves (inert-unless-configured).
  */
 export function realIceForecaster(cfg: IceConfig, opts: IceForecasterOptions): ImmunizationForecaster {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const historySource = opts.historySource ?? syntheticIceHistory;
+  const historySource = opts.historySource;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const breakerTtlMs = opts.breakerTtlMs ?? DEFAULT_BREAKER_TTL_MS;
   const now = opts.now ?? (() => Date.now());
 
-  // Circuit breaker: the instant of the last failure. While it is within the TTL, serve the fallback
+  // Circuit breaker: the instant of the last failure. While it is within the TTL, answer empty
   // without dialing — one slow request per TTL instead of one per read.
   let openedAt = 0;
 
   return {
     async forecast(subjectId: string, asOf: string): Promise<ImmunizationForecast> {
+      // Nothing to forecast from: say so, and do not ask ICE to schedule a person with no doses on file
+      // as though that were their record.
+      let history: IceDoseHistory | null;
+      try {
+        history = historySource(subjectId);
+      } catch (err) {
+        // A source that cannot answer must not fail the case read either (the advisory contract above).
+        console.warn(`ICE history read failed for ${subjectId}; showing no forecast: ${(err as Error).message}`);
+        return emptyForecast(subjectId, asOf, true);
+      }
+      if (history === null) return emptyForecast(subjectId, asOf, false);
       if (breakerTtlMs > 0 && openedAt !== 0 && now() - openedAt < breakerTtlMs) {
-        return opts.fallback.forecast(subjectId, asOf);
+        return emptyForecast(subjectId, asOf, true);
       }
       try {
-        const history = historySource(subjectId);
         const cdsInputXml = buildCdsInputXml({
           patientId: history.patientId,
           dob: history.dob,
@@ -302,13 +269,14 @@ export function realIceForecaster(cfg: IceConfig, opts: IceForecasterOptions): I
           return toSeriesForecast(s, proposal, history, asOf);
         });
         openedAt = 0; // healthy again
-        return { subjectId, asOf, series };
+        return { subjectId, asOf, historyAvailable: true, series };
       } catch (err) {
-        // Advisory surface — degrade WHOLE, never fail the read (ADR-012). Trip the breaker so an
-        // unhealthy sidecar costs one timeout per TTL, not one per request.
+        // Advisory surface — degrade WHOLE, never fail the read (ADR-012), and never to a forecast ICE
+        // did not make. Trip the breaker so an unhealthy sidecar costs one timeout per TTL, not one
+        // per request.
         openedAt = now();
-        console.warn(`ICE forecast failed for ${subjectId}; falling back to simulated: ${(err as Error).message}`);
-        return opts.fallback.forecast(subjectId, asOf);
+        console.warn(`ICE forecast failed for ${subjectId}; showing no forecast: ${(err as Error).message}`);
+        return emptyForecast(subjectId, asOf, true);
       }
     },
   };

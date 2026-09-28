@@ -562,3 +562,63 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     expect(screen.queryByRole("button", { name: /show history/i })).not.toBeInTheDocument();
   });
 });
+
+// #628: the forecast used to be invented from a hash of the subject id and rendered as the person's
+// record ("Td/Tdap — Last 2022-03-30 … Up To Date" beside a CQL outcome of Overdue). With no history
+// the panel must say so, in the collapsible (mobile) layout and in the card (desktop) alike.
+describe("CaseDetailPage immunization forecast with no history (#628)", () => {
+  const immunizationCase = (forecast: Record<string, unknown>) =>
+    makeCaseDetail({ measureId: "adult_immunization", measureName: "Adult Immunization Status (Td/Tdap)", immunizationForecast: forecast });
+
+  beforeEach(() => {
+    setSubject("employee");
+    currentRole = "ROLE_ADMIN";
+  });
+
+  it("says no vaccination history is connected, in both layouts, and shows no dose rows", async () => {
+    get.mockImplementation((url: string) =>
+      url === "/api/cases/case-001"
+        ? Promise.resolve(immunizationCase({ subjectId: "emp-101", asOf: "2026-09-28", historyAvailable: false, series: [] }))
+        : Promise.resolve([]),
+    );
+    render(<CaseDetailPage />);
+    const desktop = await screen.findByTestId("forecast-empty-desktop");
+    const mobile = screen.getByTestId("forecast-empty-mobile");
+    for (const el of [desktop, mobile]) {
+      expect(el).toHaveTextContent("No vaccination history is connected to the forecast yet, so there is no forecast.");
+    }
+    expect(screen.queryByText(/Last \d{4}-\d{2}-\d{2}/)).not.toBeInTheDocument();
+  });
+
+  it("says the forecast is unavailable when the forecaster had a history but no answer", async () => {
+    get.mockImplementation((url: string) =>
+      url === "/api/cases/case-001"
+        ? Promise.resolve(immunizationCase({ subjectId: "emp-101", asOf: "2026-09-28", historyAvailable: true, series: [] }))
+        : Promise.resolve([]),
+    );
+    render(<CaseDetailPage />);
+    expect(await screen.findByTestId("forecast-empty-desktop")).toHaveTextContent("The forecast is not available right now.");
+    expect(screen.getByTestId("forecast-empty-mobile")).toHaveTextContent("The forecast is not available right now.");
+  });
+
+  it("shows no empty-state line when there are real rows", async () => {
+    get.mockImplementation((url: string) =>
+      url === "/api/cases/case-001"
+        ? Promise.resolve(
+            immunizationCase({
+              subjectId: "emp-101",
+              asOf: "2026-09-28",
+              historyAvailable: true,
+              series: [
+                { series: "TDAP", status: "OVERDUE", lastDoseDate: "2014-05-01", nextDueDate: "2024-05-01", dosesReceived: 1, dosesRequired: 1, reason: null },
+              ],
+            }),
+          )
+        : Promise.resolve([]),
+    );
+    render(<CaseDetailPage />);
+    expect(await screen.findByText(/Last 2014-05-01/)).toBeInTheDocument();
+    expect(screen.queryByTestId("forecast-empty-desktop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("forecast-empty-mobile")).not.toBeInTheDocument();
+  });
+});

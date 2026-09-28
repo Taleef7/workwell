@@ -1,7 +1,7 @@
 /**
  * Immunization forecast route (#76 E6) — advisory ICE-ready forecasting behind the unchanged
- * frontend contract. Authenticated under /api/** by the worker's security matrix. Read-time over
- * the forecaster's synthetic history; no schema.
+ * frontend contract. Authenticated under /api/** by the worker's security matrix. Read-time; no
+ * schema. With no vaccination history source yet it answers `historyAvailable: false` (#628).
  *
  *   GET /api/immunization/forecast?subjectId=&asOf=  → ImmunizationForecast
  */

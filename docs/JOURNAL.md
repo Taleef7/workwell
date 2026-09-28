@@ -5,6 +5,18 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-09-28
+
+- **No invented vaccination history (#628).** The immunization forecast made up each person's doses from a
+  hash of their id; on TWH a Td/Tdap case CQL scored Overdue showed a 2022 dose and "Up To Date" beside it,
+  and a configured ICE was fed the same invented history. No history source is connected to the forecaster
+  yet, so the forecast is empty and the case page says so. ICE waits for WebChart immunizations (E12).
+- **Admin integration tiles are status only (#627).** Manual Sync contacted nothing and reported
+  "Manual sync completed", and every "Last sync" was the container's boot time. The button is gone; the
+  tiles are built from configuration, a WebChart tile says Maui is not connected, and a time appears only
+  where one is real (the newest run's WebChart fetch).
+- Run History checked live after #719: 4.9 s on the first visit a minute after a deploy, 0.2 s after (was 48.8 s).
+
 ## 2026-09-26
 
 - **Run History opens warm.** The list counts each run's outcomes. A finished run's counts were kept for only
