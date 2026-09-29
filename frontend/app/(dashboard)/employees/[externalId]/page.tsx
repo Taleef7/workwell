@@ -293,7 +293,8 @@ export default function EmployeeProfilePage() {
               <span className="w-36 shrink-0 text-xs text-neutral-600 dark:text-neutral-400">
                 {new Date(ev.occurredAt).toLocaleString()}
               </span>
-              <span className="text-neutral-600 dark:text-neutral-400">{ev.summary}</span>
+              {/* An actor's email has no break point, so it pushed the page sideways (#700). */}
+              <span className="min-w-0 [overflow-wrap:anywhere] text-neutral-600 dark:text-neutral-400">{ev.summary}</span>
             </div>
           ))}
         </div>
