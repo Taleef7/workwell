@@ -16,6 +16,7 @@ import {
 } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
+import { ScrollRegion } from "@/components/scroll-region";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
@@ -698,7 +699,9 @@ export default function CasesPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
+        {/* Its own full-width row that wraps: five buttons in one line made the page scroll sideways on a
+            phone (#700). */}
+        <div role="group" aria-label="Status" className="flex basis-full flex-wrap items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
           <span>Status</span>
           {(["open", "closed", "staff_closed", "all", "excluded"] as const).map((status) => (
             <Button
@@ -706,6 +709,7 @@ export default function CasesPage() {
               type="button"
               size="sm"
               variant={statusFilter === status ? "primary" : "outline"}
+              aria-pressed={statusFilter === status}
               className="rounded-full"
               onClick={() => setStatusAndUrl(status)}
             >
@@ -1028,7 +1032,7 @@ function CasesTable({
 }) {
   if (items.length === 0) return null;
   return (
-    <div className="hidden overflow-x-auto rounded-2xl border border-neutral-200 bg-white md:block dark:border-neutral-800 dark:bg-neutral-900">
+    <ScrollRegion label="Cases table" className="hidden rounded-2xl border border-neutral-200 bg-white md:block dark:border-neutral-800 dark:bg-neutral-900">
       <table className="min-w-full text-sm">
         <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
           <tr>
@@ -1103,6 +1107,6 @@ function CasesTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }

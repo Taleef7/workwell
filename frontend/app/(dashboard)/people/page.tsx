@@ -7,6 +7,7 @@ import { useAuth } from "@/components/auth-provider";
 import { AccessDenied } from "@/components/access-denied";
 import { canViewPeople } from "@/lib/rbac";
 import { SkeletonCard } from "@/components/skeleton-loader";
+import { ScrollRegion } from "@/components/scroll-region";
 import { SUBJECT } from "@/lib/terminology";
 
 /**
@@ -143,14 +144,15 @@ export default function PeoplePage() {
       ) : people.length === 0 ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">No people match that search.</p>
       ) : (
-        <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+        <ScrollRegion label="People table" className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
           <table className="min-w-full text-sm">
             <caption className="sr-only">Resolved people across all WebChart systems ({total} total)</caption>
             <thead className="text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
               <tr className="border-b border-neutral-200 dark:border-neutral-800">
                 <th scope="col" className="px-4 py-2">Person</th>
                 <th scope="col" className="px-4 py-2">Systems</th>
-                <th scope="col" className="px-4 py-2">Identity</th>
+                {/* The national id waits for a wider screen on a phone; the person page carries it. */}
+                <th scope="col" className="hidden px-4 py-2 sm:table-cell">Identity</th>
               </tr>
             </thead>
             <tbody>
@@ -184,12 +186,12 @@ export default function PeoplePage() {
                       </span>
                     ))}
                   </td>
-                  <td className="px-4 py-2 text-neutral-500 dark:text-neutral-400">{p.nationalId ?? "—"}</td>
+                  <td className="hidden px-4 py-2 text-neutral-500 dark:text-neutral-400 sm:table-cell">{p.nationalId ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
       )}
 
       {loaded && people.length > 0 && totalPages > 1 ? (

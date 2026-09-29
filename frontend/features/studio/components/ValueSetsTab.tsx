@@ -108,10 +108,10 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
       {attached.length ? (
         <ul className="space-y-2">
           {attached.map((vs) => (
-            <li key={vs.id} className="flex items-center justify-between rounded border border-neutral-200 dark:border-neutral-800 px-3 py-2 text-sm">
-              <div>
+            <li key={vs.id} className="flex items-center justify-between gap-2 rounded border border-neutral-200 dark:border-neutral-800 px-3 py-2 text-sm">
+              <div className="min-w-0">
                 <p className="font-medium text-neutral-800 dark:text-neutral-200">{vs.name}</p>
-                <p className="text-xs text-neutral-600 dark:text-neutral-400">{vs.oid} • {vs.version}</p>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 [overflow-wrap:anywhere]">{vs.oid} • {vs.version}</p>
                 <p className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${valueSetBadgeClass(vs.resolvabilityStatus)}`}>
                   {formatStatusLabel(vs.resolvabilityLabel ?? vs.resolvabilityStatus)}
                 </p>
@@ -156,10 +156,10 @@ export function ValueSetsTab({ measure, measureId, api, allValueSets, onChanged,
       {available.length ? (
         <ul className="space-y-2">
           {available.map((vs) => (
-            <li key={vs.id} className="flex items-center justify-between rounded border border-neutral-200 dark:border-neutral-800 px-3 py-2 text-sm">
-              <div>
+            <li key={vs.id} className="flex items-center justify-between gap-2 rounded border border-neutral-200 dark:border-neutral-800 px-3 py-2 text-sm">
+              <div className="min-w-0">
                 <p className="font-medium text-neutral-800 dark:text-neutral-200">{vs.name}</p>
-                <p className="text-xs text-neutral-600 dark:text-neutral-400">{vs.oid} • {vs.version}</p>
+                <p className="text-xs text-neutral-600 dark:text-neutral-400 [overflow-wrap:anywhere]">{vs.oid} • {vs.version}</p>
                 <p className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${valueSetBadgeClass(vs.resolvabilityStatus)}`}>
                   {formatStatusLabel(vs.resolvabilityLabel ?? vs.resolvabilityStatus)}
                 </p>

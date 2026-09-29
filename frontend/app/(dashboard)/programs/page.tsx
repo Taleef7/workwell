@@ -7,6 +7,7 @@ import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { fmtCount } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { SkeletonCard } from "@/components/skeleton-loader";
@@ -193,12 +194,12 @@ export default function ProgramsPage() {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Programs Overview</h2>
           {yearLine ? <p className="text-sm text-neutral-500 dark:text-neutral-400">{yearLine}</p> : null}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {canSeeEngineering(user?.role) && (
             <label className="flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
               System
@@ -231,7 +232,7 @@ export default function ProgramsPage() {
                 Run in progress…
               </span>
             ) : (
-              <Button variant="primary" onClick={() => setShowRunConfirm(true)}>
+              <Button variant="primary" className="w-full sm:w-auto" onClick={() => setShowRunConfirm(true)}>
                 Run All Measures Now
               </Button>
             )
@@ -241,10 +242,14 @@ export default function ProgramsPage() {
 
       <RunFreshnessBanner />
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <KpiCard label="Overall compliance" value={initialLoad ? "—" : formatRate(overallComplianceRate)} />
         <KpiCard label="Open cases" value={initialLoad ? "—" : fmtCount(openCases)} />
-        <KpiCard label="Last run" value={initialLoad ? "—" : lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"} />
+        <KpiCard
+          label="Last run"
+          value={initialLoad ? "—" : lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"}
+          className="col-span-2 md:col-span-1"
+        />
       </div>
 
       {tenant === "mhn" ? (
@@ -265,7 +270,7 @@ export default function ProgramsPage() {
         </p>
       ) : null}
       {loading ? (
-        <div className="grid gap-4 lg:grid-cols-2" role="status" aria-live="polite">
+        <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3" role="status" aria-live="polite">
           <span className="sr-only">Loading programs…</span>
           {Array.from({ length: 4 }, (_, i) => <SkeletonCard key={i} />)}
         </div>
@@ -276,7 +281,7 @@ export default function ProgramsPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {programs.map((program) => {
           const trend = trendByMeasure[program.measureId] ?? [];
           // The summary carries its own improvementNotation, so an inverse measure reads correctly
@@ -289,7 +294,7 @@ export default function ProgramsPage() {
           const label = measureLabelFor(program.measureId, program.measureName);
           const nothingYet = CARD_CHIPS.every(([, , field]) => program[field] === 0);
           return (
-            <div key={program.measureId} className="group relative cursor-pointer rounded-lg border border-neutral-200 bg-white p-4 transition hover:border-primary-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-primary-600">
+            <div key={program.measureId} className="@container group relative min-w-0 cursor-pointer rounded-lg border border-neutral-200 bg-white p-4 transition hover:border-primary-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-primary-600">
               {/* Stretched link: the whole card opens the measure page; interactive children below
                   carry `relative z-10` so they keep their own click targets. */}
               <Link
@@ -297,9 +302,11 @@ export default function ProgramsPage() {
                 aria-label={`View ${label} detail`}
                 className="absolute inset-0 z-0 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
               />
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-base font-semibold text-neutral-900 group-hover:text-primary-700 dark:text-neutral-100 dark:group-hover:text-primary-400">{label}</h3>
-                <div className="shrink-0 text-right">
+              {/* Title beside the rate only when the CARD is wide enough (a container query: in the
+                  2- and 3-column grids a wide viewport still gives a narrow card). */}
+              <div className="flex flex-col gap-2 @md:flex-row @md:items-start @md:justify-between @md:gap-3">
+                <h3 className="min-w-0 text-base font-semibold text-neutral-900 group-hover:text-primary-700 dark:text-neutral-100 dark:group-hover:text-primary-400">{label}</h3>
+                <div className="@md:shrink-0 @md:text-right">
                   <p
                     aria-describedby={describedBy}
                     className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100"
@@ -378,9 +385,9 @@ export default function ProgramsPage() {
   );
 }
 
-function KpiCard({ label, value }: { label: string; value: string }) {
+function KpiCard({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+    <div className={cn("rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900", className)}>
       <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{label}</p>
       <p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p>
     </div>

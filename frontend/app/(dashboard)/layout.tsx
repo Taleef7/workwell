@@ -340,7 +340,11 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
           {/* tabIndex=-1 so the skip link actually MOVES keyboard focus here (a non-focusable target
               only scrolls in some browsers, leaving focus back in the nav — defeating WCAG 2.4.1). */}
-          <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6 focus:outline-none">{children}</main>
+          <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto p-4 md:p-6 focus:outline-none">
+            {/* Content stops growing at 1600px, so a line of text or a card row stays readable on a wide
+                monitor instead of stretching edge to edge (#700). */}
+            <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+          </main>
         </div>
       </div>
     </SidebarProvider>

@@ -59,7 +59,7 @@ export default function ApiDocsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-10">
+    <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
       <header className="mb-8">
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{APP_NAME}</p>
         <h1 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
@@ -87,7 +87,7 @@ export default function ApiDocsPage() {
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
           <p className="font-semibold">The API reference could not be loaded.</p>
           <p className="mt-1 text-xs">
-            Fetching <code className="font-mono">{specUrl}</code> failed: {error}. The document is served by the
+            Fetching <code className="break-all font-mono">{specUrl}</code> failed: {error}. The document is served by the
             backend, so this page is empty whenever the backend is unreachable.
           </p>
         </div>

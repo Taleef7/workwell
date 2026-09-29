@@ -16,6 +16,7 @@ import { ComplianceSummaryBar, shownStatusOf } from '@/features/employee/compone
 import { IndividualComplianceStatus } from '@/features/employee/components/IndividualComplianceStatus';
 import { SimulateComplianceHistory } from '@/features/employee/components/SimulateComplianceHistory';
 import { SkeletonCard } from '@/components/skeleton-loader';
+import { ScrollRegion } from '@/components/scroll-region';
 import { COMPLIANCE_STATUS_LABELS, OUTCOME_LABELS, complianceStatusClass, labelFor, outcomeStatusClass } from '@/lib/status';
 import { useMeasureIdentities } from '@/lib/measure-identity';
 
@@ -80,7 +81,7 @@ function AssigneeCell({
   return (
     <Select
       size="sm"
-      className="w-56"
+      className="w-full min-w-[9rem] max-w-56"
       aria-label="Assignee"
       disabled={busy}
       // The account's OWN spelling, so a stored `CM@WorkWell.dev` renders as the option it matches
@@ -129,19 +130,27 @@ export default function EmployeeProfilePage() {
   const startDate = profile.startDate
     ? new Date(profile.startDate).toLocaleDateString()
     : null;
+  // Only the parts that are present, joined, so a patient's line never opens on a bare " · " (the role
+  // and supervisor belong to the employee deployment only).
+  const subtitle = [
+    !isPatientTerm ? profile.role : null,
+    profile.site || null,
+    !isPatientTerm && profile.supervisorName ? `Supervisor: ${profile.supervisorName}` : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(' · ');
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
+    // <main> already pads the page; a second p-6 here cost a phone 48px of width.
+    <div className="space-y-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{profile.name}</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-            {!isPatientTerm ? profile.role : null}
-            {profile.site ? ` · ${profile.site}` : ''}
-            {!isPatientTerm && profile.supervisorName ? ` · Supervisor: ${profile.supervisorName}` : ''}
+            {subtitle}
           </p>
-          <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
+          <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1 break-all">
             ID: {profile.externalId}
             {/* The FHIR resource id is an engineering detail; the patient ID above is the one staff use. */}
             {profile.fhirPatientId && canSeeEngineering(user?.role) ? ` · FHIR: ${profile.fhirPatientId}` : ''}
@@ -161,14 +170,16 @@ export default function EmployeeProfilePage() {
         <ComplianceSummaryBar outcomes={profile.measureOutcomes} labelFor={measureLabelFor} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-      <div className="space-y-6 lg:col-span-2">
+      {/* Two columns only at xl: at lg the sidebar squeezed the main column's tables into a sideways scroll. */}
+      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="min-w-0 space-y-6 xl:col-span-2">
       <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} labelFor={measureLabelFor} />
       <SimulateComplianceHistory key={externalId} externalId={externalId} labelFor={measureLabelFor} />
       {/* Open cases */}
       {profile.openCases.length > 0 && (
         <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
           <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Open Cases</h2>
+          <ScrollRegion label="Open cases table">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800">
@@ -213,6 +224,7 @@ export default function EmployeeProfilePage() {
               ))}
             </tbody>
           </table>
+          </ScrollRegion>
         </div>
       )}
 
@@ -229,12 +241,12 @@ export default function EmployeeProfilePage() {
               id={`measure-${o.measureVersionId}`}
               className="rounded-lg border border-neutral-200 dark:border-neutral-800 p-4"
             >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-neutral-900 dark:text-neutral-100">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 font-medium text-neutral-900 dark:text-neutral-100">
                   <span>{measureLabelFor(o.measureId, o.measureName)}</span>{' '}
                   <span className="text-xs font-normal text-neutral-600 dark:text-neutral-400">{o.measureVersion}</span>
                 </span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${complianceStatusClass(shownStatusOf(o))}`}>
+                <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${complianceStatusClass(shownStatusOf(o))}`}>
                   {labelFor(COMPLIANCE_STATUS_LABELS, shownStatusOf(o))}
                 </span>
               </div>
@@ -268,7 +280,7 @@ export default function EmployeeProfilePage() {
 
       </div>
 
-      <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+      <aside className="min-w-0 space-y-6 xl:sticky xl:top-6 xl:self-start">
       {/* Recent activity timeline */}
       <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Recent Activity</h2>

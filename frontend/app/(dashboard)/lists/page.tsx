@@ -23,6 +23,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
+import { ScrollRegion } from "@/components/scroll-region";
 import { useSubjectLists, type SubjectListRow } from "@/features/subject-list/use-subject-lists";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 
@@ -87,7 +88,8 @@ export default function ListsPage() {
   const selected = useMemo(() => lists.find((l) => l.id === selectedId) ?? null, [lists, selectedId]);
 
   return (
-    <div className="space-y-6 p-6">
+    // No padding of its own: <main> already pads the page, and a second p-6 cost a phone 48px.
+    <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">Attributed lists</h1>
         <p className="text-muted-foreground mt-1 text-sm">
@@ -101,17 +103,18 @@ export default function ListsPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-medium">Lists</h2>
-        <div className="overflow-x-auto rounded-lg border">
+        <ScrollRegion label="Attributed lists table" className="rounded-lg border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-left">
               <tr>
                 <th className="p-3">Name</th>
-                <th className="p-3">Revision</th>
+                {/* Revision, Ambiguous and Imported wait for md, so a phone sees the counts and Open. */}
+                <th className="hidden p-3 md:table-cell">Revision</th>
                 <th className="p-3">Matched</th>
                 <th className="p-3">Not found</th>
-                <th className="p-3">Ambiguous</th>
-                <th className="p-3">Imported</th>
-                <th className="p-3" />
+                <th className="hidden p-3 md:table-cell">Ambiguous</th>
+                <th className="hidden p-3 md:table-cell">Imported</th>
+                <th className="w-px whitespace-nowrap p-3" />
               </tr>
             </thead>
             <tbody>
@@ -135,7 +138,7 @@ export default function ListsPage() {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
       </section>
 
       {selected ? (
@@ -163,7 +166,7 @@ function ListRow({
         {list.name}
         {list.source ? <span className="text-muted-foreground block text-xs">{list.source}</span> : null}
       </td>
-      <td className="p-3">v{list.revision}</td>
+      <td className="hidden p-3 md:table-cell">v{list.revision}</td>
       <td className="p-3">{list.counts.MATCHED.toLocaleString()}</td>
       <td className="p-3">
         {list.counts.NOT_FOUND > 0 ? (
@@ -172,12 +175,12 @@ function ListRow({
           list.counts.NOT_FOUND
         )}
       </td>
-      <td className="p-3">{list.counts.AMBIGUOUS.toLocaleString()}</td>
-      <td className="p-3 text-muted-foreground text-xs">
+      <td className="hidden p-3 md:table-cell">{list.counts.AMBIGUOUS.toLocaleString()}</td>
+      <td className="hidden p-3 text-muted-foreground text-xs md:table-cell">
         {list.createdAt.slice(0, 10)} · {list.createdBy}
       </td>
-      <td className="p-3 text-right">
-        <Button size="sm" variant={selected ? "secondary" : "outline"} onClick={onSelect}>
+      <td className="w-px whitespace-nowrap p-3 text-right">
+        <Button size="sm" variant={selected ? "secondary" : "outline"} className="whitespace-nowrap" onClick={onSelect}>
           {selected ? "Hide" : "Open"}
         </Button>
       </td>
@@ -316,7 +319,7 @@ function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typ
         </select>
         <span className="text-muted-foreground text-sm">{total.toLocaleString()} rows</span>
       </div>
-      <div className="overflow-x-auto rounded-lg border">
+      <ScrollRegion label="List members table" className="rounded-lg border">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left">
             <tr>
@@ -353,7 +356,7 @@ function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typ
             )}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
       {pages > 1 ? (
         <div className="flex items-center gap-3 text-sm">
           <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
@@ -473,11 +476,13 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
               number wearing the run&apos;s identity.
             </p>
           ) : null}
-          <div className="overflow-x-auto rounded-lg border">
+          {/* The Measure column stays pinned while the counts scroll under it. Its cells paint the
+              region's own background (plus the header's tint) so the scrolled cells do not show through. */}
+          <ScrollRegion label="Measurement-year report table" className="rounded-lg border">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-left">
                 <tr>
-                  <th className="p-3">Measure</th>
+                  <th className="sticky left-0 bg-[color:var(--scroll-cue-bg)] bg-linear-to-r from-muted/50 to-muted/50 p-3">Measure</th>
                   <th className="p-3">Rate</th>
                   <th className="p-3">Initial population</th>
                   <th className="p-3">Denominator</th>
@@ -492,7 +497,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                 {report.measures.map((measure) =>
                   measure.rates.length === 0 ? (
                     <tr key={measure.measureId}>
-                      <td className="p-3 font-medium">{labelForId(measure.measureId)}</td>
+                      <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium">{labelForId(measure.measureId)}</td>
                       <td className="text-muted-foreground p-3" colSpan={8}>
                         {measure.compactionStatus === "compacted"
                           ? "Refused — the run predates a retention cutoff"
@@ -502,7 +507,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                   ) : (
                     measure.rates.map((rate, i) => (
                       <tr key={`${measure.measureId}-${rate.label ?? i}`}>
-                        <td className="p-3 font-medium">{i === 0 ? labelForId(measure.measureId) : ""}</td>
+                        <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium">{i === 0 ? labelForId(measure.measureId) : ""}</td>
                         <td className="p-3">{rate.label ?? "—"}</td>
                         <td className="p-3">{rate.ipp.toLocaleString()}</td>
                         <td className="p-3">{rate.effectiveDenominator.toLocaleString()}</td>
@@ -517,7 +522,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
           <p className="text-muted-foreground text-xs">
             &ldquo;Not measured&rdquo; counts list members this run never evaluated. They are reported
             beside the rates and never subtracted from a denominator — a smaller run must not produce a

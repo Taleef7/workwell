@@ -246,7 +246,7 @@ export function ElmExplorer({
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {/* editor */}
-        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+        <div className="min-w-0 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">CQL source — edit to recompile</p>
           <textarea
             ref={taRef}
@@ -260,7 +260,7 @@ export function ElmExplorer({
         </div>
 
         {/* AST */}
-        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+        <div className="min-w-0 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
           <div className="mb-2 flex flex-wrap items-center gap-1">
             {defines.map((d) => (
               <button

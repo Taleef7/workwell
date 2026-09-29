@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@mieweb/ui";
+import { ScrollRegion } from "@/components/scroll-region";
 import type { Segment } from "./types";
 
 type Props = {
@@ -16,7 +17,8 @@ type Props = {
 /** Presentational table of configured risk-group segments. Parent owns all state + delete confirm. */
 export function SegmentsList({ segments, counts, measureNames, onEdit, onDelete, canManage, loading = false }: Props) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-800">
+    // Scrolls rather than clips (#700): the old overflow-hidden cut Edit and Delete off on a phone.
+    <ScrollRegion label="Groups table" className="rounded-2xl border border-neutral-200 dark:border-neutral-800">
       <table className="w-full text-left text-sm">
         <thead className="bg-neutral-50 dark:bg-neutral-800/50">
           <tr>
@@ -78,6 +80,6 @@ export function SegmentsList({ segments, counts, measureNames, onEdit, onDelete,
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }

@@ -28,6 +28,7 @@ import { OUTCOME_LABELS, PRIORITY_LABELS, labelFor, outcomeStatusClass } from "@
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import { useMeasureIdentities } from "@/lib/measure-identity";
+import { ScrollRegion } from "@/components/scroll-region";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
@@ -709,7 +710,7 @@ export default function WorklistPage() {
         </div>
       ) : null}
 
-      <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+      <ScrollRegion label="Work list table" className="rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
         <table className="w-full min-w-[56rem] text-sm">
           <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
             <tr>
@@ -844,7 +845,7 @@ export default function WorklistPage() {
             )}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
 
       <div className="flex items-center justify-between text-sm text-neutral-600 dark:text-neutral-400">
         <span>

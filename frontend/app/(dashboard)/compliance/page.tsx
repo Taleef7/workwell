@@ -20,6 +20,7 @@ import { Button } from "@mieweb/ui";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
+import { ScrollRegion } from "@/components/scroll-region";
 import { usePanelCache } from "@/features/compliance/usePanelCache";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { useMeasureIdentities } from "@/lib/measure-identity";
@@ -839,7 +840,12 @@ export default function CompliancePage() {
           </div>
         ) : null}
 
-        <div className="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block dark:border-neutral-800">
+        {/* The fade matches the sticky Patient column's dark background (neutral-950, not the card's
+            neutral-900); `!` because the cue's own dark rule is unlayered. */}
+        <ScrollRegion
+          label="Compliance roster table"
+          className="hidden rounded-lg border border-neutral-200 md:block dark:border-neutral-800 dark:[--scroll-cue-bg:var(--color-neutral-950)]"
+        >
           <table className="min-w-full border-collapse text-sm">
             <thead className="bg-neutral-50 dark:bg-neutral-900/60">
               <tr>
@@ -905,7 +911,7 @@ export default function CompliancePage() {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
 
         <RosterMobileCards columns={columns} rows={rows} loading={loading} labelFor={measureLabelFor} />
 
@@ -922,7 +928,7 @@ export default function CompliancePage() {
           </p>
         ) : null}
 
-        <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-500 dark:text-neutral-400">
           <span>
             {fmtCount(total)} {total === 1 ? SUBJECT.singular : SUBJECT.plural}
             {notInPopulation > 0 ? (

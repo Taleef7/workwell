@@ -7,6 +7,7 @@ import { emitToast } from "@/lib/toast";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { AccessDenied } from "@/components/access-denied";
+import { ScrollRegion } from "@/components/scroll-region";
 import { canViewOrders } from "@/lib/rbac";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
@@ -188,24 +189,24 @@ export default function OrdersPage() {
   return (
     <section className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Order Proposals</h2>
           <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
             Advisory orders derived from the latest run of each active measure — a human reviews and submits.
           </p>
         </div>
-        <div className="flex items-end gap-2">
+        <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
           <Select
             label="Measure"
             size="sm"
-            className="w-52"
+            className="w-full sm:w-64 lg:w-80"
             value={measureFilter}
             onValueChange={onMeasureFilterChange}
             options={measureOptions}
           />
           {/* The bundle is the WHOLE filtered set, so gate on the total — a page with no proposed
               rows (suppressed-only tail) can still copy it. */}
-          <Button variant="outline" size="sm" onClick={() => void copyFhirBundle()} disabled={copying || proposedTotal === 0}>
+          <Button variant="outline" size="sm" className="whitespace-nowrap" onClick={() => void copyFhirBundle()} disabled={copying || proposedTotal === 0}>
             {copying ? "Copying…" : "Copy FHIR Bundle"}
           </Button>
         </div>
@@ -258,7 +259,7 @@ export default function OrdersPage() {
                     : "No order proposals for the current scope."}
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+              <ScrollRegion label="Proposed orders table" className="rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
                 <table className="min-w-full text-sm">
                   <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
                     <tr>
@@ -305,7 +306,7 @@ export default function OrdersPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             )}
           </div>
 
@@ -322,7 +323,7 @@ export default function OrdersPage() {
                   No suppressed orders on this page.
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+                <ScrollRegion label="Suppressed orders table" className="rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
                   <table className="min-w-full text-sm">
                     <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
                       <tr>
@@ -343,7 +344,7 @@ export default function OrdersPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </ScrollRegion>
               )}
             </div>
           ) : null}

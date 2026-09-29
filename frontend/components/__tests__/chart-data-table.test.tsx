@@ -57,9 +57,13 @@ describe("ChartDataTable", () => {
     expect(within(table).getByText("84%")).toBeInTheDocument();
   });
 
-  it("is visually hidden via the sr-only class", () => {
+  it("is visually hidden by a wrapping block, never by sr-only on the table itself (#700)", () => {
     render(<ChartDataTable caption="c" columns={["A"]} rows={[["x"]]} />);
-    expect(screen.getByRole("table")).toHaveClass("sr-only");
+    const table = screen.getByRole("table");
+    // A table ignores width:1px and sizes to its content, so an sr-only TABLE widened the page.
+    expect(table).not.toHaveClass("sr-only");
+    expect(table.parentElement).toHaveClass("sr-only");
+    expect(table.parentElement?.tagName).toBe("DIV");
   });
 
   it("renders an empty label and no column headers when there are no rows", () => {

@@ -120,9 +120,9 @@ export function TestsTab({ measureId, api, initialFixtures, onSaved, onError, ca
 
   return (
     <div className="grid gap-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Fixture Validation</h3>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" onClick={add}>Add Fixture</Button>
           <Button
             variant="outline"
