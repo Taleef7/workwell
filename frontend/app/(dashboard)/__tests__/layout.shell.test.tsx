@@ -138,6 +138,10 @@ describe("DashboardLayout shell on a phone (#700)", () => {
     // Visible at every width (it was `hidden sm:block`), with 16px text so iOS does not zoom on focus.
     expect(search.closest("div.relative")?.parentElement).not.toHaveClass("hidden");
     expect(search).toHaveClass("text-base");
+    // It shrinks only for a mouse or trackpad: a landscape phone or an iPad is wider than sm and still
+    // zooms on a focused input under 16px.
+    expect(search).not.toHaveClass("sm:text-xs");
+    expect(search).toHaveClass("sm:pointer-fine:text-xs");
   });
 });
 

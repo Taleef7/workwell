@@ -113,7 +113,7 @@ export function GlobalSearch() {
             }
           }}
           placeholder={`Search ${SUBJECT.plural}…`}
-          className="h-10 w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-base sm:h-8 sm:w-56 sm:text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          className="h-10 w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-base sm:h-8 sm:w-56 sm:pointer-fine:text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         />
       </div>
 

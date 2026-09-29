@@ -179,7 +179,7 @@ export default function LoginPage() {
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-base sm:text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                  className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-4 text-base sm:pointer-fine:text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
                   placeholder="you@example.com"
                 />
               </div>
@@ -198,7 +198,7 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-12 text-base sm:text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                  className="h-12 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-12 text-base sm:pointer-fine:text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
                   placeholder="••••••••"
                 />
                 <button
