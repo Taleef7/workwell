@@ -429,6 +429,12 @@ export default function WorklistPage() {
 
   const activeChips = useMemo(() => {
     const chips: string[] = [];
+    // Every URL-backed narrowing is named here, because on a phone these chips (and the count on the
+    // folded Filters button) are all that says the list is constrained: a link to ?status=staff_closed,
+    // ?search= or ?measureId= otherwise opened a filtered list under a plain "Filters" (#700, Codex).
+    if (statusView === "staff_closed") chips.push("Work: Closed by staff");
+    if (measureFilter) chips.push(`Measure: ${measureLabelFor(measureFilter, measureFilter)}`);
+    if (searchFilter) chips.push(`Search: ${searchFilter}`);
     // Named, not just "My panel": a staffer who owns four providers should see which four, and someone
     // who owns none should see that the heading is describing an empty set rather than a quiet failure.
     if (effectivePanel === "me") {
@@ -444,7 +450,7 @@ export default function WorklistPage() {
     if (assigneeFilter) chips.push(`Assignee: ${assigneeFilter}`);
     if (outcomeFilter) chips.push(`Status: ${labelFor(OUTCOME_LABELS, outcomeFilter)}`);
     return chips;
-  }, [effectivePanel, myPanels, providerFilter, providerNameFor, payerFilter, payerNameFor, assigneeFilter, outcomeFilter]);
+  }, [statusView, measureFilter, measureLabelFor, searchFilter, effectivePanel, myPanels, providerFilter, providerNameFor, payerFilter, payerNameFor, assigneeFilter, outcomeFilter]);
 
   return (
     <div className="flex flex-col gap-4">

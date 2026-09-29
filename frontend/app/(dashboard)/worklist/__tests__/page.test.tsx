@@ -453,6 +453,15 @@ describe("WorklistPage on a phone or narrow tablet (#700)", () => {
     expect(panel).not.toHaveClass("hidden");
   });
 
+  it("counts and names every URL-backed narrowing, so a folded panel never hides why the list is filtered", async () => {
+    navHolder.current.setUrl("/worklist?status=staff_closed&search=Carter&measureId=cms125");
+    render(<WorklistPage />);
+    expect(await screen.findByRole("button", { name: "Filters · 3 active" })).toBeInTheDocument();
+    expect(screen.getByText("Work: Closed by staff")).toBeInTheDocument();
+    expect(screen.getByText("Search: Carter")).toBeInTheDocument();
+    expect(screen.getByText(/^Measure: /)).toBeInTheDocument();
+  });
+
   it("turns each row into a card by container query, keeping every value in its own element", async () => {
     render(<WorklistPage />);
     const name = await screen.findByRole("link", { name: "Lisa Carter" });
