@@ -22,7 +22,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge, Button, Input, Select } from "@mieweb/ui";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, SlidersHorizontal } from "lucide-react";
 import { emitToast } from "@/lib/toast";
 import { OUTCOME_LABELS, PRIORITY_LABELS, labelFor, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
@@ -167,6 +167,9 @@ export default function WorklistPage() {
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [expanded, setExpanded] = useState<string[]>([]);
+  // Below md the filters fold behind one button: seven controls and the insurance chips pushed the first
+  // patient more than a screen down on a phone (#700). CSS-hidden, never unmounted.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(0);
   const requestSeq = useRef(0);
@@ -499,6 +502,17 @@ export default function WorklistPage() {
         />
       ) : (
       <>
+      <button
+        type="button"
+        className="inline-flex min-h-11 items-center gap-2 self-start rounded-lg border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-800 md:hidden dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+        aria-expanded={filtersOpen}
+        aria-controls="worklist-filters"
+        onClick={() => setFiltersOpen((open) => !open)}
+      >
+        <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+        {filtersOpen ? "Hide filters" : activeChips.length > 0 ? `Filters · ${activeChips.length} active` : "Filters"}
+      </button>
+      <div id="worklist-filters" className={`${filtersOpen ? "flex" : "hidden"} flex-col gap-3 md:flex`}>
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
         <Select
           label="View"
@@ -630,6 +644,7 @@ export default function WorklistPage() {
           </div>
         </fieldset>
       ) : null}
+      </div>
 
       {activeChips.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -656,7 +671,9 @@ export default function WorklistPage() {
       ) : null}
 
       {canBulkAct && selected.length > 0 ? (
-        <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
+        // Sticks to the top of the screen on a phone, where the list below is several screens long and
+        // the bar would otherwise scroll away from the rows being ticked (#700).
+        <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 max-md:sticky max-md:top-0 max-md:z-20 max-md:shadow-md dark:border-primary-800 dark:bg-primary-900/20 max-md:dark:bg-neutral-900">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">
               {selected.length} {SUBJECT.singular}
@@ -710,29 +727,37 @@ export default function WorklistPage() {
         </div>
       ) : null}
 
-      <ScrollRegion label="Work list table" className="rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-        <table className="w-full min-w-[56rem] text-sm">
-          <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-            <tr>
+      {/*
+        One table at every width (#700). Where its container is narrower than the table's 56rem, the
+        container query turns each row into a card: the same cells, re-placed on a grid, so selection,
+        the chips, "+N more" and the owner keep working, and the tests still see one table.
+      */}
+      <ScrollRegion label="Work list table" className="@container rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+        <table className="w-full text-sm @4xl:min-w-[56rem]">
+          <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 @max-4xl:block dark:border-neutral-800 dark:text-neutral-400">
+            <tr className="@max-4xl:flex @max-4xl:items-center">
               {canBulkAct ? (
-                <th className="w-10 p-3">
-                  <input
-                    type="checkbox"
-                    aria-label={`Select all ${SUBJECT.plural} on this page`}
-                    checked={allSelected}
-                    onChange={(e) => setSelected(e.target.checked ? rows.map((r) => r.employeeId) : [])}
-                  />
+                <th className="w-10 p-3 @max-4xl:w-auto">
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select all ${SUBJECT.plural} on this page`}
+                      checked={allSelected}
+                      onChange={(e) => setSelected(e.target.checked ? rows.map((r) => r.employeeId) : [])}
+                    />
+                    <span className="font-medium normal-case tracking-normal @4xl:hidden">Select all on this page</span>
+                  </label>
                 </th>
               ) : null}
-              <th className="p-3">{SUBJECT.Singular}</th>
-              <th className="p-3">{providerFilterLabel()}</th>
-              {payersAvailable ? <th className="p-3">{payerFilterLabel}</th> : null}
-              <th className="p-3">Open gaps</th>
-              <th className="p-3">Owner</th>
-              <th className="w-10 p-3" />
+              <th className="p-3 @max-4xl:hidden">{SUBJECT.Singular}</th>
+              <th className="p-3 @max-4xl:hidden">{providerFilterLabel()}</th>
+              {payersAvailable ? <th className="p-3 @max-4xl:hidden">{payerFilterLabel}</th> : null}
+              <th className="p-3 @max-4xl:hidden">Open gaps</th>
+              <th className="p-3 @max-4xl:hidden">Owner</th>
+              <th className="w-10 p-3 @max-4xl:hidden" />
             </tr>
           </thead>
-          <tbody>
+          <tbody className="@max-4xl:grid @max-4xl:gap-3 @max-4xl:p-3">
             {loading ? (
               <SkeletonRow />
             ) : rows.length === 0 ? (
@@ -745,9 +770,12 @@ export default function WorklistPage() {
               rows.map((row) => {
                 const isExpanded = expanded.includes(row.employeeId);
                 return (
-                  <tr key={row.employeeId} className="border-b border-neutral-100 align-top last:border-0 dark:border-neutral-800">
+                  <tr
+                    key={row.employeeId}
+                    className={`border-b border-neutral-100 align-top last:border-0 @max-4xl:grid @max-4xl:grid-cols-[auto_minmax(0,1fr)_auto] @max-4xl:gap-x-3 @max-4xl:gap-y-1 @max-4xl:rounded-lg @max-4xl:border @max-4xl:border-neutral-200 @max-4xl:p-3 @max-4xl:last:border dark:border-neutral-800 ${selected.includes(row.employeeId) ? "bg-primary-50/60 dark:bg-primary-900/20" : ""}`}
+                  >
                     {canBulkAct ? (
-                      <td className="p-3">
+                      <td className="p-3 @max-4xl:row-span-5 @max-4xl:p-0 @max-4xl:pt-0.5">
                         <input
                           type="checkbox"
                           aria-label={`Select ${row.employeeName}`}
@@ -760,7 +788,7 @@ export default function WorklistPage() {
                         />
                       </td>
                     ) : null}
-                    <td className="p-3">
+                    <td className="p-3 @max-4xl:col-start-2 @max-4xl:min-w-0 @max-4xl:p-0">
                       <Link href={subjectPath(row.employeeId)} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
                         {row.employeeName}
                       </Link>
@@ -770,9 +798,17 @@ export default function WorklistPage() {
                         <span data-testid="worklist-patient-id">{row.employeeId}</span> · {row.site}
                       </div>
                     </td>
-                    <td className="p-3 text-neutral-700 dark:text-neutral-300">{row.providerName ?? "—"}</td>
-                    {payersAvailable ? <td className="p-3 text-neutral-700 dark:text-neutral-300">{row.payerName ?? "—"}</td> : null}
-                    <td className="p-3">
+                    <td className="p-3 text-neutral-700 @max-4xl:col-start-2 @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300">
+                      <span className="text-neutral-500 @4xl:hidden dark:text-neutral-400">{providerFilterLabel()} · </span>
+                      <span>{row.providerName ?? "—"}</span>
+                    </td>
+                    {payersAvailable ? (
+                      <td className="p-3 text-neutral-700 @max-4xl:col-start-2 @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300">
+                        <span className="text-neutral-500 @4xl:hidden dark:text-neutral-400">{payerFilterLabel} · </span>
+                        <span>{row.payerName ?? "—"}</span>
+                      </td>
+                    ) : null}
+                    <td className="p-3 @max-4xl:col-start-2 @max-4xl:p-0 @max-4xl:pt-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge variant={row.highestPriority === "HIGH" ? "danger" : "warning"}>
                           {row.gapCount} {labelFor(PRIORITY_LABELS, row.highestPriority)}
@@ -795,7 +831,7 @@ export default function WorklistPage() {
                             <Link
                               key={gap.caseId}
                               href={`/cases/${encodeURIComponent(gap.caseId)}`}
-                              className={`rounded px-1.5 py-0.5 text-xs ${outcomeStatusClass(shown)} ${gap.otherAssignee ? "opacity-60" : ""}`}
+                              className={`rounded px-1.5 py-0.5 text-xs @max-4xl:py-1 ${outcomeStatusClass(shown)} ${gap.otherAssignee ? "opacity-60" : ""}`}
                               title={describe}
                               aria-label={describe}
                             >
@@ -814,7 +850,8 @@ export default function WorklistPage() {
                         ) : null}
                       </div>
                     </td>
-                    <td className="p-3 text-neutral-700 dark:text-neutral-300">
+                    <td className="p-3 text-neutral-700 @max-4xl:col-start-2 @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300">
+                      <span className="text-neutral-500 @4xl:hidden dark:text-neutral-400">Owner · </span>
                       {/*
                         "Mixed" is a real answer: a patient whose gaps belong to different people has
                         no owner, and naming one of them would say the rest are handled.
@@ -831,10 +868,10 @@ export default function WorklistPage() {
                               : `Mixed (${row.assignees.length})`}
                         </span>
                       ) : (
-                        (row.owner ?? "Unassigned")
+                        <span>{row.owner ?? "Unassigned"}</span>
                       )}
                     </td>
-                    <td className="p-3">
+                    <td className="p-3 @max-4xl:col-start-3 @max-4xl:row-start-1 @max-4xl:p-0">
                       <Link href={subjectPath(row.employeeId)} aria-label={`Open ${row.employeeName}`}>
                         <ChevronRight className="h-4 w-4 text-neutral-400" />
                       </Link>
