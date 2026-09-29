@@ -84,11 +84,11 @@ export function GlobalSearch() {
   }
 
   return (
-    <div ref={containerRef} className="relative hidden sm:block">
+    <div ref={containerRef} className="relative w-full sm:w-auto">
       <div className="relative">
         <svg
           aria-hidden="true"
-          className="absolute left-2.5 top-2 h-3.5 w-3.5 text-neutral-400"
+          className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -113,7 +113,7 @@ export function GlobalSearch() {
             }
           }}
           placeholder={`Search ${SUBJECT.plural}…`}
-          className="h-8 w-56 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          className="h-10 w-full rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 pl-7 pr-3 text-base sm:h-8 sm:w-56 sm:text-xs text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400 focus:border-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
         />
       </div>
 
@@ -128,7 +128,7 @@ export function GlobalSearch() {
       </span>
 
       {open && (results.length > 0 || (query.length >= 2 && !loading)) && (
-        <div className="absolute top-full mt-1 w-72 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-lg z-50 overflow-hidden">
+        <div className="absolute top-full mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-lg z-50 overflow-hidden">
           {results.length > 0 ? (
             <ul className="max-h-64 overflow-y-auto py-1">
               {results.map((r) => (

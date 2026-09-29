@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   BarChart3,
@@ -31,6 +31,7 @@ import {
   SidebarNavItem,
   SidebarProvider,
   SidebarToggle,
+  useSidebar,
 } from "@mieweb/ui";
 import { useAuth } from "@/components/auth-provider";
 import { ROLES, canManageCases, hasAnyRole } from "@/lib/rbac";
@@ -107,16 +108,64 @@ function RunStatusIndicator() {
           type="button"
           onClick={() => router.push("/runs")}
           title="A measure run is in progress — click to view"
-          className="hidden items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 sm:flex dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+          aria-label={`Run ${status.toLowerCase()}${evaluated > 0 ? `, ${evaluated} evaluated` : ""}`}
+          className="flex min-h-11 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 sm:min-h-0 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-          <span>
+          <span className="hidden sm:inline">
             Run {status.toLowerCase()}
             {evaluated > 0 ? ` · ${evaluated} evaluated` : ""}
           </span>
         </button>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The library Sidebar, made safe on a phone or tablet (#700). Below lg it is a drawer that slides off
+ * screen when closed, but it stayed in the tab order (all twelve nav links, reached by an invisible
+ * focus) and ignored Escape. Closed, it is now `inert` (out of the tab order and the accessibility tree,
+ * with no effect on its slide); Escape closes it; focus moves into it on open and back to the menu
+ * button on close; and it is `h-dvh`, so the footer's Log out is not under a phone browser's toolbar. On
+ * the collapsed desktop rail it marks itself so the brand and the user card show only their icons.
+ */
+function ShellSidebar({ children }: { children: React.ReactNode }) {
+  const { isMobileViewport, isMobileOpen, closeMobile, isCollapsed } = useSidebar();
+  useEffect(() => {
+    if (!isMobileViewport || !isMobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMobile();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isMobileViewport, isMobileOpen, closeMobile]);
+  // Focus follows the drawer: into its first link when it opens (it sits over the page, behind a
+  // backdrop), and back to the menu button when it closes, so a keyboard user is never left behind it.
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const wasOpen = useRef(false);
+  const closedDrawer = isMobileViewport && !isMobileOpen;
+  // `inert` is set on the library's <nav> directly: the component forwards no arbitrary attributes. A
+  // layout effect, so the attribute is off before the focus below runs.
+  useLayoutEffect(() => {
+    const nav = shellRef.current?.querySelector<HTMLElement>("nav[data-slot=sidebar]");
+    if (nav) nav.inert = closedDrawer;
+  }, [closedDrawer]);
+  useEffect(() => {
+    if (!isMobileViewport) return;
+    if (isMobileOpen) {
+      const items = shellRef.current?.querySelectorAll<HTMLElement>("[data-slot=sidebar-nav-item]");
+      const current = shellRef.current?.querySelector<HTMLElement>('[data-slot=sidebar-nav-item][aria-current="page"]');
+      (current ?? items?.[0])?.focus();
+    } else if (wasOpen.current) {
+      document.querySelector<HTMLElement>('[aria-label="Open navigation"]')?.focus();
+    }
+    wasOpen.current = isMobileOpen;
+  }, [isMobileViewport, isMobileOpen]);
+  return (
+    <div ref={shellRef} className="group/shell contents" data-rail={!isMobileViewport && isCollapsed ? "collapsed" : "open"}>
+      <Sidebar className="h-dvh">{children}</Sidebar>
+    </div>
   );
 }
 
@@ -192,6 +241,17 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     [sites],
   );
 
+  // The library's nav items carry no `aria-current`, so a screen reader could not tell which page is
+  // open; mark the active one after each render (#700).
+  useEffect(() => {
+    const items = document.querySelectorAll<HTMLElement>("[data-slot=sidebar-nav-item]");
+    items.forEach((el) => {
+      const href = `/${(el.dataset.testid ?? "").replace(/^nav-/, "")}`;
+      if (pathname?.startsWith(href) && href !== "/") el.setAttribute("aria-current", "page");
+      else el.removeAttribute("aria-current");
+    });
+  });
+
   if (!token) {
     return <div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />;
   }
@@ -217,7 +277,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       </a>
       <div className="flex h-dvh overflow-hidden bg-neutral-50 dark:bg-neutral-950">
         {/* ── Sidebar (handles its own mobile drawer + backdrop) ───────── */}
-        <Sidebar>
+        <ShellSidebar>
           <SidebarHeader>
             <button
               type="button"
@@ -227,7 +287,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-600 text-[10px] font-bold tracking-[0.2em] text-white">
                 WW
               </span>
-              <span className="flex flex-col leading-tight">
+              <span className="flex flex-col leading-tight group-data-[rail=collapsed]/shell:hidden">
                 <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{APP_BADGE}</span>
                 <span className="text-xs text-neutral-500 dark:text-neutral-400">{APP_SUBTITLE}</span>
               </span>
@@ -249,6 +309,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                     isActive={active}
                     badge={hasGap ? worklistGapCount : undefined}
                     onClick={() => router.push(target)}
+                    className="min-h-11 lg:min-h-0"
+                    data-testid={`nav-${item.href.slice(1)}`}
                   />
                 );
               })}
@@ -261,14 +323,14 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-[10px] font-bold text-white">
                   {user.email.charAt(0).toUpperCase()}
                 </div>
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 group-data-[rail=collapsed]/shell:hidden">
                   <p className="truncate text-xs font-medium text-neutral-900 dark:text-neutral-100">{user.email}</p>
                   <p className="text-[10px] text-neutral-500 dark:text-neutral-400">{roleLabel}</p>
                 </div>
                 <button
                   type="button"
                   onClick={logout}
-                  className="rounded-lg p-1.5 text-neutral-500 transition hover:bg-neutral-200 hover:text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-neutral-500 transition lg:h-auto lg:w-auto lg:p-1.5 hover:bg-neutral-200 hover:text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
                   aria-label="Log out"
                 >
                   <LogOut aria-hidden="true" className="h-3.5 w-3.5" />
@@ -276,20 +338,20 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               </div>
             </SidebarFooter>
           )}
-        </Sidebar>
+        </ShellSidebar>
 
         {/* ── Main area (header + content) ─────────────────────────────── */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <AppHeader>
             <AppHeaderSection align="left" className="min-w-0 flex-1 gap-2">
               <SidebarToggle />
-              <SidebarMobileToggle />
+              <SidebarMobileToggle className="inline-flex h-11 w-11 items-center justify-center" />
               <div className="min-w-0 flex-1">
                 <GlobalSearch />
               </div>
             </AppHeaderSection>
             <AppHeaderSection align="right" className="gap-2">
-              <GlobalFilterGroup className="hidden lg:flex">
+              <GlobalFilterGroup className="hidden xl:flex">
                 <Select
                   aria-label="Filter by site"
                   value={siteId}
@@ -314,8 +376,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
             </AppHeaderSection>
           </AppHeader>
 
-          {/* Mobile filters bar (header filters are lg-only) */}
-          <div className="border-b border-neutral-200 bg-white px-4 py-2 lg:hidden dark:border-neutral-800 dark:bg-neutral-900">
+          {/* Filters bar below xl. The header's own filters start at xl: between 1024 and 1279px the
+              search, both filters, the run pill and the theme controls did not fit one row (#700). */}
+          <div className="border-b border-neutral-200 bg-white px-4 py-2 xl:hidden dark:border-neutral-800 dark:bg-neutral-900">
             <GlobalFilterGroup className="w-full">
               <Select
                 aria-label="Filter by site"
