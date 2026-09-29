@@ -822,7 +822,9 @@ export default function CasesPage() {
       ) : null}
 
       {canBulkAct && selectedCaseIds.length > 0 ? (
-        <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
+        // Sticks to the top of a phone screen, as on the Work list and roster (#700): cards run several
+        // screens, and the bar would otherwise scroll away from the ones being ticked.
+        <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 max-md:sticky max-md:top-0 max-md:z-20 max-md:shadow-md dark:border-primary-800 dark:bg-primary-900/20 max-md:dark:bg-neutral-900">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">{selectedCaseIds.length} selected</span>
             <Select
@@ -900,9 +902,10 @@ export default function CasesPage() {
             <div key={item.caseId} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm md:p-5 dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-start justify-between gap-3">
                 {canBulkAct ? (
-                  <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+                  <label className="flex min-h-11 items-center gap-2 text-xs text-neutral-600 md:min-h-0 dark:text-neutral-400">
                     <input
                       type="checkbox"
+                      className="h-5 w-5 md:h-auto md:w-auto"
                       aria-label={`Select ${item.employeeName}`}
                       checked={selectedCaseIds.includes(item.caseId)}
                       onChange={() => toggleCase(item.caseId)}

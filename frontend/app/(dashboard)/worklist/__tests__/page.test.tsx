@@ -469,7 +469,9 @@ describe("WorklistPage on a phone or narrow tablet (#700)", () => {
     expect(owner.previousElementSibling).toHaveTextContent(/^Owner ·$/);
     expect(owner.previousElementSibling).toHaveClass("@4xl:hidden");
     // The header row reflows to a select-all bar: its own caption, the column headings hidden.
-    expect(screen.getByText("Select all on this page")).toHaveClass("@4xl:hidden");
+    // Its visible caption is its accessible name (WCAG 2.5.3, label in name).
+    const selectAll = screen.getByRole("checkbox", { name: /Select all .* on this page/ });
+    expect(screen.getByText(selectAll.getAttribute("aria-label")!)).toHaveClass("@4xl:hidden");
     expect(screen.getByRole("columnheader", { name: "Owner" })).toHaveClass("@max-4xl:hidden");
   });
 

@@ -738,14 +738,17 @@ export default function WorklistPage() {
             <tr className="@max-4xl:flex @max-4xl:items-center">
               {canBulkAct ? (
                 <th className="w-10 p-3 @max-4xl:w-auto">
-                  <label className="inline-flex items-center gap-2">
+                  {/* The visible caption is the start of the accessible name (WCAG 2.5.3), so saying
+                      "Select all" to voice control finds it. */}
+                  <label className="inline-flex items-center gap-2 @max-4xl:min-h-11">
                     <input
                       type="checkbox"
+                      className="@max-4xl:h-5 @max-4xl:w-5"
                       aria-label={`Select all ${SUBJECT.plural} on this page`}
                       checked={allSelected}
                       onChange={(e) => setSelected(e.target.checked ? rows.map((r) => r.employeeId) : [])}
                     />
-                    <span className="font-medium normal-case tracking-normal @4xl:hidden">Select all on this page</span>
+                    <span className="font-medium normal-case tracking-normal @4xl:hidden">Select all {SUBJECT.plural} on this page</span>
                   </label>
                 </th>
               ) : null}
@@ -759,36 +762,45 @@ export default function WorklistPage() {
           </thead>
           <tbody className="@max-4xl:grid @max-4xl:gap-3 @max-4xl:p-3">
             {loading ? (
-              <SkeletonRow />
+              // In card mode the placeholder cells wrap inside the card instead of widening it.
+              <SkeletonRow className="@max-4xl:flex @max-4xl:flex-wrap @max-4xl:border-0" />
             ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="p-6 text-center text-neutral-500 dark:text-neutral-400">
+              <tr className="@max-4xl:block">
+                <td colSpan={7} className="p-6 text-center text-neutral-500 @max-4xl:block dark:text-neutral-400">
                   No {SUBJECT.plural} with open gaps match these filters.
                 </td>
               </tr>
             ) : (
               rows.map((row) => {
                 const isExpanded = expanded.includes(row.employeeId);
+                // Card-mode columns: [checkbox] | body | open link. Without bulk rights there is no
+                // checkbox column, so the body starts in the first.
+                const cardBody = canBulkAct ? "@max-4xl:col-start-2" : "@max-4xl:col-start-1";
+                const cardEnd = canBulkAct ? "@max-4xl:col-start-3" : "@max-4xl:col-start-2";
                 return (
                   <tr
                     key={row.employeeId}
-                    className={`border-b border-neutral-100 align-top last:border-0 @max-4xl:grid @max-4xl:grid-cols-[auto_minmax(0,1fr)_auto] @max-4xl:gap-x-3 @max-4xl:gap-y-1 @max-4xl:rounded-lg @max-4xl:border @max-4xl:border-neutral-200 @max-4xl:p-3 @max-4xl:last:border dark:border-neutral-800 ${selected.includes(row.employeeId) ? "bg-primary-50/60 dark:bg-primary-900/20" : ""}`}
+                    className={`border-b border-neutral-100 align-top last:border-0 @max-4xl:grid ${canBulkAct ? "@max-4xl:grid-cols-[auto_minmax(0,1fr)_auto]" : "@max-4xl:grid-cols-[minmax(0,1fr)_auto]"} @max-4xl:gap-x-3 @max-4xl:gap-y-1 @max-4xl:rounded-lg @max-4xl:border @max-4xl:border-neutral-200 @max-4xl:p-3 @max-4xl:last:border dark:border-neutral-800 ${selected.includes(row.employeeId) ? "bg-primary-50/60 dark:bg-primary-900/20" : ""}`}
                   >
                     {canBulkAct ? (
-                      <td className="p-3 @max-4xl:row-span-5 @max-4xl:p-0 @max-4xl:pt-0.5">
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${row.employeeName}`}
-                          checked={selected.includes(row.employeeId)}
-                          onChange={(e) =>
-                            setSelected((existing) =>
-                              e.target.checked ? [...existing, row.employeeId] : existing.filter((id) => id !== row.employeeId),
-                            )
-                          }
-                        />
+                      <td className={`p-3 @max-4xl:p-0 ${payersAvailable ? "@max-4xl:row-span-5" : "@max-4xl:row-span-4"}`}>
+                        {/* A 44px target on a card: a bare checkbox is a 13px tap on a phone. */}
+                        <label className="inline-flex items-center justify-center @max-4xl:-m-3 @max-4xl:min-h-11 @max-4xl:min-w-11">
+                          <input
+                            type="checkbox"
+                            className="@max-4xl:h-5 @max-4xl:w-5"
+                            aria-label={`Select ${row.employeeName}`}
+                            checked={selected.includes(row.employeeId)}
+                            onChange={(e) =>
+                              setSelected((existing) =>
+                                e.target.checked ? [...existing, row.employeeId] : existing.filter((id) => id !== row.employeeId),
+                              )
+                            }
+                          />
+                        </label>
                       </td>
                     ) : null}
-                    <td className="p-3 @max-4xl:col-start-2 @max-4xl:min-w-0 @max-4xl:p-0">
+                    <td className={`p-3 ${cardBody} @max-4xl:min-w-0 @max-4xl:p-0`}>
                       <Link href={subjectPath(row.employeeId)} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
                         {row.employeeName}
                       </Link>
@@ -798,17 +810,17 @@ export default function WorklistPage() {
                         <span data-testid="worklist-patient-id">{row.employeeId}</span> · {row.site}
                       </div>
                     </td>
-                    <td className="p-3 text-neutral-700 @max-4xl:col-start-2 @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300">
+                    <td className={`p-3 text-neutral-700 ${cardBody} @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300`}>
                       <span className="text-neutral-500 @4xl:hidden dark:text-neutral-400">{providerFilterLabel()} · </span>
                       <span>{row.providerName ?? "—"}</span>
                     </td>
                     {payersAvailable ? (
-                      <td className="p-3 text-neutral-700 @max-4xl:col-start-2 @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300">
+                      <td className={`p-3 text-neutral-700 ${cardBody} @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300`}>
                         <span className="text-neutral-500 @4xl:hidden dark:text-neutral-400">{payerFilterLabel} · </span>
                         <span>{row.payerName ?? "—"}</span>
                       </td>
                     ) : null}
-                    <td className="p-3 @max-4xl:col-start-2 @max-4xl:p-0 @max-4xl:pt-1">
+                    <td className={`p-3 ${cardBody} @max-4xl:p-0 @max-4xl:pt-1`}>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge variant={row.highestPriority === "HIGH" ? "danger" : "warning"}>
                           {row.gapCount} {labelFor(PRIORITY_LABELS, row.highestPriority)}
@@ -850,7 +862,7 @@ export default function WorklistPage() {
                         ) : null}
                       </div>
                     </td>
-                    <td className="p-3 text-neutral-700 @max-4xl:col-start-2 @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300">
+                    <td className={`p-3 text-neutral-700 ${cardBody} @max-4xl:p-0 @max-4xl:text-xs dark:text-neutral-300`}>
                       <span className="text-neutral-500 @4xl:hidden dark:text-neutral-400">Owner · </span>
                       {/*
                         "Mixed" is a real answer: a patient whose gaps belong to different people has
@@ -871,7 +883,7 @@ export default function WorklistPage() {
                         <span>{row.owner ?? "Unassigned"}</span>
                       )}
                     </td>
-                    <td className="p-3 @max-4xl:col-start-3 @max-4xl:row-start-1 @max-4xl:p-0">
+                    <td className={`p-3 ${cardEnd} @max-4xl:row-start-1 @max-4xl:p-0`}>
                       <Link href={subjectPath(row.employeeId)} aria-label={`Open ${row.employeeName}`}>
                         <ChevronRight className="h-4 w-4 text-neutral-400" />
                       </Link>

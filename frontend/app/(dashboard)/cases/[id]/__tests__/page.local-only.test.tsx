@@ -63,16 +63,10 @@ const NOT_SENT = /not sent to WebChart/i;
 /**
  * §8E — every control that writes only a WorkWell row must say so.
  *
- * **Why this test is shaped around the DESKTOP button specifically.** The case page renders two
- * layouts: a `md:hidden` column and a `hidden md:grid` one. jsdom applies no media queries, so both
- * are in the tree and a bare `getByText(/not sent to WebChart/)` passes when the notice exists in
- * only one of them — which is exactly the bug review caught: the first version of this change
- * labelled the mobile column and left every desktop user, the primary audience, with an unlabelled
- * "Send outreach".
- *
- * So the assertion is anchored to the desktop button and walks up to its shared container. The two
- * layouts spell the button differently — "Send Outreach" in the mobile column, "Send outreach" in
- * the desktop one — which is what makes them separable here at all.
+ * The notice is checked beside the button it labels, walking up to their shared container, not with a
+ * bare `getByText`: the page once had a phone layout and a desktop one, and a notice present in only one
+ * of them passed a page-wide query. There is one layout now (#700); the anchored check still catches a
+ * notice that drifts away from its button.
  */
 describe("CaseDetailPage — local-only action notices", () => {
   beforeEach(() => {

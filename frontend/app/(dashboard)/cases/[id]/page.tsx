@@ -769,7 +769,7 @@ export default function CaseDetailPage() {
                   </Button>
                 </div>
                 {/* §8E on the DESKTOP path. The first version of this change put the notice only in
-                    the `md:hidden` column above, so every desktop user — which is most of them — saw
+                    the phone layout this page used to have, so every desktop user — which is most of them — saw
                     the same unlabelled "Send outreach" the change existed to label. Sits under the
                     row rather than inside it because the row is `flex flex-wrap` and a paragraph
                     between buttons wraps as a flex item. "Schedule Appointment" carries its own
@@ -870,9 +870,9 @@ export default function CaseDetailPage() {
                     ) : null}
                     <p className="mt-2 whitespace-pre-wrap">{outreachPreview.bodyText}</p>
                   </div>
-                ) : (
+                ) : canManage ? (
                   <p className="mt-3 text-xs text-amber-800 dark:text-amber-300">Preview the outreach message before sending.</p>
-                )}
+                ) : null}
                 {canManage && canEngineering && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => void updateDeliveryStatus("QUEUED")} disabled={acting !== null}>
@@ -904,12 +904,13 @@ export default function CaseDetailPage() {
                   <p className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">These are the code sets the CQL was evaluating against for this measure version.</p>
                   <div className="mt-3 space-y-2">
                     {linkedValueSets.map((vs) => (
-                      <div key={vs.id} className="flex items-center justify-between rounded-xl border border-indigo-200 bg-white dark:bg-neutral-900 px-3 py-2">
-                        <div>
+                      <div key={vs.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-white dark:bg-neutral-900 px-3 py-2">
+                        {/* An OID has no break point: on a phone it pushed the page sideways (#700). */}
+                        <div className="min-w-0">
                           <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">{vs.name}</p>
-                          <p className="font-mono text-[10px] text-neutral-500 dark:text-neutral-400">{vs.oid}</p>
+                          <p className="break-all font-mono text-[10px] text-neutral-500 dark:text-neutral-400">{vs.oid}</p>
                         </div>
-                        <div className="flex items-center gap-2 text-right">
+                        <div className="flex shrink-0 items-center gap-2 text-right">
                           <span className="text-[10px] text-neutral-500 dark:text-neutral-400">{vs.codeCount} code{vs.codeCount !== 1 ? "s" : ""}</span>
                           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${vs.resolvabilityStatus === "RESOLVED" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
                             {vs.resolvabilityLabel}
@@ -1257,8 +1258,9 @@ function Info({ label, value }: { label: string; value: ReactNode }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4">
-      <dt className="text-neutral-500 dark:text-neutral-400">{label}</dt>
-      <dd className="text-right font-medium text-neutral-900 dark:text-neutral-100">{value}</dd>
+      <dt className="shrink-0 text-neutral-500 dark:text-neutral-400">{label}</dt>
+      {/* An assignee or closer is an email, which has no break point on a phone (#700). */}
+      <dd className="min-w-0 text-right font-medium [overflow-wrap:anywhere] text-neutral-900 dark:text-neutral-100">{value}</dd>
     </div>
   );
 }
