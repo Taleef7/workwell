@@ -16,7 +16,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   accordion drew Preview into the hidden desktop panel, sent without a preview, and had no Mark Resolved,
   scheduling or upload. Work list rows become cards by container query (one table, same cells) and the
   filters fold behind "Filters · N active"; roster and Cases cards take selection, so a phone can assign.
-  Next: the shell (part 3).
+- **The shell on a phone or tablet (#700, part 3).** The closed nav drawer kept its twelve links in the
+  tab order and ignored Escape; it is now `inert` when closed, focus moves to the current page on open and
+  back to the menu button on close, and the current page carries `aria-current`. Search shows on phones
+  (16px, so iOS does not zoom); header filters start at xl, where 1024–1279px no longer overflowed; the
+  menu button, nav rows, Log out and the password toggle are 44px targets.
 
 ## 2026-09-28
 

@@ -12,9 +12,10 @@ vi.mock("@/components/auth-provider", () => ({
   useAuth: () => ({ user, token: "mock-token", logout: vi.fn() }),
 }));
 
+let pathname = "/worklist";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => "/worklist",
+  usePathname: () => pathname,
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -24,18 +25,32 @@ const apiMock = {
 };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
-/** The sidebar decides phone vs desktop with `(max-width: 1023px)`; answer it as a phone or a desktop. */
-function viewport(phone: boolean) {
+/**
+ * The sidebar decides phone vs desktop with `(max-width: 1023px)`. The stub answers it as a phone or a
+ * desktop and keeps the `change` listeners, so a test can rotate the device mid-session.
+ */
+let phone = false;
+const listeners = new Set<(e: { matches: boolean }) => void>();
+function viewport(isPhone: boolean) {
+  phone = isPhone;
   vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: phone ? query.includes("max-width: 1023px") : false,
+    get matches() {
+      return phone ? query.includes("max-width: 1023px") : false;
+    },
     media: query,
     onchange: null,
     addListener: vi.fn(),
     removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
+    addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => {
+      if (query.includes("max-width: 1023px")) listeners.add(fn);
+    },
+    removeEventListener: (_: string, fn: (e: { matches: boolean }) => void) => listeners.delete(fn),
     dispatchEvent: vi.fn(),
   }));
+}
+async function rotate(isPhone: boolean) {
+  phone = isPhone;
+  await act(async () => listeners.forEach((fn) => fn({ matches: isPhone })));
 }
 
 const renderShell = () =>
@@ -45,7 +60,11 @@ const renderShell = () =>
     </DashboardLayout>,
   );
 
-beforeEach(() => setPublicDemo(false));
+beforeEach(() => {
+  setPublicDemo(false);
+  pathname = "/worklist";
+  listeners.clear();
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe("DashboardLayout shell on a phone (#700)", () => {
@@ -53,8 +72,10 @@ describe("DashboardLayout shell on a phone (#700)", () => {
     viewport(true);
     renderShell();
     const nav = screen.getByRole("navigation", { name: "Main navigation" });
-    // Closed: inert, so its twelve links are not reachable by an invisible Tab.
+    // Closed: inert, so its twelve links are not reachable by an invisible Tab. Loading the page moves
+    // no focus: the menu button is focused only after the drawer was open.
     expect(nav.inert).toBe(true);
+    expect(document.activeElement).toBe(document.body);
 
     const toggle = screen.getByRole("button", { name: "Open navigation" });
     await act(async () => fireEvent.click(toggle));
@@ -66,6 +87,47 @@ describe("DashboardLayout shell on a phone (#700)", () => {
     await act(async () => fireEvent.keyDown(document, { key: "Escape" }));
     expect(nav.inert).toBe(true);
     expect(document.activeElement).toBe(toggle);
+  });
+
+  it("makes the page behind the open drawer inert, and gives it back on close", async () => {
+    viewport(true);
+    renderShell();
+    const main = document.getElementById("shell-main")!;
+    const skip = screen.getByText("Skip to content");
+    expect(main.inert).toBe(false);
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open navigation" })));
+    expect(main.inert).toBe(true);
+    expect(skip.inert).toBe(true);
+
+    await act(async () => fireEvent.keyDown(document, { key: "Escape" }));
+    expect(main.inert).toBe(false);
+    expect(skip.inert).toBe(false);
+  });
+
+  it("closes the drawer on a nav tap and returns focus to the menu button", async () => {
+    viewport(true);
+    renderShell();
+    const toggle = screen.getByRole("button", { name: "Open navigation" });
+    await act(async () => fireEvent.click(toggle));
+    const cases = screen.getByTestId("nav-cases");
+    cases.focus();
+    await act(async () => fireEvent.click(cases));
+    expect(screen.getByRole("navigation", { name: "Main navigation" }).inert).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open navigation" }));
+  });
+
+  it("does not pull focus to the menu button after a rotation to desktop and back", async () => {
+    viewport(true);
+    renderShell();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open navigation" })));
+    // Tablet rotated to landscape: the library closes the drawer, and the user starts typing.
+    await rotate(false);
+    const search = screen.getByRole("textbox", { name: /search/i });
+    search.focus();
+    await rotate(true);
+    expect(document.activeElement).toBe(search);
+    expect(document.getElementById("shell-main")!.inert).toBe(false);
   });
 
   it("gives the menu button a 44px target and shows search on a phone", () => {
@@ -84,8 +146,17 @@ describe("DashboardLayout shell on a desktop", () => {
     viewport(false);
     renderShell();
     expect(screen.getByRole("navigation", { name: "Main navigation" }).inert).toBe(false);
+    expect(document.getElementById("shell-main")!.inert).toBe(false);
     expect(screen.getByTestId("nav-worklist")).toHaveAttribute("aria-current", "page");
     expect(screen.getByTestId("nav-cases")).not.toHaveAttribute("aria-current");
+  });
+
+  it("marks the section a nested page belongs to", () => {
+    viewport(false);
+    pathname = "/cases/abc-123";
+    renderShell();
+    expect(screen.getByTestId("nav-cases")).toHaveAttribute("aria-current", "page");
+    expect(screen.getByTestId("nav-worklist")).not.toHaveAttribute("aria-current");
   });
 
   it("puts the header's filters at xl, so 1024 to 1279px uses the filter bar below it", () => {

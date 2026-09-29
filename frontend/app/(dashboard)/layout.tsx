@@ -89,6 +89,13 @@ const DATE_PRESETS = [
   { value: "all", label: "All time" },
 ] as const;
 
+/** A nav item is current on its own page and every page under it (`/cases/123` is Cases). */
+function isNavActive(pathname: string | null, href: string): boolean {
+  return !!pathname && (pathname === href || pathname.startsWith(`${href}/`));
+}
+
+const navTestId = (href: string) => `nav-${href.slice(1)}`;
+
 /** Global "a measure run is in progress" pill — visible on every dashboard screen, persists across
  *  navigation and reloads via RunStatusProvider, and links to /runs. */
 function RunStatusIndicator() {
@@ -109,7 +116,7 @@ function RunStatusIndicator() {
           onClick={() => router.push("/runs")}
           title="A measure run is in progress — click to view"
           aria-label={`Run ${status.toLowerCase()}${evaluated > 0 ? `, ${evaluated} evaluated` : ""}`}
-          className="flex min-h-11 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 sm:min-h-0 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
+          className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100 sm:min-h-0 sm:min-w-0 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/40"
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
           <span className="hidden sm:inline">
@@ -135,32 +142,43 @@ function ShellSidebar({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isMobileViewport || !isMobileOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMobile();
+      if (e.key === "Escape" && !e.defaultPrevented) closeMobile();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [isMobileViewport, isMobileOpen, closeMobile]);
-  // Focus follows the drawer: into its first link when it opens (it sits over the page, behind a
-  // backdrop), and back to the menu button when it closes, so a keyboard user is never left behind it.
+  // The open drawer is modal: it sits over the page behind a backdrop, so the page (and the skip link)
+  // is inert while it is open, and focus moves into it. When it closes, focus goes back to the menu
+  // button, but only if it was inside the drawer: a close the user did not make (a rotation to desktop
+  // width and back) must not pull focus out of whatever they are typing in.
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const wasOpen = useRef(false);
+  const returnFocus = useRef(false);
   const closedDrawer = isMobileViewport && !isMobileOpen;
+  const openDrawer = isMobileViewport && isMobileOpen;
   // `inert` is set on the library's <nav> directly: the component forwards no arbitrary attributes. A
-  // layout effect, so the attribute is off before the focus below runs.
+  // layout effect, so where focus was is read before `inert` blurs it, and the attribute is off before
+  // the focus below runs.
   useLayoutEffect(() => {
     const nav = shellRef.current?.querySelector<HTMLElement>("nav[data-slot=sidebar]");
-    if (nav) nav.inert = closedDrawer;
-  }, [closedDrawer]);
+    if (nav) {
+      if (closedDrawer) returnFocus.current = nav.contains(document.activeElement);
+      nav.inert = closedDrawer;
+    }
+    for (const id of ["shell-main", "skip-link"]) {
+      const el = document.getElementById(id);
+      if (el) el.inert = openDrawer;
+    }
+  }, [closedDrawer, openDrawer]);
   useEffect(() => {
     if (!isMobileViewport) return;
     if (isMobileOpen) {
       const items = shellRef.current?.querySelectorAll<HTMLElement>("[data-slot=sidebar-nav-item]");
       const current = shellRef.current?.querySelector<HTMLElement>('[data-slot=sidebar-nav-item][aria-current="page"]');
       (current ?? items?.[0])?.focus();
-    } else if (wasOpen.current) {
+    } else if (returnFocus.current) {
+      returnFocus.current = false;
       document.querySelector<HTMLElement>('[aria-label="Open navigation"]')?.focus();
     }
-    wasOpen.current = isMobileOpen;
   }, [isMobileViewport, isMobileOpen]);
   return (
     <div ref={shellRef} className="group/shell contents" data-rail={!isMobileViewport && isCollapsed ? "collapsed" : "open"}>
@@ -241,15 +259,22 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     [sites],
   );
 
-  // The library's nav items carry no `aria-current`, so a screen reader could not tell which page is
-  // open; mark the active one after each render (#700).
+  const navItems = nav.filter((item) => {
+    if (ENGINEERING_HREFS.has(item.href) && !canSeeEngineering(user?.role)) {
+      return false;
+    }
+    return !("roles" in item && item.roles) || hasAnyRole(user?.role, item.roles);
+  });
+
+  // The library's nav items carry no `aria-current` and forward no attributes, so a screen reader could
+  // not tell which page is open; mark the active one after each render (#700). Cheap: a dozen nodes.
   useEffect(() => {
-    const items = document.querySelectorAll<HTMLElement>("[data-slot=sidebar-nav-item]");
-    items.forEach((el) => {
-      const href = `/${(el.dataset.testid ?? "").replace(/^nav-/, "")}`;
-      if (pathname?.startsWith(href) && href !== "/") el.setAttribute("aria-current", "page");
+    for (const item of navItems) {
+      const el = document.querySelector<HTMLElement>(`[data-testid="${navTestId(item.href)}"]`);
+      if (!el) continue;
+      if (isNavActive(pathname, item.href)) el.setAttribute("aria-current", "page");
       else el.removeAttribute("aria-current");
-    });
+    }
   });
 
   if (!token) {
@@ -258,18 +283,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
   const showDateRange = usesDateRange(pathname);
 
-  const navItems = nav.filter((item) => {
-    if (ENGINEERING_HREFS.has(item.href) && !canSeeEngineering(user?.role)) {
-      return false;
-    }
-    return !("roles" in item && item.roles) || hasAnyRole(user?.role, item.roles);
-  });
-
   return (
     <SidebarProvider>
       {/* Skip-to-content: the first focusable element, visually hidden until focused, lets keyboard users
           jump past the 12-item nav on every page (WCAG 2.4.1). */}
       <a
+        id="skip-link"
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-neutral-900 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:shadow-lg dark:focus:bg-white dark:focus:text-neutral-900"
       >
@@ -297,7 +316,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           <SidebarContent>
             <SidebarNav>
               {navItems.map((item) => {
-                const active = pathname?.startsWith(item.href) ?? false;
+                const active = isNavActive(pathname, item.href);
                 const Icon = item.icon;
                 const hasGap = item.href === "/worklist" && worklistGapCount > 0;
                 const target = sharedFilterQuery ? `${item.href}?${sharedFilterQuery}` : item.href;
@@ -310,7 +329,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                     badge={hasGap ? worklistGapCount : undefined}
                     onClick={() => router.push(target)}
                     className="min-h-11 lg:min-h-0"
-                    data-testid={`nav-${item.href.slice(1)}`}
+                    data-testid={navTestId(item.href)}
                   />
                 );
               })}
@@ -319,7 +338,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
           {user && (
             <SidebarFooter>
-              <div className="flex items-center gap-3 rounded-xl bg-neutral-50 px-3 py-2.5 dark:bg-neutral-800">
+              <div className="flex items-center gap-3 rounded-xl bg-neutral-50 px-3 py-2.5 group-data-[rail=collapsed]/shell:flex-col group-data-[rail=collapsed]/shell:gap-2 group-data-[rail=collapsed]/shell:px-1 dark:bg-neutral-800">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-[10px] font-bold text-white">
                   {user.email.charAt(0).toUpperCase()}
                 </div>
@@ -341,11 +360,11 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         </ShellSidebar>
 
         {/* ── Main area (header + content) ─────────────────────────────── */}
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div id="shell-main" className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <AppHeader>
             <AppHeaderSection align="left" className="min-w-0 flex-1 gap-2">
               <SidebarToggle />
-              <SidebarMobileToggle className="inline-flex h-11 w-11 items-center justify-center" />
+              <SidebarMobileToggle className="inline-flex h-11 w-11 items-center justify-center focus:ring-0 focus-visible:ring-2" />
               <div className="min-w-0 flex-1">
                 <GlobalSearch />
               </div>

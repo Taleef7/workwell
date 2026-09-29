@@ -128,7 +128,7 @@ export function GlobalSearch() {
       </span>
 
       {open && (results.length > 0 || (query.length >= 2 && !loading)) && (
-        <div className="absolute top-full mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-lg z-50 overflow-hidden">
+        <div className="absolute inset-x-0 top-full mt-1 sm:right-auto sm:w-72 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-lg z-50 overflow-hidden">
           {results.length > 0 ? (
             <ul className="max-h-64 overflow-y-auto py-1">
               {results.map((r) => (
