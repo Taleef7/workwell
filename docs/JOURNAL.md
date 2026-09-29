@@ -5,6 +5,15 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-09-29
+
+- **No page scrolls sideways on a phone or tablet (#700, part 1 of 3).** At 375px Programs slid sideways
+  by 506px (121 at 768), Campaigns 316, Hierarchy 300, Runs 211, the patient page 113, Cases 80: chart
+  tables hidden with `sr-only` still sized to their content, rows that did not wrap, selects as wide as
+  their longest option. Wide tables now scroll inside a labelled `ScrollRegion` with edge shadows; content
+  caps at 1600px. A Playwright spec checks every main route at 375 and 768 (e2e ran only at 1280).
+  Next: phone cards and selection (part 2), then the shell (part 3).
+
 ## 2026-09-28
 
 - **No invented vaccination history (#628).** The immunization forecast made up each person's doses from a

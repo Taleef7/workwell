@@ -293,7 +293,7 @@ export default function HierarchyPage() {
                     key={key}
                     className="group border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50"
                   >
-                    <td className="sticky left-0 z-[1] bg-white px-2 py-2 text-neutral-900 group-hover:bg-neutral-50 sm:px-4 dark:bg-neutral-900 dark:text-neutral-100 dark:group-hover:bg-neutral-800">
+                    <td className="sticky left-0 z-[1] bg-white px-2 py-2 text-neutral-900 group-hover:bg-neutral-50 sm:px-4 dark:bg-neutral-900 dark:text-neutral-100 dark:group-hover:bg-[color-mix(in_oklab,var(--color-neutral-800)_50%,var(--color-neutral-900))]">
                       {/* Indent per level: 0.75rem on a phone, 1.25rem from sm up. */}
                       <div
                         className="flex items-center gap-2 pl-[calc(var(--depth)*0.75rem)] sm:pl-[calc(var(--depth)*1.25rem)]"

@@ -281,7 +281,7 @@ export default function RunsPage() {
   function selectRunFromList(runId: string) {
     setSelectedRunId(runId);
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    if (!window.matchMedia("(max-width: 1279.98px)").matches) return;
+    if (!window.matchMedia("not all and (min-width: 80rem)").matches) return;
     const panel = runDetailRef.current;
     if (!panel || typeof panel.scrollIntoView !== "function") return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

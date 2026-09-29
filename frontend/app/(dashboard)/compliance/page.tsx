@@ -841,7 +841,7 @@ export default function CompliancePage() {
         ) : null}
 
         {/* The fade matches the sticky Patient column's dark background (neutral-950, not the card's
-            neutral-900); `!` because the cue's own dark rule is unlayered. */}
+            neutral-900); a utility overrides the cue's own value, which sits in the components layer. */}
         <ScrollRegion
           label="Compliance roster table"
           className="hidden rounded-lg border border-neutral-200 md:block dark:border-neutral-800 dark:[--scroll-cue-bg:var(--color-neutral-950)]"

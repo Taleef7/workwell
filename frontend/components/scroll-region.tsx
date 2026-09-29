@@ -9,7 +9,9 @@ import { cn } from "@/lib/utils";
  * region is labelled and focusable so a keyboard user can scroll it with the arrow keys.
  *
  * Pass the container's look (border, radius, background) through `className`; a background other than
- * the page's default card colour should also set `--scroll-cue-bg` so the fades match it.
+ * the page's default card colour should also set `--scroll-cue-bg` so the fades match it. The shadows
+ * are the region's own background, so an opaque cell covers them: a table with a sticky first column
+ * shows only the right-hand cue.
  */
 export function ScrollRegion({
   label,

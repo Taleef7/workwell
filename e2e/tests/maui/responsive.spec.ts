@@ -22,20 +22,27 @@ const VIEWPORTS = [
   { name: "tablet", width: 768, height: 1024 },
 ] as const;
 
-/** Each route with the element that means its data has painted, so the page is measured loaded. */
-const ROUTES: { path: string; ready: (page: Page) => ReturnType<Page["locator"]> }[] = [
-  { path: "/programs", ready: (p) => p.getByText(/Open cases \(\d+\)/).first() },
-  { path: "/programs/hierarchy", ready: (p) => p.getByText("All Systems").first() },
-  { path: "/programs/cms125", ready: (p) => p.getByText(/CMS125/).first() },
-  { path: "/worklist", ready: (p) => p.locator("a[href^='/patients/']").first() },
-  { path: "/compliance", ready: (p) => p.locator("a[href^='/patients/']").filter({ visible: true }).first() },
-  { path: "/cases", ready: (p) => p.getByText(/ of [\d,]+ cases/).first() },
-  { path: "/lists", ready: (p) => p.getByRole("heading", { name: /Attributed lists/i }) },
-  { path: "/people", ready: (p) => p.locator("a[href^='/people/']").first() },
-  { path: "/orders", ready: (p) => p.getByRole("heading").first() },
-  { path: "/campaigns", ready: (p) => p.getByRole("heading").first() },
-  { path: "/runs", ready: (p) => p.getByRole("heading").first() },
-  { path: "/admin", ready: (p) => p.getByRole("heading").first() },
+/**
+ * Each route with a wait for its DATA, not its heading: a heading paints before any fetch, and a page
+ * measured before its table or its options arrive passes whatever the layout does.
+ */
+const T = { timeout: 30_000 };
+const ROUTES: { path: string; ready: (page: Page) => Promise<void> }[] = [
+  { path: "/programs", ready: (p) => expect(p.getByText(/Open cases \(\d+\)/).first()).toBeVisible(T) },
+  // Exact and inside the table: the System filter's "All systems" <option> comes first in the DOM.
+  { path: "/programs/hierarchy", ready: (p) => expect(p.getByRole("table").getByText("All Systems", { exact: true })).toBeVisible(T) },
+  { path: "/programs/cms125", ready: (p) => expect(p.getByText(/CMS125/).first()).toBeVisible(T) },
+  { path: "/worklist", ready: (p) => expect(p.locator("a[href^='/patients/']").first()).toBeVisible(T) },
+  { path: "/compliance", ready: (p) => expect(p.locator("a[href^='/patients/']").filter({ visible: true }).first()).toBeVisible(T) },
+  // "N of M cases" only when there is a next page; "N cases loaded" otherwise.
+  { path: "/cases", ready: (p) => expect(p.getByText(/\d+ of [\d,]+ cases|\d+ cases? loaded/).first()).toBeVisible(T) },
+  { path: "/lists", ready: (p) => expect(p.getByRole("button", { name: /^(Open|Hide)$/ }).or(p.getByText("No attributed lists yet.")).first()).toBeVisible(T) },
+  { path: "/people", ready: (p) => expect(p.locator("a[href^='/people/']").first()).toBeVisible(T) },
+  { path: "/orders", ready: (p) => expect(p.locator("table").or(p.getByText("No suppressed orders on this page.")).first()).toBeVisible(T) },
+  // The measure options come from the API, and a long one is what widened this page.
+  { path: "/campaigns", ready: (p) => expect(p.locator("#campaign-measure option").nth(1)).toBeAttached(T) },
+  { path: "/runs", ready: (p) => expect(p.getByRole("button", { name: /View run details for/ }).first()).toBeVisible(T) },
+  { path: "/admin", ready: (p) => expect(p.getByText("Measure evaluation").first()).toBeVisible(T) },
 ];
 
 /** How far `<main>` scrolls sideways, and the outermost elements that stick out of it. */
@@ -60,7 +67,7 @@ for (const vp of VIEWPORTS) {
     for (const route of ROUTES) {
       test(`${route.path} does not scroll sideways`, async ({ page }) => {
         await page.goto(route.path);
-        await expect(route.ready(page)).toBeVisible({ timeout: 30_000 });
+        await route.ready(page);
         await expectNoErrorPage(page);
         // Let late content (trend charts, the measure catalog's labels) settle before measuring.
         await page.waitForTimeout(1_500);
