@@ -201,3 +201,29 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
     expect(screen.getByText("Select a run to view details.")).toBeInTheDocument();
   });
 });
+
+describe("RunsPage on a narrower screen (#700)", () => {
+  it("picking a run scrolls its detail into view AND moves focus there, so the next Tab enters the detail", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("80rem"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    const scrolled = vi.fn();
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrolled;
+    try {
+      render(<RunsPage />);
+      const button = await screen.findByRole("button", { name: /View run details for All Programs/ });
+      fireEvent.click(button);
+      expect(scrolled).toHaveBeenCalled();
+      const panel = scrolled.mock.contexts[0] as HTMLElement;
+      expect(document.activeElement).toBe(panel);
+      expect(panel).toHaveAttribute("tabindex", "-1");
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+      vi.unstubAllGlobals();
+    }
+  });
+});
