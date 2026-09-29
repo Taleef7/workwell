@@ -85,16 +85,14 @@ describe("CaseDetailPage — local-only action notices", () => {
     });
   });
 
-  it("labels the DESKTOP outreach action, not only the mobile one", async () => {
+  it("labels the outreach action", async () => {
     render(<CaseDetailPage />);
     await waitFor(() => expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0));
 
-    // The desktop button, by its own spelling.
     const desktopSend = screen.getByRole("button", { name: "Send outreach" });
 
-    // Walk up until a container holds both the button and a notice. Without the desktop notice this
-    // only terminates at a common ancestor that also contains the mobile column — so the loop is
-    // bounded and the failure is a thrown error rather than a silent pass.
+    // Walk up until a container holds both the button and a notice; bounded, so a missing notice is a
+    // failure rather than a match on some distant ancestor.
     let scope: HTMLElement | null = desktopSend.closest("div");
     let found = false;
     for (let hops = 0; hops < 4 && scope; hops += 1) {
@@ -104,24 +102,18 @@ describe("CaseDetailPage — local-only action notices", () => {
       }
       scope = scope.parentElement;
     }
-    expect(found, "the desktop outreach action has no local-only notice near it").toBe(true);
+    expect(found, "the outreach action has no local-only notice near it").toBe(true);
   });
 
-  it("labels the mobile outreach action too", async () => {
+  it("has ONE outreach action at every width, and it cannot send before a preview (#700)", async () => {
     render(<CaseDetailPage />);
     await waitFor(() => expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0));
 
-    const mobileSend = screen.getByRole("button", { name: "Send Outreach" });
-    let scope: HTMLElement | null = mobileSend.closest("div");
-    let found = false;
-    for (let hops = 0; hops < 4 && scope; hops += 1) {
-      if (within(scope).queryAllByText(NOT_SENT).length > 0) {
-        found = true;
-        break;
-      }
-      scope = scope.parentElement;
-    }
-    expect(found, "the mobile outreach action has no local-only notice near it").toBe(true);
+    // The phone accordion had its own "Send Outreach", which sent with no preview; there is one now.
+    expect(screen.queryByRole("button", { name: "Send Outreach" })).toBeNull();
+    const sends = screen.getAllByRole("button", { name: "Send outreach" });
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toBeDisabled();
   });
 
   it("tells the truth about an uploaded document AND about the measure", async () => {
