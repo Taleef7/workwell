@@ -12,7 +12,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   tables hidden with `sr-only` still sized to their content, rows that did not wrap, selects as wide as
   their longest option. Wide tables now scroll inside a labelled `ScrollRegion` with edge shadows; content
   caps at 1600px. A Playwright spec checks every main route at 375 and 768 (e2e ran only at 1280).
-  Next: phone cards and selection (part 2), then the shell (part 3).
+- **Phone and tablet workflows (#700, part 2).** The case page is one layout at every width: its phone
+  accordion drew Preview into the hidden desktop panel, sent without a preview, and had no Mark Resolved,
+  scheduling or upload. Work list rows become cards by container query (one table, same cells) and the
+  filters fold behind "Filters · N active"; roster and Cases cards take selection, so a phone can assign.
+  Next: the shell (part 3).
 
 ## 2026-09-28
 
