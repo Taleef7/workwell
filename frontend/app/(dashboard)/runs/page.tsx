@@ -277,7 +277,8 @@ export default function RunsPage() {
   }, [selectedRunId]);
 
   // Below xl the detail panel sits under the list (#700), so a picked run's detail would open off
-  // screen; bring it into view. Side by side (xl+) nothing moves.
+  // screen; bring it into view, and take focus with it, so the next Tab enters the detail rather than
+  // returning to a row that has scrolled away. Side by side (xl+) nothing moves.
   function selectRunFromList(runId: string) {
     setSelectedRunId(runId);
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -286,6 +287,7 @@ export default function RunsPage() {
     if (!panel || typeof panel.scrollIntoView !== "function") return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     panel.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+    panel.focus({ preventScroll: true });
   }
 
 
@@ -1072,7 +1074,8 @@ export default function RunsPage() {
 
         <div
           ref={runDetailRef}
-          className="min-w-0 scroll-mt-4 space-y-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3"
+          tabIndex={-1}
+          className="min-w-0 scroll-mt-4 space-y-3 focus:outline-none rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3"
         >
           <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Run Detail</h3>
           {/* AI insight is on-demand (UX-19): viewing a run no longer auto-fires a billed OpenAI call. */}

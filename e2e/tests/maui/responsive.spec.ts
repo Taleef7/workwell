@@ -29,9 +29,10 @@ const VIEWPORTS = [
 const T = { timeout: 30_000 };
 const ROUTES: { path: string; ready: (page: Page) => Promise<void> }[] = [
   { path: "/programs", ready: (p) => expect(p.getByText(/Open cases \(\d+\)/).first()).toBeVisible(T) },
-  // Exact and inside the table: the System filter's "All systems" <option> comes first in the DOM.
-  { path: "/programs/hierarchy", ready: (p) => expect(p.getByRole("table").getByText("All Systems", { exact: true })).toBeVisible(T) },
-  { path: "/programs/cms125", ready: (p) => expect(p.getByText(/CMS125/).first()).toBeVisible(T) },
+  // Inside the table: the System filter's "All systems" <option> comes first in the DOM, and the top row
+  // names "All Systems" twice (its name and its level tag).
+  { path: "/programs/hierarchy", ready: (p) => expect(p.getByRole("table").getByText("All Systems", { exact: true }).first()).toBeVisible(T) },
+  { path: "/programs/cms125", ready: (p) => expect(p.getByText(/CMS125/).filter({ visible: true }).first()).toBeVisible(T) },
   { path: "/worklist", ready: (p) => expect(p.locator("a[href^='/patients/']").first()).toBeVisible(T) },
   { path: "/compliance", ready: (p) => expect(p.locator("a[href^='/patients/']").filter({ visible: true }).first()).toBeVisible(T) },
   // "N of M cases" only when there is a next page; "N cases loaded" otherwise.
@@ -84,7 +85,8 @@ for (const vp of VIEWPORTS) {
       for (const href of [await patient.getAttribute("href"), caseHref]) {
         expect(href, "the work list links a patient and a case").toBeTruthy();
         await page.goto(href!);
-        await expect(page.getByText(/CMS\d+/).first()).toBeVisible({ timeout: 30_000 });
+        // Visible only: a page may also carry a CSS-hidden copy for another width.
+        await expect(page.getByText(/CMS\d+/).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
         await page.waitForTimeout(1_500);
         const { overflow, offenders } = await sidewaysOverflow(page);
         expect(overflow, `${href} at ${vp.width}px scrolls sideways; sticking out: ${offenders.join(", ")}`).toBeLessThanOrEqual(1);
