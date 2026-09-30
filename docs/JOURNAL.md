@@ -7,6 +7,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-29
 
+- **A failing backend test failed nothing in CI.** The sharded test step piped into `tee` under GitHub's
+  default `bash -e` (no `pipefail`), so the step took tee's status: run 36158859048 logged `fail 1` and
+  went green. `shell: bash` restores `pipefail`; it was the only such step.
 - **No page scrolls sideways on a phone or tablet (#700, part 1 of 3).** At 375px Programs slid sideways
   by 506px (121 at 768), Campaigns 316, Hierarchy 300, Runs 211, the patient page 113, Cases 80: chart
   tables hidden with `sr-only` still sized to their content, rows that did not wrap, selects as wide as
