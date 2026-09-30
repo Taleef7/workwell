@@ -228,7 +228,12 @@ jobs:
         #
         # `$files` is then deliberately word-split: the script prints one path per line and no test path
         # contains a space. Teed because the next step reads the output rather than trusting the exit
-        # code; the default shell sets `pipefail`, so a failing suite still fails the step.
+        # code.
+        #
+        # `shell: bash` is what sets `pipefail` (`bash --noprofile --norc -eo pipefail {0}`). Without it
+        # a step runs as `bash -e {0}`, the pipeline's status is tee's, and a failing suite passes: run
+        # 36158859048 logged `fail 1` on shard 1 and the job went green. Do not remove it.
+        shell: bash
         run: |
           files=$(node scripts/test-shards.mjs ${{ matrix.shard }} 3)
           if [ -z "$files" ]; then
