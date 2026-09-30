@@ -88,12 +88,12 @@ Each one fails the test and names the steward case.
 
   So the end-to-end test cannot check how the pipeline handles them. `test-support/madie-oracle.test.ts`
   pins what the oracle expects for each, but that pins the specification, not the code.
-- **One known disagreement on such a shape.** Take a patient in both the exception and the numerator.
+- **One disagreement on such a shape, now decided.** Take a patient in both the exception and the numerator.
   - The rate counts them as meeting the numerator (`normalizeMembership`, following the QI-Core IG).
-  - `outcomeFromPopulations` shows them as Excluded.
+  - `outcomeFromPopulations` showed them as Excluded.
 
-  No deck holds that patient, so nothing is wrong on screen today. Which reading is right is an open
-  owner question.
+  The owner decided on 2026-09-29 that the screen follows the rate, and #732 makes that change. No deck
+  holds that patient, so no current result moves.
 - **Stratifiers:** the cms125, cms130 and cms137 decks carry expected stratifier results, and neither
   this test nor the gate compares them. That is a follow-up.
 - **cms68, cms951 and cms138:** they stay in the in-memory gate only, because none is in a deployment's
