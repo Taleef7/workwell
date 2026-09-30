@@ -147,10 +147,33 @@ export interface RebuildResult {
  * idempotent: `pnpm rebuild:quality-snapshots`.
  */
 export async function rebuildSnapshotHistory(deps: MaterializeDeps): Promise<RebuildResult> {
-  const runs = (await deps.runStore.listRuns(100_000))
+  const newestFirst = (await deps.runStore.listRuns(100_000))
     .filter((run) => run.triggeredBy !== SCALE_TRIGGER && isPopulationRun(run.scopeType) && isCompletedRun(run.status))
-    // Oldest first, so each (measure, month) is left at its newest run; the id breaks a same-instant tie.
-    .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id));
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
+  // Only the runs that are some measure's NEWEST in their month change the result, so only they are
+  // replayed: on a deployment with a run a night, each reading every subject's outcomes, replaying all
+  // of them would read ~30x what the answer needs (metered compute). Newest first per month: a
+  // single-MEASURE run covers its measure; a COMPLETED ALL_PROGRAMS run covers every measure and closes
+  // the month. A PARTIAL_FAILURE run may be missing a measure, so it covers what it has but does not
+  // close the month, and older runs stay candidates for the rest.
+  const needed = new Set<string>();
+  const covered = new Map<string, Set<string>>();
+  for (const run of newestFirst) {
+    const period = run.startedAt.slice(0, 7);
+    const seen = covered.get(period) ?? new Set<string>();
+    covered.set(period, seen);
+    if (seen.has("*")) continue;
+    const measure = run.scopeType === "MEASURE" ? run.scopeId ?? "" : null;
+    if (measure !== null) {
+      if (seen.has(measure)) continue;
+      seen.add(measure);
+    } else if (run.status === "COMPLETED") {
+      seen.add("*");
+    }
+    needed.add(run.id);
+  }
+  // Replayed oldest first, so each (measure, month) is left at its newest run; the id breaks a tie.
+  const runs = newestFirst.filter((run) => needed.has(run.id)).reverse();
   const result: RebuildResult = { rebuilt: [], skipped: [] };
   for (const run of runs) {
     const period = run.startedAt.slice(0, 7);
