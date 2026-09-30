@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
-import { freshnessNotice, type FreshnessNotice, type FreshnessRun } from "./freshness";
+import { freshnessNotice, type FreshnessNotice, type FreshnessRun, type NightlySchedule } from "./freshness";
 
 // The viewer's own clock, with its zone named, so it cannot be read as UTC or as the practice's zone.
 const when = (iso: string): string =>
@@ -39,10 +39,11 @@ export function RunFreshnessBanner() {
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      api
-        .get<FreshnessRun[]>("/api/runs?scopeType=ALL_PROGRAMS&limit=5")
-        .then((runs) => {
-          if (!cancelled) setNotice(Array.isArray(runs) ? freshnessNotice(runs) : null);
+      // The schedule is optional: without it (an older server, a failed read) the daily rule applies.
+      const schedule = api.get<NightlySchedule>("/api/runs/schedule").catch(() => null);
+      Promise.all([api.get<FreshnessRun[]>("/api/runs?scopeType=ALL_PROGRAMS&limit=5"), schedule])
+        .then(([runs, nightly]) => {
+          if (!cancelled) setNotice(Array.isArray(runs) ? freshnessNotice(runs, Date.now(), nightly ?? null) : null);
         })
         .catch(() => {
           if (!cancelled) setNotice(null);

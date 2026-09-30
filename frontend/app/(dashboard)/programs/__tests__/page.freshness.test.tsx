@@ -63,3 +63,31 @@ describe("ProgramsPage says when its numbers are stale (#623)", () => {
     expect(screen.queryByTestId("run-freshness-banner")).toBeNull();
   });
 });
+
+describe("the banner judges a missing update against the deployment's schedule", () => {
+  // An update 50 hours old: past the daily rule's 36, but on a deployment whose next scheduled nightly
+  // is two days from now (a weekend on a weekdays-only schedule), nothing has been missed yet.
+  const started = new Date(Date.now() - 50 * 3600_000).toISOString();
+  const onlyTheDayAfterTomorrow = [new Date(Date.now() + 2 * 86_400_000).getUTCDay()];
+  const serve = (schedule: unknown) =>
+    get.mockReset().mockImplementation((url: string) => {
+      if (url.startsWith("/api/runs?")) return Promise.resolve([{ status: "COMPLETED", startedAt: started }]);
+      if (url === "/api/runs/schedule") return schedule instanceof Error ? Promise.reject(schedule) : Promise.resolve(schedule);
+      return Promise.resolve([]);
+    });
+
+  it("stays quiet when the schedule has no nightly due yet", async () => {
+    serve({ enabled: true, anchorHourUtc: 12, days: onlyTheDayAfterTomorrow });
+    render(<ProgramsPage />);
+    await screen.findByText("Programs Overview");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(get.mock.calls.map(([u]) => String(u))).toContain("/api/runs/schedule");
+    expect(screen.queryByTestId("run-freshness-banner")).toBeNull();
+  });
+
+  it("falls back to the daily rule when the schedule cannot be read", async () => {
+    serve(new Error("older server"));
+    render(<ProgramsPage />);
+    expect(await screen.findByTestId("run-freshness-banner")).toBeInTheDocument();
+  });
+});

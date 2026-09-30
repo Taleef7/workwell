@@ -223,6 +223,7 @@ const MUST_AGREE_KEYS = [
   "WORKWELL_MAUI_CORPUS_SEED",
   "WORKWELL_RUN_CHUNK_SIZE",
   "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC",
+  "WORKWELL_SCHEDULER_DAYS",
   "WORKWELL_OUTCOME_RETENTION_DAYS",
 ] as const;
 
@@ -245,8 +246,11 @@ test("the Maui deployment actually ships the corpus size, and it is the 20,000-p
   assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), "20000");
   // Retention is ON since 2026-09-07 (issue #535). It was pinned ABSENT here until then, precisely so
   // that turning it on had to be a deliberate edit of this line rather than a value that slipped in —
-  // which is what this now is.
-  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), "400");
+  // which is what this now is. 400 days until 2026-09-30, then 90 to stop the sandbox's storage growing
+  // on metered Neon (ADR-073: calibrated for a sandbox, revisited before a real performance year).
+  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), "90");
+  // Weekdays only since 2026-09-30: each nightly is 20,000 synthetic patients on metered compute.
+  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_SCHEDULER_DAYS"), "1-5");
   // ADR-073 d1's condition, enforced instead of remembered: Maui turns retention on ONLY alongside the
   // indexes compaction needs. Without the keep-set one the nightly DELETE sorts the whole outcomes
   // table inline during the tick (measured: an external merge sort, 19 MB to disk, at 300,000 rows).

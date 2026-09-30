@@ -1473,3 +1473,13 @@ test("EMPLOYEE stays synchronous — it is genuinely one subject", async () => {
   assert.notEqual(body.status, "RUNNING", "finished in the request, so the response already states the outcome");
   await drain();
 });
+
+test("GET /api/runs/schedule answers the nightly's hour and weekdays, and is not read as a run id", async () => {
+  const res = await get("/api/runs/schedule");
+  assert.ok(res, "the runs route handles it");
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { enabled: boolean; anchorHourUtc: number; days: number[] | null };
+  assert.equal(typeof body.enabled, "boolean");
+  assert.equal(typeof body.anchorHourUtc, "number");
+  assert.ok(body.days === null || Array.isArray(body.days));
+});

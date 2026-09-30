@@ -1208,8 +1208,8 @@ function renderOutlook(
     // nightly deployment's newest N runs share one period for any N, so reaching three needs either
     // the measure's whole retained history — which is the 504 this function existed to cause — or new
     // per-period SQL the owner must approve and index. ADR-073 has meanwhile decided that per-subject
-    // history is a retention WINDOW, so under the pilot's 400 days an annual measure holds at most
-    // two periods and this list is empty there by construction. It returns when the aggregate
+    // history is a retention WINDOW, so under the pilot's window (400 days, 90 since 2026-09-30) an
+    // annual measure holds at most two periods and this list is empty there by construction. It returns when the aggregate
     // snapshot store grows a per-subject dimension, or behind an indexed per-period query, as its own
     // unit of work.
     repeatNonCompliers: [],

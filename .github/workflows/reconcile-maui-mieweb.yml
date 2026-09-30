@@ -245,19 +245,21 @@ jobs:
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
                 {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},
+                {key: "WORKWELL_SCHEDULER_DAYS", value: "1-5"},
                 # Retention is ON since 2026-09-07, in the same commit as the index ADR-073 d1 required
                 # (spike_outcomes_keepset_idx, plus spike_cases_cited_outcome_idx for the second
                 # exclusion). The keep-set is now an indexed existence check rather than a whole-table
                 # sort, which is what made this safe to set on a table of nightly 20,000-patient runs.
                 #
-                # 400 days keeps a full measurement year plus a margin, so a closed years evidence is
-                # never swept by the first run of the next one, and nothing a case cites or any subjects
-                # newest row per period is ever deleted at any age. It removes NOTHING today: the
-                # instance is about two months old, so the window starts protecting the table later
-                # rather than deleting history now. Both workflows carry it; official-flip-config.test.ts
-                # asserts they agree. No apostrophes in this comment: it lives inside a single-quoted
-                # shell string.
-                {key: "WORKWELL_OUTCOME_RETENTION_DAYS", value: "400"},
+                # 90 days since 2026-09-30 (it was 400, a full measurement year plus a margin): this is
+                # a sandbox on metered storage, and ADR-073 calibrates the window for a sandbox, to be
+                # revisited before a real performance year. Nothing a case cites and no subjects newest
+                # row per period is deleted at any age, so the live numbers survive; what goes is the
+                # per-patient detail of runs older than 90 days, and their MeasureReport and QRDA answer
+                # 409. The oldest outcome rows date from 2026-09-01, so nothing is deleted before the end
+                # of November. Both workflows carry it; official-flip-config.test.ts asserts they agree.
+                # No apostrophes in this comment: it lives inside a single-quoted shell string.
+                {key: "WORKWELL_OUTCOME_RETENTION_DAYS", value: "90"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_BUCKET", value: $bucket_name},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},

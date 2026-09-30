@@ -81,6 +81,7 @@ import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, profileSubjectMatcher } from "../config/deployment-profile.ts";
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
 import { runOutcomeCountsFor } from "../run/run-counts.ts";
+import { nightlySchedule } from "../admin/scheduler.ts";
 
 interface RunsEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -508,6 +509,10 @@ export async function handleRuns(
   const { pathname } = url;
 
   // ---- read models (#107 strangler — runs module) -------------------------
+  // The nightly's schedule (weekdays, hour), so the Programs freshness banner judges a missing run
+  // against it rather than against "every 24 hours". Before the `/api/runs/:id` reads below.
+  if (pathname === "/api/runs/schedule" && req.method === "GET") return json(nightlySchedule());
+
   // List: newest-first run summaries for the worklist/history grid, honoring the
   // page's status/scopeType/triggerType/site/from/to filters (the Java contract).
   if (pathname === "/api/runs" && req.method === "GET") {

@@ -24,14 +24,43 @@ export type FreshnessNotice =
   /** No whole-practice update has ever run: whatever is shown came from runs started by hand. */
   | { kind: "none" };
 
-/** A nightly runs every 24 hours; past 36 without a new one, one has been missed. */
+/** With no schedule known, a nightly runs every 24 hours; past 36 without a new one, one has been missed. */
 export const OVERDUE_AFTER_MS = 36 * 60 * 60 * 1000;
+
+/** The nightly's schedule, from `GET /api/runs/schedule`: its UTC hour and weekdays (null = every day). */
+export interface NightlySchedule {
+  anchorHourUtc: number;
+  days: number[] | null;
+}
+
+/** How long past a scheduled nightly's start its absence is still not a missed run. */
+export const SCHEDULED_GRACE_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * The first scheduled nightly at least 12 hours after a run started: the one whose absence would mean
+ * a miss. At least 12 hours, because the scheduler counts a run shortly before the day's hour as that
+ * day's run. On a weekdays-only deployment Friday's run is followed by Monday's, so the weekend
+ * between is not "no update".
+ */
+export function nextScheduledAfter(startedMs: number, schedule: NightlySchedule): number {
+  const start = new Date(startedMs);
+  for (let day = 0; day <= 8; day++) {
+    const anchor = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + day, schedule.anchorHourUtc);
+    const weekday = new Date(anchor).getUTCDay();
+    if (anchor - startedMs >= SCHEDULED_GRACE_MS && (schedule.days === null || schedule.days.includes(weekday))) return anchor;
+  }
+  return startedMs + OVERDUE_AFTER_MS - SCHEDULED_GRACE_MS; // an empty schedule: fall back to the daily rule
+}
 
 const upper = (s: string) => s.trim().toUpperCase();
 const DID_NOT_FINISH = new Set(["FAILED", "CANCELLED"]);
 const REPORTABLE = new Set(["COMPLETED", "PARTIAL_FAILURE"]);
 
-export function freshnessNotice(runsNewestFirst: readonly FreshnessRun[], now: number = Date.now()): FreshnessNotice | null {
+export function freshnessNotice(
+  runsNewestFirst: readonly FreshnessRun[],
+  now: number = Date.now(),
+  schedule: NightlySchedule | null = null,
+): FreshnessNotice | null {
   const newest = runsNewestFirst[0];
   // Silence here would last forever on a deployment whose scheduler never created its first run
   // (Codex on #710). A deployment with the scheduler off (staging) has no update to be late for, and
@@ -45,6 +74,11 @@ export function freshnessNotice(runsNewestFirst: readonly FreshnessRun[], now: n
   }
   if (status === "PARTIAL_FAILURE") return { kind: "partial", latestAt: newest.startedAt };
   const started = Date.parse(newest.startedAt);
-  if (Number.isFinite(started) && now - started > OVERDUE_AFTER_MS) return { kind: "overdue", latestAt: newest.startedAt };
-  return null;
+  if (!Number.isFinite(started)) return null;
+  // A finished update is judged against the schedule when the deployment names its weekdays; a run
+  // still "in progress" past a day is stuck whatever the schedule, so it keeps the daily rule.
+  const overdue = schedule?.days && status === "COMPLETED"
+    ? now > nextScheduledAfter(started, schedule) + SCHEDULED_GRACE_MS
+    : now - started > OVERDUE_AFTER_MS;
+  return overdue ? { kind: "overdue", latestAt: newest.startedAt } : null;
 }
