@@ -10,7 +10,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { MAX_CONSECUTIVE_PANEL_FAILURES, RUN_LIST_WARM, warmReadModels } from "./warm-read-models.ts";
 import { resetRunOutcomeCounts, runOutcomeCountsFor } from "../run/run-counts.ts";
-import { programOverview, programRiskOutlook, __overviewMemo, __chartMemos, __sitesMemo } from "./program-read-models.ts";
+import { programOverview, programRiskOutlook, programTrend, __overviewMemo, __chartMemos, __sitesMemo } from "./program-read-models.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 import { __resetRuntimeHealth, runtimeDetail, runtimeHealth } from "../admin/runtime-health.ts";
 
@@ -168,4 +168,40 @@ test("Run History's first page is warmed, so its first visitor after a deploy do
   counted.length = 0;
   await runOutcomeCountsFor({ countOutcomesByStatus }, firstPage);
   assert.equal(counted.length, 0, "the first visitor reads no counts");
+});
+
+test("the trend is warmed in the practice's zone, so its first visitor there reads nothing (#615)", async () => {
+  // Pairs of runs at 12:00Z and 08:00Z the next day: two UTC days, one Honolulu day. Warmed in UTC,
+  // the newest ten runs are ten days and the memo stops there, five days short for Honolulu. That is
+  // Maui's shape in US Eastern, where a late-evening manual run shares a local day with a nightly.
+  clearAll();
+  const pairRows: OutcomeWithRun[] = [];
+  for (let k = 1; k <= 10; k++) {
+    for (const [day, hour, label] of [[2 * k, "12", "noon"], [2 * k + 1, "08", "morning"]] as const) {
+      const dd = String(day).padStart(2, "0");
+      pairRows.push({ runId: `run-${dd}-${label}`, runStartedAt: `2026-08-${dd}T${hour}:00:00.000Z`, runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual", subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT" });
+    }
+  }
+  let reads = 0;
+  const deps = {
+    ...makeDeps({
+      listOutcomesWithRun: async () => {
+        reads++;
+        return pairRows;
+      },
+      listLatestPopulationRuns: latestRunsFromRows(pairRows),
+    }),
+    // Readable runs, so the warmed trend is complete and memoized.
+    runStore: {
+      listRuns: async () => [],
+      getRunsByIds: async (ids: readonly string[]) =>
+        ids.map((id) => ({ id, measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z", startedAt: "2026-08-01T00:00:00.000Z", requestedScope: {} })),
+    } as unknown as RunStore,
+  };
+
+  await warmReadModels(deps, "run", "Pacific/Honolulu");
+  const afterWarm = reads;
+  const honolulu = await programTrend(deps, "audiogram", {}, { tz: "Pacific/Honolulu" });
+  assert.equal(honolulu.length, 10, "ten Honolulu days");
+  assert.equal(reads, afterWarm, "served from what the warm memoized, with no read");
 });

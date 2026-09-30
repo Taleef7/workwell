@@ -21,6 +21,7 @@ import {
   type ProgramDeps,
 } from "./program-read-models.ts";
 import { recordWarm, type WarmRecord } from "../admin/runtime-health.ts";
+import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 import { runCandidates } from "../run/read-models.ts";
 import { runOutcomeCountsFor } from "../run/run-counts.ts";
 
@@ -74,10 +75,17 @@ export interface WarmResult {
  * Warm, and record the pass on the runtime view (`/health`'s `lastWarm`, `/api/admin/runtime`'s
  * `warms`) whatever the caller does with the result (#615). The scheduler awaited this and dropped
  * the answer, so "did last night's warm run?" had no answer anywhere an operator could read.
+ *
+ * `trendTimeZone` is the zone each measure's trend is warmed in: the deployment's practice zone unless
+ * a test names one.
  */
-export async function warmReadModels(deps: ProgramDeps, trigger: WarmRecord["trigger"] = "run"): Promise<WarmResult> {
+export async function warmReadModels(
+  deps: ProgramDeps,
+  trigger: WarmRecord["trigger"] = "run",
+  trendTimeZone: string | null = DEPLOYMENT_PROFILE.practiceTimeZone,
+): Promise<WarmResult> {
   const started = Date.now();
-  const result = await warmPass(deps);
+  const result = await warmPass(deps, trendTimeZone);
   const finished = Date.now();
   recordWarm({
     trigger,
@@ -91,7 +99,7 @@ export async function warmReadModels(deps: ProgramDeps, trigger: WarmRecord["tri
   return result;
 }
 
-async function warmPass(deps: ProgramDeps): Promise<WarmResult> {
+async function warmPass(deps: ProgramDeps, trendTimeZone: string | null): Promise<WarmResult> {
   let error: string | undefined;
   let measureIds: string[];
   try {
@@ -119,9 +127,18 @@ async function warmPass(deps: ProgramDeps): Promise<WarmResult> {
     const panels: Array<[string, () => Promise<unknown>]> = [
       // Monthly is what the dashboard asks for. Where the monthly series cannot apply (every official
       // measure, and every measure on Maui) this fills the per-run trend memo, which serves the
-      // measure page in any time zone (#615). Where it can, the page's per-run trend is left cold,
-      // because warming it would double this pass for a page one person opens at a time.
-      ["trend", () => programTrend(deps, measureId, { ...UNFILTERED }, { monthly: true })],
+      // measure page in any time zone (#615). It is asked in the practice's zone first, so the memo is
+      // widened until that zone has ten days: warmed in UTC, four of Maui's six measures were a run
+      // short in US Eastern (a late-evening manual run shares a local day with a nightly), and their
+      // first visitor read twenty runs (6-7 s). Then with no zone, as the dashboard asks: usually a memo
+      // hit, and a read only where UTC's days fall short of the zone's. Another zone that comes up
+      // short still reads on at request time, as it did before. Where the monthly series can apply,
+      // the page's per-run trend is left cold, because warming it would double this pass for a page
+      // one person opens at a time.
+      ["trend", async () => {
+        if (trendTimeZone) await programTrend(deps, measureId, { ...UNFILTERED }, { monthly: true, tz: trendTimeZone });
+        return programTrend(deps, measureId, { ...UNFILTERED }, { monthly: true });
+      }],
       ["drivers", () => programTopDrivers(deps, measureId, { ...UNFILTERED })],
       // The measure page's third panel, warmed since 2026-09-15 because it now costs what the other
       // two do: the winner's lean row read, plus ONE peeked row to learn whether the run's evidence

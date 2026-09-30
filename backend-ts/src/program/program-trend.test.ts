@@ -274,7 +274,7 @@ test("runPeriodOf — the year a run SCORED, read from its record, not the day i
   assert.equal(await runPeriodOf(runStore, "boom"), null);
 });
 
-// #615: the measure page asks for its trend in the browser's zone, and the nightly warm fills the trend
+// #615: the measure page asks for its trend in the browser's zone, and the nightly warm filled the trend
 // with none. Memoized per zone, the warm never served that page: its first visitor after each run waited
 // 6-19 s on Maui. The memo now holds the zone-free per-run points and each zone collapses them itself.
 function countingDeps(rows: OutcomeWithRun[]): { deps: ProgramDeps; reads: () => number; singleRunReads: () => number } {
@@ -322,7 +322,7 @@ test("programTrend — the warm's zone-free trend serves a request in any zone w
     zoneRow(measureId, "run-b", "2026-09-03T01:30:00.000Z"),
   ]);
 
-  const warmed = await programTrend(deps, measureId, {}); // what warmReadModels asks for
+  const warmed = await programTrend(deps, measureId, {}); // a zone-free request, as the warm made before practiceTimeZone
   assert.equal(warmed.length, 2, "two UTC days");
   assert.equal(singleRunReads(), 0, "the runs' years were read in one batch, not one run at a time");
   const afterWarm = reads();

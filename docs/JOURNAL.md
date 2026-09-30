@@ -12,6 +12,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   page: on Maui the first visitor after a run waited 19 s for cms130's trend, and 0.2 s without the zone.
   The memo now holds the zone-free per-run points and each request collapses them to one point per day
   in its own zone; a zone that merges the memo's runs into fewer than ten days reads further back.
+  Live after the deploy, four of the six were still 6-7 s in US Eastern: warmed in UTC, a late-evening
+  manual run sat on its own UTC day but shared a local day with a nightly. The warm now asks in the
+  deployment's practice zone (`practiceTimeZone`, US Eastern on Maui).
 - **A deploy no longer signs out whoever's access token lapses during it.** #688 kept the login itself
   across a restart, but the browser still treated any failed refresh as a logout: a 502 or a dropped
   connection while the backend restarted sent the page to /login, and a failed request called

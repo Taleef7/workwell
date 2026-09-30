@@ -43,7 +43,9 @@ test("resolveDeploymentProfile is pure, normalized, and defaults safely", () => 
     visibleTenantIds: ["maui"],
     runnableMeasureIds: ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"],
     subjectTerm: "patient",
+    practiceTimeZone: "America/New_York",
   });
+  assert.equal(resolveDeploymentProfile(undefined).practiceTimeZone, null);
   assert.equal(resolveDeploymentProfile(undefined).subjectTerm, "employee");
 });
 
