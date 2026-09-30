@@ -7,6 +7,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-29
 
+- **The steward's MADiE patients end to end (#727).** The gate proved the calculation in memory; the
+  pilot-trust defects all sat after it. A new test runs the six Maui decks (334 patients) through the
+  nightly's run, both stores and the read APIs (report, roster, cases, programs overview,
+  reconciliation, and an idempotent second run) against an oracle written from the population table.
+  All 334 agree on SQLite and Postgres; cms165's `trustMetaProfile` and `preparedForQiCore` changed
+  nothing. Runs in the official-cases job, which now has a Postgres service. Evidence:
+  `docs/evidence/MADIE_END_TO_END_2026-09.md`.
 - **An exception no longer excuses a patient who met the numerator** (owner decision). The rate already
   counted them as met (the QI-Core IG's Denominator Membership) while the bucket said Excluded, so one
   patient could be a met numerator in the rate and Excluded on the roster. `outcomeFromPopulations` and

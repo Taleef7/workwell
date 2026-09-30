@@ -413,6 +413,71 @@ export function verifyVendoredTestsHash(testsDir: string, manifestTests: { count
   }
 }
 
+/** Every case in one MADiE deck directory, and the single measurement period they all share. */
+function readDeck(testsDir: string, measureName: string): { cases: OfficialCase[]; measurementPeriod: MeasurementPeriod } {
+  const manifestPath = join(testsDir, ".madie");
+  const readmePath = join(testsDir, "README.txt");
+  const metadata = existsSync(manifestPath)
+    ? parseMadieManifest(readFileSync(manifestPath, "utf8"))
+    : parseMadieReadme(readFileSync(readmePath, "utf8"));
+
+  const cases: OfficialCase[] = [];
+  let measurementPeriod: MeasurementPeriod | undefined;
+  for (const entry of readdirSync(testsDir, { withFileTypes: true })
+    .filter((candidate) => candidate.isDirectory())
+    .sort((left, right) => left.name.localeCompare(right.name))) {
+    const loaded = loadCase(join(testsDir, entry.name), entry.name, metadata.get(entry.name));
+    if (loaded.period) {
+      if (
+        measurementPeriod &&
+        (measurementPeriod.start !== loaded.period.start || measurementPeriod.end !== loaded.period.end)
+      ) {
+        loaded.caseData.loadError =
+          `measurement period ${loaded.period.start}..${loaded.period.end} does not match ` +
+          `${measurementPeriod.start}..${measurementPeriod.end}`;
+        delete loaded.caseData.patientBundle;
+        delete loaded.caseData.expected;
+      } else {
+        measurementPeriod ??= loaded.period;
+      }
+    }
+    cases.push(loaded.caseData);
+  }
+  if (!measurementPeriod) throw new Error(`${measureName}: no valid expected MeasureReport measurement period found`);
+  return { cases, measurementPeriod };
+}
+
+export interface VendoredOfficialDeck {
+  measure: OfficialMeasureId;
+  measureName: string;
+  cases: OfficialCase[];
+  measurementPeriod: MeasurementPeriod;
+}
+
+/**
+ * The COMMITTED deck alone (`measures/official/<id>/tests`), hash-checked, with no upstream content.
+ *
+ * `loadOfficialMeasureCases` also reads the steward's measure bundle from the uncommitted
+ * `.official-content/` checkout, which a test that drives the RUNTIME (vendored artifact + sidecar
+ * terminology) does not need and should not depend on. No fallback to an upstream deck: a missing
+ * vendored deck throws, so the caller cannot silently test fewer patients than the gate proved.
+ */
+export function loadVendoredOfficialDeck(
+  measure: OfficialMeasureId,
+  artifactRoot: string = fileURLToPath(new URL("../../measures/official/", import.meta.url)),
+): VendoredOfficialDeck {
+  const config = MEASURES[measure];
+  const artifactDir = join(artifactRoot, measure);
+  const testsDir = join(artifactDir, "tests");
+  if (!existsSync(testsDir)) throw new Error(`${config.name}: no vendored deck at ${testsDir}`);
+  const artifactManifest = JSON.parse(readFileSync(join(artifactDir, "manifest.json"), "utf8"));
+  if (!artifactManifest.tests?.sha256) {
+    throw new Error(`${config.name}: vendored tests exist but manifest.json has no tests.sha256 to verify against`);
+  }
+  verifyVendoredTestsHash(testsDir, artifactManifest.tests, config.name);
+  return { measure, measureName: config.name, ...readDeck(testsDir, config.name) };
+}
+
 /** Load one official measure bundle and every loose-resource MADiE case beneath it. */
 export function loadOfficialMeasureCases(
   contentDir: string,
@@ -448,35 +513,7 @@ export function loadOfficialMeasureCases(
     verifyVendoredTestsHash(vendoredTestsDir, artifactManifest.tests, config.name);
     testsDir = vendoredTestsDir;
   }
-  const manifestPath = join(testsDir, ".madie");
-  const readmePath = join(testsDir, "README.txt");
-  const metadata = existsSync(manifestPath)
-    ? parseMadieManifest(readFileSync(manifestPath, "utf8"))
-    : parseMadieReadme(readFileSync(readmePath, "utf8"));
-
-  const cases: OfficialCase[] = [];
-  let measurementPeriod: MeasurementPeriod | undefined;
-  for (const entry of readdirSync(testsDir, { withFileTypes: true })
-    .filter((candidate) => candidate.isDirectory())
-    .sort((left, right) => left.name.localeCompare(right.name))) {
-    const loaded = loadCase(join(testsDir, entry.name), entry.name, metadata.get(entry.name));
-    if (loaded.period) {
-      if (
-        measurementPeriod &&
-        (measurementPeriod.start !== loaded.period.start || measurementPeriod.end !== loaded.period.end)
-      ) {
-        loaded.caseData.loadError =
-          `measurement period ${loaded.period.start}..${loaded.period.end} does not match ` +
-          `${measurementPeriod.start}..${measurementPeriod.end}`;
-        delete loaded.caseData.patientBundle;
-        delete loaded.caseData.expected;
-      } else {
-        measurementPeriod ??= loaded.period;
-      }
-    }
-    cases.push(loaded.caseData);
-  }
-  if (!measurementPeriod) throw new Error(`${config.name}: no valid expected MeasureReport measurement period found`);
+  const { cases, measurementPeriod } = readDeck(testsDir, config.name);
 
   return {
     measure,
