@@ -57,17 +57,20 @@ async function attempt(): Promise<RefreshResult> {
 }
 
 async function refreshWithRetry(): Promise<RefreshResult> {
+  // If the session it was for ends (a logout, or a login as someone else), it stops, and answers
+  // `unavailable` whatever an attempt already in flight returned: an old login's token must not be
+  // used after it, and a refusal would sign out whoever is signed in now.
   const mine = generation;
+  const superseded = (): boolean => mine !== generation;
   let result = await attempt();
   for (const delay of retryDelaysMs) {
+    if (superseded()) return { kind: "unavailable" };
     if (result.kind !== "unavailable") return result;
     await new Promise((resolve) => setTimeout(resolve, delay));
-    // The session it was for ended (a logout, or a login as someone else). Stop without asking again,
-    // and answer `unavailable`, never `refused`: a refusal would sign out whoever is signed in now.
-    if (mine !== generation) return { kind: "unavailable" };
+    if (superseded()) return { kind: "unavailable" };
     result = await attempt();
   }
-  return result;
+  return superseded() ? { kind: "unavailable" } : result;
 }
 
 /**

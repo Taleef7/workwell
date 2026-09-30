@@ -91,6 +91,27 @@ describe("refreshSession", () => {
     expect(calls()).toBe(1);
   });
 
+  it.each([
+    ["a token", () => HttpResponse.json({ token: "old-login", email: "a@b.dev", role: "ROLE_ADMIN" })],
+    ["a refusal", () => HttpResponse.json({ error: "invalid_refresh_token" }, { status: 401 })],
+  ])("an attempt in flight when the session ends has its answer (%s) dropped", async (_name, answer) => {
+    // No retries: the in-flight attempt is the last one, which is where the check was once missing.
+    __setRefreshRetryDelaysForTest([]);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    server.use(
+      http.post("*/api/auth/refresh", async () => {
+        await gate;
+        return answer();
+      }),
+    );
+    const pending = refreshSession();
+    await new Promise((r) => setTimeout(r, 5));
+    cancelSessionRefresh(); // a logout, or a login as someone else, while the request is out
+    release();
+    expect(await pending).toEqual({ kind: "unavailable" });
+  });
+
   it("concurrent callers share one refresh, since each refresh rotates the cookie", async () => {
     const calls = refreshAnswers(() => HttpResponse.error(), ok);
     const [a, b] = await Promise.all([refreshSession(), refreshSession()]);
