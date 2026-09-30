@@ -188,3 +188,12 @@ test("an exception with the numerator met excuses nothing: on an inverse measure
   const exceptedNotMet = evidenceWithRates(rate({ ...IN, numer: false, denexcep: true }), rate({ ...IN, numer: true }));
   assert.equal(multiRateExclusionActive(exceptedNotMet, true), true, "an exception outside the numerator still excuses");
 });
+
+test("the missed rate reads numerator membership: a numerator exclusion voids the numerator, not the exception's void", () => {
+  const withNumex = (r: Population[]): Population[] => [...r, { populationType: "numerator-exclusion", result: true }];
+  // Normal measure: rate 1 has NUMER+NUMEX (and an exception the raw numerator voids), so it is missed.
+  const numexed = evidenceWithRates(withNumex(rate({ ...IN, numer: true, denexcep: true })), rate({ ...IN, numer: true }));
+  assert.equal(missedRateIndex(numexed, true), 0);
+  // Inverse measure: the same rate is NOT in numerator membership, so it is not the miss.
+  assert.equal(missedRateIndex(numexed, false), 1);
+});

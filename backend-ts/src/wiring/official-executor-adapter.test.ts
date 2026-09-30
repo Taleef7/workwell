@@ -90,6 +90,15 @@ test("an exception excuses only a subject who did NOT meet the numerator (QI-Cor
   assert.equal(outcomeFromPopulations({ [IPP]: true, [DENOM]: true, [DENEX]: true, [NUMER]: true }, true).outcome, "EXCLUDED");
 });
 
+test("a numerator exclusion voids the numerator for met/missed, but the raw numerator still voids an exception", () => {
+  const NUMEX = "numerator-exclusion";
+  // NUMER+NUMEX: not in numerator membership, so a scored failure, as the rate counts it.
+  assert.equal(outcomeFromPopulations({ [IPP]: true, [DENOM]: true, [NUMER]: true, [NUMEX]: true }, true).outcome, "OVERDUE");
+  assert.equal(outcomeFromPopulations({ [IPP]: true, [DENOM]: true, [NUMER]: true, [NUMEX]: true }, false).outcome, "COMPLIANT");
+  // DENEXCEP+NUMER+NUMEX: the raw numerator voids the exception, then NUMEX voids the numerator.
+  assert.equal(outcomeFromPopulations({ [IPP]: true, [DENOM]: true, [DENEXCEP]: true, [NUMER]: true, [NUMEX]: true }, true).outcome, "OVERDUE");
+});
+
 test("out-of-IPP is MISSING_DATA *paired with* inInitialPopulation:false, never bare", () => {
   // The pair is the whole L17 signal: without the flag, "out of scope for this measure" is
   // indistinguishable from "eligible but we hold no data", and the roster would chase the wrong people.

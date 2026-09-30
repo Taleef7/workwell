@@ -200,12 +200,14 @@ export function missedRateIndex(evidence: unknown, numeratorMeansCompliant: bool
     rate.some((p) => p?.populationType === key && p?.result === true);
   return rates.findIndex((rate) => {
     if (!Array.isArray(rate)) return false;
-    const inNumerator = inPopulation(rate, "numerator");
+    // As `outcomeFromPopulations` reads them: the RAW numerator decides whether an exception applies,
+    // numerator membership (less a numerator exclusion) decides met or missed.
+    const rawNumerator = inPopulation(rate, "numerator");
+    const inNumerator = rawNumerator && !inPopulation(rate, "numerator-exclusion");
     return (
       inPopulation(rate, "denominator") &&
       !inPopulation(rate, "denominator-exclusion") &&
-      // An exception excuses only a subject outside the numerator, as `outcomeFromPopulations` reads it.
-      !(inPopulation(rate, "denominator-exception") && !inNumerator) &&
+      !(inPopulation(rate, "denominator-exception") && !rawNumerator) &&
       (numeratorMeansCompliant ? !inNumerator : inNumerator)
     );
   });

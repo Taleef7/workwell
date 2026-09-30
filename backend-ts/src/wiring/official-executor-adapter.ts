@@ -232,12 +232,14 @@ export function outcomeFromPopulations(
 ): { outcome: OutcomeStatus; inInitialPopulation: boolean } {
   const inIpp = populations["initial-population"] === true;
   if (!inIpp) return { outcome: "MISSING_DATA", inInitialPopulation: false };
-  const inNumerator = populations["numerator"] === true;
-  // An exception excuses only a subject who did NOT meet the numerator (QI-Core Measure IG,
-  // Denominator Membership; owner decision 2026-09-29). One who met it is scored, exactly as the rate
-  // counts them (`normalizeMembership`), so the bucket and the rate cannot disagree about a person.
-  // An exclusion wins regardless of the numerator.
-  const excepted = populations["denominator-exception"] === true && !inNumerator;
+  // Two numerators, as `normalizeMembership` reads them. The RAW numerator decides whether an
+  // exception applies: an exception excuses only a subject who did NOT meet it (QI-Core Measure IG,
+  // Denominator Membership; owner decision 2026-09-29). Numerator MEMBERSHIP, the raw numerator less
+  // a numerator exclusion, decides met or missed, so a NUMER+NUMEX subject is a scored failure here as
+  // in the rate. The bucket and the rate cannot disagree about a person. An exclusion wins regardless.
+  const rawNumerator = populations["numerator"] === true;
+  const inNumerator = rawNumerator && populations["numerator-exclusion"] !== true;
+  const excepted = populations["denominator-exception"] === true && !rawNumerator;
   if (populations["denominator-exclusion"] === true || excepted) {
     return { outcome: "EXCLUDED", inInitialPopulation: true };
   }
