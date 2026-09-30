@@ -71,7 +71,7 @@ describe("CaseDetailPage pilot mode controls", () => {
     });
   });
 
-  it("gives a pilot case manager Escalate and Rerun in both layouts and the next step, but not the delivery-state controls (#618)", async () => {
+  it("gives a pilot case manager Escalate and Rerun and the next step, but not the delivery-state controls (#618)", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_CASE_MANAGER";
 
@@ -81,10 +81,10 @@ describe("CaseDetailPage pilot mode controls", () => {
       expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
     });
 
-    // jsdom renders both layouts; each is pinned by its own label so a fix that lands on one only fails.
-    expect(screen.getByRole("button", { name: "Rerun to Verify" })).toBeInTheDocument(); // wide layout
-    expect(screen.getByRole("button", { name: "Rerun to verify" })).toBeInTheDocument(); // narrow layout
-    expect(screen.getAllByRole("button", { name: /^Escalate$/ })).toHaveLength(2);
+    // One layout at every width (#700): one of each action, no phone copy.
+    expect(screen.getAllByRole("button", { name: "Rerun to verify" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Rerun to Verify" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^Escalate$/ })).toHaveLength(1);
     // Outreach was sent, so the next-step panel offers the verify, where it used to go blank.
     expect(screen.getByRole("button", { name: "Rerun to verify →" })).toBeInTheDocument();
     // The simulated delivery-state controls stay engineering-only.
@@ -134,7 +134,7 @@ describe("CaseDetailPage pilot mode controls", () => {
     expect(screen.queryAllByRole("button", { name: /^Escalate$/ })).toHaveLength(0);
   });
 
-  it("disables Rerun on a staff-closed case in both layouts: a noncompliant result would reopen it", async () => {
+  it("disables Rerun on a staff-closed case: a noncompliant result would reopen it", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_CASE_MANAGER";
     get.mockImplementation((url: string) => {
@@ -147,8 +147,7 @@ describe("CaseDetailPage pilot mode controls", () => {
       expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
     });
 
-    expect(screen.getByRole("button", { name: "Rerun to Verify" })).toBeDisabled(); // wide layout
-    expect(screen.getByRole("button", { name: "Rerun to verify" })).toBeDisabled(); // narrow layout
+    expect(screen.getByRole("button", { name: "Rerun to verify" })).toBeDisabled();
   });
 
   it.each([

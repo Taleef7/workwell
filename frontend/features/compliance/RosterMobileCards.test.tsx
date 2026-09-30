@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 
 import { setSubject, subject } from "@/test/mocks/terminology";
@@ -57,5 +57,50 @@ describe("RosterMobileCards", () => {
     expect(screen.getByText("Loading…")).toBeInTheDocument();
     rerender(<RosterMobileCards columns={columns} rows={[]} loading={false} />);
     expect(screen.getByText("No employees match these filters.")).toBeInTheDocument();
+  });
+
+  describe("selection (#700: assign from a phone)", () => {
+    const two: RosterRow[] = [
+      rows[0]!,
+      { subject: { externalId: "emp-007", name: "Grace Hopper", role: "Nurse", site: "HQ", tenantId: "twh", tenantName: "Total Worker Health" }, cells: {} },
+    ];
+
+    it("has no checkboxes unless the page passes a selection", () => {
+      render(<RosterMobileCards columns={columns} rows={two} loading={false} />);
+      expect(screen.queryByRole("checkbox")).toBeNull();
+    });
+
+    it("selects only rows the page says are selectable, and reports each toggle", () => {
+      const onToggle = vi.fn();
+      render(
+        <RosterMobileCards
+          columns={columns}
+          rows={two}
+          loading={false}
+          selection={{ selectableIds: ["emp-006"], selectedIds: [], onToggle }}
+        />,
+      );
+      const ada = screen.getByRole("checkbox", { name: "Select Ada Lovelace" });
+      const grace = screen.getByRole("checkbox", { name: "Select Grace Hopper" });
+      expect(ada).toBeEnabled();
+      // No open case for the measure: nothing to assign, so the box is dead, as in the table.
+      expect(grace).toBeDisabled();
+      fireEvent.click(ada);
+      expect(onToggle).toHaveBeenCalledWith("emp-006", true);
+    });
+
+    it("shows a selected card as ticked and tinted", () => {
+      render(
+        <RosterMobileCards
+          columns={columns}
+          rows={two}
+          loading={false}
+          selection={{ selectableIds: ["emp-006"], selectedIds: ["emp-006"], onToggle: vi.fn() }}
+        />,
+      );
+      const ada = screen.getByRole("checkbox", { name: "Select Ada Lovelace" });
+      expect(ada).toBeChecked();
+      expect(ada.closest("li")).toHaveClass("bg-primary-50/60");
+    });
   });
 });

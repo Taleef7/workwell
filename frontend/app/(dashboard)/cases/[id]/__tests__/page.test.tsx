@@ -118,19 +118,19 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     });
   });
 
-  it("renders crosswalk label MIPS 112 · CMS125 · Breast Cancer Screening for cms125 case in both mobile and desktop views", async () => {
+  it("renders crosswalk label MIPS 112 · CMS125 · Breast Cancer Screening for a cms125 case, once (#700: one layout)", async () => {
     setSubject("patient");
     render(<CaseDetailPage />);
     await waitFor(() => {
       const elements = screen.getAllByText("MIPS 112 · CMS125 · Breast Cancer Screening");
-      expect(elements).toHaveLength(2);
+      expect(elements).toHaveLength(1);
     });
-    expect(screen.getByText("Measurement year: 2026")).toBeInTheDocument();
-    expect(screen.getByText("Measurement year", { selector: "dt" })).toBeInTheDocument();
+    const year = screen.getByText("Measurement year", { selector: "dt" });
+    expect(year.nextElementSibling).toHaveTextContent(/^2026$/);
     expect(screen.queryByText("2026-01-01", { exact: true })).not.toBeInTheDocument();
   });
 
-  it("renders plain name for an OSHA measure without identity crosswalk in both mobile and desktop views", async () => {
+  it("renders plain name for an OSHA measure without identity crosswalk", async () => {
     get.mockImplementation((url: string) => {
       if (url === "/api/measures") {
         return Promise.resolve([
@@ -179,10 +179,9 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     render(<CaseDetailPage />);
     await waitFor(() => {
       const elements = screen.getAllByText("Annual Audiogram Completed", { exact: true });
-      expect(elements).toHaveLength(2);
+      expect(elements).toHaveLength(1);
     });
-    expect(screen.getByText("Period: 2026-Q1")).toBeInTheDocument();
-    expect(screen.getByText("Evaluation period", { selector: "dt" })).toBeInTheDocument();
+    expect(screen.getByText("Evaluation period", { selector: "dt" }).nextElementSibling).toHaveTextContent(/^2026-Q1$/);
     expect(screen.queryByText(/^MIPS/)).not.toBeInTheDocument();
   });
 
@@ -368,16 +367,12 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
   it("keeps an employee-term canonical year period raw in case detail", async () => {
     setSubject("employee");
     render(<CaseDetailPage />);
-    expect(await screen.findByText("Period: 2026-01-01", { exact: true })).toBeInTheDocument();
+    expect((await screen.findByText("Evaluation period", { selector: "dt" })).nextElementSibling).toHaveTextContent(/^2026-01-01$/);
     expect(screen.queryByText("2026", { exact: true })).not.toBeInTheDocument();
   });
 
   it("offers the assignable accounts from the profile as options", async () => {
     render(<CaseDetailPage />);
-    await waitFor(() => {
-      expect(screen.getByText("Actions")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText("Actions"));
     const control = (await screen.findAllByRole("combobox", { name: /assignee/i }))[0]!;
     fireEvent.click(control);
     await waitFor(() => {
@@ -414,9 +409,6 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     });
 
     render(<CaseDetailPage />);
-    await waitFor(() => expect(screen.getByText("Actions")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("Actions"));
-
     const control = (await screen.findAllByRole("combobox", { name: /assignee/i }))[0]!;
     await waitFor(() => expect(control).toHaveTextContent("quality-lead@maui.workwell.dev"));
     expect(control).not.toHaveTextContent("Choose an assignee");
@@ -575,18 +567,16 @@ describe("CaseDetailPage immunization forecast with no history (#628)", () => {
     currentRole = "ROLE_ADMIN";
   });
 
-  it("says no vaccination history is connected, in both layouts, and shows no dose rows", async () => {
+  it("says no vaccination history is connected, and shows no dose rows", async () => {
     get.mockImplementation((url: string) =>
       url === "/api/cases/case-001"
         ? Promise.resolve(immunizationCase({ subjectId: "emp-101", asOf: "2026-09-28", historyAvailable: false, series: [] }))
         : Promise.resolve([]),
     );
     render(<CaseDetailPage />);
-    const desktop = await screen.findByTestId("forecast-empty-desktop");
-    const mobile = screen.getByTestId("forecast-empty-mobile");
-    for (const el of [desktop, mobile]) {
-      expect(el).toHaveTextContent("No vaccination history is connected to the forecast yet, so there is no forecast.");
-    }
+    expect(await screen.findByTestId("forecast-empty-desktop")).toHaveTextContent(
+      "No vaccination history is connected to the forecast yet, so there is no forecast.",
+    );
     expect(screen.queryByText(/Last \d{4}-\d{2}-\d{2}/)).not.toBeInTheDocument();
   });
 
@@ -598,7 +588,6 @@ describe("CaseDetailPage immunization forecast with no history (#628)", () => {
     );
     render(<CaseDetailPage />);
     expect(await screen.findByTestId("forecast-empty-desktop")).toHaveTextContent("The forecast is not available right now.");
-    expect(screen.getByTestId("forecast-empty-mobile")).toHaveTextContent("The forecast is not available right now.");
   });
 
   it("shows no empty-state line when there are real rows", async () => {
@@ -619,6 +608,5 @@ describe("CaseDetailPage immunization forecast with no history (#628)", () => {
     render(<CaseDetailPage />);
     expect(await screen.findByText(/Last 2014-05-01/)).toBeInTheDocument();
     expect(screen.queryByTestId("forecast-empty-desktop")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("forecast-empty-mobile")).not.toBeInTheDocument();
   });
 });

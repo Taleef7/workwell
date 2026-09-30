@@ -229,4 +229,34 @@ describe("CasesPage crosswalk identity rendering", () => {
     // The card's name opens the patient's page (the table's opens the case).
     expect(within(heading).getByRole("link", { name: "Alice Walker" })).toHaveAttribute("href", "/patients/emp-101");
   });
+
+  it("shows the cards on a phone even in table view, with bulk selection (#700)", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("48rem"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    try {
+      render(<CasesPage />);
+      await screen.findByRole("heading", { name: "Alice Walker" });
+      fireEvent.click(screen.getByRole("button", { name: "table" }));
+      // The table is md+; a phone keeps the cards, whose checkboxes are its bulk selection.
+      expect(screen.queryByRole("table")).toBeNull();
+      expect(screen.getByRole("heading", { name: "Alice Walker" })).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Select Alice Walker" })).toBeInTheDocument();
+      const selectAll = screen.getByText("Select all in current results").closest("label")!;
+      expect(selectAll).toHaveClass("flex");
+      expect(selectAll).not.toHaveClass("hidden");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("offers no separate phone list: one card, one link per case", async () => {
+    render(<CasesPage />);
+    await screen.findByRole("heading", { name: "Alice Walker" });
+    // The old phone list linked each case a second time under the patient's name and measure.
+    expect(screen.getAllByRole("link", { name: /Alice Walker/ })).toHaveLength(1);
+  });
 });
