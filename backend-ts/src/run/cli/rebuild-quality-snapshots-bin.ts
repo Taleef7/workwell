@@ -1,10 +1,12 @@
-#!/usr/bin/env -S node --import tsx
 /**
- * #676 — rebuild the stored monthly quality snapshots on the population basis, from each month's newest
- * completed population run (`rebuildSnapshotHistory`). One-shot, owner-run, idempotent:
+ * #676 — rebuild the stored monthly quality snapshots on the population basis, by replaying the runs
+ * that are some measure's newest in their month (`rebuildSnapshotHistory`). One-shot, owner-run, idempotent:
  *   DATABASE_URL=... pnpm rebuild:quality-snapshots
  * Without DATABASE_URL it uses the local SQLite floor (WORKWELL_SQLITE_PATH, default ./.workwell-local.sqlite).
  * WORKWELL_INSTANCE must match the deployment's, so subjects resolve to the right directory.
+ *
+ * No shebang: with one, tsx's import scanner fails to parse this file's top-level await and dynamic
+ * import ("Parse error …:2:113"); `pnpm rebuild:quality-snapshots` runs it through tsx anyway.
  */
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
 import { rebuildSnapshotHistory } from "../../quality/materialize-run.ts";
@@ -26,5 +28,5 @@ const result = await rebuildSnapshotHistory({
 });
 for (const m of result.rebuilt) console.log(`rebuilt ${m.period} from run ${m.runId}: ${m.rows} rows`);
 for (const m of result.skipped) console.log(`skipped ${m.period} (run ${m.runId}): ${m.reason}`);
-console.log(`rebuild:quality-snapshots — ${result.rebuilt.length} month(s) rebuilt, ${result.skipped.length} skipped`);
+console.log(`rebuild:quality-snapshots — ${result.rebuilt.length} run(s) replayed, ${result.skipped.length} skipped`);
 process.exit(0);
