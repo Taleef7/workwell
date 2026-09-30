@@ -47,6 +47,44 @@ test.describe("Maui authentication", () => {
     await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
   });
 
+  // A deploy restarts the backend. Whoever's access token lapses meanwhile refreshes against a server
+  // that cannot answer yet, and used to be sent to /login although the login itself was still good.
+  for (const outage of ["page load", "mid-session"] as const) {
+    test(`a refresh the server cannot answer keeps the session (${outage})`, async ({ page }) => {
+      await loginAs(page, MAUI_ACCOUNTS.qualityLead.email);
+
+      // The access token lapses (page load) or stops verifying (mid-session); the app only decodes it.
+      await page.evaluate((kind) => {
+        const token = JSON.parse(localStorage.getItem("ww_token")!) as string;
+        const [h, p, s] = token.split(".");
+        const payload = JSON.parse(atob(p.replace(/-/g, "+").replace(/_/g, "/")));
+        payload.exp = Math.floor(Date.now() / 1000) + (kind === "page load" ? -60 : 600);
+        const p2 = btoa(JSON.stringify(payload)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+        localStorage.setItem("ww_token", JSON.stringify(`${h}.${p2}.${kind === "page load" ? s : "not-a-signature"}`));
+      }, outage);
+
+      // The first two refreshes meet the restart: one dropped connection, one 502 from the proxy.
+      let refreshes = 0;
+      await page.route(`${API_BASE}/api/auth/refresh`, (route) => {
+        refreshes++;
+        if (refreshes === 1) return route.abort("connectionrefused");
+        if (refreshes === 2) return route.fulfill({ status: 502, body: "Bad Gateway" });
+        return route.continue();
+      });
+      const logouts: string[] = [];
+      page.on("request", (r) => {
+        if (r.url().endsWith("/api/auth/logout")) logouts.push(r.url());
+      });
+
+      await page.goto("/programs");
+      await expect.poll(() => refreshes, { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
+      await expect(page).toHaveURL(/\/programs/);
+      await expect(page.getByRole("button", { name: /log ?out|sign out/i })).toBeVisible({ timeout: 30_000 });
+      await expectNoErrorPage(page);
+      expect(logouts, "an unreachable server must never end the login").toEqual([]);
+    });
+  }
+
   test("viewer gets 403 on POST /api/runs/manual", async ({ request }) => {
     const login = await request.post(`${API_BASE}/api/auth/login`, {
       data: { email: MAUI_ACCOUNTS.clinician.email, password: MAUI_PASSWORD },

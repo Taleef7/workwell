@@ -1,5 +1,5 @@
 import { ApiError } from "./errors";
-import { withRefreshLock } from "./refresh-lock";
+import { refreshSession } from "./session-refresh";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
 
@@ -17,31 +17,16 @@ function bustGetCache(): void {
 }
 
 /**
- * Module-level single-flight for the silent access-token refresh (Fable M24). Parallel 401s (several
- * components fetching at once) must NOT each POST /api/auth/refresh: the refresh ROTATES the HttpOnly
- * cookie, so a second concurrent call races the first's rotation and can fail → a spurious hard logout
- * mid-session. All callers now share one in-flight refresh; the slot is cleared once it settles so a
- * later token expiry starts a fresh one.
+ * What a request answers when its access token lapsed and the refresh could not reach the server (a
+ * deploy, a busy pool). A 503 with a message, so the page shows a retryable error, and the session is
+ * kept: the login itself is still good, and the next request refreshes again.
  */
-let refreshInFlight: Promise<string | null> | null = null;
-function refreshAccessToken(): Promise<string | null> {
-  if (refreshInFlight) return refreshInFlight;
-  const p = (async (): Promise<string | null> => {
-    try {
-      // Held across tabs too (refresh-lock.ts): a second tab refreshing at once signed everyone out.
-      const res = await withRefreshLock(() => fetch(`${API_BASE}/api/auth/refresh`, { method: "POST", credentials: "include" }));
-      if (!res.ok) return null;
-      const payload = (await res.json()) as { token?: string };
-      return payload.token ?? null;
-    } catch {
-      return null;
-    }
-  })();
-  refreshInFlight = p;
-  void p.finally(() => {
-    if (refreshInFlight === p) refreshInFlight = null;
+export const SERVER_UNAVAILABLE_MESSAGE = "Can't reach the server right now. It may be restarting; try again in a moment.";
+function serverUnavailable(): Response {
+  return new Response(JSON.stringify({ error: "server_unavailable", message: SERVER_UNAVAILABLE_MESSAGE }), {
+    status: 503,
+    headers: { "content-type": "application/json" },
   });
-  return p;
 }
 
 export type ApiClientOptions = {
@@ -72,21 +57,12 @@ export class ApiClient {
   }
 
   /**
-   * Attempts one silent access-token refresh against /api/auth/refresh using the HttpOnly refresh
-   * cookie, via the module-level single-flight (Fable M24). Returns true if a fresh access token was
-   * obtained; the token is also propagated to the session store so every client picks it up.
-   */
-  private async tryRefresh(): Promise<boolean> {
-    const token = await refreshAccessToken();
-    if (!token) return false;
-    this.token = token;
-    this.onTokenRefreshed?.(token);
-    return true;
-  }
-
-  /**
    * Executes a fetch and, on a 401, attempts exactly one silent refresh + retry.
    * The `retried` boolean (NOT header inspection) guards against unbounded recursion.
+   *
+   * Only a REFUSED refresh signs the user out. One the server could not answer is retried for up to
+   * about two minutes, then keeps the session and answers 503 (`session-refresh.ts`): signing out there
+   * turned every deploy into a logout.
    */
   private async fetchWithAuth(
     url: string,
@@ -95,10 +71,14 @@ export class ApiClient {
   ): Promise<Response> {
     const res = await fetch(url, build());
     if (res.status === 401 && !retried) {
-      const refreshed = await this.tryRefresh();
-      if (refreshed) {
+      const refresh = await refreshSession();
+      if (refresh.kind === "ok") {
+        // Propagated to the session store too, so every client uses it (Fable M24).
+        this.token = refresh.token;
+        this.onTokenRefreshed?.(refresh.token);
         return this.fetchWithAuth(url, build, true);
       }
+      if (refresh.kind === "unavailable") return serverUnavailable();
       this.onUnauthorized?.();
       return res;
     }

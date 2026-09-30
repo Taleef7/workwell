@@ -3,8 +3,9 @@
  *
  * We verify three observable contracts:
  *  1. Expired token + successful refresh → new credentials written to localStorage, no redirect.
- *  2. Expired token + failed refresh (non-2xx) → router.replace("/login") called.
- *  3. Expired token + network error → router.replace("/login") called.
+ *  2. Expired token + a refused refresh (401) → router.replace("/login") called.
+ *  3. Expired token + a refresh the server could not answer (network error, 5xx) → retried, never
+ *     sent to /login: a deploy restarting the backend is not a logout.
  *  4. Logout in progress → refresh skipped, redirect not duplicated by the effect.
  *  5. Refresh attempted only once per unauthenticated epoch (silentRefreshAttempted guard).
  *  6. Public routes (`/` and `/sandbox`) do not trigger refresh or redirect.
@@ -15,9 +16,10 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { act, render, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { server } from "../../test/msw/server";
 import { AuthProvider, PUBLIC_ROUTES, isPublicRoute, useAuth } from "../auth-provider";
+import { __setRefreshRetryDelaysForTest } from "@/lib/api/session-refresh";
 
 // ── Next.js navigation mocks ──────────────────────────────────────────────────
 const mockReplace = vi.fn();
@@ -54,6 +56,11 @@ beforeEach(() => {
   localStorage.clear();
   mockReplace.mockClear();
   mockPathname.mockReturnValue("/programs");
+  __setRefreshRetryDelaysForTest([5, 5, 5]);
+});
+
+afterEach(() => {
+  __setRefreshRetryDelaysForTest(null);
 });
 
 // ── Helper component ──────────────────────────────────────────────────────────
@@ -149,7 +156,7 @@ describe("AuthProvider — silent refresh on page load", () => {
     expect(mockReplace).not.toHaveBeenCalled();
   });
 
-  it("redirects to /login when the refresh endpoint returns a non-2xx response", async () => {
+  it("redirects to /login when the refresh endpoint refuses (401)", async () => {
     // Default MSW handler returns 401 — no server.use() override needed.
     renderProvider();
 
@@ -159,9 +166,138 @@ describe("AuthProvider — silent refresh on page load", () => {
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
   });
 
-  it("redirects to /login when the refresh fetch throws a network error", async () => {
+  it("keeps the login through a server restart: network errors and 502s are retried, not a logout", async () => {
+    storeExpiredSession();
+    let calls = 0;
     server.use(
-      http.post("*/api/auth/refresh", () => HttpResponse.error())
+      http.post("*/api/auth/refresh", () => {
+        calls++;
+        if (calls === 1) return HttpResponse.error();
+        if (calls <= 3) return new HttpResponse("Bad Gateway", { status: 502 });
+        return HttpResponse.json({ token: freshToken, email: "admin@workwell.dev", role: "ADMIN" });
+      })
+    );
+
+    renderProvider();
+
+    await waitFor(() => {
+      expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(freshToken));
+    });
+    expect(calls).toBe(4);
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("while the server stays unreachable it keeps retrying and says it is reconnecting, never /login", async () => {
+    storeExpiredSession();
+    let calls = 0;
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        calls++;
+        return new HttpResponse(null, { status: 503 });
+      })
+    );
+
+    let latest: ReturnType<typeof useAuth> | null = null;
+    const { unmount } = renderProvider((auth) => { latest = auth; });
+
+    // Past one whole retry budget (4 attempts), so the provider is on its second round.
+    await waitFor(() => expect(calls).toBeGreaterThan(5));
+    await waitFor(() => expect(latest?.reconnecting).toBe(true), { timeout: 3_000 });
+    expect(mockReplace).not.toHaveBeenCalled();
+
+    // Leaving the page ends the retrying; let the in-flight round settle before the next test.
+    unmount();
+    await new Promise((r) => setTimeout(r, 100));
+    const settled = calls;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls).toBe(settled);
+  });
+
+  it("a navigation while it reconnects is not a second attempt, and does not send the user to /login", async () => {
+    // Long enough waits that the navigation lands mid-outage.
+    __setRefreshRetryDelaysForTest([40, 40, 40, 40, 40]);
+    storeExpiredSession();
+    let calls = 0;
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        calls++;
+        return calls < 6
+          ? new HttpResponse(null, { status: 502 })
+          : HttpResponse.json({ token: freshToken, email: "admin@workwell.dev", role: "ADMIN" });
+      })
+    );
+
+    const { rerender } = renderProvider();
+    await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2));
+    mockPathname.mockReturnValue("/cases");
+    rerender(
+      <AuthProvider>
+        <TestApp />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(freshToken));
+    });
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("a login made while it reconnects wins: the old login's late answer neither overwrites it nor ejects it", async () => {
+    storeExpiredSession();
+    let calls = 0;
+    let refuseOld = false;
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        calls++;
+        if (refuseOld) return HttpResponse.json({ error: "invalid_refresh_token" }, { status: 401 });
+        return new HttpResponse(null, { status: 502 });
+      })
+    );
+
+    let latest: ReturnType<typeof useAuth> | null = null;
+    renderProvider((auth) => { latest = auth; });
+    await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2));
+
+    // The user follows "Sign in again" and signs in as someone else; the server then answers the loop.
+    const newToken = buildJwt(Math.floor(Date.now() / 1000) + 900, "new@workwell.dev");
+    act(() => { latest!.login(newToken, "new@workwell.dev", "ADMIN"); });
+    refuseOld = true;
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(newToken));
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("a logout while it reconnects stops the refreshing at once", async () => {
+    // Waits long enough that the round would still be firing after the logout if nothing cancelled it.
+    __setRefreshRetryDelaysForTest([40, 40, 40, 40]);
+    storeExpiredSession();
+    let calls = 0;
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        calls++;
+        return new HttpResponse(null, { status: 502 });
+      })
+    );
+
+    let latest: ReturnType<typeof useAuth> | null = null;
+    renderProvider((auth) => { latest = auth; });
+    await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2));
+
+    const atLogout = calls;
+    act(() => { latest!.logout(); });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(calls).toBe(atLogout);
+  });
+
+  it("a refusal after an outage still ends the session", async () => {
+    storeExpiredSession();
+    let calls = 0;
+    server.use(
+      http.post("*/api/auth/refresh", () => {
+        calls++;
+        return calls === 1 ? HttpResponse.error() : HttpResponse.json({ error: "invalid_refresh_token" }, { status: 401 });
+      })
     );
 
     renderProvider();
@@ -169,6 +305,8 @@ describe("AuthProvider — silent refresh on page load", () => {
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith("/login");
     });
+    expect(calls).toBe(2);
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
   });
 
   it("does not attempt refresh and does not redirect from the effect when logout is in progress", async () => {
