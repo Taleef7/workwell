@@ -1,0 +1,78 @@
+name: Rebuild Maui quality snapshots (#676)
+
+# One-shot, owner-run: puts Maui's stored monthly quality snapshots on the population basis (#676) by
+# replaying, from their PERSISTED outcomes, each month's runs that are some measure's newest. Nothing is
+# re-evaluated. Idempotent: running it again rewrites the same rows. Each run it replays writes its own
+# QUALITY_SNAPSHOT_MATERIALIZED audit event. Reversible: the table is a rebuildable cache.
+#
+# It runs with Maui's own profile settings (instance, corpus size, routed measures), copied from
+# deploy-maui-mieweb.yml, so every subject resolves to the same directory the nightly used. If those
+# change there, change them here.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "rebuild maui" to write to the Maui database'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rebuild-quality-snapshots-maui
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: backend-ts
+    env:
+      DATABASE_URL_RAW: ${{ secrets.DATABASE_URL_MAUI }}
+      PROD_DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
+      WORKWELL_INSTANCE: maui
+      WORKWELL_MAUI_CORPUS_SIZE: "20000"
+      WORKWELL_OFFICIAL_MEASURES: cms122,cms125,cms2,cms130,cms165,cms137
+    steps:
+      - name: Confirmation and safety checks
+        working-directory: .
+        shell: bash
+        env:
+          # Through the environment, never interpolated into the script: an input is untrusted text.
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "rebuild maui" ]; then
+            echo "::error::Confirmation text did not match; nothing was written."; exit 1
+          fi
+          # The nightly recompute runs 12:00 UTC and writes these rows; do not race it.
+          now=$(date -u +%H%M)
+          if [ "$now" -ge 1145 ] && [ "$now" -le 1345 ]; then
+            echo "::error::Inside the nightly window (11:45–13:45 UTC). Run it outside that window."; exit 1
+          fi
+          [ -n "$DATABASE_URL_RAW" ] || { echo "::error::DATABASE_URL_MAUI is not set."; exit 1; }
+          # Never the production database (the same guard deploy-maui-mieweb.yml carries).
+          host_of() { printf '%s' "$1" | sed -E 's#^(jdbc:)?[a-z]+://([^@]*@)?([^/:?]+).*#\3#'; }
+          if [ -n "$PROD_DATABASE_URL" ] && [ "$(host_of "$DATABASE_URL_RAW")" = "$(host_of "$PROD_DATABASE_URL")" ]; then
+            echo "::error::DATABASE_URL_MAUI resolves to the production host; refusing."; exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Rebuild the snapshots
+        shell: bash
+        run: |
+          export DATABASE_URL="${DATABASE_URL_RAW#jdbc:}"
+          pnpm rebuild:quality-snapshots

@@ -218,8 +218,8 @@ test("#676 rebuildSnapshotHistory: each month from its NEWEST run, old rows corr
   ]);
 
   const result = await rebuildSnapshotHistory(s);
-  // Every run replayed oldest first; June ends at its newest run.
-  assert.deepEqual(result.rebuilt.map((m) => [m.period, m.runId]), [["2026-06", juneOld.id], ["2026-06", juneNew.id], ["2026-07", july.id]]);
+  // Only each month's newest full run is replayed: June's older run changes nothing, so it is not read.
+  assert.deepEqual(result.rebuilt.map((m) => [m.period, m.runId]), [["2026-06", juneNew.id], ["2026-07", july.id]]);
   assert.deepEqual(result.skipped, []);
   const all = (await s.qualitySnapshots.querySnapshots({ measureId: "audiogram", scopeLevel: "all" }))
     .map((r) => [r.period, r.denominator, r.notInPopulation, r.sourceRunId]);
@@ -253,4 +253,24 @@ test("#676 rebuildSnapshotHistory: a later single-measure run rebuilds its measu
     ["audiogram", one.id, 0, 1],
     ["hazwoper", full.id, 1, 1],
   ].sort());
+});
+
+test("#676 rebuildSnapshotHistory: a newer PARTIAL_FAILURE full run covers only what it has; older runs still serve the rest", async () => {
+  const s = await freshStores();
+  const full = await popRun(s, { startedAt: "2026-10-02T10:00:00.000Z", completedAt: "2026-10-02T10:05:00.000Z" });
+  await s.outcomeStore.recordOutcomes([
+    { runId: full.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+    { runId: full.id, subjectId: twh[0]!.externalId, measureId: "hazwoper", status: "COMPLIANT", evidence: {} },
+  ]);
+  const partial = await popRun(s, {
+    status: "PARTIAL_FAILURE", startedAt: "2026-10-20T10:00:00.000Z", completedAt: "2026-10-20T10:05:00.000Z",
+  });
+  await s.outcomeStore.recordOutcomes([
+    { runId: partial.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "OVERDUE", evidence: {} },
+  ]);
+  const result = await rebuildSnapshotHistory(s);
+  assert.deepEqual(result.rebuilt.map((m) => m.runId), [full.id, partial.id]);
+  const all = (await s.qualitySnapshots.querySnapshots({ from: "2026-10", to: "2026-10", scopeLevel: "all" }))
+    .map((r) => [r.measureId, r.sourceRunId]).sort();
+  assert.deepEqual(all, [["audiogram", partial.id], ["hazwoper", full.id]]);
 });

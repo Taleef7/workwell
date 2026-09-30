@@ -11,7 +11,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   counted in, so every official measure's monthly rate read low and the screens refused the whole series.
   A new `not_in_population` column (owner-approved) records how many a row left out, NULL on an old row;
   the screens now refuse per row. `pnpm rebuild:quality-snapshots` replays each month's runs to rebuild
-  the history; running it against Maui is a separate owner-approved step.
+  the history. It replays only each month's runs that are some measure's newest (Maui's database is
+  metered), and a manual workflow runs it against Maui with the deployment's own settings.
 
 ## 2026-09-29
 
