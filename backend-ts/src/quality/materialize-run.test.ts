@@ -218,7 +218,8 @@ test("#676 rebuildSnapshotHistory: each month from its NEWEST run, old rows corr
   ]);
 
   const result = await rebuildSnapshotHistory(s);
-  assert.deepEqual(result.rebuilt.map((m) => [m.period, m.runId]), [["2026-06", juneNew.id], ["2026-07", july.id]]);
+  // Every run replayed oldest first; June ends at its newest run.
+  assert.deepEqual(result.rebuilt.map((m) => [m.period, m.runId]), [["2026-06", juneOld.id], ["2026-06", juneNew.id], ["2026-07", july.id]]);
   assert.deepEqual(result.skipped, []);
   const all = (await s.qualitySnapshots.querySnapshots({ measureId: "audiogram", scopeLevel: "all" }))
     .map((r) => [r.period, r.denominator, r.notInPopulation, r.sourceRunId]);
@@ -227,4 +228,29 @@ test("#676 rebuildSnapshotHistory: each month from its NEWEST run, old rows corr
     ["2026-06", 1, 1, juneNew.id],
     ["2026-07", 1, 0, july.id],
   ]);
+});
+
+// #676 review: a month whose newest run covers ONE measure must not leave the others on the old basis.
+test("#676 rebuildSnapshotHistory: a later single-measure run rebuilds its measure and leaves the others at the earlier full run", async () => {
+  const s = await freshStores();
+  const full = await popRun(s, { startedAt: "2026-09-02T10:00:00.000Z", completedAt: "2026-09-02T10:05:00.000Z" });
+  await s.outcomeStore.recordOutcomes([
+    { runId: full.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+    { runId: full.id, subjectId: twh[0]!.externalId, measureId: "hazwoper", status: "MISSING_DATA", evidence: {}, outOfPopulation: true },
+    { runId: full.id, subjectId: twh[1]!.externalId, measureId: "hazwoper", status: "COMPLIANT", evidence: {} },
+  ]);
+  const one = await popRun(s, {
+    scopeType: "MEASURE", scopeId: "audiogram", requestedScope: { measureId: "audiogram" },
+    startedAt: "2026-09-20T10:00:00.000Z", completedAt: "2026-09-20T10:05:00.000Z",
+  });
+  await s.outcomeStore.recordOutcomes([
+    { runId: one.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "OVERDUE", evidence: {} },
+  ]);
+  await rebuildSnapshotHistory(s);
+  const all = (await s.qualitySnapshots.querySnapshots({ from: "2026-09", to: "2026-09", scopeLevel: "all" }))
+    .map((r) => [r.measureId, r.sourceRunId, r.notInPopulation, r.denominator]);
+  assert.deepEqual(all.sort(), [
+    ["audiogram", one.id, 0, 1],
+    ["hazwoper", full.id, 1, 1],
+  ].sort());
 });

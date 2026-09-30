@@ -159,10 +159,7 @@ export async function backfillQualityHistory(
           const target = bundleSource.targetFor(employees, measureId, employee.externalId) ?? "MISSING_DATA";
           const bundle = bundleSource.bundleFor(employee, measureId, target, today); // anchor to today
           const outcome = await deps.engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: asOfDate });
-          // Out of population only for an officially routed measure, as the run pipeline reads it (ADR-078):
-          // an authored "not in the initial population" is a workflow fact, not the measure's scope (#676).
-          const inIpp = (outcome as { inInitialPopulation?: boolean }).inInitialPopulation;
-          liveOutcomes.push({ subjectId: employee.externalId, status: outcome.outcome, outOfPopulation: isOfficialRouted(measureId) && inIpp === false });
+          liveOutcomes.push({ subjectId: employee.externalId, status: outcome.outcome });
         } catch {
           liveOutcomes.push({ subjectId: employee.externalId, status: "MISSING_DATA" });
         }
@@ -170,7 +167,14 @@ export async function backfillQualityHistory(
       const groups = scaleGroupsByMeasure.get(measureId);
       const scale = groups ? { tenantId: SCALE_TENANT.id, groups } : undefined;
       rows.push(
-        ...buildSnapshotRows({ measureId, period, periodStart, periodEnd, sourceRunId: null, computedAt, liveOutcomes, resolveScope, scale }),
+        ...buildSnapshotRows({
+          measureId, period, periodStart, periodEnd, sourceRunId: null, computedAt, liveOutcomes, resolveScope, scale,
+          // #676: this backfill evaluates with the engine its caller injects, which for `seed:quality-history`
+          // is the AUTHORED one. For an officially routed measure that is not the measure's own logic, so it
+          // cannot say who is out of the official population: the rows stay on the old basis (NULL) and the
+          // screens keep refusing them. An authored measure has no such population, so its rows are sound.
+          basisKnown: !isOfficialRouted(measureId),
+        }),
       );
     }
 

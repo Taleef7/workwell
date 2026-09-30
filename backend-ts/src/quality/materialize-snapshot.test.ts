@@ -162,3 +162,8 @@ test("#676: an out-of-population subject leaves the denominator at every scope, 
 test("#676: every row states its basis — a number, never NULL — even where no subject was left out", () => {
   for (const row of buildSnapshotRows(baseInput())) assert.equal(row.notInPopulation, 0, `${row.scopeLevel}:${row.scopeId}`);
 });
+
+test("#676: outcomes that cannot tell who is out of the population write the old basis (NULL), never a number", () => {
+  const rows = buildSnapshotRows({ ...baseInput(), basisKnown: false });
+  for (const row of rows) assert.equal(row.notInPopulation, null, `${row.scopeLevel}:${row.scopeId}`);
+});

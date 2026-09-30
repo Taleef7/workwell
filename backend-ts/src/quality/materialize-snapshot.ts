@@ -48,6 +48,12 @@ export interface BuildSnapshotInput {
    * a measure's population: the groups carry no such flag because they cannot hold such a row.
    */
   scale?: { tenantId: string; groups: ScaleGroup[] };
+  /**
+   * Whether these outcomes KNOW which subjects are out of the population (#676). Default true: a run's
+   * persisted outcomes carry the flag. False where they cannot: then the rows record NULL, the old
+   * basis, and the screens refuse them rather than certify a denominator nobody checked.
+   */
+  basisKnown?: boolean;
 }
 
 interface Acc {
@@ -157,8 +163,9 @@ export function buildSnapshotRows(input: BuildSnapshotInput): QualitySnapshotInp
       excluded: acc.excluded,
       sourceRunId: input.sourceRunId,
       computedAt: input.computedAt,
-      // Always a number from here: this row was computed without the out-of-population subjects.
-      notInPopulation: acc.notInPopulation,
+      // A number: computed without the out-of-population subjects. NULL only where the caller could not
+      // tell them apart (`basisKnown: false`).
+      notInPopulation: input.basisKnown === false ? null : acc.notInPopulation,
     });
   };
 
