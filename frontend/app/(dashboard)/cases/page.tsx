@@ -16,12 +16,13 @@ import {
 } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
+import { ScrollRegion } from "@/components/scroll-region";
+import { BELOW_MD, useMediaQuery } from "@/lib/use-media-query";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
-import { ChevronRight } from "lucide-react";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
@@ -224,6 +225,7 @@ export default function CasesPage() {
   const canManage = canManageCases(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
   const { labelFor: measureLabelFor } = useMeasureIdentities();
+  const isPhone = useMediaQuery(BELOW_MD);
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -698,7 +700,9 @@ export default function CasesPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
+        {/* Its own full-width row that wraps: five buttons in one line made the page scroll sideways on a
+            phone (#700). */}
+        <div role="group" aria-label="Status" className="flex basis-full flex-wrap items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
           <span>Status</span>
           {(["open", "closed", "staff_closed", "all", "excluded"] as const).map((status) => (
             <Button
@@ -706,6 +710,7 @@ export default function CasesPage() {
               type="button"
               size="sm"
               variant={statusFilter === status ? "primary" : "outline"}
+              aria-pressed={statusFilter === status}
               className="rounded-full"
               onClick={() => setStatusAndUrl(status)}
             >
@@ -779,7 +784,8 @@ export default function CasesPage() {
         />
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400">View</span>
-          <div className="inline-flex overflow-hidden rounded-lg border border-neutral-300 dark:border-neutral-700" role="group" aria-label="Result view">
+          {/* No table on a phone (#700): the cards are the phone view, so the toggle is md+. */}
+          <div className="hidden overflow-hidden rounded-lg border border-neutral-300 md:inline-flex dark:border-neutral-700" role="group" aria-label="Result view">
             {(["cards", "table"] as const).map((mode) => (
               <button
                 key={mode}
@@ -816,7 +822,9 @@ export default function CasesPage() {
       ) : null}
 
       {canBulkAct && selectedCaseIds.length > 0 ? (
-        <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
+        // Sticks to the top of a phone screen, as on the Work list and roster (#700): cards run several
+        // screens, and the bar would otherwise scroll away from the ones being ticked.
+        <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 max-md:sticky max-md:top-0 max-md:z-20 max-md:shadow-md dark:border-primary-800 dark:bg-primary-900/20 max-md:dark:bg-neutral-900">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">{selectedCaseIds.length} selected</span>
             <Select
@@ -871,52 +879,33 @@ export default function CasesPage() {
       ) : null}
 
       {canBulkAct && filteredCases.length > 0 ? (
-        <label className="hidden items-center gap-2 text-sm text-neutral-600 md:flex dark:text-neutral-400">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-neutral-600 md:min-h-0 dark:text-neutral-400">
           <input type="checkbox" checked={allFilteredSelected} onChange={toggleAllFiltered} />
           <span>Select all in current results</span>
         </label>
       ) : null}
 
-      <div className="space-y-2 md:hidden">
-        {filteredCases.map((item) => {
-          const outcomeLabel = labelFor(OUTCOME_LABELS, displayOutcomeOf(item));
-          return (
-            <Link
-              key={item.caseId}
-              href={`/cases/${item.caseId}`}
-              className="flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-neutral-900 dark:text-neutral-100">{item.employeeName}</p>
-                <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{measureLabelFor(item.measureId, item.measureName)}</p>
-                <StaffClosureNote item={item} className="truncate" />
-              </div>
-              <div className="ml-3 flex items-center gap-2">
-                <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${outcomeStatusClass(displayOutcomeOf(item))}`}>
-                  {outcomeLabel}
-                </span>
-                <ChevronRight className="h-4 w-4 text-neutral-400" />
-              </div>
-            </Link>
-          );
-        })}
-      </div>
-
-      {viewMode === "table" ? (
+      {/*
+        The cards are the view at every width (#700). A phone had a separate link list with no
+        checkboxes and no select-all, so nothing could be bulk-assigned from it; the table is md+ and a
+        table view carried over from a wider screen falls back to cards on a phone.
+      */}
+      {viewMode === "table" && !isPhone ? (
         <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canBulkAct} measureLabelFor={measureLabelFor} />
       ) : (
-      <div className="hidden gap-4 md:grid md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
         {filteredCases.map((item) => {
           const caseStatus = normalizeEnumValue(item.status);
           const caseStatusLabel = labelFor(CASE_STATUS_LABELS, item.status);
           const priorityLabel = labelFor(PRIORITY_LABELS, item.priority);
           return (
-            <div key={item.caseId} className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+            <div key={item.caseId} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm md:p-5 dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-start justify-between gap-3">
                 {canBulkAct ? (
-                  <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+                  <label className="flex min-h-11 items-center gap-2 text-xs text-neutral-600 md:min-h-0 dark:text-neutral-400">
                     <input
                       type="checkbox"
+                      className="h-5 w-5 md:h-auto md:w-auto"
                       aria-label={`Select ${item.employeeName}`}
                       checked={selectedCaseIds.includes(item.caseId)}
                       onChange={() => toggleCase(item.caseId)}
@@ -1028,7 +1017,7 @@ function CasesTable({
 }) {
   if (items.length === 0) return null;
   return (
-    <div className="hidden overflow-x-auto rounded-2xl border border-neutral-200 bg-white md:block dark:border-neutral-800 dark:bg-neutral-900">
+    <ScrollRegion label="Cases table" className="hidden rounded-2xl border border-neutral-200 bg-white md:block dark:border-neutral-800 dark:bg-neutral-900">
       <table className="min-w-full text-sm">
         <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
           <tr>
@@ -1103,6 +1092,6 @@ function CasesTable({
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }

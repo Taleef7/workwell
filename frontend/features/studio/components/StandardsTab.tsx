@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { ApiClient } from "@/lib/api/client";
+import { ScrollRegion } from "@/components/scroll-region";
 
 /**
  * E14 (#186) Standards Fidelity tab — a read-only view of WorkWell's authored eCQM measure vs the
@@ -177,7 +178,7 @@ export function StandardsTab({ measureId, api }: Props) {
       </div>
 
       {/* Criterion fidelity */}
-      <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+      <ScrollRegion label="Criterion fidelity table" className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <table className="min-w-full text-left text-xs">
           <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400">
             <tr>
@@ -215,7 +216,7 @@ export function StandardsTab({ measureId, api }: Props) {
             })}
           </tbody>
         </table>
-      </div>
+      </ScrollRegion>
 
       {/* Outcome diff summary */}
       {divergent ? (
@@ -272,7 +273,7 @@ export function StandardsTab({ measureId, api }: Props) {
             ) : null}
           </div>
 
-          <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+          <ScrollRegion label="Subject outcomes table" className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
             <table className="min-w-full text-left text-xs">
               <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400">
                 <tr>
@@ -296,7 +297,7 @@ export function StandardsTab({ measureId, api }: Props) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
 
           <p className="text-[11px] leading-5 text-neutral-600 dark:text-neutral-500">{execution.disclaimer}</p>
         </div>

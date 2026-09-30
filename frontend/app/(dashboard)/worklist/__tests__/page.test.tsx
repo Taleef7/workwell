@@ -431,3 +431,65 @@ describe("WorklistPage", () => {
     );
   });
 });
+
+// #700: the Work list on a phone or narrow tablet. jsdom has no layout and no container queries, so these
+// pin the markup the CSS reflow and the fold depend on; the Playwright responsive spec measures the page.
+describe("WorklistPage on a phone or narrow tablet (#700)", () => {
+  it("folds the filters behind one button that counts the active ones, hidden by class and never unmounted", async () => {
+    navHolder.current.setUrl("/worklist?providerId=maui-prov-012");
+    render(<WorklistPage />);
+    const toggle = await screen.findByRole("button", { name: /^Filters · \d+ active$/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const panel = document.getElementById("worklist-filters")!;
+    expect(toggle).toHaveAttribute("aria-controls", "worklist-filters");
+    expect(panel).toHaveClass("hidden", "md:flex");
+    // Still mounted while folded: the filters keep their state and the URL keeps driving them.
+    expect(screen.getByRole("combobox", { name: /work/i })).toBeInTheDocument();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Hide filters");
+    expect(panel).toHaveClass("flex");
+    expect(panel).not.toHaveClass("hidden");
+  });
+
+  it("counts and names every URL-backed narrowing, so a folded panel never hides why the list is filtered", async () => {
+    navHolder.current.setUrl("/worklist?status=staff_closed&search=Carter&measureId=cms125");
+    render(<WorklistPage />);
+    expect(await screen.findByRole("button", { name: "Filters · 3 active" })).toBeInTheDocument();
+    expect(screen.getByText("Work: Closed by staff")).toBeInTheDocument();
+    expect(screen.getByText("Search: Carter")).toBeInTheDocument();
+    expect(screen.getByText(/^Measure: /)).toBeInTheDocument();
+  });
+
+  it("turns each row into a card by container query, keeping every value in its own element", async () => {
+    render(<WorklistPage />);
+    const name = await screen.findByRole("link", { name: "Lisa Carter" });
+    const region = screen.getByRole("region", { name: "Work list table" });
+    expect(region).toHaveClass("@container");
+    const row = name.closest("tr")!;
+    expect(row).toHaveClass("@max-4xl:grid");
+    // Card-only captions sit beside each value and hide at table width, so a value is still its own
+    // element: a test, a screen reader or a copy-paste gets "NP Kira Venn", not "PCP · NP Kira Venn".
+    const pcp = screen.getByText("NP Kira Venn");
+    expect(pcp.previousElementSibling).toHaveTextContent(/^(PCP|Provider) ·$/);
+    expect(pcp.previousElementSibling).toHaveClass("@4xl:hidden");
+    const owner = screen.getByText("Unassigned");
+    expect(owner.previousElementSibling).toHaveTextContent(/^Owner ·$/);
+    expect(owner.previousElementSibling).toHaveClass("@4xl:hidden");
+    // The header row reflows to a select-all bar: its own caption, the column headings hidden.
+    // Its visible caption is its accessible name (WCAG 2.5.3, label in name).
+    const selectAll = screen.getByRole("checkbox", { name: /Select all .* on this page/ });
+    expect(screen.getByText(selectAll.getAttribute("aria-label")!)).toHaveClass("@4xl:hidden");
+    expect(screen.getByRole("columnheader", { name: "Owner" })).toHaveClass("@max-4xl:hidden");
+  });
+
+  it("marks a selected row, so a ticked card reads as ticked", async () => {
+    render(<WorklistPage />);
+    const box = await screen.findByRole("checkbox", { name: "Select Lisa Carter" });
+    const row = box.closest("tr")!;
+    expect(row).not.toHaveClass("bg-primary-50/60");
+    await userEvent.click(box);
+    expect(row).toHaveClass("bg-primary-50/60");
+  });
+});

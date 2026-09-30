@@ -526,17 +526,17 @@ export default function CaseDetailPage() {
         }}
         onCancel={() => setEscalationConfirmOpen(false)}
       />
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <Link href="/cases" className="text-sm font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100">
             ← Back to cases
           </Link>
-          <h2 className="mt-2 text-3xl font-semibold">Case detail</h2>
+          <h2 className="mt-2 text-2xl font-semibold sm:text-3xl">Case detail</h2>
           <p className="mt-2 text-neutral-600 dark:text-neutral-400">Structured Why Flagged evidence for the selected case and its {isPatientTerm ? "exclusion" : "waiver"} context.</p>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col items-start gap-2 sm:items-end">
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            Case: <code>{caseId}</code>
+            Case: <code className="break-all">{caseId}</code>
           </p>
           <AuditPacketExportButton
             api={api}
@@ -553,170 +553,13 @@ export default function CaseDetailPage() {
 
       {caseDetail ? (
         <>
-        <div className="space-y-3 md:hidden">
-          <details open className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-            <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Case Summary</summary>
-            <div className="mt-3 space-y-2 text-sm">
-              <p className="font-semibold text-neutral-900 dark:text-neutral-100">{caseDetail.employeeName}</p>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">{caseDetail.employeeId}</p>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">{measureLabelFor(caseDetail.measureId, caseDetail.measureName)}</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${caseStatusClass(caseDetail.status)}`}>
-                  {labelFor(CASE_STATUS_LABELS, caseDetail.status)}
-                </span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(caseDetail.currentOutcomeStatus)}`}>
-                  {labelFor(OUTCOME_LABELS, caseDetail.currentOutcomeStatus)}
-                </span>
-              </div>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">
-                {isPatientTerm ? `Measurement year: ${formatEvaluationPeriod(caseDetail.evaluationPeriod)}` : `Period: ${caseDetail.evaluationPeriod}`}
-              </p>
-              <p className="text-xs text-neutral-700 dark:text-neutral-300">{caseDetail.nextAction}</p>
-              <Link href={subjectPath(caseDetail.employeeId)} className="text-xs font-semibold text-primary-700 dark:text-primary-400 hover:underline">
-                {`Open ${SUBJECT.Singular} Profile`}
-              </Link>
-            </div>
-          </details>
-
-          {canManage && (
-          <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-            <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Actions</summary>
-            <div className="mt-3 space-y-3">
-              <Select
-                label="Outreach Template"
-                value={selectedTemplateId}
-                onValueChange={setSelectedTemplateId}
-                options={templateOptions}
-              />
-              <Select
-                label="Channel"
-                value={outreachChannel}
-                onValueChange={setOutreachChannel}
-                options={channelOptions}
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void previewOutreach()}
-                  disabled={previewing || caseStatus === "EXCLUDED"}
-                  isLoading={previewing}
-                  loadingText="Previewing..."
-                >
-                  Preview
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => void runAction("outreach")}
-                  disabled={acting !== null || caseStatus === "EXCLUDED"}
-                  isLoading={acting === "outreach"}
-                  loadingText="Sending..."
-                >
-                  Send Outreach
-                </Button>
-                {/* §8E — the send is simulated AND nothing reaches the chart. Spans both columns so it
-                    reads as a statement about the pair of buttons, not a hint on the last one. */}
-                <div className="col-span-2">
-                  <LocalOnlyNotice action="Outreach" />
-                </div>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => void runAction("rerun")}
-                  disabled={acting !== null || caseStatus === "CLOSED"}
-                  isLoading={acting === "rerun"}
-                  loadingText="Verifying..."
-                >
-                  Rerun to Verify
-                </Button>
-                {!caseIsFinished && (
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => setEscalationConfirmOpen(true)}
-                    disabled={escalating}
-                    isLoading={escalating}
-                    loadingText="Escalating..."
-                  >
-                    Escalate
-                  </Button>
-                )}
-              </div>
-              <div className="grid gap-2">
-                <Select
-                  label="Assignee"
-                  hideLabel
-                  value={assigneeValue}
-                  onValueChange={setAssigneeInput}
-                  options={assigneeOptions}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void assignCase()}
-                  disabled={assigning || assigneeUnchanged}
-                  isLoading={assigning}
-                  loadingText="Assigning..."
-                >
-                  Assign
-                </Button>
-              </div>
-            </div>
-          </details>
-          )}
-
-          <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-            <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Why Flagged Evidence</summary>
-            <div className="mt-3">
-              <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} />
-            </div>
-          </details>
-
-          {caseDetail.immunizationForecast ? (
-            <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Immunization Forecast</summary>
-              <p className="mt-2 text-[11px] text-neutral-500 dark:text-neutral-400">Advisory — as of {caseDetail.immunizationForecast.asOf}</p>
-              {forecastEmptyMessage(caseDetail.immunizationForecast) ? (
-                <p data-testid="forecast-empty-mobile" className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
-                  {forecastEmptyMessage(caseDetail.immunizationForecast)}
-                </p>
-              ) : null}
-              <div className="mt-2 space-y-2">
-                {caseDetail.immunizationForecast.series.map((s) => (
-                  <div key={s.series} className="flex items-center justify-between gap-2 rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-2">
-                    <div>
-                      <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">{VACCINE_SERIES_LABELS[s.series] ?? s.series}</p>
-                      <p className="text-[11px] text-neutral-600 dark:text-neutral-400">{s.nextDueDate ? `Next due ${s.nextDueDate}` : (s.reason ?? "—")}</p>
-                    </div>
-                    <span className={`text-[11px] ${forecastStatusClass(s.status)}`}>{formatForecastStatus(s.status)}</span>
-                  </div>
-                ))}
-              </div>
-            </details>
-          ) : null}
-
-          <details className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
-            <summary className="cursor-pointer text-sm font-semibold text-neutral-900 dark:text-neutral-100">Timeline</summary>
-            <div className="mt-3 space-y-2">
-              {caseDetail.timeline.map((event) => (
-                <div key={`${event.eventType}-${event.occurredAt}`} className="rounded border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-2">
-                  <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">{formatEventType(event.eventType)}</p>
-                  <p className="text-[11px] text-neutral-600 dark:text-neutral-400">{new Date(event.occurredAt).toLocaleString()} • {event.actor}</p>
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
-
-        <div className="hidden gap-6 md:grid xl:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-6">
-            <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+        {/* One layout at every width (#700). A separate phone accordion re-told part of this page and
+            drifted from it: its Preview drew into the hidden desktop panel, it could send without a
+            preview, and it had no Mark Resolved, scheduling, evidence upload, exclusion status or
+            next-step button. */}
+        <div className="grid grid-cols-1 gap-4 md:gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <div className="min-w-0 space-y-4 sm:space-y-6">
+            <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{measureLabelFor(caseDetail.measureId, caseDetail.measureName)}</p>
@@ -828,7 +671,9 @@ export default function CaseDetailPage() {
                 ) : null}
                 {canManage && (
                 <>
-                <div className="mt-4 grid gap-2">
+                {/* One shrinkable column: a select is as wide as its longest option otherwise, and on a
+                    320px phone the Assignee row ran 32px past the screen (#700). */}
+                <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2">
                   <Select
                     label="Outreach template"
                     value={selectedTemplateId}
@@ -842,17 +687,19 @@ export default function CaseDetailPage() {
                     options={channelOptions}
                   />
                 </div>
-                <div className="mt-4 grid gap-2">
+                <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</span>
-                  <div className="flex items-end gap-2">
-                    <Select
-                      label="Assignee"
-                      hideLabel
-                      className="w-full"
-                      value={assigneeValue}
-                      onValueChange={setAssigneeInput}
-                      options={assigneeOptions}
-                    />
+                  <div className="flex min-w-0 items-end gap-2">
+                    <div className="min-w-0 flex-1">
+                      <Select
+                        label="Assignee"
+                        hideLabel
+                        className="w-full"
+                        value={assigneeValue}
+                        onValueChange={setAssigneeInput}
+                        options={assigneeOptions}
+                      />
+                    </div>
                     <Button
                       type="button"
                       variant="outline"
@@ -926,7 +773,7 @@ export default function CaseDetailPage() {
                   </Button>
                 </div>
                 {/* §8E on the DESKTOP path. The first version of this change put the notice only in
-                    the `md:hidden` column above, so every desktop user — which is most of them — saw
+                    the phone layout this page used to have, so every desktop user — which is most of them — saw
                     the same unlabelled "Send outreach" the change existed to label. Sits under the
                     row rather than inside it because the row is `flex flex-wrap` and a paragraph
                     between buttons wraps as a flex item. "Schedule Appointment" carries its own
@@ -1027,9 +874,9 @@ export default function CaseDetailPage() {
                     ) : null}
                     <p className="mt-2 whitespace-pre-wrap">{outreachPreview.bodyText}</p>
                   </div>
-                ) : (
+                ) : canManage ? (
                   <p className="mt-3 text-xs text-amber-800 dark:text-amber-300">Preview the outreach message before sending.</p>
-                )}
+                ) : null}
                 {canManage && canEngineering && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => void updateDeliveryStatus("QUEUED")} disabled={acting !== null}>
@@ -1046,7 +893,7 @@ export default function CaseDetailPage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+            <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Why Flagged</p>
               <h4 className="mt-2 text-xl font-semibold">What the measure found</h4>
               <div className="mt-4">
@@ -1061,12 +908,13 @@ export default function CaseDetailPage() {
                   <p className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">These are the code sets the CQL was evaluating against for this measure version.</p>
                   <div className="mt-3 space-y-2">
                     {linkedValueSets.map((vs) => (
-                      <div key={vs.id} className="flex items-center justify-between rounded-xl border border-indigo-200 bg-white dark:bg-neutral-900 px-3 py-2">
-                        <div>
+                      <div key={vs.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-white dark:bg-neutral-900 px-3 py-2">
+                        {/* An OID has no break point: on a phone it pushed the page sideways (#700). */}
+                        <div className="min-w-0">
                           <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">{vs.name}</p>
-                          <p className="font-mono text-[10px] text-neutral-500 dark:text-neutral-400">{vs.oid}</p>
+                          <p className="break-all font-mono text-[10px] text-neutral-500 dark:text-neutral-400">{vs.oid}</p>
                         </div>
-                        <div className="flex items-center gap-2 text-right">
+                        <div className="flex shrink-0 items-center gap-2 text-right">
                           <span className="text-[10px] text-neutral-500 dark:text-neutral-400">{vs.codeCount} code{vs.codeCount !== 1 ? "s" : ""}</span>
                           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${vs.resolvabilityStatus === "RESOLVED" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
                             {vs.resolvabilityLabel}
@@ -1141,8 +989,8 @@ export default function CaseDetailPage() {
             </div>
           </div>
 
-          <div className="space-y-6">
-            <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+          <div className="min-w-0 space-y-4 sm:space-y-6">
+            <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Metadata</p>
               <dl className="mt-4 space-y-3 text-sm">
                 <Row label="Created" value={new Date(caseDetail.createdAt).toLocaleString()} />
@@ -1156,7 +1004,7 @@ export default function CaseDetailPage() {
             </div>
 
             {caseDetail.immunizationForecast ? (
-              <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+              <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Immunization forecast</p>
                 <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                   Advisory only — not a compliance decision. As of {caseDetail.immunizationForecast.asOf}.
@@ -1184,7 +1032,7 @@ export default function CaseDetailPage() {
               </div>
             ) : null}
 
-            <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+            <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Appointments</p>
               {appointments.length === 0 ? <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">No appointments scheduled.</p> : null}
               <div className="mt-3 space-y-2">
@@ -1201,7 +1049,7 @@ export default function CaseDetailPage() {
             {/* Evidence list + upload is CASE_MANAGER/ADMIN on the backend; a read role 403s on the list
                 and would see a misleading "No evidence uploaded" (Fable H9). Gate the whole section. */}
             {canManage && (
-            <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+            <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Evidence</p>
               <div className="mt-3 space-y-2">
                 <EvidenceDropzone file={evidenceFile} onFileChange={setEvidenceFile} disabled={uploadingEvidence} />
@@ -1282,7 +1130,7 @@ export default function CaseDetailPage() {
               latest one — and the test missed it by feeding descending fixture data the real store
               never produces.
             */}
-            <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+            <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Audit timeline</p>
                 {caseDetail.timeline.length > 1 ? (
@@ -1414,8 +1262,9 @@ function Info({ label, value }: { label: string; value: ReactNode }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4">
-      <dt className="text-neutral-500 dark:text-neutral-400">{label}</dt>
-      <dd className="text-right font-medium text-neutral-900 dark:text-neutral-100">{value}</dd>
+      <dt className="shrink-0 text-neutral-500 dark:text-neutral-400">{label}</dt>
+      {/* An assignee or closer is an email, which has no break point on a phone (#700). */}
+      <dd className="min-w-0 text-right font-medium [overflow-wrap:anywhere] text-neutral-900 dark:text-neutral-100">{value}</dd>
     </div>
   );
 }

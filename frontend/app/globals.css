@@ -151,6 +151,27 @@ body {
   font-family: var(--font-geist-sans), sans-serif;
   @apply bg-neutral-50 text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100;
 }
+/* Scroll cue for wide tables (#700, components/scroll-region.tsx). The two `local` gradients scroll
+   with the content and cover the two `scroll` shadows while that edge is at its end, so a shadow shows
+   only on a side that has more to see. Pure CSS: no scroll listener. In the components layer, so a
+   utility such as `dark:[--scroll-cue-bg:…]` can match a container whose background differs. */
+@layer components {
+.scroll-cue {
+  --scroll-cue-bg: #fff;
+  --scroll-cue-shadow: rgb(0 0 0 / 0.16);
+  background:
+    linear-gradient(to right, var(--scroll-cue-bg) 30%, transparent) left center / 40px 100% no-repeat local,
+    linear-gradient(to left, var(--scroll-cue-bg) 30%, transparent) right center / 40px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, var(--scroll-cue-shadow), transparent) left center / 14px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--scroll-cue-shadow), transparent) right center / 14px 100% no-repeat scroll;
+  background-color: var(--scroll-cue-bg);
+}
+:where([data-theme=dark], .dark) .scroll-cue {
+  --scroll-cue-bg: var(--color-neutral-900);
+  --scroll-cue-shadow: rgb(0 0 0 / 0.55);
+}
+}
+
 /* DataVis NITRO grid — custom classes from vendor/datavis/src/index.css (not Tailwind-generated) */
 .wcdv-pin-separator {
   box-shadow: 2px 0 4px -1px rgba(0, 0, 0, 0.1);

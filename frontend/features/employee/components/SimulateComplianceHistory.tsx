@@ -71,21 +71,21 @@ export function SimulateComplianceHistory({
             Never changes status; CQL is the sole authority.
           </p>
         </div>
-        <div className="flex items-end gap-2">
-          <label className="flex flex-col text-xs font-medium">
+        <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
+          <label className="flex min-w-0 flex-1 flex-col text-xs font-medium sm:flex-none">
             <span className="mb-1">As of</span>
             <input
               type="date"
               value={asOf}
               onChange={(e) => setAsOf(e.target.value)}
-              className="rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+              className="w-full min-w-0 rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
             />
           </label>
           <button
             type="button"
             onClick={runSimulation}
             disabled={loading || !asOf}
-            className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            className="shrink-0 whitespace-nowrap rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
           >
             {loading ? "Simulating…" : "Run simulation"}
           </button>
@@ -102,7 +102,7 @@ export function SimulateComplianceHistory({
           <p className="text-[11px] text-neutral-400">Showing compliance as of {snapshot.asOf}</p>
           {snapshot.evaluations.map((ev) => (
             <div key={ev.measureId} className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-2">
-              <div>
+              <div className="min-w-0">
                 <span className="text-sm font-medium">{labelFor(ev.measureId, ev.name)}</span>
                 <span
                   className="ml-1 text-[10px] uppercase text-neutral-400"
@@ -111,7 +111,7 @@ export function SimulateComplianceHistory({
                   {ev.complianceClass === "PERMANENT" ? "perm" : "rec"}
                 </span>
               </div>
-              <ComplianceChip cell={{ status: ev.status, method: ev.method }} />
+              <ComplianceChip className="shrink-0" cell={{ status: ev.status, method: ev.method }} />
             </div>
           ))}
           {snapshot.evaluations.length === 0 && (

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { SUBJECT } from "@/lib/terminology";
 import { useApi } from "@/lib/api/hooks";
+import { ScrollRegion } from "@/components/scroll-region";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { canRunMeasures } from "@/lib/rbac";
@@ -181,15 +182,15 @@ export function IndividualComplianceStatus({
 
   return (
     <section className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">Individual Compliance Status</h2>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="min-w-0 text-base font-semibold">Individual Compliance Status</h2>
         {canRecalc ? (
           <button
             type="button"
             onClick={recalculate}
             disabled={recalcBusy || isActive}
             title={isActive ? "A run is already in progress" : undefined}
-            className="rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            className="shrink-0 whitespace-nowrap rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
           >
             {isActive ? "Run in progress…" : recalcBusy ? "Starting…" : "Recalculate"}
           </button>
@@ -209,6 +210,7 @@ export function IndividualComplianceStatus({
       ) : rows.length === 0 ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">No evaluated measures for this {SUBJECT.singular} yet.</p>
       ) : (
+        <ScrollRegion label="Individual compliance status table">
         <table className="min-w-full text-sm">
           <thead>
             <tr className="text-left text-xs uppercase text-neutral-400">
@@ -269,6 +271,7 @@ export function IndividualComplianceStatus({
             })}
           </tbody>
         </table>
+        </ScrollRegion>
       )}
     </section>
   );

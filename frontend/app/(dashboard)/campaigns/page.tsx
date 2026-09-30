@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth-provider";
 import { AccessDenied } from "@/components/access-denied";
 import { canRunCampaigns } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ScrollRegion } from "@/components/scroll-region";
 import { SUBJECT } from "@/lib/terminology";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 
@@ -247,8 +248,10 @@ export default function CampaignsPage() {
     [api],
   );
 
+  // A native <select> sizes to its longest option, and a long measure label pushed the phone page
+  // 316px sideways (#700). Full width of its field, never wider than it.
   const selectClass =
-    "rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100";
+    "w-full min-w-0 max-w-full rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100";
   const labelClass = "text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400";
 
   function measureLabel(id: string | null): string {
@@ -282,7 +285,7 @@ export default function CampaignsPage() {
           New campaign
         </h3>
         <div className="mt-4 flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1">
+          <div className="flex w-full min-w-0 flex-col gap-1 sm:w-72 lg:w-80">
             <label htmlFor="campaign-measure" className={labelClass}>
               Measure
             </label>
@@ -304,7 +307,7 @@ export default function CampaignsPage() {
             </select>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex w-full min-w-0 flex-col gap-1 sm:w-56">
             <label htmlFor="campaign-site" className={labelClass}>
               Site
             </label>
@@ -326,7 +329,7 @@ export default function CampaignsPage() {
             </select>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex w-full min-w-0 flex-col gap-1 sm:w-56">
             <label htmlFor="campaign-outcome" className={labelClass}>
               Outcome
             </label>
@@ -348,7 +351,7 @@ export default function CampaignsPage() {
             </select>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex w-full min-w-0 flex-col gap-1 sm:w-56">
             <label htmlFor="campaign-channel" className={labelClass}>
               Channel
             </label>
@@ -369,7 +372,7 @@ export default function CampaignsPage() {
             </select>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex w-full min-w-0 flex-col gap-1 sm:w-56">
             <label htmlFor="campaign-template" className={labelClass}>
               Template
             </label>
@@ -380,12 +383,12 @@ export default function CampaignsPage() {
             </select>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => void launch(true)}
               disabled={launching !== null}
-              className="rounded-md border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+              className="whitespace-nowrap rounded-md border border-neutral-300 bg-white px-4 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
             >
               {launching === "dry" ? "Previewing…" : "Dry run"}
             </button>
@@ -393,7 +396,7 @@ export default function CampaignsPage() {
               type="button"
               onClick={() => void requestSend()}
               disabled={launching !== null}
-              className="rounded-md bg-primary-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="whitespace-nowrap rounded-md bg-primary-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {launching === "send" ? "Sending…" : "Send campaign"}
             </button>
@@ -476,7 +479,7 @@ export default function CampaignsPage() {
             No campaigns yet. Launch one above.
           </div>
         ) : history.length > 0 ? (
-          <div className="overflow-x-auto rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+          <ScrollRegion label="Campaign history table" className="rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
@@ -524,7 +527,7 @@ export default function CampaignsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         ) : null}
 
         {/* ── Selected campaign detail ───────────────────────────── */}
@@ -566,7 +569,7 @@ export default function CampaignsPage() {
 
 function RecipientTable({ recipients }: { recipients: CampaignRecipient[] }) {
   return (
-    <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800">
+    <ScrollRegion label="Campaign recipients table" className="rounded-md border border-neutral-200 dark:border-neutral-800">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
@@ -584,12 +587,12 @@ function RecipientTable({ recipients }: { recipients: CampaignRecipient[] }) {
             >
               <td className="px-4 py-2 text-neutral-900 dark:text-neutral-100">{r.employeeName}</td>
               <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">{r.channel}</td>
-              <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">{r.toAddress}</td>
+              <td className="break-all px-4 py-2 text-neutral-700 dark:text-neutral-300">{r.toAddress}</td>
               <td className="px-4 py-2 text-neutral-700 dark:text-neutral-300">{r.status}</td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }

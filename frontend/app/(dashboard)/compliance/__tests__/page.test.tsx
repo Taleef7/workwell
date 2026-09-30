@@ -506,6 +506,39 @@ describe("CompliancePage", () => {
     expect(screen.getByText("2 selected")).toBeInTheDocument();
   });
 
+  it("assigns from the cards on a phone: they get checkboxes, the bar shows, and the post is the same (#700)", async () => {
+    // Below md the roster is cards; the card checkboxes are rendered only there (a media query), and
+    // share the table's selection, so the bar and the rule are one.
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("48rem"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    try {
+      oneMeasureMocks();
+      post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
+      render(<CompliancePage />);
+      const cards = within(await screen.findByRole("list", { name: /cards/i }));
+      expect(cards.getByLabelText("Select Compliant Patient")).toBeDisabled();
+      await userEvent.click(cards.getByLabelText("Select Overdue Patient"));
+      expect(screen.getByText("1 selected")).toBeInTheDocument();
+      await userEvent.selectOptions(screen.getByLabelText("Assign to"), "cm@workwell.dev");
+      await userEvent.click(screen.getByRole("button", { name: /Assign selected/ }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0]![1]).toEqual({ assignee: "cm@workwell.dev", measureId: "cms125", subjectIds: ["pat-1"] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("renders no card checkboxes at desktop width, so each patient has ONE select control", async () => {
+    oneMeasureMocks();
+    render(<CompliancePage />);
+    expect(await screen.findAllByLabelText("Select Overdue Patient")).toHaveLength(1);
+    expect(within(screen.getByRole("list", { name: /cards/i })).queryByRole("checkbox")).toBeNull();
+  });
+
   it("shows an error alert when the roster fetch fails", async () => {
     getWithHeaders.mockReset().mockRejectedValue(new Error("boom"));
     render(<CompliancePage />);

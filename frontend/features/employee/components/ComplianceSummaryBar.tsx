@@ -22,7 +22,7 @@ export function ComplianceSummaryBar({
         <a
           key={o.measureVersionId}
           href={`#measure-${o.measureVersionId}`}
-          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${complianceStatusClass(shownStatusOf(o))}`}
+          className={`inline-flex max-w-full items-center rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80 ${complianceStatusClass(shownStatusOf(o))}`}
         >
           {labelFor(o.measureId, o.measureName)} — {statusLabelFor(COMPLIANCE_STATUS_LABELS, shownStatusOf(o))}
         </a>

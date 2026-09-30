@@ -84,6 +84,7 @@ export const AUTH_SESSIONS = [
   { email: ADMIN_EMAIL, tag: "measures" },
   { email: ADMIN_EMAIL, tag: "terminology-admin" },
   { email: ADMIN_EMAIL, tag: "readiness-catalog" },
+  { email: ADMIN_EMAIL, tag: "responsive" },
 ] as const;
 
 export const AS_QUALITY_LEAD_ROSTER = session(QUALITY_LEAD_EMAIL, "roster");
@@ -97,6 +98,7 @@ export const AS_ADMIN_RUNS = session(ADMIN_EMAIL, "runs");
 export const AS_ADMIN_MEASURES = session(ADMIN_EMAIL, "measures");
 export const AS_ADMIN_TERMS = session(ADMIN_EMAIL, "terminology-admin");
 export const AS_ADMIN_READINESS = session(ADMIN_EMAIL, "readiness-catalog");
+export const AS_ADMIN_RESPONSIVE = session(ADMIN_EMAIL, "responsive");
 
 /**
  * The ACO's whole computable set, which the Maui stack has ROUTED since ADR-078 — in CI too, since the

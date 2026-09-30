@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth-provider";
 import { canReconcileIdentity } from "@/lib/rbac";
 import { emitToast } from "@/lib/toast";
 import { SkeletonCard } from "@/components/skeleton-loader";
+import { ScrollRegion } from "@/components/scroll-region";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import { useMeasureIdentities } from "@/lib/measure-identity";
@@ -340,7 +341,7 @@ export default function PersonDetailPage() {
             {detail.timeline.entries.length === 0 ? (
               <p className="text-xs text-neutral-500 dark:text-neutral-400">No recorded outcomes yet across the linked systems.</p>
             ) : (
-              <div className="overflow-x-auto">
+              <ScrollRegion label="Compliance history table">
                 <table className="min-w-full text-sm">
                   <thead className="text-left text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                     <tr className="border-b border-neutral-200 dark:border-neutral-800">
@@ -370,7 +371,7 @@ export default function PersonDetailPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             )}
           </div>
         </>

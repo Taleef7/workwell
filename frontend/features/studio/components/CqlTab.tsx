@@ -212,7 +212,7 @@ export function CqlTab({
           </button>
         </div>
       ) : null}
-      <div className="overflow-hidden rounded border border-neutral-300 dark:border-neutral-700" style={{ minHeight: 400, height: "calc(100vh - 24rem)", maxHeight: "calc(100vh - 12rem)" }}>
+      <div className="overflow-hidden rounded border border-neutral-300 dark:border-neutral-700" style={{ minHeight: 400, height: "calc(100dvh - 24rem)", maxHeight: "calc(100dvh - 12rem)" }}>
         <MonacoEditor
           height="100%"
           language="sql"

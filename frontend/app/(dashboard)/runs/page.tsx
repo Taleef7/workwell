@@ -33,6 +33,7 @@ import { AuditPacketExportButton } from "@/components/audit-packet-export-button
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { AccessDenied } from "@/components/access-denied";
+import { ScrollRegion } from "@/components/scroll-region";
 
 type RunListItem = {
   runId: string;
@@ -269,10 +270,25 @@ export default function RunsPage() {
     ? ["ALL_PROGRAMS", "MEASURE", "SITE", "EMPLOYEE", "CASE"].includes(normalizeEnumValue(selectedRun.scopeType))
     : false;
   const selectedRunIdRef = useRef<string | null>(selectedRunId);
+  const runDetailRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     selectedRunIdRef.current = selectedRunId;
   }, [selectedRunId]);
+
+  // Below xl the detail panel sits under the list (#700), so a picked run's detail would open off
+  // screen; bring it into view, and take focus with it, so the next Tab enters the detail rather than
+  // returning to a row that has scrolled away. Side by side (xl+) nothing moves.
+  function selectRunFromList(runId: string) {
+    setSelectedRunId(runId);
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    if (!window.matchMedia("not all and (min-width: 80rem)").matches) return;
+    const panel = runDetailRef.current;
+    if (!panel || typeof panel.scrollIntoView !== "function") return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    panel.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+    panel.focus({ preventScroll: true });
+  }
 
 
   const loadMeasures = useCallback(async () => {
@@ -778,9 +794,9 @@ export default function RunsPage() {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-2xl font-semibold">Run History</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -855,7 +871,7 @@ export default function RunsPage() {
 
       {mayRun ? (
       <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-        <div className="grid items-end gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-[minmax(0,1fr)] items-end gap-3 md:grid-cols-4">
           <Select
             label="Scope"
             size="sm"
@@ -960,14 +976,19 @@ export default function RunsPage() {
         </p>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+      {/* Side by side only from xl (#700): at lg a half column squeezed the six-column list into a
+          sideways scroll. Below xl the detail sits under the list, and picking a run scrolls to it. */}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="min-w-0 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+          <ScrollRegion label="Runs table" className="rounded-md">
           <table className="min-w-full table-fixed text-sm">
+            {/* Scope and Trigger hide below sm (both are in Run Detail), so a phone keeps Run, Status,
+                Duration and Started in view. */}
             <colgroup>
               <col className="w-[30%]" />
               <col className="w-[14%]" />
-              <col className="w-[14%]" />
-              <col className="w-[15%]" />
+              <col className="hidden w-[14%] sm:table-column" />
+              <col className="hidden w-[15%] sm:table-column" />
               <col className="w-[10%]" />
               <col className="w-[17%]" />
             </colgroup>
@@ -975,8 +996,8 @@ export default function RunsPage() {
               <tr>
                 <th scope="col" className="px-3 py-2">Run</th>
                 <th scope="col" className="px-3 py-2">Status</th>
-                <th scope="col" className="px-3 py-2">Scope</th>
-                <th scope="col" className="px-3 py-2">Trigger</th>
+                <th scope="col" className="hidden px-3 py-2 sm:table-cell">Scope</th>
+                <th scope="col" className="hidden px-3 py-2 sm:table-cell">Trigger</th>
                 <th scope="col" className="px-3 py-2">Duration</th>
                 <th scope="col" className="px-3 py-2">Started</th>
               </tr>
@@ -989,7 +1010,7 @@ export default function RunsPage() {
                 <tr
                   key={run.runId}
                   className={`border-t border-neutral-200 dark:border-neutral-800 ${selectedRunId === run.runId ? "bg-neutral-100 dark:bg-neutral-800" : "hover:bg-neutral-50 dark:hover:bg-neutral-800/50"}`}
-                  onClick={() => setSelectedRunId(run.runId)}
+                  onClick={() => selectRunFromList(run.runId)}
                 >
                   <td className="px-3 py-2 align-top">
                     <button
@@ -998,7 +1019,7 @@ export default function RunsPage() {
                       aria-pressed={selectedRunId === run.runId}
                       onClick={(e) => {
                         e.stopPropagation(); // the row onClick already handles selection
-                        setSelectedRunId(run.runId);
+                        selectRunFromList(run.runId);
                       }}
                       className="cursor-pointer text-left font-medium text-neutral-800 hover:underline dark:text-neutral-200"
                     >
@@ -1013,8 +1034,8 @@ export default function RunsPage() {
                       {labelFor(RUN_STATUS_LABELS, run.status)}
                     </span>
                   </td>
-                  <td className="px-3 py-2 align-top">{labelFor(SCOPE_LABELS, run.scopeType)}</td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="hidden px-3 py-2 align-top sm:table-cell">{labelFor(SCOPE_LABELS, run.scopeType)}</td>
+                  <td className="hidden px-3 py-2 align-top sm:table-cell">
                     <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${triggerBadgeClass(run.triggerType)}`}>
                       {labelFor(TRIGGER_LABELS, run.triggerType)}
                     </span>
@@ -1035,6 +1056,7 @@ export default function RunsPage() {
               ))}
             </tbody>
           </table>
+          </ScrollRegion>
           {runs.length >= limit ? (
             <div className="border-t border-neutral-200 dark:border-neutral-800 px-3 py-3">
               <Button
@@ -1050,7 +1072,11 @@ export default function RunsPage() {
           ) : null}
         </div>
 
-        <div className="space-y-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+        <div
+          ref={runDetailRef}
+          tabIndex={-1}
+          className="min-w-0 scroll-mt-4 space-y-3 focus:outline-none rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3"
+        >
           <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Run Detail</h3>
           {/* AI insight is on-demand (UX-19): viewing a run no longer auto-fires a billed OpenAI call. */}
           {selectedRun && !runInsight ? (
@@ -1063,7 +1089,7 @@ export default function RunsPage() {
           ) : null}
           {runInsight && !runInsight.fallback && runInsight.insights.length > 0 && !insightDismissed ? (
             <div role="status" aria-live="polite" className="rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-700 dark:text-primary-400">AI-generated operational insight - verify before acting</p>
                 <Button variant="link" size="sm" onClick={() => setInsightDismissed(true)}>
                   Dismiss
@@ -1220,7 +1246,7 @@ export default function RunsPage() {
         ) : (
           <ul className="space-y-1 text-xs">
             {runLogs.map((entry, idx) => (
-              <li key={`${entry.timestamp}-${idx}`} className="rounded border border-neutral-200 dark:border-neutral-800 px-2 py-1">
+              <li key={`${entry.timestamp}-${idx}`} className="break-words rounded border border-neutral-200 dark:border-neutral-800 px-2 py-1 [overflow-wrap:anywhere]">
                 <span className="font-semibold text-neutral-700 dark:text-neutral-300">{formatStatusLabel(entry.level)}</span>{" "}
                 <span className="text-neutral-500 dark:text-neutral-400">{new Date(entry.timestamp).toLocaleString()}</span>{" "}
                 <span className="text-neutral-700 dark:text-neutral-300">{entry.message}</span>

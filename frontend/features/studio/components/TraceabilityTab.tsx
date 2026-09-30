@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@mieweb/ui";
 import { formatStatusLabel, normalizeEnumValue } from "@/lib/status";
 import type { ApiClient } from "@/lib/api/client";
+import { ScrollRegion } from "@/components/scroll-region";
 import type { TraceabilityResponse, TraceabilityGap } from "../types";
 
 type Props = {
@@ -59,7 +60,7 @@ export function TraceabilityTab({ measureId, api }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3">
         <div>
           <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{data.measureName} — {data.version}</p>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">{data.rows.length} traceability links · {data.gaps.length} gap{data.gaps.length !== 1 ? "s" : ""}</p>
@@ -96,7 +97,7 @@ export function TraceabilityTab({ measureId, api }: Props) {
           No traceability rows generated. Add a policy reference, spec fields, and CQL.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+        <ScrollRegion label="Traceability table" className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
           <table className="min-w-full text-left text-xs">
             <thead className="bg-neutral-50 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400">
               <tr>
@@ -173,7 +174,7 @@ export function TraceabilityTab({ measureId, api }: Props) {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
       )}
     </div>
   );

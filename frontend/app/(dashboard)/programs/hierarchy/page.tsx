@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { fmtCount } from "@/lib/format";
 import { displayRate, formatRate, type NotationSource } from "@/lib/measure-rate";
@@ -12,6 +12,7 @@ import { canSeeEngineering } from "@/lib/public-demo";
 import { AccessDenied } from "@/components/access-denied";
 import type { TenantOption } from "@/features/compliance/types";
 import { SkeletonRow } from "@/components/skeleton-loader";
+import { ScrollRegion } from "@/components/scroll-region";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 
@@ -168,7 +169,7 @@ export default function HierarchyPage() {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Compliance Hierarchy</h2>
         <Link
           href="/programs"
@@ -186,7 +187,9 @@ export default function HierarchyPage() {
           id="measure-filter"
           value={measureId}
           onChange={(e) => setMeasureId(e.target.value)}
-          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+          // A native select sizes to its longest option (~660px for a MIPS title); constrained, it
+          // truncates the shown value instead of widening the page.
+          className="w-full min-w-0 rounded-md border sm:w-auto sm:max-w-md border-neutral-300 bg-white px-3 py-1.5 text-sm text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
         >
           <option value="">All measures</option>
           {measures.map((m) => (
@@ -264,15 +267,19 @@ export default function HierarchyPage() {
       ) : null}
 
       {!loading && !error && root && root.children.length > 0 ? (
-        <div className="overflow-x-auto rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+        <ScrollRegion
+          label="Compliance hierarchy table"
+          className="rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+        >
           <table aria-describedby="hierarchy-rate-note" className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-                <th scope="col" className="px-4 py-2 font-semibold">Name</th>
-                <th scope="col" className="px-4 py-2 text-right font-semibold">In population</th>
-                <th scope="col" className="px-4 py-2 text-right font-semibold">{lowerIsBetter ? "Poorly controlled" : "Compliant"}</th>
-                <th scope="col" className="px-4 py-2 text-right font-semibold">{lowerIsBetter ? "Poor control" : "Compliance"}</th>
-                <th scope="col" className="px-4 py-2 text-right font-semibold">Open Cases</th>
+                {/* The Name column stays put while the counts scroll under it on a phone. */}
+                <th scope="col" className="sticky left-0 z-[1] bg-white px-2 py-2 font-semibold sm:px-4 dark:bg-neutral-900">Name</th>
+                <th scope="col" className="px-2 py-2 text-right font-semibold sm:px-4">In population</th>
+                <th scope="col" className="px-2 py-2 text-right font-semibold sm:px-4">{lowerIsBetter ? "Poorly controlled" : "Compliant"}</th>
+                <th scope="col" className="px-2 py-2 text-right font-semibold sm:px-4">{lowerIsBetter ? "Poor control" : "Compliance"}</th>
+                <th scope="col" className="px-2 py-2 text-right font-semibold sm:px-4">Open Cases</th>
               </tr>
             </thead>
             <tbody>
@@ -284,10 +291,14 @@ export default function HierarchyPage() {
                 return (
                   <tr
                     key={key}
-                    className="border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50"
+                    className="group border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/50"
                   >
-                    <td className="px-4 py-2 text-neutral-900 dark:text-neutral-100">
-                      <div className="flex items-center gap-2" style={{ paddingLeft: `${depth * 1.25}rem` }}>
+                    <td className="sticky left-0 z-[1] bg-white px-2 py-2 text-neutral-900 group-hover:bg-neutral-50 sm:px-4 dark:bg-neutral-900 dark:text-neutral-100 dark:group-hover:bg-[color-mix(in_oklab,var(--color-neutral-800)_50%,var(--color-neutral-900))]">
+                      {/* Indent per level: 0.75rem on a phone, 1.25rem from sm up. */}
+                      <div
+                        className="flex items-center gap-2 pl-[calc(var(--depth)*0.75rem)] sm:pl-[calc(var(--depth)*1.25rem)]"
+                        style={{ "--depth": depth } as CSSProperties}
+                      >
                         {hasChildren ? (
                           <button
                             type="button"
@@ -316,16 +327,16 @@ export default function HierarchyPage() {
                         </span>
                       </div>
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-700 sm:px-4 dark:text-neutral-300">
                       {fmtCount(rate.denominator)}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-700 sm:px-4 dark:text-neutral-300">
                       {fmtCount(rate.numerator)}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-900 dark:text-neutral-100">
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-900 sm:px-4 dark:text-neutral-100">
                       {formatRate(rate.value)}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-300">
+                    <td className="px-2 py-2 text-right tabular-nums text-neutral-700 sm:px-4 dark:text-neutral-300">
                       {fmtCount(node.totals.openCases)}
                     </td>
                   </tr>
@@ -333,7 +344,7 @@ export default function HierarchyPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
       ) : null}
     </section>
   );

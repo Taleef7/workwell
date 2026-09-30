@@ -49,7 +49,7 @@ export function ImpactPreviewPanel({ measureId, api }: Props) {
 
   return (
     <div className="mt-4 space-y-3 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Activation Impact Preview</p>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">Dry run — no outcomes, cases, or runs will be written.</p>

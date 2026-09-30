@@ -676,9 +676,9 @@ export default function AdminPage() {
 
   return (
     <section className="space-y-6">
-      <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-950 p-8 text-white shadow-lg">
+      <div className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-950 p-4 text-white shadow-lg sm:p-8">
         <p className="text-sm uppercase tracking-[0.3em] text-neutral-300 dark:text-neutral-600">Admin</p>
-        <h2 className="mt-2 text-3xl font-semibold">Operations, waivers, and audit access</h2>
+        <h2 className="mt-2 text-2xl font-semibold sm:text-3xl">Operations, waivers, and audit access</h2>
         <p className="mt-3 max-w-2xl text-neutral-300 dark:text-neutral-600">
           Keep the demo coherent: integration health, scheduler control, waiver tracking, and access-event review all live
           from the same admin surface.
@@ -687,7 +687,7 @@ export default function AdminPage() {
 
       {error ? <p role="alert" className="text-sm text-red-700">Error: {error}</p> : null}
 
-      <div ref={adminTablistRef} className="flex gap-1 overflow-x-auto border-b border-neutral-200 dark:border-neutral-800" role="tablist" aria-label="Admin sections">
+      <div ref={adminTablistRef} className="flex flex-wrap gap-1 border-b border-neutral-200 dark:border-neutral-800" role="tablist" aria-label="Admin sections">
         {ADMIN_TABS.map((t, i) => (
           <button
             key={t.id}
@@ -713,7 +713,7 @@ export default function AdminPage() {
       {activeTab === "operations" && (
       <div role="tabpanel" id="admin-tabpanel-operations" aria-labelledby="admin-tab-operations" tabIndex={0}>
       <div className="grid gap-6 xl:grid-cols-2">
-        <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+        <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
           <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">scheduler</p>
           <p className="mt-2 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{scheduler?.enabled ? "enabled" : "disabled"}</p>
           <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Cron: {scheduler?.cron ?? "-"}</p>
@@ -778,7 +778,7 @@ export default function AdminPage() {
           </div>
         </article>
 
-        <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+        <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
           <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">integration health</p>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {integrations.map((item) => (
@@ -804,7 +804,7 @@ export default function AdminPage() {
 
       {activeTab === "governance" && (
       <div role="tabpanel" id="admin-tabpanel-governance" aria-labelledby="admin-tab-governance" tabIndex={0} className="space-y-6">
-      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">data readiness</p>
@@ -842,7 +842,7 @@ export default function AdminPage() {
         )}
       </article>
 
-      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">terminology governance</p>
@@ -1001,7 +1001,7 @@ export default function AdminPage() {
 
       {activeTab === "outreach" && (
       <div role="tabpanel" id="admin-tabpanel-outreach" aria-labelledby="admin-tab-outreach" tabIndex={0} className="space-y-6">
-      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">waivers</p>
@@ -1048,7 +1048,7 @@ export default function AdminPage() {
           />
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
             <div className="flex items-center justify-between">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Waivers</p>
@@ -1155,7 +1155,7 @@ export default function AdminPage() {
         </div>
       </article>
 
-      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">notification templates</p>
@@ -1253,7 +1253,7 @@ export default function AdminPage() {
         </div>
       </article>
 
-      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">outreach delivery log</p>
@@ -1294,7 +1294,7 @@ export default function AdminPage() {
       {activeTab === "audit" && (
       <div role="tabpanel" id="admin-tabpanel-audit" aria-labelledby="admin-tab-audit" tabIndex={0} className="space-y-6">
       {demoResetVisible ? (
-      <article className="rounded-3xl border border-red-200 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+      <article className="rounded-3xl border border-red-200 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
         <p className="text-xs uppercase tracking-[0.2em] text-red-600">demo tools</p>
         <h3 className="mt-1 text-2xl font-semibold text-red-700">Reset demo data</h3>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
@@ -1340,7 +1340,7 @@ export default function AdminPage() {
       </article>
       ) : null}
 
-      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+      <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">audit log</p>
@@ -1389,8 +1389,8 @@ export default function AdminPage() {
           {auditEvents.map((event) => (
             <div key={`${event.eventType}-${event.occurredAt}-${event.caseId ?? "none"}`} className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4 text-sm">
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="font-semibold text-neutral-900 dark:text-neutral-100">{event.eventType}</p>
+                <div className="min-w-0">
+                  <p className="font-semibold text-neutral-900 dark:text-neutral-100 [overflow-wrap:anywhere]">{event.eventType}</p>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400">
                     {event.scope === "access" ? "Access event" : "Mutation"} • {event.actor ?? "system"} • {new Date(event.occurredAt).toLocaleString()}
                   </p>
@@ -1399,7 +1399,7 @@ export default function AdminPage() {
                   {event.scope}
                 </span>
               </div>
-              <div className="mt-2 grid gap-1 text-xs text-neutral-600 dark:text-neutral-400">
+              <div className="mt-2 grid gap-1 text-xs text-neutral-600 dark:text-neutral-400 [overflow-wrap:anywhere]">
                 <p>Case: {event.caseId ?? "-"}</p>
                 <p>Run: {event.runId ?? "-"}</p>
                 <p>Measure: {event.measureName ?? "-"}</p>

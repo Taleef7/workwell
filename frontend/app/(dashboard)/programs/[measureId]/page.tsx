@@ -22,6 +22,7 @@ import { SUBJECT } from "@/lib/terminology";
 import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
+import { ScrollRegion } from "@/components/scroll-region";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { displayRate, formatRate, isSmallNumbers, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
 import { chartablePoints } from "../trend-meta";
@@ -200,7 +201,7 @@ export default function ProgramDetailPage() {
             <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{program.policyRef}</p>
             <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(measureId, program.measureName)}</h2>
             <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {program.version}{yearLine ? ` · ${yearLine}` : ""}</p>
-            <div className="mt-3 flex items-end gap-3">
+            <div className="mt-3 flex flex-wrap items-end gap-3">
               <div>
                 <p aria-describedby={rate.value === null ? "counted-yet-note" : undefined} className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{rate.value === null ? `${rate.label} —` : `${rate.label} ${rate.value.toFixed(1)}%`}</p>
                 {rate.lowerIsBetter ? (
@@ -260,7 +261,7 @@ export default function ProgramDetailPage() {
           ) : null}
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+            <div className="min-w-0 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{rate.label} trend</p>
               {/* The largest panel, and the one this change nearly broke. `ComplianceTrendChart`
                   answers an empty `points` array with "No run history for this measure yet" — a
@@ -281,7 +282,7 @@ export default function ProgramDetailPage() {
                 <ComplianceTrendChart points={chartablePoints(trend, identity)} identity={identity} />
               )}
             </div>
-            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
+            <div className="min-w-0 rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">Outcome breakdown (latest run)</p>
               {outcomeBreakdown.length === 0 ? (
                 <div className="flex h-[200px] items-center justify-center rounded border border-dashed border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50">
@@ -382,7 +383,7 @@ export default function ProgramDetailPage() {
             {riskOutlook?.siteComplianceRates && riskOutlook.siteComplianceRates.length > 0 ? (
               <div className="mt-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-400">Site risk heatmap</p>
-                <div className="mt-2 overflow-x-auto">
+                <ScrollRegion label="Site risk heatmap table" className="mt-2">
                   <table className="min-w-full text-xs">
                     <thead className="text-left text-neutral-600 dark:text-neutral-400">
                       <tr>
@@ -414,14 +415,14 @@ export default function ProgramDetailPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </ScrollRegion>
               </div>
             ) : null}
               </>
             )}
           </div>
 
-          <div className={`grid gap-4 ${isPatientTerm ? "lg:grid-cols-2" : "lg:grid-cols-3"}`}>
+          <div className={`grid gap-4 sm:grid-cols-2 ${isPatientTerm ? "lg:grid-cols-2" : "lg:grid-cols-3"}`}>
             <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
               <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Top sites</p>
               {/* `loading` is distinguished from `no concentration` on all three driver panels: the
@@ -487,7 +488,7 @@ export default function ProgramDetailPage() {
             ) : runHistory.length === 0 ? (
               <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">No runs recorded for this measure yet.</p>
             ) : (
-              <div className="mt-2 overflow-x-auto">
+              <ScrollRegion label="Run history table" className="mt-2">
                 <table className="min-w-full text-xs">
                   <thead className="text-left text-neutral-600 dark:text-neutral-400">
                     <tr>
@@ -516,37 +517,39 @@ export default function ProgramDetailPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             )}
           </div>
 
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
             <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Outcome breakdown by version</p>
-            <table className="mt-2 min-w-full text-xs">
-              <thead className="text-left text-neutral-600 dark:text-neutral-400">
-                <tr>
-                  <th scope="col" className="py-1">Version</th>
-                  <th scope="col" className="py-1">Compliant</th>
-                  <th scope="col" className="py-1">Due Soon</th>
-                  <th scope="col" className="py-1">Overdue</th>
-                  <th scope="col" className="py-1">Missing</th>
-                  <th scope="col" className="py-1">Excluded</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-t border-neutral-200 dark:border-neutral-800">
-                  <td className="py-1">{program.version}</td>
-                  <td className="py-1">{program.compliant}</td>
-                  <td className="py-1">{program.dueSoon}</td>
-                  <td className="py-1">{program.overdue}</td>
-                  <td className="py-1">{program.missingData}</td>
-                  <td className="py-1">{program.excluded}</td>
-                </tr>
-              </tbody>
-            </table>
+            <ScrollRegion label="Outcome breakdown by version table" className="mt-2">
+              <table className="min-w-full text-xs">
+                <thead className="text-left text-neutral-600 dark:text-neutral-400">
+                  <tr>
+                    <th scope="col" className="py-1 pr-3">Version</th>
+                    <th scope="col" className="py-1 pr-3">Compliant</th>
+                    <th scope="col" className="py-1 pr-3">Due Soon</th>
+                    <th scope="col" className="py-1 pr-3">Overdue</th>
+                    <th scope="col" className="py-1 pr-3">Missing</th>
+                    <th scope="col" className="py-1">Excluded</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-t border-neutral-200 dark:border-neutral-800">
+                    <td className="py-1 pr-3">{program.version}</td>
+                    <td className="py-1 pr-3">{program.compliant}</td>
+                    <td className="py-1 pr-3">{program.dueSoon}</td>
+                    <td className="py-1 pr-3">{program.overdue}</td>
+                    <td className="py-1 pr-3">{program.missingData}</td>
+                    <td className="py-1">{program.excluded}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </ScrollRegion>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm font-medium text-neutral-800 dark:text-neutral-200">
               Open cases for this measure
             </Link>
@@ -754,7 +757,7 @@ function QualityOverTime({
       ) : null}
 
       {withheld ? null : selected && selectedView ? (
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div className="rounded border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950/40">
             <p className="text-xs text-emerald-800 dark:text-emerald-300">{rateLabel} on {monthLabel(selected.period)}</p>
             <p className="text-2xl font-semibold text-emerald-900 dark:text-emerald-200">

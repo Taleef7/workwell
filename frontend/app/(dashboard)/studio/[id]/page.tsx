@@ -134,8 +134,8 @@ export default function StudioMeasurePage() {
       </div>
 
       <div className="hidden space-y-4 md:block">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <Link href="/measures" className="text-xs text-neutral-500 dark:text-neutral-400 hover:underline">Back to Measures</Link>
           <h2 className="text-2xl font-semibold">{measure?.name ?? "Measure Studio"}</h2>
           {measure ? (
@@ -172,7 +172,7 @@ export default function StudioMeasurePage() {
         </div>
       </div>
 
-      <div ref={tablistRef} role="tablist" aria-label="Measure authoring sections" className="flex gap-2">
+      <div ref={tablistRef} role="tablist" aria-label="Measure authoring sections" className="flex flex-wrap gap-2">
         {tabs.map((t, i) => (
           <button
             key={t}
@@ -183,7 +183,7 @@ export default function StudioMeasurePage() {
             aria-controls={`studio-tabpanel-${t}`}
             tabIndex={tab === t ? 0 : -1}
             onKeyDown={(e) => onTabKeyDown(e, i)}
-            className={`rounded-md px-3 py-2 text-sm ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`}
+            className={`whitespace-nowrap rounded-md px-3 py-2 text-sm ${tab === t ? "bg-neutral-900 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"}`}
             onClick={() => setTab(t)}
           >
             {tabLabels[t]}

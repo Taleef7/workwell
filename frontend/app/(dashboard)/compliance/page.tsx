@@ -20,9 +20,11 @@ import { Button } from "@mieweb/ui";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { RosterMobileCards } from "@/features/compliance/RosterMobileCards";
+import { ScrollRegion } from "@/components/scroll-region";
 import { usePanelCache } from "@/features/compliance/usePanelCache";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { useMeasureIdentities } from "@/lib/measure-identity";
+import { BELOW_MD, useMediaQuery } from "@/lib/use-media-query";
 import { PANEL_OPTIONS, type DisplayState, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
@@ -471,6 +473,9 @@ export default function CompliancePage() {
     [selection, selectionScopeKey, selectableIds],
   );
   const allSelectableSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedHere.includes(id));
+  // Below md the roster is cards, and their checkboxes are rendered only there: a CSS-hidden copy
+  // would be a second "Select <name>" for every patient in the DOM (#700).
+  const isPhone = useMediaQuery(BELOW_MD);
   const toggleOne = useCallback((externalId: string, on: boolean) => {
     setSelection((current) => {
       const ids = current.scope === selectionScopeKey ? current.ids : [];
@@ -796,12 +801,23 @@ export default function CompliancePage() {
           "assign these" is ambiguous until a measure is named.
         */}
         {assignEnabled ? (
-          // `md:flex`, because every selection checkbox lives in the desktop table (`hidden md:block`)
-          // and `RosterMobileCards` has none. Below `md` this bar rendered a live-looking control with
-          // nothing on screen able to change its state — a vacuous control, and on a tablet, which is
-          // what the pilot's quality lead is most likely to open. Selection on the mobile cards is the
-          // better answer and is its own piece of work.
-          <div className="hidden flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm md:flex dark:border-neutral-800 dark:bg-neutral-900/60">
+          // At every width (#700): the cards carry their own checkboxes below md, so the bar always has
+          // something on screen that changes its state. On a phone it sticks to the top of the screen,
+          // above a list several screens long.
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm max-md:sticky max-md:top-0 max-md:z-20 max-md:shadow-md dark:border-neutral-800 dark:bg-neutral-900/60 max-md:dark:bg-neutral-900">
+            {isPhone ? (
+              <label className="inline-flex min-h-11 items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-5 w-5"
+                  aria-label={`Select all ${SUBJECT.plural} with an open case`}
+                  checked={allSelectableSelected}
+                  disabled={selectableIds.length === 0}
+                  onChange={(e) => toggleAll(e.target.checked)}
+                />
+                <span>All</span>
+              </label>
+            ) : null}
             <span className="font-medium">
               {selectedHere.length === 0
                 ? `Select ${SUBJECT.plural} to assign their ${measureLabelForId(assignMeasureId)} case`
@@ -839,7 +855,12 @@ export default function CompliancePage() {
           </div>
         ) : null}
 
-        <div className="hidden overflow-x-auto rounded-lg border border-neutral-200 md:block dark:border-neutral-800">
+        {/* The fade matches the sticky Patient column's dark background (neutral-950, not the card's
+            neutral-900); a utility overrides the cue's own value, which sits in the components layer. */}
+        <ScrollRegion
+          label="Compliance roster table"
+          className="hidden rounded-lg border border-neutral-200 md:block dark:border-neutral-800 dark:[--scroll-cue-bg:var(--color-neutral-950)]"
+        >
           <table className="min-w-full border-collapse text-sm">
             <thead className="bg-neutral-50 dark:bg-neutral-900/60">
               <tr>
@@ -905,9 +926,15 @@ export default function CompliancePage() {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollRegion>
 
-        <RosterMobileCards columns={columns} rows={rows} loading={loading} labelFor={measureLabelFor} />
+        <RosterMobileCards
+          columns={columns}
+          rows={rows}
+          loading={loading}
+          labelFor={measureLabelFor}
+          selection={assignEnabled && isPhone ? { selectableIds, selectedIds: selectedHere, onToggle: toggleOne } : undefined}
+        />
 
         {/*
           The legend for the third state (#569), shown only when a marker is actually on the page. A
@@ -922,7 +949,7 @@ export default function CompliancePage() {
           </p>
         ) : null}
 
-        <div className="flex items-center justify-between text-sm text-neutral-500 dark:text-neutral-400">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-neutral-500 dark:text-neutral-400">
           <span>
             {fmtCount(total)} {total === 1 ? SUBJECT.singular : SUBJECT.plural}
             {notInPopulation > 0 ? (
