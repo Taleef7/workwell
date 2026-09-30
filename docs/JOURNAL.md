@@ -7,6 +7,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-29
 
+- **The steward's MADiE patients end to end (#727).** The gate proved the calculation in memory; the
+  pilot-trust defects all sat after it. A new test runs the six Maui decks (334 patients) through the
+  nightly's run, both stores and the read APIs (report, roster, cases, programs overview,
+  reconciliation, and an idempotent second run) against an oracle written from the population table.
+  All 334 agree on SQLite and Postgres; cms165's `trustMetaProfile` and `preparedForQiCore` changed
+  nothing. Runs in the official-cases job, which now has a Postgres service. Evidence:
+  `docs/evidence/MADIE_END_TO_END_2026-09.md`.
 - **No page scrolls sideways on a phone or tablet (#700, part 1 of 3).** At 375px Programs slid sideways
   by 506px (121 at 768), Campaigns 316, Hierarchy 300, Runs 211, the patient page 113, Cases 80: chart
   tables hidden with `sr-only` still sized to their content, rows that did not wrap, selects as wide as

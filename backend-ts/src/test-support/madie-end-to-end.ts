@@ -314,7 +314,8 @@ export async function runMadieEndToEnd(env: MadieEnv): Promise<Record<string, Re
 
   // 2. The subject-list report, per patient per rate: the steward's populations exactly.
   for (const [m, list] of byMeasure) {
-    const listId = `madie-${m}`;
+    // A UUID, as the import route mints: the Pg ceiling types the column, the SQLite floor does not.
+    const listId = crypto.randomUUID();
     await stores.subjectLists.createList({
       id: listId,
       name: `MADiE ${m}`,
