@@ -298,10 +298,10 @@ async function checkSurfaces(
   }
 
   // 3. The roster: each patient's cell for its measure, and "not evaluated" for the other five.
-  const cells = new Map<string, Record<string, { status: string }>>();
+  const cells = new Map<string, Record<string, { status: string; evidenceRef?: { runId: string } }>>();
   const maxPages = Math.ceil(cases.length / 200) + 1;
   for (let page = 1; page <= maxPages; page++) {
-    const roster = await body<{ rows: Array<{ subject: { externalId: string }; cells: Record<string, { status: string }> }>; total: number }>(
+    const roster = await body<{ rows: Array<{ subject: { externalId: string }; cells: Record<string, { status: string; evidenceRef?: { runId: string } }> }>; total: number }>(
       await handleCompliance(new Request(`http://x/api/compliance/roster?panel=${PROFILE_DEFAULT_PANEL}&pageSize=200&page=${page}`), env as never),
       `roster page ${page}`,
     );
@@ -313,6 +313,9 @@ async function checkSurfaces(
     const row = cells.get(c.patientId);
     assert.ok(row, `${caseLabel(c)}: on the roster`);
     assert.equal(row[c.measure]?.status, c.status, `${caseLabel(c)}: roster cell ${at}`);
+    // The status is the same after both runs; the evidence is what shows the newer run won (and not a
+    // cached cell from the first).
+    assert.equal(row[c.measure]?.evidenceRef?.runId, runId, `${caseLabel(c)}: roster cell read from the newest run`);
     for (const other of MAUI_MEASURES.filter((m) => m !== c.measure)) {
       assert.equal(row[other]?.status, "NA", `${caseLabel(c)}: ${other} must read not evaluated (no cross-measure leak)`);
     }
