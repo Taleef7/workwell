@@ -7,6 +7,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-30
 
+- **A measure's trend is warm in every time zone (#615).** The measure page asks for its trend in the
+  browser's zone, and the trend memo was keyed by it, so the nightly warm (no zone) never served that
+  page: on Maui the first visitor after a run waited 19 s for cms130's trend, and 0.2 s without the zone.
+  The memo now holds the zone-free per-run points and each request collapses them to one point per day
+  in its own zone; a zone that merges the memo's runs into fewer than ten days reads further back.
 - **A deploy no longer signs out whoever's access token lapses during it.** #688 kept the login itself
   across a restart, but the browser still treated any failed refresh as a logout: a 502 or a dropped
   connection while the backend restarted sent the page to /login, and a failed request called

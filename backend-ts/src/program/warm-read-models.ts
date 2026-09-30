@@ -117,8 +117,10 @@ async function warmPass(deps: ProgramDeps): Promise<WarmResult> {
     // Per measure AND per panel, so one failure leaves every other panel warm rather than aborting at
     // whichever happened to come first.
     const panels: Array<[string, () => Promise<unknown>]> = [
-      // Monthly is what the dashboard asks for; the per-run trend the measure detail page uses is
-      // left cold, because warming it would double this pass for a page one person opens at a time.
+      // Monthly is what the dashboard asks for. Where the monthly series cannot apply (every official
+      // measure, and every measure on Maui) this fills the per-run trend memo, which serves the
+      // measure page in any time zone (#615). Where it can, the page's per-run trend is left cold,
+      // because warming it would double this pass for a page one person opens at a time.
       ["trend", () => programTrend(deps, measureId, { ...UNFILTERED }, { monthly: true })],
       ["drivers", () => programTopDrivers(deps, measureId, { ...UNFILTERED })],
       // The measure page's third panel, warmed since 2026-09-15 because it now costs what the other

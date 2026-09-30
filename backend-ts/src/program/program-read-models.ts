@@ -8,7 +8,7 @@
  * the case). Active measures are the catalog's Active set = the engine's runnable set.
  * Employee site is resolved from the synthetic directory (outcomes carry only subjectId).
  */
-import type { RunStore } from "../stores/run-store.ts";
+import type { RunRecord, RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeWithRun, OutcomeMeasureFilter } from "../stores/outcome-store.ts";
 import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import { EMPLOYEES, employeeById, type EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
@@ -665,7 +665,20 @@ const chartMemoKey = (deps: ProgramDeps, measureId: string, filters: ProgramFilt
     measureId, filters.from?.trim() || null, filters.to?.trim() || null, filters.site?.trim() || null, filters.tenant?.trim() || null,
     isWebChartConfigured(deps.webChartEnv ?? {}), extra,
   ]);
-const trendMemo = new RunKeyedMemo<ProgramTrendPoint[]>(64);
+/**
+ * What a measure's per-run trend is built from, memoized WITHOUT the time zone (#615): every completed
+ * run in the window with its counts and measurement year, newest first. The zone only decides which
+ * runs share a calendar day, so the one-point-per-day collapse is applied per request. Keyed by zone,
+ * the memo the nightly warm filled (no zone) was never the one the measure page read (its browser's
+ * zone): that page's first visitor after each run waited 6-19 s on Maui.
+ */
+interface TrendBase {
+  runs: ProgramTrendPoint[];
+  /** The run window read; `exhausted` when it returned fewer runs than that, so no older run exists. */
+  window: number;
+  exhausted: boolean;
+}
+const trendMemo = new RunKeyedMemo<TrendBase>(64);
 const driversMemo = new RunKeyedMemo<TopDrivers>(64);
 /**
  * The risk outlook's memo lives here, with its siblings, rather than beside the function that uses
@@ -761,9 +774,40 @@ export async function programTrend(
   // pass warming nothing.
   const monthlyPossible = Boolean(opts?.monthly && deps.qualitySnapshots && DEPLOYMENT_PROFILE.id === "default" && !isOfficialRouted(measureId));
   const { winners, runKey } = await latestPopulationWinners(deps.outcomeStore, [measureId], measureFilter(filters), TREND_RUN_WINDOW);
-  const memoKey = chartMemoKey(deps, measureId, filters, opts?.tz ?? null);
+  const memoKey = chartMemoKey(deps, measureId, filters);
   const cached = monthlyPossible ? undefined : trendMemo.get(memoKey, runKey);
-  if (cached) return cached;
+
+  // The window is widened until ten DISPLAYABLE points exist in the requested zone or the history is
+  // exhausted: the site/tenant filter and the same-day collapse can each spend a run of the window on
+  // a point that never shows, and the old all-history read always found the older days beyond them.
+  // Doubling stops at TREND_RUN_WINDOW_MAX, and at a read that returned fewer runs than it asked for
+  // (nothing older exists). The memo key stays the newest ten's — a wider window changes only when
+  // they do, or when an older run completes, which the next nightly's new winner refreshes.
+  const widenAndServe = async (start: { runs: ProgramTrendPoint[]; runsFound: number; window: number }): Promise<ProgramTrendPoint[]> => {
+    let { runs, runsFound, window } = start;
+    while (trendPointsIn(runs, opts?.tz).length < 10 && runsFound >= window && window < TREND_RUN_WINDOW_MAX) {
+      window = Math.min(window * 2, TREND_RUN_WINDOW_MAX);
+      const read = await runsWithOutcomes(deps, measureId, filters, window);
+      runs = runPointsOf(read.groups);
+      runsFound = read.runsFound;
+    }
+    const stamped = await withMeasurementYears(deps.runStore, runs);
+    const points = trendPointsIn(stamped.points, opts?.tz);
+    // A point whose run could not be read is unstamped, and an unstamped NEWEST point turns the year
+    // filter off for the chart — so a partial answer is served but never memoized for the cycle.
+    if (monthlyPossible || !stamped.complete) return points;
+    trendMemo.set(memoKey, runKey, { runs: stamped.points, window, exhausted: runsFound < window });
+    return points;
+  };
+
+  if (cached) {
+    const points = trendPointsIn(cached.runs, opts?.tz);
+    if (points.length >= 10 || cached.exhausted || cached.window >= TREND_RUN_WINDOW_MAX) return points;
+    // A zone that merges more of the memo's runs into shared days than the zone it was widened for:
+    // read on from where the memo stopped (it already holds the newer runs), and memoize the wider
+    // window. The monthly branch below cannot apply: a memo exists only where it was not possible.
+    return widenAndServe({ runs: cached.runs, runsFound: cached.window, window: cached.window });
+  }
   // Load once before the optional monthly early return: the same successful rows both rehydrate the
   // site-only scope after restart and feed the per-run fallback without a second store read.
   const first = await runsWithOutcomes(deps, measureId, filters, TREND_RUN_WINDOW, winners);
@@ -817,26 +861,7 @@ export async function programTrend(
   // NOTE: Java unions a `run_based` branch for aggregate-only seeded runs; the TS floor `runs`
   // table has no compliant/total columns, so every TS run with data has outcomes — the
   // outcome-based branch is complete here.
-  //
-  // The window is widened until ten DISPLAYABLE points exist or the history is exhausted: the
-  // site/tenant filter and the same-day collapse below can each spend a run of the window on a
-  // point that never shows, and the old all-history read always found the older days beyond them.
-  // Doubling stops at TREND_RUN_WINDOW_MAX, and at a read that returned fewer runs than it asked
-  // for (nothing older exists). The memo key stays the newest ten's — a wider window changes only
-  // when they do, or when an older run completes, which the next nightly's new winner refreshes.
-  let read = first;
-  let window = TREND_RUN_WINDOW;
-  let points = trendPointsOf(read.groups, opts?.tz);
-  while (points.length < 10 && read.runsFound >= window && window < TREND_RUN_WINDOW_MAX) {
-    window = Math.min(window * 2, TREND_RUN_WINDOW_MAX);
-    read = await runsWithOutcomes(deps, measureId, filters, window);
-    points = trendPointsOf(read.groups, opts?.tz);
-  }
-  const stamped = await withMeasurementYears(deps.runStore, points);
-  // A point whose run could not be read is unstamped, and an unstamped NEWEST point turns the year
-  // filter off for the chart — so a partial answer is served but never memoized for the cycle.
-  if (monthlyPossible || !stamped.complete) return stamped.points;
-  return trendMemo.set(memoKey, runKey, stamped.points);
+  return widenAndServe({ runs: runPointsOf(first.groups), runsFound: first.runsFound, window: TREND_RUN_WINDOW });
 }
 
 /**
@@ -845,6 +870,17 @@ export async function programTrend(
  * compare within, and stamping it would cut the occupational deployment's trends every January.
  */
 async function withMeasurementYears(runStore: RunStore, points: ProgramTrendPoint[]): Promise<{ points: ProgramTrendPoint[]; complete: boolean }> {
+  // The runs not yet cached, in ONE read: the trend's base holds every run in its window (up to
+  // TREND_RUN_WINDOW_MAX), and a cold process would otherwise read them one round trip at a time. A
+  // failed batch leaves each run to its own read below, which decides what is unreadable.
+  const uncached = [...new Set(points.map((p) => p.runId))].filter((id) => !runPeriodCache.has(id));
+  if (uncached.length > 1) {
+    try {
+      for (const run of await runStore.getRunsByIds(uncached)) cacheRunPeriod(run.id, run);
+    } catch {
+      /* read one at a time below */
+    }
+  }
   const out: ProgramTrendPoint[] = [];
   let complete = true;
   for (const p of points) {
@@ -892,6 +928,10 @@ async function readRunPeriod(runStore: RunStore, runId: string): Promise<RunPeri
     return UNREADABLE;
   }
   if (!run) return null;
+  return cacheRunPeriod(runId, run);
+}
+
+function cacheRunPeriod(runId: string, run: Pick<RunRecord, "measurementPeriodStart" | "measurementPeriodEnd" | "startedAt" | "requestedScope">): RunPeriod {
   const start = run.measurementPeriodStart.slice(0, 10);
   const end = run.measurementPeriodEnd.slice(0, 10);
   const started = run.startedAt.slice(0, 10);
@@ -913,29 +953,33 @@ const runPeriodCache = new Map<string, RunPeriod>();
 /** How far the trend widens its run window looking for ten displayable points. */
 const TREND_RUN_WINDOW_MAX = 80;
 
-/** The per-run points of a measure's trend: completed runs only, one point per calendar day
- *  (the day's latest run), newest first, capped at 10 (Java parity). */
-function trendPointsOf(groups: RunGroup[], tz?: string): ProgramTrendPoint[] {
-  const n = (os: OutcomeWithRun[], s: string) => os.filter((o) => o.status === s).length;
-  // Completed runs (COMPLETED or PARTIAL_FAILURE per isCompletedRun) are included as trend points
-  // so the headline rate and "from previous" compare like with like; FAILED/QUEUED runs are not.
-  const completed = groups.filter((g) => isCompletedRun(g.runStatus));
-
-  // Collapse to at most one point per calendar day in the requested timezone (default UTC),
-  // keeping the last (latest runStartedAt by epoch ms) completed run of that day.
+/** The trend's points: one per calendar day in the requested zone (default UTC), the day's latest
+ *  completed run, newest first, capped at 10 (Java parity). Pure over the memoized per-run points. */
+function trendPointsIn(runs: ProgramTrendPoint[], tz?: string): ProgramTrendPoint[] {
   const dtf = createDayFormatter(tz);
-  const latestByDay = new Map<string, { group: RunGroup; epochMs: number }>();
-  for (const g of completed) {
-    const epochMs = Date.parse(g.runStartedAt);
+  const latestByDay = new Map<string, { point: ProgramTrendPoint; epochMs: number }>();
+  for (const point of runs) {
+    const epochMs = Date.parse(point.startedAt);
     const dayKey = dtf.format(epochMs);
     const existing = latestByDay.get(dayKey);
     if (!existing || epochMs > existing.epochMs) {
-      latestByDay.set(dayKey, { group: g, epochMs });
+      latestByDay.set(dayKey, { point, epochMs });
     }
   }
-
   return [...latestByDay.values()]
-    .map(({ group: { runId, runStartedAt, rows } }): ProgramTrendPoint => {
+    .map(({ point }) => point)
+    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+    .slice(0, 10);
+}
+
+/** One point per completed run, before any per-day collapse: the part of the trend no time zone changes. */
+function runPointsOf(groups: RunGroup[]): ProgramTrendPoint[] {
+  const n = (os: OutcomeWithRun[], s: string) => os.filter((o) => o.status === s).length;
+  // Completed runs (COMPLETED or PARTIAL_FAILURE per isCompletedRun) are included as trend points
+  // so the headline rate and "from previous" compare like with like; FAILED/QUEUED runs are not.
+  return groups
+    .filter((g) => isCompletedRun(g.runStatus))
+    .map(({ runId, runStartedAt, rows }): ProgramTrendPoint => {
       const total = rows.length;
       const compliant = n(rows, "COMPLIANT");
       const dueSoon = n(rows, "DUE_SOON");
@@ -963,8 +1007,7 @@ function trendPointsOf(groups: RunGroup[], tz?: string): ProgramTrendPoint[] {
         excluded,
       };
     })
-    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
-    .slice(0, 10);
+    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
 }
 
 /** Overdue concentration (site/role) + flagged-reason mix for a measure's latest filtered run. */
