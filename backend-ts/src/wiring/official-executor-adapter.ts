@@ -232,7 +232,13 @@ export function outcomeFromPopulations(
 ): { outcome: OutcomeStatus; inInitialPopulation: boolean } {
   const inIpp = populations["initial-population"] === true;
   if (!inIpp) return { outcome: "MISSING_DATA", inInitialPopulation: false };
-  if (populations["denominator-exclusion"] === true || populations["denominator-exception"] === true) {
+  const inNumerator = populations["numerator"] === true;
+  // An exception excuses only a subject who did NOT meet the numerator (QI-Core Measure IG,
+  // Denominator Membership; owner decision 2026-09-29). One who met it is scored, exactly as the rate
+  // counts them (`normalizeMembership`), so the bucket and the rate cannot disagree about a person.
+  // An exclusion wins regardless of the numerator.
+  const excepted = populations["denominator-exception"] === true && !inNumerator;
+  if (populations["denominator-exclusion"] === true || excepted) {
     return { outcome: "EXCLUDED", inInitialPopulation: true };
   }
   // In the initial population but NOT the denominator: the measure does not score this subject, so
@@ -245,7 +251,6 @@ export function outcomeFromPopulations(
   // violation — and falling through to the numerator branch on a missing key would be exactly the
   // guess this file refuses to make everywhere else.
   if (populations["denominator"] !== true) return { outcome: "EXCLUDED", inInitialPopulation: true };
-  const inNumerator = populations["numerator"] === true;
   const compliant = inNumerator === numeratorMeansCompliant;
   return { outcome: compliant ? "COMPLIANT" : "OVERDUE", inInitialPopulation: true };
 }

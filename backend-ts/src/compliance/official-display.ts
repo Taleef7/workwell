@@ -204,7 +204,8 @@ export function missedRateIndex(evidence: unknown, numeratorMeansCompliant: bool
     return (
       inPopulation(rate, "denominator") &&
       !inPopulation(rate, "denominator-exclusion") &&
-      !inPopulation(rate, "denominator-exception") &&
+      // An exception excuses only a subject outside the numerator, as `outcomeFromPopulations` reads it.
+      !(inPopulation(rate, "denominator-exception") && !inNumerator) &&
       (numeratorMeansCompliant ? !inNumerator : inNumerator)
     );
   });
@@ -232,7 +233,8 @@ export function missedRateIndex(evidence: unknown, numeratorMeansCompliant: bool
  * Where there is NO missed rate — an EXCLUDED or COMPLIANT outcome — any rate carrying one answers,
  * since ADR-074's bucket is worst-of-rates and an exclusion anywhere is what put the subject there.
  *
- * "Excluded" here means `denominator-exclusion` OR `denominator-exception`, matching
+ * "Excluded" here means `denominator-exclusion`, OR `denominator-exception` on a subject outside the
+ * numerator (the IG: an exception excuses only a subject who did not meet it), matching
  * `outcomeFromPopulations`, which is the reader that decides the EXCLUDED bucket in the first place.
  * The single-rate derivation this falls back to matches on define NAMES against
  * /waiver|exemption|exclusion|contraindication/, which does NOT match `denominator-exception` — so an
@@ -243,13 +245,12 @@ export function missedRateIndex(evidence: unknown, numeratorMeansCompliant: bool
 export function multiRateExclusionActive(evidence: unknown, numeratorMeansCompliant: boolean): boolean | null {
   const rates = (evidence as { official?: { rates?: unknown } } | null)?.official?.rates;
   if (!Array.isArray(rates) || rates.length < 2) return null;
+  const has = (rate: Population[], key: string): boolean => rate.some((p) => p?.populationType === key && p?.result === true);
+  // An exception excuses only a subject outside the numerator, as `outcomeFromPopulations` reads it.
   const excused = (rate: unknown): boolean =>
     Array.isArray(rate) &&
-    (rate as Population[]).some(
-      (p) =>
-        (p?.populationType === "denominator-exclusion" || p?.populationType === "denominator-exception") &&
-        p?.result === true,
-    );
+    (has(rate as Population[], "denominator-exclusion") ||
+      (has(rate as Population[], "denominator-exception") && !has(rate as Population[], "numerator")));
   // A missed rate exists ⇒ the case is about a rate nothing excused the subject from.
   if (missedRateIndex(evidence, numeratorMeansCompliant) >= 0) return false;
   return rates.some(excused);

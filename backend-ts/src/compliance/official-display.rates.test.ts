@@ -174,3 +174,17 @@ test("multiRateExclusionActive returns null for anything that is not multi-rate"
   assert.equal(multiRateExclusionActive({}, true), null);
   assert.equal(multiRateExclusionActive({ official: { rates: [[]] } }, true), null, "one rate is not multi-rate");
 });
+
+// Owner decision 2026-09-29: an exception excuses only a patient who did NOT meet the numerator (the
+// QI-Core IG's Denominator Membership), matching `outcomeFromPopulations` and `normalizeMembership`.
+test("an exception with the numerator met excuses nothing: on an inverse measure that rate is the miss", () => {
+  const exceptedButMet = evidenceWithRates(rate({ ...IN, numer: true, denexcep: true }), rate({ ...IN, numer: false }));
+  // Inverse (numerator = the gap): rate 1's numerator is met, and the exception does not excuse it.
+  assert.equal(missedRateIndex(exceptedButMet, false), 0);
+  // Normal: rate 1 met, rate 2 missed; rate 1's exception does not count as an exclusion either way.
+  assert.equal(missedRateIndex(exceptedButMet, true), 1);
+  const metOnBoth = evidenceWithRates(rate({ ...IN, numer: true, denexcep: true }), rate({ ...IN, numer: true }));
+  assert.equal(multiRateExclusionActive(metOnBoth, true), false, "an exception on a met rate is not an exclusion");
+  const exceptedNotMet = evidenceWithRates(rate({ ...IN, numer: false, denexcep: true }), rate({ ...IN, numer: true }));
+  assert.equal(multiRateExclusionActive(exceptedNotMet, true), true, "an exception outside the numerator still excuses");
+});

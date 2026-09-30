@@ -7,6 +7,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-29
 
+- **An exception no longer excuses a patient who met the numerator** (owner decision). The rate already
+  counted them as met (the QI-Core IG's Denominator Membership) while the bucket said Excluded, so one
+  patient could be a met numerator in the rate and Excluded on the roster. `outcomeFromPopulations` and
+  the multi-rate wording now read an exception only outside the numerator. No steward deck holds that
+  shape, so no current result moves.
 - **No page scrolls sideways on a phone or tablet (#700, part 1 of 3).** At 375px Programs slid sideways
   by 506px (121 at 768), Campaigns 316, Hierarchy 300, Runs 211, the patient page 113, Cases 80: chart
   tables hidden with `sr-only` still sized to their content, rows that did not wrap, selects as wide as

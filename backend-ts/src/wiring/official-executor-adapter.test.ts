@@ -81,6 +81,15 @@ test("denominator-exception maps to EXCLUDED — the CMS68 unblock, with no enum
   );
 });
 
+test("an exception excuses only a subject who did NOT meet the numerator (QI-Core IG; owner decision 2026-09-29)", () => {
+  // A met numerator is scored, as the rate counts it (`normalizeMembership`); the bucket must agree.
+  assert.equal(outcomeFromPopulations({ [IPP]: true, [DENOM]: true, [DENEXCEP]: true, [NUMER]: true }, true).outcome, "COMPLIANT");
+  // Inverse measure: the met numerator is the gap, and the exception does not excuse it.
+  assert.equal(outcomeFromPopulations({ [IPP]: true, [DENOM]: true, [DENEXCEP]: true, [NUMER]: true }, false).outcome, "OVERDUE");
+  // An exclusion wins regardless of the numerator.
+  assert.equal(outcomeFromPopulations({ [IPP]: true, [DENOM]: true, [DENEX]: true, [NUMER]: true }, true).outcome, "EXCLUDED");
+});
+
 test("out-of-IPP is MISSING_DATA *paired with* inInitialPopulation:false, never bare", () => {
   // The pair is the whole L17 signal: without the flag, "out of scope for this measure" is
   // indistinguishable from "eligible but we hold no data", and the roster would chase the wrong people.
