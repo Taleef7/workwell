@@ -8,8 +8,9 @@ import { setPublicDemo } from "@/test/mocks/public-demo";
 vi.mock("@/lib/public-demo", () => import("@/test/mocks/public-demo"));
 
 const user = { email: "test@example.com", role: "ROLE_CASE_MANAGER" };
+const auth = { token: "mock-token" as string | null, reconnecting: false };
 vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({ user, token: "mock-token", logout: vi.fn() }),
+  useAuth: () => ({ user, token: auth.token, reconnecting: auth.reconnecting, logout: vi.fn() }),
 }));
 
 let pathname = "/worklist";
@@ -62,6 +63,8 @@ const renderShell = () =>
 
 beforeEach(() => {
   setPublicDemo(false);
+  auth.token = "mock-token";
+  auth.reconnecting = false;
   pathname = "/worklist";
   listeners.clear();
 });
@@ -168,5 +171,26 @@ describe("DashboardLayout shell on a desktop", () => {
     renderShell();
     const [headerSite] = screen.getAllByLabelText("Filter by site");
     expect(headerSite!.closest(".xl\\:flex")).not.toBeNull();
+  });
+});
+
+describe("DashboardLayout without a session", () => {
+  it("says it is reconnecting while a refresh waits out a server restart", () => {
+    viewport(false);
+    auth.token = null;
+    auth.reconnecting = true;
+    renderShell();
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnecting to the server");
+    // The way out if the server stays unreachable: a plain link to sign in, which ends nothing.
+    expect(screen.getByRole("link", { name: "Sign in again" })).toHaveAttribute("href", "/login");
+    expect(screen.queryByText("Content")).toBeNull();
+  });
+
+  it("shows nothing while a refresh is quick", () => {
+    viewport(false);
+    auth.token = null;
+    renderShell();
+    expect(screen.queryByTestId("auth-reconnecting")).toBeNull();
+    expect(screen.queryByText("Content")).toBeNull();
   });
 });

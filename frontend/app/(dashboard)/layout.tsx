@@ -190,7 +190,7 @@ function ShellSidebar({ children }: { children: React.ReactNode }) {
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { token, user, logout } = useAuth();
+  const { token, user, logout, reconnecting } = useAuth();
   const api = useApi();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
   const roleLabel = user ? labelFor(ROLE_LABELS, user.role) : null;
@@ -278,7 +278,22 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   });
 
   if (!token) {
-    return <div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />;
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-neutral-50 px-4 dark:bg-neutral-950">
+        {/* A page-load refresh waiting out a server restart (a deploy): the login is still good. The
+            link is the way out if the server stays unreachable; it signs nothing out. */}
+        {reconnecting ? (
+          <div className="text-center text-sm text-neutral-600 dark:text-neutral-400">
+            <p role="status" data-testid="auth-reconnecting">
+              Reconnecting to the server…
+            </p>
+            <a href="/login" className="mt-2 inline-block underline hover:text-neutral-900 dark:hover:text-neutral-100">
+              Sign in again
+            </a>
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   const showDateRange = usesDateRange(pathname);

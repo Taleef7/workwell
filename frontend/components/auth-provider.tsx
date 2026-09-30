@@ -1,12 +1,14 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { withRefreshLock } from "@/lib/api/refresh-lock";
+import { cancelSessionRefresh, refreshSession } from "@/lib/api/session-refresh";
 
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
+/** How long a page-load refresh may take before the page says it is reconnecting. */
+const RECONNECTING_NOTICE_AFTER_MS = 1_500;
 /**
  * Routes that render without a session, and therefore must not trigger a silent refresh or a redirect
  * to `/login`.
@@ -50,6 +52,8 @@ type AuthContextValue = {
   /** Propagate a silently-refreshed access token into the session store (Fable M24) — keeps the
    *  existing user, swaps only the token, and notifies so every `useApi` client rebuilds with it. */
   updateToken: (token: string) => void;
+  /** A page-load refresh has been waiting on the server for a moment (a deploy restarting it). */
+  reconnecting: boolean;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -143,6 +147,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Reset when token becomes valid (after login or successful refresh).
   const silentRefreshAttempted = useRef(false);
 
+  // A page-load refresh in progress (it can be waiting out a server restart), whether it has been
+  // slow long enough to say so, and whether the provider is still mounted to act on its answer.
+  const refreshing = useRef(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (token) {
       silentRefreshAttempted.current = false;
@@ -166,6 +182,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // A refresh is still waiting out an outage; a navigation meanwhile must not count as a second try.
+    if (refreshing.current) return;
+
     // Only one refresh attempt per unauthenticated epoch.
     if (silentRefreshAttempted.current) {
       router.replace("/login");
@@ -182,35 +201,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       notifySessionChange();
     }
 
-    // One tab at a time (lib/api/refresh-lock.ts): opening a second tab while another refreshed
-    // replayed a rotated-away cookie, and the server then ended the login everywhere.
-    withRefreshLock(() =>
-      fetch(`${API_BASE}/api/auth/refresh`, {
-        method: "POST",
-        credentials: "include",
-      }),
-    )
-      .then((r) => (r.ok ? (r.json() as Promise<{ token?: string; email?: string; role?: string }>) : null))
-      .then((payload) => {
-        if (payload?.token && payload.email && payload.role) {
-          localStorage.setItem(TOKEN_KEY, JSON.stringify(payload.token));
-          localStorage.setItem(USER_KEY, JSON.stringify({ email: payload.email, role: payload.role }));
+    // Only a REFUSED refresh sends the user to /login. One the server could not answer (a deploy
+    // restarting the backend) is retried until it can, with a "Reconnecting" notice after a moment:
+    // the login is still good, and sending the user to sign in again is what made every deploy a logout.
+    // The refresh holds the cross-tab lock (lib/api/refresh-lock.ts) inside `refreshSession`.
+    refreshing.current = true;
+    const slow = setTimeout(() => {
+      if (mounted.current) setReconnecting(true);
+    }, RECONNECTING_NOTICE_AFTER_MS);
+    void (async () => {
+      try {
+        // Each check also stops when a session appeared meanwhile (the user signed in again from the
+        // "Sign in again" link): a late answer for the old login must neither overwrite it nor send
+        // the new one to /login.
+        const superseded = () => !mounted.current || logoutInProgress.current || !!readStoredSession().token;
+        let result = await refreshSession();
+        while (result.kind === "unavailable" && !superseded()) {
+          result = await refreshSession();
+        }
+        if (superseded()) return;
+        if (result.kind === "ok" && result.email && result.role) {
+          localStorage.setItem(TOKEN_KEY, JSON.stringify(result.token));
+          localStorage.setItem(USER_KEY, JSON.stringify({ email: result.email, role: result.role }));
           notifySessionChange();
         } else {
           router.replace("/login");
         }
-      })
-      .catch(() => {
-        router.replace("/login");
-      });
+      } finally {
+        clearTimeout(slow);
+        refreshing.current = false;
+        if (mounted.current) setReconnecting(false);
+      }
+    })();
   }, [pathname, router, token]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       token,
       user,
+      reconnecting,
       login: (nextToken, email, role) => {
         logoutInProgress.current = false;
+        cancelSessionRefresh(); // a refresh still retrying belongs to the previous login
         localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
         localStorage.setItem(USER_KEY, JSON.stringify({ email, role }));
         notifySessionChange();
@@ -239,6 +271,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Gate the refresh effect before clearing storage so the re-render it
         // triggers does not race to re-authenticate the user.
         logoutInProgress.current = true;
+        cancelSessionRefresh(); // a refresh still retrying would re-arm the login being ended
         // Best-effort: clear the HttpOnly refresh cookie server-side. The local
         // session is cleared regardless of whether the network call succeeds.
         void fetch(`${API_BASE}/api/auth/logout`, {
@@ -253,7 +286,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         router.replace("/login");
       }
     }),
-    [router, token, user]
+    [router, token, user, reconnecting]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
