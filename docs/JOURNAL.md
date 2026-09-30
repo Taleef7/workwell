@@ -20,7 +20,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   tab order and ignored Escape; it is now `inert` when closed, focus moves to the current page on open and
   back to the menu button on close, and the current page carries `aria-current`. Search shows on phones
   (16px, so iOS does not zoom); header filters start at xl, where 1024–1279px no longer overflowed; the
-  menu button, nav rows, Log out and the password toggle are 44px targets.
+  menu button, nav rows, Log out and the password toggle are 44px targets. A WebKit (Safari engine) sweep
+  on iPhone SE/15 and iPad profiles found the case page's Assignee row and the Runs filters still ran past
+  a 320px screen; both fixed, and the responsive spec now measures 320 too.
 
 ## 2026-09-28
 

@@ -17,7 +17,10 @@ test.beforeEach(() => {
 
 test.use(AS_ADMIN_RESPONSIVE);
 
+// 320 is the smallest phone still in use (iPhone SE, 1st gen); at 375 the case page's Assignee row and the
+// Runs filters fitted, at 320 they did not.
 const VIEWPORTS = [
+  { name: "small phone", width: 320, height: 568 },
   { name: "phone", width: 375, height: 812 },
   { name: "tablet", width: 768, height: 1024 },
 ] as const;

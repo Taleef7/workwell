@@ -671,7 +671,9 @@ export default function CaseDetailPage() {
                 ) : null}
                 {canManage && (
                 <>
-                <div className="mt-4 grid gap-2">
+                {/* One shrinkable column: a select is as wide as its longest option otherwise, and on a
+                    320px phone the Assignee row ran 32px past the screen (#700). */}
+                <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2">
                   <Select
                     label="Outreach template"
                     value={selectedTemplateId}
@@ -685,17 +687,19 @@ export default function CaseDetailPage() {
                     options={channelOptions}
                   />
                 </div>
-                <div className="mt-4 grid gap-2">
+                <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</span>
-                  <div className="flex items-end gap-2">
-                    <Select
-                      label="Assignee"
-                      hideLabel
-                      className="w-full"
-                      value={assigneeValue}
-                      onValueChange={setAssigneeInput}
-                      options={assigneeOptions}
-                    />
+                  <div className="flex min-w-0 items-end gap-2">
+                    <div className="min-w-0 flex-1">
+                      <Select
+                        label="Assignee"
+                        hideLabel
+                        className="w-full"
+                        value={assigneeValue}
+                        onValueChange={setAssigneeInput}
+                        options={assigneeOptions}
+                      />
+                    </div>
                     <Button
                       type="button"
                       variant="outline"

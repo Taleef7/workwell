@@ -871,7 +871,7 @@ export default function RunsPage() {
 
       {mayRun ? (
       <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-        <div className="grid items-end gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-[minmax(0,1fr)] items-end gap-3 md:grid-cols-4">
           <Select
             label="Scope"
             size="sm"
