@@ -30,6 +30,13 @@ export interface DeploymentProfile {
   readonly subjectTerm: SubjectTerm;
   readonly visibleTenantIds: VisibleTenantSelection;
   readonly runnableMeasureIds: readonly string[];
+  /**
+   * The zone the deployment's users read its screens in, or null for none in particular. The post-run
+   * warm asks for each measure's trend in it (#615): a trend collapses runs to one point per calendar
+   * day, so a late-evening run can share a local day with the nightly while sitting on its own UTC
+   * day, and a trend warmed in UTC alone is then too short for this zone's first visitor.
+   */
+  readonly practiceTimeZone: string | null;
 }
 
 export function subjectNoun(profile: Pick<DeploymentProfile, "subjectTerm">): {
@@ -91,9 +98,10 @@ validateRunnableMeasureIds(DEFAULT_MEASURE_IDS);
 export function resolveDeploymentProfile(name: string | undefined): DeploymentProfile {
   const normalized = (name ?? "").trim().toLowerCase();
   if (normalized === "maui") {
-    return { id: "maui", subjectTerm: "patient", visibleTenantIds: ["maui"], runnableMeasureIds: MAUI_MEASURE_IDS };
+    // The pilot group's practice keeps US Eastern time.
+    return { id: "maui", subjectTerm: "patient", visibleTenantIds: ["maui"], runnableMeasureIds: MAUI_MEASURE_IDS, practiceTimeZone: "America/New_York" };
   }
-  return { id: "default", subjectTerm: "employee", visibleTenantIds: "all", runnableMeasureIds: DEFAULT_MEASURE_IDS };
+  return { id: "default", subjectTerm: "employee", visibleTenantIds: "all", runnableMeasureIds: DEFAULT_MEASURE_IDS, practiceTimeZone: null };
 }
 
 /**
