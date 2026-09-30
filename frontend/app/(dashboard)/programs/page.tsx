@@ -52,7 +52,21 @@ type ProgramSummary = {
   /** The year the latest run scored and the day it describes (#637); absent from an older server. */
   measurementYear?: number | null;
   asOf?: string | null;
+  /** The measure's own rates off the run's evidence (ADR-077 d5); read here only for a multi-rate measure (#697). */
+  measureRate?: { rates?: Array<{ label?: string | null; score: number | null }> } | null;
 };
+
+/**
+ * A multi-rate measure's own rates, for its card (#697). The card's headline counts the patients who
+ * met every rate that applies to them, which on CMS137 reads as Engagement alone, so the practice saw
+ * one of its two rates and could not tell that case work covers the other. Null for a single-rate
+ * measure.
+ */
+function multiRates(program: ProgramSummary): Array<{ label: string; score: number | null }> | null {
+  const rates = program.measureRate?.rates;
+  if (!Array.isArray(rates) || rates.length < 2) return null;
+  return rates.map((r, index) => ({ label: r.label ?? `Rate ${index + 1}`, score: r.score }));
+}
 
 /** `?include=trend` attaches the per-measure trend to each summary. */
 type DetailedSummary = ProgramSummary & { trend?: TrendPoint[] };
@@ -332,6 +346,24 @@ export default function ProgramsPage() {
                   Based on {fmtCount(programRate.denominator)} {programRate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
                 </p>
               ) : null}
+              {(() => {
+                const rates = multiRates(program);
+                // The rates are the run's whole population and are never site- or tenant-filtered,
+                // while the headline and chips are: under a filter they would describe other people.
+                if (!rates || siteId || tenant) return null;
+                return (
+                  <div className="mt-2 text-xs text-neutral-600 dark:text-neutral-400" data-testid={`card-rates-${program.measureId}`}>
+                    <p className="font-medium text-neutral-800 dark:text-neutral-200">
+                      {rates.map((r) => `${r.label} ${r.score === null ? "no score" : `${(r.score * 100).toFixed(1)}%`}`).join(" · ")}
+                    </p>
+                    <p className="mt-0.5">
+                      {/* A lower-is-better headline counts a miss on ANY rate, so it gets no such sentence. */}
+                      {programRate.lowerIsBetter ? "" : `${programRate.label} counts ${SUBJECT.plural} who met every rate that applies to them. `}
+                      A miss on any rate opens a case, and the case names the rate missed.
+                    </p>
+                  </div>
+                );
+              })()}
 
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 {nothingYet ? (

@@ -72,6 +72,17 @@ describe("ProgramDetailPage — what moved here from the card (#637)", () => {
     expect(within(tile).getByText("2 evaluation errors not counted")).toBeInTheDocument();
     expect(within(tile).getByText(/the two can differ/)).toBeInTheDocument();
     expect(within(tile).queryByText(/counted in no rate/i)).toBeNull();
+    // #697: case work covers both rates, and the page says so.
+    expect(within(tile).getByTestId("measure-rate-cases-cms137")).toHaveTextContent(
+      "Case work covers every rate: a miss on any rate opens a case for the patient, and the case names the rate missed. A case staff closed stays closed until the chart changes.",
+    );
+  });
+
+  it("does not claim rates it does not have: one rate, no case-coverage line (#697)", async () => {
+    mockPrograms({ ...withRate, measureRate: { ...withRate.measureRate, rates: [withRate.measureRate.rates[0]] } });
+    render(<ProgramDetailPage />);
+    await screen.findByTestId("measure-rate-cms137");
+    expect(screen.queryByTestId("measure-rate-cases-cms137")).toBeNull();
   });
 
   it("shows no CMS rate tile for a run without official evidence", async () => {
