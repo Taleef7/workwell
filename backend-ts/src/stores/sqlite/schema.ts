@@ -345,6 +345,7 @@ CREATE TABLE IF NOT EXISTS quality_snapshots (
   excluded      INTEGER NOT NULL,
   source_run_id TEXT,
   computed_at   TEXT NOT NULL,
+  not_in_population INTEGER,
   UNIQUE (measure_id, period, scope_level, scope_id)
 );
 
@@ -490,6 +491,10 @@ const FLOOR_COLUMN_BACKFILL: ReadonlyArray<{ table: string; column: string; ddl:
   // before the column existed, and a NULL source with an assignee is read as operator-owned — the
   // reading that declines to move the row, so a panel edit never reassigns work a person placed.
   { table: "cases", column: "assignment_source", ddl: "assignment_source TEXT" },
+  // #676 (owner-approved 2026-09-29). NULLABLE, and NULL is the point: it marks a snapshot computed
+  // before out-of-population subjects left the denominator (ADR-079), which the screens refuse. A
+  // number is the count left out, on a row computed without them.
+  { table: "quality_snapshots", column: "not_in_population", ddl: "not_in_population INTEGER" },
 ];
 
 interface MinimalDb {

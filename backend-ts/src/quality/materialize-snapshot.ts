@@ -34,12 +34,26 @@ export interface BuildSnapshotInput {
   periodEnd: string;
   sourceRunId: string | null;
   computedAt: string;
-  /** Live-evaluated outcomes (the in-directory tenants) — subjectId + CQL status bucket. */
-  liveOutcomes: { subjectId: string; status: string }[];
+  /**
+   * Live-evaluated outcomes (the in-directory tenants) — subjectId, CQL status bucket, and whether the
+   * measure's own logic put the subject OUTSIDE its population (ADR-079). Such a subject is persisted as
+   * MISSING_DATA but is not a gap: it is counted into `notInPopulation`, never into `total` (#676).
+   */
+  liveOutcomes: { subjectId: string; status: string; outOfPopulation?: boolean }[];
   /** Resolve a live subject to its scope; `null` ⇒ skip (unknown subject), as the hierarchy rollup does. */
   resolveScope: (subjectId: string) => ScopeRef | null;
-  /** The scale tenant, already aggregated to (location, provider, status) groups. Omit if none. */
+  /**
+   * The scale tenant, already aggregated to (location, provider, status) groups. Omit if none. Its rows
+   * are seeded by `backfill-scale` for AUTHORED measures with synthetic statuses, so none is ever out of
+   * a measure's population: the groups carry no such flag because they cannot hold such a row.
+   */
   scale?: { tenantId: string; groups: ScaleGroup[] };
+  /**
+   * Whether these outcomes KNOW which subjects are out of the population (#676). Default true: a run's
+   * persisted outcomes carry the flag. False where they cannot: then the rows record NULL, the old
+   * basis, and the screens refuse them rather than certify a denominator nobody checked.
+   */
+  basisKnown?: boolean;
 }
 
 interface Acc {
@@ -50,6 +64,7 @@ interface Acc {
   overdue: number;
   missingData: number;
   excluded: number;
+  notInPopulation: number;
 }
 
 const zeroAcc = (tenantId: string | null): Acc => ({
@@ -60,10 +75,19 @@ const zeroAcc = (tenantId: string | null): Acc => ({
   overdue: 0,
   missingData: 0,
   excluded: 0,
+  notInPopulation: 0,
 });
 
-/** Bucket one (status, count) into an accumulator — mirrors hierarchy-rollup `addStatus`/`add`. */
-function addStatus(acc: Acc, status: string, count: number): void {
+/**
+ * Bucket one (status, count) into an accumulator — mirrors hierarchy-rollup `addStatus`/`add`. An
+ * out-of-population subject is counted apart and never into `total`, so it never reaches `denominator`
+ * (ADR-079, as every rate computed from outcomes already does; #676).
+ */
+function addStatus(acc: Acc, status: string, count: number, outOfPopulation = false): void {
+  if (outOfPopulation) {
+    acc.notInPopulation += count;
+    return;
+  }
   acc.total += count;
   switch (status.toUpperCase()) {
     case "COMPLIANT":
@@ -101,17 +125,17 @@ export function buildSnapshotRows(input: BuildSnapshotInput): QualitySnapshotInp
   };
 
   /** Count one (tenant, site, provider, status, n) into every scope level it belongs to. */
-  const record = (tenantId: string, site: string, providerId: string, status: string, count: number): void => {
-    addStatus(all, status, count);
-    addStatus(at(tenants, tenantId, tenantId), status, count);
-    addStatus(at(sites, `${tenantId}|${site}`, tenantId), status, count);
-    addStatus(at(providers, `${tenantId}|${site}|${providerId}`, tenantId), status, count);
+  const record = (tenantId: string, site: string, providerId: string, status: string, count: number, outOfPopulation = false): void => {
+    addStatus(all, status, count, outOfPopulation);
+    addStatus(at(tenants, tenantId, tenantId), status, count, outOfPopulation);
+    addStatus(at(sites, `${tenantId}|${site}`, tenantId), status, count, outOfPopulation);
+    addStatus(at(providers, `${tenantId}|${site}|${providerId}`, tenantId), status, count, outOfPopulation);
   };
 
   for (const o of input.liveOutcomes) {
     const scope = input.resolveScope(o.subjectId);
     if (!scope) continue; // unresolvable subject — skipped (mirrors the rollup's `ensure` gate)
-    record(scope.tenantId, scope.site, scope.providerId, o.status, 1);
+    record(scope.tenantId, scope.site, scope.providerId, o.status, 1, o.outOfPopulation === true);
   }
 
   if (input.scale) {
@@ -139,6 +163,9 @@ export function buildSnapshotRows(input: BuildSnapshotInput): QualitySnapshotInp
       excluded: acc.excluded,
       sourceRunId: input.sourceRunId,
       computedAt: input.computedAt,
+      // A number: computed without the out-of-population subjects. NULL only where the caller could not
+      // tell them apart (`basisKnown: false`).
+      notInPopulation: input.basisKnown === false ? null : acc.notInPopulation,
     });
   };
 

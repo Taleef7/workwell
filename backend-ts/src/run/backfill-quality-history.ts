@@ -40,6 +40,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { SnapshotEngine } from "./employee-compliance-snapshot.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
 
 export const QUALITY_HISTORY_BACKFILLED_EVENT = "QUALITY_HISTORY_BACKFILLED";
 
@@ -152,7 +153,7 @@ export async function backfillQualityHistory(
     const rows: QualitySnapshotInput[] = [];
 
     for (const measureId of measureIds) {
-      const liveOutcomes: { subjectId: string; status: string }[] = [];
+      const liveOutcomes: { subjectId: string; status: string; outOfPopulation?: boolean }[] = [];
       for (const employee of employees) {
         try {
           const target = bundleSource.targetFor(employees, measureId, employee.externalId) ?? "MISSING_DATA";
@@ -166,7 +167,14 @@ export async function backfillQualityHistory(
       const groups = scaleGroupsByMeasure.get(measureId);
       const scale = groups ? { tenantId: SCALE_TENANT.id, groups } : undefined;
       rows.push(
-        ...buildSnapshotRows({ measureId, period, periodStart, periodEnd, sourceRunId: null, computedAt, liveOutcomes, resolveScope, scale }),
+        ...buildSnapshotRows({
+          measureId, period, periodStart, periodEnd, sourceRunId: null, computedAt, liveOutcomes, resolveScope, scale,
+          // #676: this backfill evaluates with the engine its caller injects, which for `seed:quality-history`
+          // is the AUTHORED one. For an officially routed measure that is not the measure's own logic, so it
+          // cannot say who is out of the official population: the rows stay on the old basis (NULL) and the
+          // screens keep refusing them. An authored measure has no such population, so its rows are sound.
+          basisKnown: !isOfficialRouted(measureId),
+        }),
       );
     }
 

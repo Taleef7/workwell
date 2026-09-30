@@ -26,7 +26,7 @@ const snap = (over: Partial<QualitySnapshotInput>): QualitySnapshotInput => ({
   measureId: "audiogram", period: "2026-05", periodStart: "2026-05-01T00:00:00.000Z", periodEnd: "2026-05-31T23:59:59.999Z",
   scopeLevel: "all", scopeId: "ALL", tenantId: null,
   numerator: 8, denominator: 10, compliant: 8, dueSoon: 1, overdue: 1, missingData: 0, excluded: 0,
-  sourceRunId: null, computedAt: "2026-05-31T00:00:00.000Z", ...over,
+  sourceRunId: null, computedAt: "2026-05-31T00:00:00.000Z", notInPopulation: null, ...over,
 });
 
 before(async () => {
@@ -128,4 +128,27 @@ test("#642: a measure with no out-of-population subjects still gets its history"
   const res = await get("?measureId=audiogram&scopeLevel=all");
   assert.equal(res?.status, 200);
   assert.equal(((await res!.json()) as Row[]).length, 2);
+});
+
+// #676: the refusal is per ROW now. A row computed without out-of-population subjects states the rate
+// correctly for any measure, so it is served; an old row of such a measure is still withheld.
+test("#676: an official measure's rows on the population basis are served, and its old rows withheld", async () => {
+  const store = new SqliteQualitySnapshotStore(env.DB as never);
+  await store.upsertSnapshots([
+    // Old basis (NULL): 3,388 / 19,636 — the understated rate #642 refused.
+    snap({ measureId: "cms165", period: "2026-06", numerator: 3388, denominator: 19636, compliant: 3388, notInPopulation: null }),
+    // Rebuilt or new: the 11,543 out-of-population patients left out, 3,388 / 8,093 = 41.9%.
+    snap({ measureId: "cms165", period: "2026-07", numerator: 3388, denominator: 8093, compliant: 3388, notInPopulation: 11543 }),
+  ]);
+  const prev = process.env.WORKWELL_OFFICIAL_MEASURES;
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms165";
+  try {
+    const res = await get("?measureId=cms165&scopeLevel=all");
+    assert.equal(res?.status, 200);
+    const rows = (await res!.json()) as Array<Row & { denominator: number; notInPopulation: number | null }>;
+    assert.deepEqual(rows.map((r) => [r.period, r.denominator, r.notInPopulation]), [["2026-07", 8093, 11543]]);
+  } finally {
+    if (prev === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = prev;
+  }
 });

@@ -52,6 +52,7 @@ const snap = (period: string, num: number, den: number): QualitySnapshotRow => (
   excluded: 0,
   sourceRunId: `run-${period}`,
   computedAt: `${period}-28T00:00:00.000Z`,
+  notInPopulation: null,
 });
 
 test("monthlyTrendPoints — newest-first order, stamps period, rate = complianceRateOf (denominator-based)", () => {

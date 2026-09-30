@@ -135,3 +135,35 @@ test("buildSnapshotRows: no scale tenant → live-only, still reconciles", () =>
   assert.equal(all.denominator, 2); // total 3 − excluded 1
   assert.equal(rows.filter((r) => r.scopeLevel === "tenant").length, 2); // twh, ihn only
 });
+
+// #676. An out-of-population subject is persisted as MISSING_DATA (ADR-078) but is not a gap. It was
+// counted into `total` and so into `denominator`, which understated every official measure's monthly
+// rate (cms130 at 17.3% under a headline of 41.9%). It is now counted apart, at every scope.
+test("#676: an out-of-population subject leaves the denominator at every scope, counted in notInPopulation", () => {
+  const input = baseInput();
+  delete input.scale;
+  input.liveOutcomes = [
+    { subjectId: "s1", status: "COMPLIANT" },
+    { subjectId: "s2", status: "MISSING_DATA", outOfPopulation: true },
+    { subjectId: "s3", status: "MISSING_DATA" }, // in population, data missing: still a gap
+  ];
+  const rows = buildSnapshotRows(input);
+  const all = find(rows, "all", "ALL")!;
+  assert.deepEqual(
+    { denominator: all.denominator, missingData: all.missingData, notInPopulation: all.notInPopulation, numerator: all.numerator },
+    { denominator: 2, missingData: 1, notInPopulation: 1, numerator: 1 },
+  );
+  // s2 is twh / HQ / prov-002: every level it belongs to leaves it out; the others count none.
+  assert.deepEqual([find(rows, "tenant", "twh")!.denominator, find(rows, "tenant", "twh")!.notInPopulation], [1, 1]);
+  assert.deepEqual([find(rows, "provider", "twh|HQ|prov-002")!.denominator, find(rows, "provider", "twh|HQ|prov-002")!.notInPopulation], [0, 1]);
+  assert.deepEqual([find(rows, "tenant", "ihn")!.denominator, find(rows, "tenant", "ihn")!.notInPopulation], [1, 0]);
+});
+
+test("#676: every row states its basis — a number, never NULL — even where no subject was left out", () => {
+  for (const row of buildSnapshotRows(baseInput())) assert.equal(row.notInPopulation, 0, `${row.scopeLevel}:${row.scopeId}`);
+});
+
+test("#676: outcomes that cannot tell who is out of the population write the old basis (NULL), never a number", () => {
+  const rows = buildSnapshotRows({ ...baseInput(), basisKnown: false });
+  for (const row of rows) assert.equal(row.notInPopulation, null, `${row.scopeLevel}:${row.scopeId}`);
+});

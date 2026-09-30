@@ -88,7 +88,7 @@ test("resume recomputes a month that is only PARTIALLY materialized (not all mea
       measureId: "audiogram", period: "2026-03", periodStart: "2026-03-01T00:00:00.000Z", periodEnd: "2026-03-31T23:59:59.999Z",
       scopeLevel: "all", scopeId: "ALL", tenantId: null,
       numerator: 1, denominator: 2, compliant: 1, dueSoon: 0, overdue: 1, missingData: 0, excluded: 0,
-      sourceRunId: "run-x", computedAt: "2026-03-31T00:00:00.000Z",
+      sourceRunId: "run-x", computedAt: "2026-03-31T00:00:00.000Z", notInPopulation: 0,
     },
   ]);
   const summary = await backfillQualityHistory(deps, { months: 1, asOf: "2026-03" });
@@ -97,4 +97,24 @@ test("resume recomputes a month that is only PARTIALLY materialized (not all mea
   // Now the month is complete → a rerun skips it.
   const again = await backfillQualityHistory(deps, { months: 1, asOf: "2026-03" });
   assert.equal(again.monthsSkipped, 1);
+});
+
+// #676 review: this backfill evaluates with the engine its caller injects (the AUTHORED one from the
+// CLI), which cannot tell who is out of an OFFICIAL measure's population. Such rows must stay on the old
+// basis (NULL) so the screens keep refusing them; an authored measure's rows are sound (a number).
+test("#676: an officially routed measure's backfilled rows stay on the old basis; an authored one's are certified", async () => {
+  const prev = process.env.WORKWELL_OFFICIAL_MEASURES;
+  process.env.WORKWELL_OFFICIAL_MEASURES = "audiogram";
+  try {
+    await backfillQualityHistory(deps, { months: 1, asOf: "2025-12" });
+  } finally {
+    if (prev === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = prev;
+  }
+  const rows = await deps.qualitySnapshots.querySnapshots({ from: "2025-12", to: "2025-12", scopeLevel: "all" });
+  const audiogram = rows.find((r) => r.measureId === "audiogram");
+  const other = rows.find((r) => r.measureId !== "audiogram");
+  assert.ok(audiogram && other, "both an official and an authored measure were backfilled");
+  assert.equal(audiogram.notInPopulation, null);
+  assert.equal(other.notInPopulation, 0);
 });

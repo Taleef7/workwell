@@ -69,7 +69,7 @@ const snapshot = (period: string): QualitySnapshotRow => ({
   id: `snap-${period}`, measureId: "audiogram", period,
   periodStart: `${period}-01T00:00:00.000Z`, periodEnd: `${period}-28T00:00:00.000Z`,
   scopeLevel: "site", scopeId: "wc|WebChart", tenantId: "wc", numerator: 1, denominator: 1,
-  compliant: 1, dueSoon: 0, overdue: 0, missingData: 0, excluded: 0,
+  compliant: 1, dueSoon: 0, overdue: 0, missingData: 0, excluded: 0, notInPopulation: null,
   sourceRunId: `run-${period}`, computedAt: `${period}-28T00:00:00.000Z`,
 });
 

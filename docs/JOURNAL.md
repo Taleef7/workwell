@@ -5,6 +5,14 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-09-30
+
+- **Monthly quality snapshots leave out-of-population patients out of the denominator (#676).** They were
+  counted in, so every official measure's monthly rate read low and the screens refused the whole series.
+  A new `not_in_population` column (owner-approved) records how many a row left out, NULL on an old row;
+  the screens now refuse per row. `pnpm rebuild:quality-snapshots` replays each month's runs to rebuild
+  the history; running it against Maui is a separate owner-approved step.
+
 ## 2026-09-29
 
 - **The steward's MADiE patients end to end (#727).** The gate proved the calculation in memory; the
