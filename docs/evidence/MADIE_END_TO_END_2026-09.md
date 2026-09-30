@@ -28,7 +28,13 @@ Then:
   - the buckets equal the summed steward results, with Due soon 0 and in-population missing 0;
   - each rate is numerator ÷ (denominator − exclusions − exceptions).
 - **Run reconciliation:** one row per patient, no evaluation errors, and the out-of-population count.
-- **Idempotency:** a second run writes no case event and changes no case.
+- **Idempotency:** a second run writes no case event and changes no case. As a positive control, the
+  first run's case events cover every case it created.
+- **After the second run,** every check above runs again against the newer run. The report and the
+  programs rate must read from it, so a surface that summed across runs or picked the older one fails.
+
+The run uses the deployment's seeded, enabled segments, with every deck patient at one clinic. That is
+closer to the nightly than the issue's `segments: []`, and it makes every patient applicable.
 
 ## Result per measure
 
@@ -54,21 +60,40 @@ with a VSAC key). Without them it skips and names what is missing. When the cont
 - **Postgres:** `node --import tsx --test src/stores/postgres/madie-end-to-end-postgres.test.ts`. It needs
   a reachable Postgres and runs in a database of its own, which it drops afterwards.
 - **CI:** both run in the "Official MADiE test cases" job.
+- **`pnpm test`** also collects both files. They run wherever the sidecars are present and skip in the
+  backend CI shards, which have none.
 
-The test was mutation-checked by breaking the pipeline seven ways:
+The test was mutation-checked by breaking the pipeline nine ways:
 
 - cms122 read the right way round;
 - an exception not treated as an exclusion;
 - out-of-population counted in population;
 - cms137 taking its best rate;
 - the rate ignoring exceptions;
+- the score ignoring exclusions;
 - an exclusion recording no case;
-- a re-confirm reading as a change.
+- a re-confirm reading as a change;
+- the report reading the older of two 2026 runs.
 
 Each one fails the test and names the steward case.
 
 ## Not covered
 
+- **Population shapes no steward deck holds.** No case in the six decks has any of these:
+  - exception and numerator;
+  - exclusion and numerator;
+  - initial population without denominator;
+  - a cms137 patient out of one rate's population but in the other's;
+  - excluded on one rate only.
+
+  So the end-to-end test cannot check how the pipeline handles them. `test-support/madie-oracle.test.ts`
+  pins what the oracle expects for each, but that pins the specification, not the code.
+- **One known disagreement on such a shape.** Take a patient in both the exception and the numerator.
+  - The rate counts them as meeting the numerator (`normalizeMembership`, following the QI-Core IG).
+  - `outcomeFromPopulations` shows them as Excluded.
+
+  No deck holds that patient, so nothing is wrong on screen today. Which reading is right is an open
+  owner question.
 - **Stratifiers:** the cms125, cms130 and cms137 decks carry expected stratifier results, and neither
   this test nor the gate compares them. That is a follow-up.
 - **cms68, cms951 and cms138:** they stay in the in-memory gate only, because none is in a deployment's

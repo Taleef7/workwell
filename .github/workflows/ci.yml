@@ -438,32 +438,6 @@ jobs:
             src/fhir/qrda1-import-official.test.ts \
             scripts/valueset-parity.test.mjs \
             scripts/vendor-official-measure.test.mjs
-      # #727. The gate above proves the CALCULATION in memory; this drives the same steward patients
-      # through the nightly's run, both stores and the read APIs the screens use. Both files need all six
-      # sidecars, so they skip without them and FAIL instead when this context is credentialed.
-      - name: MADiE test patients end to end (the run, both stores, the read APIs)
-        env:
-          WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY: ${{ steps.vendor.outputs.credentialed }}
-          WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell
-        run: |
-          log="$RUNNER_TEMP/madie-e2e.log"
-          set +e
-          pnpm exec node --import tsx --test \
-            src/run/madie-end-to-end.test.ts \
-            src/stores/postgres/madie-end-to-end-postgres.test.ts 2>&1 | tee "$log"
-          status=${PIPESTATUS[0]}
-          set -e
-          [ "$status" -eq 0 ] || exit "$status"
-          # Both halves print their summary only after every assertion passed. A credentialed run that
-          # printed neither (a skip that slipped past the REQUIRE guard) must not read as green.
-          if [ "${{ steps.vendor.outputs.credentialed }}" = "true" ]; then
-            for store in SQLite Postgres; do
-              if ! grep -q "\[madie-e2e\] $store " "$log"; then
-                echo "::error::The MADiE end-to-end test did not run on $store in a credentialed context."
-                exit 1
-              fi
-            done
-          fi
       # `--allow-missing-terminology` ONLY where the credential is genuinely absent (Dependabot's
       # pushes — GitHub withholds the secret there). Without it, the uncredentialed re-vendor above
       # produces a cms138 sidecar that omits the value set upstream does not ship, the deck cannot
@@ -500,6 +474,32 @@ jobs:
       # Only worth uploading once the harness has actually written a report. If the FETCH step failed,
       # the file on disk is still the committed copy, and publishing it as "the failing report" is
       # actively misleading — it shows green results for a run that never happened.
+      # #727. The gate above proves the CALCULATION in memory; this drives the same steward patients
+      # through the nightly's run, both stores and the read APIs the screens use. Both files need all six
+      # sidecars, so they skip without them and FAIL instead when this context is credentialed.
+      - name: MADiE test patients end to end (the run, both stores, the read APIs)
+        env:
+          WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY: ${{ steps.vendor.outputs.credentialed }}
+          WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell
+        run: |
+          log="$RUNNER_TEMP/madie-e2e.log"
+          set +e
+          pnpm exec node --import tsx --test \
+            src/run/madie-end-to-end.test.ts \
+            src/stores/postgres/madie-end-to-end-postgres.test.ts 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          set -e
+          [ "$status" -eq 0 ] || exit "$status"
+          # Both halves print their summary only after every assertion passed. A credentialed run that
+          # printed neither (a skip that slipped past the REQUIRE guard) must not read as green.
+          if [ "${{ steps.vendor.outputs.credentialed }}" = "true" ]; then
+            for store in SQLite Postgres; do
+              if ! grep -q "\[madie-e2e\] $store " "$log"; then
+                echo "::error::The MADiE end-to-end test did not run on $store in a credentialed context."
+                exit 1
+              fi
+            done
+          fi
       - name: Upload report on failure
         uses: actions/upload-artifact@v7
         if: failure() && steps.gate.outcome != 'skipped'
