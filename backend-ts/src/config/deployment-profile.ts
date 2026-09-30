@@ -162,6 +162,15 @@ export function getDeploymentDirectory(): DeploymentDirectory {
 export const __resetDeploymentDirectory = (): void => {
   directoryMemo = null;
 };
+/**
+ * Test seam only (#727) — installs a directory in place of the composed one, so a test can make a
+ * known set of patients (the steward's MADiE test patients, under their own ids) the deployment's
+ * roster. Every consumer reads through the memo, so this is what the roster, programs overview, cases
+ * and the run's evaluable population all see; `__resetDeploymentDirectory` undoes it.
+ */
+export const __setDeploymentDirectoryForTest = (directory: DeploymentDirectory): void => {
+  directoryMemo = directory;
+};
 
 /**
  * The seed the ACTIVE directory was composed from.

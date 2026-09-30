@@ -613,3 +613,42 @@ test("the evidence report renders EVERY rate's expected/actual, not rate 1 alone
     "rate 2's populations are rendered beside rate 1's, and the mismatch is visible",
   );
 });
+
+// #727. The end-to-end test drives the RUNTIME with the committed decks alone, so the deck-only loader
+// must return every case the gate proved, with no network and no `.official-content/` checkout.
+test("loadVendoredOfficialDeck: the six Maui decks load from the repo alone, every case whole, ids unique, all 2026", async () => {
+  const { loadVendoredOfficialDeck } = await import("./official-cases.ts");
+  const { REQUIRED_OFFICIAL_CASE_COUNTS } = await import("../run/cli/official-cases.ts");
+  const seen = new Map<string, string>();
+  for (const measure of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"] as const) {
+    const deck = loadVendoredOfficialDeck(measure);
+    assert.equal(deck.cases.length, REQUIRED_OFFICIAL_CASE_COUNTS[measure], `${measure}: the whole deck`);
+    assert.deepEqual(
+      deck.cases.filter((c) => c.loadError).map((c) => `${c.uuid}: ${c.loadError}`),
+      [],
+      `${measure}: no case failed to load`,
+    );
+    assert.deepEqual(
+      { start: deck.measurementPeriod.start.slice(0, 10), end: deck.measurementPeriod.end.slice(0, 10) },
+      { start: "2026-01-01", end: "2026-12-31" },
+      `${measure}: the 2026 period`,
+    );
+    for (const c of deck.cases) {
+      assert.ok(c.patientId && c.patientBundle && c.expectedRates?.length, `${measure} ${c.uuid}: patient, bundle and expected`);
+      const other = seen.get(c.patientId!);
+      assert.equal(other, undefined, `${c.patientId} is in both ${other} and ${measure}: a subject id must name one case`);
+      seen.set(c.patientId!, measure);
+    }
+  }
+  assert.equal(seen.size, 334);
+});
+
+test("loadVendoredOfficialDeck: a measure with no vendored deck throws rather than loading nothing", async () => {
+  const { loadVendoredOfficialDeck } = await import("./official-cases.ts");
+  const root = await mkdtemp(join(tmpdir(), "no-deck-"));
+  try {
+    assert.throws(() => loadVendoredOfficialDeck("cms2", root), /no vendored deck/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

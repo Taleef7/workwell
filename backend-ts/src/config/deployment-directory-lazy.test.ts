@@ -94,3 +94,39 @@ test("the default profile is untouched by the corpus size", () => {
   // The corpus generator is reached only through the maui branch, so the size variable is inert here.
   assert.equal(out.employees, 198, "a Maui-only variable must not resize the default roster");
 });
+
+// #727. The MADiE end-to-end test makes the steward's patients the roster through this seam; if any
+// consumer read around the memo, the run would evaluate one population and the screens show another.
+test("__setDeploymentDirectoryForTest: every consumer sees the installed directory, and a reset restores the corpus", () => {
+  const out = runProfileChild("maui", `
+    const profile = await import("./src/config/deployment-profile.ts");
+    const base = profile.getDeploymentDirectory();
+    const one = { ...base.EMPLOYEES[0], externalId: "deck-patient-1", name: "Deck One" };
+    const byId = new Map([[one.externalId, one]]);
+    profile.__setDeploymentDirectoryForTest({
+      ...base,
+      EMPLOYEES: [one],
+      EVALUABLE_EMPLOYEES: [one],
+      employeeById: (id) => byId.get(id) ?? null,
+      employeesForTenant: (t) => (t === one.tenantId ? [one] : []),
+    });
+    const match = profile.profileSubjectMatcher(profile.employeeById);
+    const installed = {
+      employees: profile.employees().map((e) => e.externalId),
+      directory: profile.DIRECTORY.employees.map((e) => e.externalId),
+      evaluable: profile.evaluableEmployees().map((e) => e.externalId),
+      matchesDeck: match("deck-patient-1"),
+      matchesCorpus: match("pat-00001"),
+    };
+    profile.__resetDeploymentDirectory();
+    console.log(JSON.stringify({ installed, afterReset: profile.employees().length }));
+  `);
+  assert.deepEqual(out.installed, {
+    employees: ["deck-patient-1"],
+    directory: ["deck-patient-1"],
+    evaluable: ["deck-patient-1"],
+    matchesDeck: true,
+    matchesCorpus: false,
+  });
+  assert.equal(out.afterReset, 48);
+});
