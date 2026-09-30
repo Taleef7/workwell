@@ -27,7 +27,7 @@ import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webc
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
-import { snapshotsUnderstateRate } from "../quality/snapshot-basis.ts";
+import { servableSnapshots, snapshotsUnderstateRate } from "../quality/snapshot-basis.ts";
 import { latestPopulationSnapshot, latestPopulationWinners, RunKeyedMemo, type VisibilityContext } from "./latest-population.ts";
 import type { LatestPopulationRun } from "../stores/outcome-store.ts";
 
@@ -794,17 +794,20 @@ export async function programTrend(
     opts?.monthly &&
     deps.qualitySnapshots &&
     scope &&
-    // The one rule the history route applies too (#642: that route used to go around this one).
-    !snapshotsUnderstateRate(measureId, producedOutOfPopulation) &&
+    // An official measure's trend stays per-run: each point is stamped with the year its run scored
+    // (#637), and a calendar-month series has none to stamp.
+    !isOfficialRouted(measureId) &&
     monthlySnapshotScopeIsSafe(scope, webChartConfigured, hasWebChartRows)
   ) {
-    const snaps = await deps.qualitySnapshots.querySnapshots({
+    // The one rule the history route applies too (#642, #676): where the rows show the measure put
+    // subjects out of its population, only snapshots computed without them are used.
+    const snaps = servableSnapshots(await deps.qualitySnapshots.querySnapshots({
       measureId,
       scopeLevel: scope.scopeLevel,
       scopeId: scope.scopeId,
       from: from?.slice(0, 7),
       to: to?.slice(0, 7),
-    });
+    }), snapshotsUnderstateRate(measureId, producedOutOfPopulation));
     // Unstamped: the monthly series only ever serves a rolling-window (authored) measure, which has no
     // measurement year to compare within (#637 review).
     const monthly = monthlyTrendPoints(snaps);

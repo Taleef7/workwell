@@ -395,6 +395,7 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.quality_snapshots (
   excluded      INTEGER NOT NULL,
   source_run_id TEXT,
   computed_at   TIMESTAMPTZ NOT NULL,
+  not_in_population INTEGER,
   UNIQUE (measure_id, period, scope_level, scope_id)
 );
 
@@ -402,6 +403,12 @@ CREATE INDEX IF NOT EXISTS spike_quality_snapshots_measure_period_idx
   ON ${SPIKE_SCHEMA}.quality_snapshots (measure_id, period);
 CREATE INDEX IF NOT EXISTS spike_quality_snapshots_scope_idx
   ON ${SPIKE_SCHEMA}.quality_snapshots (scope_level, scope_id);
+
+-- OWNER-APPROVED DDL (#676, 2026-09-29): which basis a snapshot was computed on. NULL = before
+-- out-of-population subjects left the denominator (ADR-079), so the screens refuse the row; a number =
+-- how many were left out of a row computed without them. Additive, nullable, no data migration;
+-- reversible (ALTER TABLE ... DROP COLUMN not_in_population). Existing rows stay NULL until rebuilt.
+ALTER TABLE ${SPIKE_SCHEMA}.quality_snapshots ADD COLUMN IF NOT EXISTS not_in_population INTEGER;
 
 -- Cross-system identity links (#187 E15 PR-2). A human-confirmed assertion that two source-system
 -- records ARE (CONFIRMED) or are NOT (BROKEN) the same person — overrides the auto matchKey grouping

@@ -38,6 +38,13 @@ export interface QualitySnapshotInput {
   /** The run this snapshot was materialized from (null for purely synthetic backfill). */
   sourceRunId: string | null;
   computedAt: string;
+  /**
+   * Which basis the row was computed on (#676). A number: computed without the subjects the measure's
+   * own logic put outside its population (ADR-079), and how many that was. NULL: a row computed before
+   * that, which counted them into `total` and so into `denominator`, and which the screens refuse.
+   * Required, so no writer can leave the basis unsaid.
+   */
+  notInPopulation: number | null;
 }
 
 /** A persisted snapshot row (the write shape + its stable id). */

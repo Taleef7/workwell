@@ -10,7 +10,13 @@
  * The trend chart already refused the snapshot series for such a measure, with this reasoning, in
  * `programTrend`. The "Quality over time" panel read `/api/quality/history` directly and went around
  * it. This is the rule both now call, so there is one rule and not two.
+ *
+ * #676: a row now records its basis. The materializer leaves out-of-population subjects out of
+ * `total` and writes how many it left out (`notInPopulation`, a number); a row written before that
+ * has NULL. So the refusal is per ROW, not per measure: a row on the population basis states the rate
+ * correctly whatever the measure, and only an old row is withheld.
  */
+import type { QualitySnapshotRow } from "../stores/quality-snapshot-store.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
@@ -43,6 +49,22 @@ export async function monthlySnapshotsUnderstateRate(
   if (!winner) return false;
   const rows = await outcomes.listOutcomesWithRun({ measureId, runIds: [winner.runId], excludeScale: true });
   return snapshotsUnderstateRate(measureId, rows.some((r) => r.outOfPopulation === true));
+}
+
+/** Computed without out-of-population subjects (#676): its denominator is the measure's own. */
+export const onPopulationBasis = (row: Pick<QualitySnapshotRow, "notInPopulation">): boolean =>
+  row.notInPopulation !== null;
+
+/**
+ * The rows a measure's history may serve. For a measure whose snapshots could have counted
+ * out-of-population subjects, only rows on the population basis; for any other, every row (an old row
+ * of such a measure counted none, so its denominator was already right).
+ */
+export function servableSnapshots<T extends Pick<QualitySnapshotRow, "notInPopulation">>(
+  rows: readonly T[],
+  understates: boolean,
+): T[] {
+  return understates ? rows.filter(onPopulationBasis) : [...rows];
 }
 
 /** What the history route answers instead of a series that would understate the rate. */

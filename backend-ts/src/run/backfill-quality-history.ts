@@ -40,6 +40,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { SnapshotEngine } from "./employee-compliance-snapshot.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
 
 export const QUALITY_HISTORY_BACKFILLED_EVENT = "QUALITY_HISTORY_BACKFILLED";
 
@@ -152,13 +153,16 @@ export async function backfillQualityHistory(
     const rows: QualitySnapshotInput[] = [];
 
     for (const measureId of measureIds) {
-      const liveOutcomes: { subjectId: string; status: string }[] = [];
+      const liveOutcomes: { subjectId: string; status: string; outOfPopulation?: boolean }[] = [];
       for (const employee of employees) {
         try {
           const target = bundleSource.targetFor(employees, measureId, employee.externalId) ?? "MISSING_DATA";
           const bundle = bundleSource.bundleFor(employee, measureId, target, today); // anchor to today
           const outcome = await deps.engine.evaluate({ measureId, patientBundle: bundle, evaluationDate: asOfDate });
-          liveOutcomes.push({ subjectId: employee.externalId, status: outcome.outcome });
+          // Out of population only for an officially routed measure, as the run pipeline reads it (ADR-078):
+          // an authored "not in the initial population" is a workflow fact, not the measure's scope (#676).
+          const inIpp = (outcome as { inInitialPopulation?: boolean }).inInitialPopulation;
+          liveOutcomes.push({ subjectId: employee.externalId, status: outcome.outcome, outOfPopulation: isOfficialRouted(measureId) && inIpp === false });
         } catch {
           liveOutcomes.push({ subjectId: employee.externalId, status: "MISSING_DATA" });
         }

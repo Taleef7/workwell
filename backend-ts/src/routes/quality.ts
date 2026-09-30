@@ -19,7 +19,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import type { QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
-import { monthlySnapshotsUnderstateRate, SNAPSHOT_BASIS_REFUSAL } from "../quality/snapshot-basis.ts";
+import { monthlySnapshotsUnderstateRate, servableSnapshots, SNAPSHOT_BASIS_REFUSAL } from "../quality/snapshot-basis.ts";
 
 interface QualityEnv {
   DB: CloudDatabase;
@@ -72,10 +72,6 @@ export async function handleQuality(req: Request, env: QualityEnv): Promise<Resp
   }
 
   const s = await getStores(env);
-  // #642: refuse rather than serve a series that understates the rate. A 409 and not an empty array:
-  // "no history yet" and "history exists but would be wrong" are different answers, and the panel must
-  // be able to say which (the same shape as ADR-077's `run_compacted`).
-  if (await monthlySnapshotsUnderstateRate(s.outcomes, measureId)) return json(SNAPSHOT_BASIS_REFUSAL, 409);
   const rows = await s.qualitySnapshots.querySnapshots({
     measureId,
     scopeLevel: (scopeLevelRaw as QualityScopeLevel) ?? undefined,
@@ -84,5 +80,12 @@ export async function handleQuality(req: Request, env: QualityEnv): Promise<Resp
     from,
     to,
   });
-  return json(rows);
+  // #642/#676: never serve a row that understates the rate. Rows on the population basis are served
+  // whatever the measure; only rows computed before it, for a measure that can put subjects out of its
+  // population, are withheld. A 409 and not an empty array when that leaves nothing: "no history yet"
+  // and "history exists but would be wrong" are different answers, and the panel must be able to say
+  // which (the same shape as ADR-077's `run_compacted`).
+  const servable = servableSnapshots(rows, await monthlySnapshotsUnderstateRate(s.outcomes, measureId));
+  if (servable.length === 0 && rows.length > 0) return json(SNAPSHOT_BASIS_REFUSAL, 409);
+  return json(servable);
 }

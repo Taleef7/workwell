@@ -35,6 +35,7 @@ interface SnapRow {
   excluded: number;
   source_run_id: string | null;
   computed_at: string;
+  not_in_population: number | null;
 }
 
 function mapRow(r: SnapRow): QualitySnapshotRow {
@@ -56,6 +57,7 @@ function mapRow(r: SnapRow): QualitySnapshotRow {
     excluded: Number(r.excluded),
     sourceRunId: r.source_run_id ?? null,
     computedAt: r.computed_at,
+    notInPopulation: r.not_in_population == null ? null : Number(r.not_in_population),
   };
 }
 
@@ -68,8 +70,9 @@ export class SqliteQualitySnapshotStore implements QualitySnapshotStore {
         .prepare(
           `INSERT OR REPLACE INTO quality_snapshots
              (id, measure_id, period, period_start, period_end, scope_level, scope_id, tenant_id,
-              numerator, denominator, compliant, due_soon, overdue, missing_data, excluded, source_run_id, computed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              numerator, denominator, compliant, due_soon, overdue, missing_data, excluded, source_run_id, computed_at,
+              not_in_population)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           crypto.randomUUID(),
@@ -89,6 +92,7 @@ export class SqliteQualitySnapshotStore implements QualitySnapshotStore {
           s.excluded,
           s.sourceRunId,
           s.computedAt,
+          s.notInPopulation,
         )
         .run();
     }

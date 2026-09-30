@@ -73,14 +73,14 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
     const location = directory.providerById(emp.providerId)?.location ?? "Unknown";
     return { tenantId: emp.tenantId, site: location, providerId: emp.providerId };
   };
-  const liveByMeasure = new Map<string, { subjectId: string; status: string }[]>();
+  const liveByMeasure = new Map<string, { subjectId: string; status: string; outOfPopulation?: boolean }[]>();
   for (const o of live) {
     let arr = liveByMeasure.get(o.measureId);
     if (!arr) {
       arr = [];
       liveByMeasure.set(o.measureId, arr);
     }
-    arr.push({ subjectId: o.subjectId, status: o.status });
+    arr.push({ subjectId: o.subjectId, status: o.status, outOfPopulation: o.outOfPopulation === true });
   }
 
   // Latest COMPLETED `seed:scale` run per measure, so the population-scale tenant folds in via the
@@ -125,4 +125,40 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
   await deps.qualitySnapshots.upsertSnapshots(rows);
 
   return { materialized: true, rows: rows.length, period };
+}
+
+export interface RebuildResult {
+  /** Months re-materialized from their newest completed population run, oldest first. */
+  rebuilt: { period: string; runId: string; rows: number }[];
+  /** Months with a run that could not be re-materialized (e.g. its outcomes were compacted). */
+  skipped: { period: string; runId: string; reason: string }[];
+}
+
+/**
+ * #676 — put the stored history on the population basis. Re-materializes every month from its NEWEST
+ * completed population run, which is the run whose rows the nightly left in place (each run
+ * re-materializes its month, last write wins), so a rebuilt month is what the nightly would have
+ * written had it left out-of-population subjects out at the time. It reads the run's PERSISTED
+ * outcomes and their persisted flag; nothing is re-evaluated. Each month writes its own
+ * `QUALITY_SNAPSHOT_MATERIALIZED` audit event through `materializeRun`.
+ *
+ * A month with snapshot rows but no surviving run (retention, or a synthetic backfill) keeps its old
+ * rows, which the screens keep refusing where they would understate the rate. Owner-run, one-shot,
+ * idempotent: `pnpm rebuild:quality-snapshots`.
+ */
+export async function rebuildSnapshotHistory(deps: MaterializeDeps): Promise<RebuildResult> {
+  const newestByMonth = new Map<string, string>();
+  // Newest-first, so the first run seen for a month is its newest.
+  for (const run of await deps.runStore.listRuns(100_000)) {
+    if (run.triggeredBy === SCALE_TRIGGER || !isPopulationRun(run.scopeType) || !isCompletedRun(run.status)) continue;
+    const period = run.startedAt.slice(0, 7);
+    if (!newestByMonth.has(period)) newestByMonth.set(period, run.id);
+  }
+  const result: RebuildResult = { rebuilt: [], skipped: [] };
+  for (const [period, runId] of [...newestByMonth].sort(([a], [b]) => a.localeCompare(b))) {
+    const r = await materializeRun(runId, deps);
+    if (r.materialized) result.rebuilt.push({ period, runId, rows: r.rows });
+    else result.skipped.push({ period, runId, reason: r.reason ?? "not materialized" });
+  }
+  return result;
 }

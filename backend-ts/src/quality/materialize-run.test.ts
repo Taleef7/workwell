@@ -16,7 +16,7 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteQualitySnapshotStore } from "../stores/sqlite/quality-snapshot-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { materializeRun, QUALITY_SNAPSHOT_MATERIALIZED_EVENT, type MaterializeDeps } from "./materialize-run.ts";
+import { materializeRun, QUALITY_SNAPSHOT_MATERIALIZED_EVENT, type MaterializeDeps, rebuildSnapshotHistory } from "./materialize-run.ts";
 import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { encodeScaleSubject } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
@@ -172,4 +172,59 @@ test("materializeRun: restart-rehydrated wc outcomes appear in all/tenant/site/p
   } finally {
     replaceLiveDirectory([]);
   }
+});
+
+// #676: the run's own out-of-population flag (ADR-079) reaches the snapshot, from the store.
+test("materializeRun: a persisted out-of-population outcome leaves the denominator and is counted apart", async () => {
+  const s = await freshStores();
+  const run = await popRun(s, { startedAt: "2026-08-15T10:00:00.000Z", completedAt: "2026-08-15T10:05:00.000Z" });
+  await s.outcomeStore.recordOutcomes([
+    { runId: run.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+    { runId: run.id, subjectId: twh[1]!.externalId, measureId: "audiogram", status: "MISSING_DATA", evidence: {}, outOfPopulation: true },
+    { runId: run.id, subjectId: twh[2]!.externalId, measureId: "audiogram", status: "MISSING_DATA", evidence: {} },
+  ]);
+  const result = await materializeRun(run.id, s);
+  assert.equal(result.materialized, true);
+  const all = (await s.qualitySnapshots.querySnapshots({ measureId: "audiogram", from: "2026-08", to: "2026-08" }))
+    .find((row) => row.scopeLevel === "all")!;
+  assert.deepEqual(
+    { denominator: all.denominator, missingData: all.missingData, notInPopulation: all.notInPopulation },
+    { denominator: 2, missingData: 1, notInPopulation: 1 },
+  );
+});
+
+test("#676 rebuildSnapshotHistory: each month from its NEWEST run, old rows corrected in place, a run-less month left alone", async () => {
+  const s = await freshStores();
+  const oldRow = (period: string) => ({
+    measureId: "audiogram", period, periodStart: `${period}-01T00:00:00.000Z`, periodEnd: `${period}-28T00:00:00.000Z`,
+    scopeLevel: "all" as const, scopeId: "ALL", tenantId: null, numerator: 1, denominator: 3, compliant: 1, dueSoon: 0,
+    overdue: 0, missingData: 2, excluded: 0, sourceRunId: null, computedAt: `${period}-28T00:00:00.000Z`, notInPopulation: null,
+  });
+  // Pre-#676 rows (NULL basis) for three months; only two have runs.
+  await s.qualitySnapshots.upsertSnapshots([oldRow("2026-05"), oldRow("2026-06"), oldRow("2026-07")]);
+  // June: an older run (all compliant) and the newest (one out of population), which must win.
+  const juneOld = await popRun(s, { startedAt: "2026-06-02T10:00:00.000Z", completedAt: "2026-06-02T10:05:00.000Z" });
+  await s.outcomeStore.recordOutcomes([
+    { runId: juneOld.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+  ]);
+  const juneNew = await popRun(s, { startedAt: "2026-06-28T10:00:00.000Z", completedAt: "2026-06-28T10:05:00.000Z" });
+  await s.outcomeStore.recordOutcomes([
+    { runId: juneNew.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+    { runId: juneNew.id, subjectId: twh[1]!.externalId, measureId: "audiogram", status: "MISSING_DATA", evidence: {}, outOfPopulation: true },
+  ]);
+  const july = await popRun(s, { startedAt: "2026-07-10T10:00:00.000Z", completedAt: "2026-07-10T10:05:00.000Z" });
+  await s.outcomeStore.recordOutcomes([
+    { runId: july.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "OVERDUE", evidence: {} },
+  ]);
+
+  const result = await rebuildSnapshotHistory(s);
+  assert.deepEqual(result.rebuilt.map((m) => [m.period, m.runId]), [["2026-06", juneNew.id], ["2026-07", july.id]]);
+  assert.deepEqual(result.skipped, []);
+  const all = (await s.qualitySnapshots.querySnapshots({ measureId: "audiogram", scopeLevel: "all" }))
+    .map((r) => [r.period, r.denominator, r.notInPopulation, r.sourceRunId]);
+  assert.deepEqual(all, [
+    ["2026-05", 3, null, null], // no run to rebuild from: still refused where it would understate
+    ["2026-06", 1, 1, juneNew.id],
+    ["2026-07", 1, 0, july.id],
+  ]);
 });

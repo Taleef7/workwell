@@ -3218,6 +3218,7 @@ export function qualitySnapshotStoreContract(label: string, freshStore: () => Pr
     excluded: 0,
     sourceRunId: "run-1",
     computedAt: "2026-06-30T12:00:00.000Z",
+    notInPopulation: null,
     ...over,
   });
 
@@ -3250,6 +3251,24 @@ export function qualitySnapshotStoreContract(label: string, freshStore: () => Pr
     assert.equal(rows.length, 1, "same (measure, period, scope) overwrites, never duplicates");
     assert.equal(rows[0]!.numerator, 9);
     assert.equal(rows[0]!.compliant, 9);
+  });
+
+  // #676. The basis marker must survive the store exactly: NULL (computed before ADR-079, refused by the
+  // screens) and 0 (computed without out-of-population subjects, none of them) are different answers,
+  // and a store that wrote 0 for NULL, or NULL for 0, would serve a wrong series or refuse a right one.
+  test(`[${label}] quality snapshots: notInPopulation round-trips NULL, 0 and a count, and a rebuild overwrites it`, async () => {
+    const store = await freshStore();
+    await store.upsertSnapshots([
+      base({ period: "2026-04", notInPopulation: null }),
+      base({ period: "2026-05", notInPopulation: 0 }),
+      base({ period: "2026-06", notInPopulation: 7 }),
+    ]);
+    const before = await store.querySnapshots({ measureId: "audiogram" });
+    assert.deepEqual(before.map((r) => [r.period, r.notInPopulation]), [["2026-04", null], ["2026-05", 0], ["2026-06", 7]]);
+    // A rebuild of an old month puts it on the population basis in place.
+    await store.upsertSnapshots([base({ period: "2026-04", notInPopulation: 3 })]);
+    const after = await store.querySnapshots({ measureId: "audiogram", from: "2026-04", to: "2026-04" });
+    assert.deepEqual(after.map((r) => r.notInPopulation), [3]);
   });
 
   test(`[${label}] quality snapshots: filters by period range, scopeLevel/scopeId, tenantId`, async () => {

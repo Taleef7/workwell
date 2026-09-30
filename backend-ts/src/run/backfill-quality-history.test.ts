@@ -88,7 +88,7 @@ test("resume recomputes a month that is only PARTIALLY materialized (not all mea
       measureId: "audiogram", period: "2026-03", periodStart: "2026-03-01T00:00:00.000Z", periodEnd: "2026-03-31T23:59:59.999Z",
       scopeLevel: "all", scopeId: "ALL", tenantId: null,
       numerator: 1, denominator: 2, compliant: 1, dueSoon: 0, overdue: 1, missingData: 0, excluded: 0,
-      sourceRunId: "run-x", computedAt: "2026-03-31T00:00:00.000Z",
+      sourceRunId: "run-x", computedAt: "2026-03-31T00:00:00.000Z", notInPopulation: 0,
     },
   ]);
   const summary = await backfillQualityHistory(deps, { months: 1, asOf: "2026-03" });
