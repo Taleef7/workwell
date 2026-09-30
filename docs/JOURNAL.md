@@ -7,6 +7,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-30
 
+- **A measure's trend is warm in every time zone (#615).** The measure page asks for its trend in the
+  browser's zone, and the trend memo was keyed by it, so the nightly warm (no zone) never served that
+  page: on Maui the first visitor after a run waited 19 s for cms130's trend, and 0.2 s without the zone.
+  The memo now holds the zone-free per-run points and each request collapses them to one point per day
+  in its own zone; a zone that merges the memo's runs into fewer than ten days reads further back.
 - **Monthly quality snapshots leave out-of-population patients out of the denominator (#676).** They were
   counted in, so every official measure's monthly rate read low and the screens refused the whole series.
   A new `not_in_population` column (owner-approved) records how many a row left out, NULL on an old row;

@@ -273,3 +273,84 @@ test("runPeriodOf — the year a run SCORED, read from its record, not the day i
   // A label fails soft: an unreadable run leaves the year unstated rather than failing the dashboard.
   assert.equal(await runPeriodOf(runStore, "boom"), null);
 });
+
+// #615: the measure page asks for its trend in the browser's zone, and the nightly warm fills the trend
+// with none. Memoized per zone, the warm never served that page: its first visitor after each run waited
+// 6-19 s on Maui. The memo now holds the zone-free per-run points and each zone collapses them itself.
+function countingDeps(rows: OutcomeWithRun[]): { deps: ProgramDeps; reads: () => number } {
+  let reads = 0;
+  const deps = {
+    // A readable run record, so the trend is complete and memoized (an unreadable one never is).
+    runStore: {
+      getRun: async () => ({
+        measurementPeriodStart: "2026-01-01T00:00:00.000Z",
+        measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        requestedScope: {},
+      }),
+    } as unknown as ProgramDeps["runStore"],
+    caseStore: {} as ProgramDeps["caseStore"],
+    outcomeStore: {
+      listOutcomesWithRun: async () => {
+        reads++;
+        return rows;
+      },
+      listLatestPopulationRuns: latestRunsFromRows(() => rows),
+    } as unknown as ProgramDeps["outcomeStore"],
+  } as ProgramDeps;
+  deps.webChartEnv = { WORKWELL_WEBCHART_BASE_URL: "http://webchart.test", WORKWELL_WEBCHART_API_KEY: "fixture-key" };
+  return { deps, reads: () => reads };
+}
+
+const zoneRow = (measureId: string, runId: string, startedAt: string): OutcomeWithRun => ({
+  ...perRunRow(runId, startedAt, "COMPLIANT"),
+  measureId,
+});
+
+test("programTrend — the warm's zone-free trend serves a request in any zone without a read (#615)", async () => {
+  const measureId = "trend-zone-warm";
+  const { deps, reads } = countingDeps([
+    zoneRow(measureId, "run-a", "2026-09-02T23:30:00.000Z"),
+    zoneRow(measureId, "run-b", "2026-09-03T01:30:00.000Z"),
+  ]);
+
+  const warmed = await programTrend(deps, measureId, {}); // what warmReadModels asks for
+  assert.equal(warmed.length, 2, "two UTC days");
+  const afterWarm = reads();
+
+  // The measure page, in two browsers' zones: no store read, and each zone's own day collapse.
+  const honolulu = await programTrend(deps, measureId, {}, { tz: "Pacific/Honolulu" });
+  assert.deepEqual(honolulu.map((p) => p.runId), ["run-b"], "one Honolulu day, its later run");
+  const indianapolis = await programTrend(deps, measureId, {}, { tz: "America/Indianapolis" });
+  assert.deepEqual(indianapolis.map((p) => p.runId), ["run-b"], "one Indianapolis day");
+  assert.deepEqual((await programTrend(deps, measureId, {}, { tz: "UTC" })).map((p) => p.runId), ["run-b", "run-a"]);
+  assert.equal(reads(), afterWarm, "every zone was served from the memo the warm filled");
+});
+
+test("programTrend — a zone that merges the memo's days into fewer than ten reads further back, then memoizes that (#615)", async () => {
+  // Twenty runs in pairs: 12:00Z on one day and 08:00Z the next, which are two UTC days but one
+  // Honolulu day (02:00 and 22:00 HST). The newest ten runs are ten UTC days, so the warm memoizes
+  // them, and older runs exist; for Honolulu those ten runs are only five days.
+  const measureId = "trend-zone-widen";
+  const rows: OutcomeWithRun[] = [];
+  for (let k = 1; k <= 10; k++) {
+    const first = String(2 * k).padStart(2, "0");
+    const second = String(2 * k + 1).padStart(2, "0");
+    rows.push(zoneRow(measureId, `run-${first}-noon`, `2026-08-${first}T12:00:00.000Z`));
+    rows.push(zoneRow(measureId, `run-${second}-morning`, `2026-08-${second}T08:00:00.000Z`));
+  }
+  const { deps, reads } = countingDeps(rows);
+
+  const utc = await programTrend(deps, measureId, {});
+  assert.equal(utc.length, 10, "ten UTC days in the newest ten runs");
+  const afterWarm = reads();
+
+  const honolulu = await programTrend(deps, measureId, {}, { tz: "Pacific/Honolulu" });
+  assert.equal(honolulu.length, 10, "ten Honolulu days, found by reading further back");
+  assert.ok(reads() > afterWarm, "the memo was too short for this zone, so it read");
+
+  const again = reads();
+  assert.equal((await programTrend(deps, measureId, {}, { tz: "Pacific/Honolulu" })).length, 10);
+  assert.equal((await programTrend(deps, measureId, {})).length, 10, "UTC still ten from the wider memo");
+  assert.equal(reads(), again, "the wider base was memoized for both zones");
+});
