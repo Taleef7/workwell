@@ -739,15 +739,13 @@ export default function CasesPage() {
           ))}
         </div>
         {/* Two "Excluded" numbers answer two questions (#655): the Programs chip counts the patients the
-            latest run excludes; this tab lists cases a run CLOSED as excluded. A patient excluded with no
-            open gap never had a case, and a closed case stays closed when the patient later becomes
-            compliant or leaves the population, so neither number is the other's subset. */}
+            latest run excludes (one run, this year); this tab is every case closed as excluded, by a run
+            (`planCaseUpsert`, which also inserts a closed case for an excluded patient who had none) or by
+            a person's rerun-to-verify, across every year (`wantsCurrentCycle` is false here). A closed case
+            stays here when the patient later becomes compliant or leaves the population. */}
         {statusFilter === "excluded" ? (
           <p className="basis-full text-xs text-neutral-600 dark:text-neutral-400" data-testid="excluded-tab-note">
-            Cases a run closed because the {SUBJECT.singular} became excluded (
-            {isPatientTerm ? "a documented exclusion, such as hospice or a mastectomy" : "an active waiver or exemption"}). This
-            is a record of closed cases, so it differs from the &ldquo;Excluded&rdquo; count on Programs, which is the{" "}
-            {SUBJECT.plural} the latest run excludes, including those who never had an open gap.
+            {`Cases closed as excluded (${isPatientTerm ? "a documented exclusion, such as hospice or a mastectomy" : "an active waiver or exemption"}), whether by a run or by a staff rerun, from every measurement year. A case stays here after the ${SUBJECT.singular} becomes compliant or leaves the measure's population, so this list differs from the “Excluded” count on Programs, which counts the ${SUBJECT.plural} the latest run excludes.`}
           </p>
         ) : null}
         <Select

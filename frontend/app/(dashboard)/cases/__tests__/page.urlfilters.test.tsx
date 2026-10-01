@@ -128,12 +128,17 @@ describe("CasesPage — the work list link is the same cohort (#742 review)", ()
 });
 
 describe("CasesPage — the Excluded tab says what it counts (#655)", () => {
-  it("explains it lists cases a run closed as excluded, unlike the Programs count", async () => {
+  it("explains it is every case closed as excluded, unlike the Programs count", async () => {
     navHolder.current.setUrl("/cases?status=excluded");
     render(<CasesPage />);
     const note = await screen.findByTestId("excluded-tab-note");
-    expect(note).toHaveTextContent(/Cases a run closed because the \w+ became excluded/);
-    expect(note).toHaveTextContent(/differs from the .Excluded. count on Programs/);
+    // The whole sentence, as this suite's (employee) terminology renders it: the parenthetical and the
+    // spacing around it are part of what is tested.
+    expect(note.textContent).toBe(
+      "Cases closed as excluded (an active waiver or exemption), whether by a run or by a staff rerun, from every measurement year. " +
+        "A case stays here after the employee becomes compliant or leaves the measure's population, so this list differs from the " +
+        "“Excluded” count on Programs, which counts the employees the latest run excludes.",
+    );
   });
 
   it("says nothing of the kind on the other tabs", async () => {
