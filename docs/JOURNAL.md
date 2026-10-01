@@ -7,6 +7,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-01
 
+- **The Cases "Excluded" tab says what it counts (#655 checklist).** Programs' Excluded chip counts the
+  patients the latest run excludes (1,327); the tab lists cases a run closed as excluded (1,519 live), and
+  neither is the other's subset. The tab now says so; both numbers are right.
 - **One answer per patient, on the page and in search (#655 checklist).** Global search showed each
   patient's newest outcome of any measure as the stored bucket: on the pilot every result read "MISSING
   DATA", including a patient compliant on CMS2 and outside the other five populations (pat-00491, checked
