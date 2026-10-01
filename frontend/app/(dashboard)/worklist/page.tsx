@@ -134,6 +134,10 @@ const PAGE_SIZES = [25, 50, 100].map((n) => ({ value: String(n), label: String(n
  */
 const BULK_ASSIGN_MAX = 500;
 
+/** How long the search box waits for typing to settle before it filters (#658). Cases uses 300 ms;
+ *  this list's search is the costlier read, so it waits a little longer. */
+const SEARCH_DEBOUNCE_MS = 400;
+
 export default function WorklistPage() {
   const api = useApi();
   const router = useRouter();
@@ -244,6 +248,44 @@ export default function WorklistPage() {
     },
     [pathname, router],
   );
+
+  /**
+   * Search as you type (#658). It used to apply only on Enter, with nothing saying so: staff typed a
+   * name, saw the list unchanged, and concluded search was broken, while every other filter here
+   * updates on selection. The typing settles for {@link SEARCH_DEBOUNCE_MS} before the URL changes,
+   * because `search` is applied against the directory after an unbounded case read (it never takes the
+   * SQL fast path), so a request per keystroke would be the expensive kind. Enter still applies at once.
+   *
+   * `lastWrittenSearchRef` tells our own URL write apart from an outside one (back/forward, a link):
+   * the URL catching up to what we wrote must not reset the box while the person keeps typing, and an
+   * outside change must replace what the box holds.
+   */
+  const lastWrittenSearchRef = useRef(searchFilter);
+  useEffect(() => {
+    if (searchFilter === lastWrittenSearchRef.current) return;
+    lastWrittenSearchRef.current = searchFilter;
+    setSearchTerm(searchFilter);
+  }, [searchFilter]);
+  const applySearch = useCallback(
+    (term: string) => {
+      const trimmed = term.trim();
+      lastWrittenSearchRef.current = trimmed;
+      setParams((p) => (trimmed ? p.set("search", trimmed) : p.delete("search")));
+    },
+    [setParams],
+  );
+  useEffect(() => {
+    const trimmed = searchTerm.trim();
+    if (trimmed === searchFilter) return;
+    const timer = setTimeout(() => {
+      // Checked when the timer FIRES, not when it is set: Enter can write this term in between, and
+      // until the URL catches up nothing re-runs this effect to cancel the timer. Writing it again
+      // would restart the navigation Enter began.
+      if (trimmed === lastWrittenSearchRef.current) return;
+      applySearch(searchTerm);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchTerm, searchFilter, applySearch]);
 
   /**
    * The view actually being shown.
@@ -594,7 +636,7 @@ export default function WorklistPage() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") setParams((p) => (searchTerm ? p.set("search", searchTerm) : p.delete("search")));
+            if (e.key === "Enter") applySearch(searchTerm);
           }}
         />
         <Select
@@ -668,6 +710,11 @@ export default function WorklistPage() {
             type="button"
             className="text-primary-700 hover:underline dark:text-primary-300"
             onClick={() => {
+              // Clear the box too, and with it any search still settling: if `search` was not yet in
+              // the URL, nothing else would cancel its timer, and the list would filter again 400 ms
+              // after it was cleared (#744 review).
+              lastWrittenSearchRef.current = "";
+              setSearchTerm("");
               setPage(0);
               router.replace(pathname, { scroll: false });
             }}
