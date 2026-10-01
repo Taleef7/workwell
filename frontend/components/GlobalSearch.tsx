@@ -11,16 +11,17 @@ interface SearchResult {
   name: string;
   role: string;
   site: string;
-  latestOutcome: string | null;
+  /** Active cases: the rows of the Open Cases table on the page the result opens. */
+  openGaps: number;
 }
 
-const OUTCOME_BADGE: Record<string, string> = {
-  OVERDUE: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-  DUE_SOON: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
-  COMPLIANT: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
-  MISSING_DATA: 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400',
-  EXCLUDED: 'bg-neutral-50 dark:bg-neutral-800/50 text-neutral-400',
-};
+/**
+ * "2 open gaps", or nothing. A single status for a person who is scored on six measures named one of
+ * them at random (it was the newest outcome of any measure, as the stored bucket, so an out-of-population
+ * patient read "MISSING DATA"). No badge for none: a person never evaluated also has no open case, so
+ * "No open gaps" would claim a check that may not have happened.
+ */
+const openGapsLabel = (n: number): string | null => (n > 0 ? `${n} open ${n === 1 ? 'gap' : 'gaps'}` : null);
 
 export function GlobalSearch() {
   const [query, setQuery] = useState('');
@@ -145,11 +146,9 @@ export function GlobalSearch() {
                         {SUBJECT.singular === "patient" ? `${r.externalId} · ${r.site}` : `${r.role} · ${r.site}`}
                       </p>
                     </div>
-                    {r.latestOutcome && (
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${OUTCOME_BADGE[r.latestOutcome] ?? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400'}`}
-                      >
-                        {r.latestOutcome.replace(/_/g, ' ')}
+                    {openGapsLabel(r.openGaps) && (
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                        {openGapsLabel(r.openGaps)}
                       </span>
                     )}
                   </button>

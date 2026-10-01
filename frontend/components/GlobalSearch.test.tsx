@@ -19,7 +19,7 @@ beforeEach(() => {
   server.use(
     http.get("*/api/employees/search", () =>
       HttpResponse.json([
-        { externalId: "emp-041", name: "Ada Lovelace", role: "Nurse", site: "HQ", latestOutcome: "OVERDUE" },
+        { externalId: "emp-041", name: "Ada Lovelace", role: "Nurse", site: "HQ", openGaps: 1 },
       ])
     )
   );
@@ -36,6 +36,8 @@ describe("GlobalSearch terminology", () => {
 
     await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeInTheDocument(), { timeout: 1000 });
     expect(screen.getByRole("button", { name: /Ada Lovelace/ })).toHaveTextContent(context);
+    // One open case reads in the singular.
+    expect(screen.getByRole("button", { name: /Ada Lovelace/ })).toHaveTextContent(/1 open gap(?!s)/);
     if (term === "patient") {
       expect(screen.queryByText("Nurse · HQ", { exact: true })).not.toBeInTheDocument();
     }

@@ -34,6 +34,7 @@ before(async () => {
     scopeType: "MEASURE",
     scopeId: "audiogram",
     triggeredBy: "test",
+    status: "COMPLETED",
     requestedScope: { measureId: "audiogram" },
     measurementPeriodStart: "2026-06-13T00:00:00.000Z",
     measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
@@ -130,6 +131,7 @@ test("profile shows what the roster shows: out-of-population MISSING_DATA reads 
     scopeType: "MEASURE",
     scopeId: "cms122",
     triggeredBy: "test",
+    status: "COMPLETED",
     requestedScope: { measureId: "cms122" },
     measurementPeriodStart: "2026-01-01T00:00:00.000Z",
     measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
@@ -143,7 +145,6 @@ test("profile shows what the roster shows: out-of-population MISSING_DATA reads 
     evaluationPeriod: "2026-06-13",
     status: "MISSING_DATA",
     evidence: { expressionResults: [], official: { populationResults: { ipp: false, denom: false, denex: false, numer: false, denexcep: false } } },
-    // Older than the fixture's rows, so the search test's "latest outcome" stays the audiogram's.
     evaluatedAt: "2026-06-01T00:00:00.000Z",
   });
   const p = (await (await get("/api/employees/emp-006/profile"))!.json()) as {
@@ -237,10 +238,13 @@ test("configured live employee profile uses the cached identity and restart-safe
   }
 });
 
-test("GET /api/employees/search matches name/role; honors min-length + latest outcome", async () => {
-  const byName = (await get("/api/employees/search?q=omar").then((r) => r!.json())) as Array<{ externalId: string; latestOutcome: string | null }>;
-  assert.ok(byName.some((e) => e.externalId === "emp-006"));
-  assert.equal(byName.find((e) => e.externalId === "emp-006")!.latestOutcome, "OVERDUE");
+test("GET /api/employees/search matches name/role; honors min-length + open gaps", async () => {
+  const byName = (await get("/api/employees/search?q=omar").then((r) => r!.json())) as Array<Record<string, unknown>>;
+  const omar = byName.find((e) => e.externalId === "emp-006")!;
+  assert.ok(omar);
+  // The two open cases the fixture made (audiogram, cms125): what the work list and the page show.
+  assert.equal(omar.openGaps, 2);
+  assert.equal("latestOutcome" in omar, false, "no single stored status for a person scored on several measures");
 
   const byRole = (await get("/api/employees/search?q=welder").then((r) => r!.json())) as Array<{ role: string }>;
   assert.ok(byRole.length > 0 && byRole.every((e) => /welder/i.test(e.role)));
@@ -255,4 +259,92 @@ test("GET /api/employees/search respects limit (1..50)", async () => {
   assert.deepEqual(one, []);
   const capped = (await get("/api/employees/search?q=em&limit=2").then((r) => r!.json())) as unknown[];
   assert.ok(capped.length <= 2);
+});
+
+test("search counts the ACTIVE cases (open or in progress), and a person with none reads 0 (#655)", async () => {
+  const store = new SqliteCaseStore(env.DB as never);
+  const omarGaps = async () =>
+    ((await get("/api/employees/search?q=omar").then((r) => r!.json())) as Array<{ externalId: string; openGaps: number }>)
+      .find((e) => e.externalId === "emp-006")!.openGaps;
+  const was = await omarGaps();
+  try {
+    // In progress is still open work: the page's Open Cases table lists it, so the badge counts it.
+    await store.patchCase(caseId, { status: "IN_PROGRESS" });
+    assert.equal(await omarGaps(), was, "an in-progress case is still an open gap");
+    await store.patchCase(caseId, { status: "CLOSED", closedAt: new Date().toISOString(), closedReason: "MANUAL_RESOLVE", closedBy: "cm@workwell.dev" });
+    const after = (await get("/api/employees/search?q=omar").then((r) => r!.json())) as Array<{ externalId: string; openGaps: number }>;
+    assert.equal(after.find((e) => e.externalId === "emp-006")!.openGaps, was - 1, "a closed case is not an open gap");
+    for (const e of after.filter((x) => x.externalId !== "emp-006")) assert.equal(e.openGaps, 0);
+  } finally {
+    await store.patchCase(caseId, { status: "OPEN", closedAt: null, closedReason: null, closedBy: null });
+  }
+});
+
+test("profile reads each measure's WINNING population run, never a newer single-patient rerun (#655)", async () => {
+  const db = env.DB as never;
+  const runs = new SqliteRunStore(db);
+  const outcomes = new SqliteOutcomeStore(db);
+  // The winner: the newest finished population run (earlier tests leave others behind).
+  const population = await runs.createRun({
+    scopeType: "MEASURE",
+    scopeId: "audiogram",
+    triggeredBy: "test",
+    status: "COMPLETED",
+    requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await outcomes.recordOutcome({
+    runId: population.id,
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    status: "OVERDUE",
+    evidence: {},
+  });
+  // A newer one-patient rerun says COMPLIANT. The roster table ignores it (not a population run), so
+  // the summary beside it must too, or one page gives two answers.
+  const rerun = await runs.createRun({
+    scopeType: "EMPLOYEE",
+    scopeId: "emp-006",
+    triggeredBy: "test",
+    status: "COMPLETED",
+    requestedScope: { employeeId: "emp-006" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await outcomes.recordOutcome({
+    runId: rerun.id,
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    status: "COMPLIANT",
+    evidence: {},
+    evaluatedAt: "2099-01-01T00:00:00.000Z",
+  });
+  // And a population run still in flight, newer still: not finished, so not the answer yet.
+  const inFlight = await runs.createRun({
+    scopeType: "ALL_PROGRAMS",
+    triggeredBy: "test",
+    status: "RUNNING",
+    requestedScope: {},
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await outcomes.recordOutcome({
+    runId: inFlight.id,
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: "2026-06-13",
+    status: "COMPLIANT",
+    evidence: {},
+    evaluatedAt: "2099-01-02T00:00:00.000Z",
+  });
+  const p = (await (await get("/api/employees/emp-006/profile"))!.json()) as {
+    measureOutcomes: Array<{ measureId: string; outcomeStatus: string; displayStatus: string }>;
+  };
+  const audiogram = p.measureOutcomes.filter((o) => o.measureId === "audiogram");
+  assert.equal(audiogram.length, 1, "one row per measure");
+  assert.equal(audiogram[0]!.outcomeStatus, "OVERDUE", "the completed population run's answer, as the table shows it");
+  assert.equal(audiogram[0]!.displayStatus, "OVERDUE");
 });
