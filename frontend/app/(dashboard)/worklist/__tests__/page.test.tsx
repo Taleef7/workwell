@@ -527,3 +527,97 @@ describe("WorklistPage — from My panel, the gap view says it is the whole prac
     expect(screen.queryByRole("link", { name: /view by gap instead/i })).toBeNull();
   });
 });
+
+describe("WorklistPage — the heading describes the rows under it (#661)", () => {
+  it("the closed-by-staff view says closed, not open, and does not rank closed cases", async () => {
+    navHolder.current.setUrl("/worklist?status=staff_closed");
+    render(<WorklistPage />);
+    expect(await screen.findByText(/with gaps closed by staff\./)).toBeInTheDocument();
+    expect(screen.queryByText(/with open gaps/)).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Closed by staff" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Open gaps" })).toBeNull();
+    expect(await screen.findByText("2 closed")).toBeInTheDocument();
+    expect(screen.queryByText(/^2 High$/)).toBeNull();
+  });
+
+  it("the open view keeps its wording", async () => {
+    render(<WorklistPage />);
+    expect(await screen.findByText(/with open gaps\./)).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Open gaps" })).toBeInTheDocument();
+    expect(await screen.findByText("2 High")).toBeInTheDocument();
+  });
+
+  it("the Panels tab carries no patient-list line: it describes itself", async () => {
+    navHolder.current.setUrl("/worklist?tab=panels");
+    render(<WorklistPage />);
+    expect(await screen.findByRole("heading", { name: "Work list" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/^One row per/)).toBeNull());
+    expect(screen.queryByText(/with open gaps/)).toBeNull();
+  });
+});
+
+describe("WorklistPage — search as you type (#658)", () => {
+  const searchBox = () => screen.getByRole("textbox", { name: /^search$/i });
+
+  it("filters once the typing settles, without Enter, and asks for the finished name only", async () => {
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+    await userEvent.type(searchBox(), "Naomi");
+    await waitFor(() => expect(navHolder.current.params.get("search")).toBe("Naomi"));
+    await waitFor(() => expect(listCalls().at(-1)).toContain("search=Naomi"));
+    // One request for the settled term, not one per keystroke.
+    expect(listCalls().filter((u) => /search=N(a|ao|aom)?(&|$)/.test(u))).toEqual([]);
+  });
+
+  it("applies at once on Enter, and clearing the box removes the filter", async () => {
+    render(<WorklistPage />);
+    await userEvent.type(searchBox(), "Carter{Enter}");
+    expect(navHolder.current.params.get("search")).toBe("Carter");
+    await userEvent.clear(searchBox());
+    await waitFor(() => expect(navHolder.current.params.get("search")).toBeNull());
+  });
+
+  it("writes Enter's term once, even when the URL is slow to catch up", async () => {
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+    // The router has not landed the write yet: the params stay as they were. (The mock is shared by
+    // the file's tests, so its call log starts clean here.)
+    navHolder.current.navigation.useRouter().replace.mockClear();
+    navHolder.current.navigation.useRouter().replace.mockImplementationOnce(() => {});
+    await userEvent.type(searchBox(), "Carter{Enter}");
+    await new Promise((r) => setTimeout(r, 600));
+    const writes = navHolder.current.navigation.useRouter().replace.mock.calls.filter(([url]) => String(url).includes("search=Carter"));
+    expect(writes).toHaveLength(1);
+  });
+
+  it("an outside change while the typing is still settling wins, in the box and the URL", async () => {
+    render(<WorklistPage />);
+    await userEvent.type(searchBox(), "Nao");
+    navHolder.current.setUrl("/worklist?search=Lani");
+    await new Promise((r) => setTimeout(r, 600));
+    expect(navHolder.current.params.get("search")).toBe("Lani");
+    expect(searchBox()).toHaveValue("Lani");
+  });
+
+  it("Clear filters also clears a search that has not landed yet", async () => {
+    // Another filter is what shows "Clear filters" while the search is still settling.
+    navHolder.current.setUrl("/worklist?measureId=cms125");
+    render(<WorklistPage />);
+    await userEvent.type(searchBox(), "Nao");
+    await userEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    await new Promise((r) => setTimeout(r, 600));
+    expect(navHolder.current.params.get("search")).toBeNull();
+    expect(navHolder.current.params.get("measureId")).toBeNull();
+    expect(searchBox()).toHaveValue("");
+  });
+
+  it("takes an outside URL change (back, a link) into the box", async () => {
+    navHolder.current.setUrl("/worklist?search=Carter");
+    render(<WorklistPage />);
+    expect(searchBox()).toHaveValue("Carter");
+    navHolder.current.setUrl("/worklist?search=Lani");
+    await waitFor(() => expect(searchBox()).toHaveValue("Lani"));
+    navHolder.current.setUrl("/worklist");
+    await waitFor(() => expect(searchBox()).toHaveValue(""));
+  });
+});

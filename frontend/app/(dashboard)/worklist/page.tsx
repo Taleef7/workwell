@@ -134,6 +134,10 @@ const PAGE_SIZES = [25, 50, 100].map((n) => ({ value: String(n), label: String(n
  */
 const BULK_ASSIGN_MAX = 500;
 
+/** How long the search box waits for typing to settle before it filters (#658). Cases uses 300 ms;
+ *  this list's search is the costlier read, so it waits a little longer. */
+const SEARCH_DEBOUNCE_MS = 400;
+
 export default function WorklistPage() {
   const api = useApi();
   const router = useRouter();
@@ -244,6 +248,44 @@ export default function WorklistPage() {
     },
     [pathname, router],
   );
+
+  /**
+   * Search as you type (#658). It used to apply only on Enter, with nothing saying so: staff typed a
+   * name, saw the list unchanged, and concluded search was broken, while every other filter here
+   * updates on selection. The typing settles for {@link SEARCH_DEBOUNCE_MS} before the URL changes,
+   * because `search` is applied against the directory after an unbounded case read (it never takes the
+   * SQL fast path), so a request per keystroke would be the expensive kind. Enter still applies at once.
+   *
+   * `lastWrittenSearchRef` tells our own URL write apart from an outside one (back/forward, a link):
+   * the URL catching up to what we wrote must not reset the box while the person keeps typing, and an
+   * outside change must replace what the box holds.
+   */
+  const lastWrittenSearchRef = useRef(searchFilter);
+  useEffect(() => {
+    if (searchFilter === lastWrittenSearchRef.current) return;
+    lastWrittenSearchRef.current = searchFilter;
+    setSearchTerm(searchFilter);
+  }, [searchFilter]);
+  const applySearch = useCallback(
+    (term: string) => {
+      const trimmed = term.trim();
+      lastWrittenSearchRef.current = trimmed;
+      setParams((p) => (trimmed ? p.set("search", trimmed) : p.delete("search")));
+    },
+    [setParams],
+  );
+  useEffect(() => {
+    const trimmed = searchTerm.trim();
+    if (trimmed === searchFilter) return;
+    const timer = setTimeout(() => {
+      // Checked when the timer FIRES, not when it is set: Enter can write this term in between, and
+      // until the URL catches up nothing re-runs this effect to cancel the timer. Writing it again
+      // would restart the navigation Enter began.
+      if (trimmed === lastWrittenSearchRef.current) return;
+      applySearch(searchTerm);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchTerm, searchFilter, applySearch]);
 
   /**
    * The view actually being shown.
@@ -458,10 +500,24 @@ export default function WorklistPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Work list</h1>
+          {/* The line describes the rows under it, so it follows the tab and the Work view (#661): it
+              said "with open gaps" over the closed-by-staff list and over the Panels table. The Panels
+              tab describes itself, so there is no page line over it. */}
+          {tab === "panels" ? null : (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            One row per {SUBJECT.singular}, with every open gap. {total.toLocaleString()}{" "}
-            {total === 1 ? SUBJECT.singular : SUBJECT.plural} with open gaps.
+            {statusView === "staff_closed" ? (
+              <>
+                One row per {SUBJECT.singular}, with every gap staff closed and what CQL says about it today.{" "}
+                {total.toLocaleString()} {total === 1 ? SUBJECT.singular : SUBJECT.plural} with gaps closed by staff.
+              </>
+            ) : (
+              <>
+                One row per {SUBJECT.singular}, with every open gap. {total.toLocaleString()}{" "}
+                {total === 1 ? SUBJECT.singular : SUBJECT.plural} with open gaps.
+              </>
+            )}
           </p>
+          )}
         </div>
         {/* The same question one row per gap, filters kept (#698). Cases has no "My panel" filter (the
             work list resolves a staff member's panel on the server), so from My panel the link says it
@@ -594,7 +650,7 @@ export default function WorklistPage() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") setParams((p) => (searchTerm ? p.set("search", searchTerm) : p.delete("search")));
+            if (e.key === "Enter") applySearch(searchTerm);
           }}
         />
         <Select
@@ -668,6 +724,11 @@ export default function WorklistPage() {
             type="button"
             className="text-primary-700 hover:underline dark:text-primary-300"
             onClick={() => {
+              // Clear the box too, and with it any search still settling: if `search` was not yet in
+              // the URL, nothing else would cancel its timer, and the list would filter again 400 ms
+              // after it was cleared (#744 review).
+              lastWrittenSearchRef.current = "";
+              setSearchTerm("");
               setPage(0);
               router.replace(pathname, { scroll: false });
             }}
@@ -768,7 +829,7 @@ export default function WorklistPage() {
               <th className="p-3 @max-4xl:hidden">{SUBJECT.Singular}</th>
               <th className="p-3 @max-4xl:hidden">{providerFilterLabel()}</th>
               {payersAvailable ? <th className="p-3 @max-4xl:hidden">{payerFilterLabel}</th> : null}
-              <th className="p-3 @max-4xl:hidden">Open gaps</th>
+              <th className="p-3 @max-4xl:hidden">{statusView === "staff_closed" ? "Closed by staff" : "Open gaps"}</th>
               <th className="p-3 @max-4xl:hidden">Owner</th>
               <th className="w-10 p-3 @max-4xl:hidden" />
             </tr>
@@ -780,7 +841,9 @@ export default function WorklistPage() {
             ) : rows.length === 0 ? (
               <tr className="@max-4xl:block">
                 <td colSpan={7} className="p-6 text-center text-neutral-500 @max-4xl:block dark:text-neutral-400">
-                  No {SUBJECT.plural} with open gaps match these filters.
+                  {statusView === "staff_closed"
+                    ? `No ${SUBJECT.plural} with gaps closed by staff match these filters.`
+                    : `No ${SUBJECT.plural} with open gaps match these filters.`}
                 </td>
               </tr>
             ) : (
@@ -835,9 +898,15 @@ export default function WorklistPage() {
                     ) : null}
                     <td className={`p-3 ${cardBody} @max-4xl:p-0 @max-4xl:pt-1`}>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant={row.highestPriority === "HIGH" ? "danger" : "warning"}>
-                          {row.gapCount} {labelFor(PRIORITY_LABELS, row.highestPriority)}
-                        </Badge>
+                        {/* A closed case's priority is no call to act, so the closed view counts the
+                            gaps and does not rank them ("1 High" over a closed case, #661). */}
+                        {statusView === "staff_closed" ? (
+                          <Badge variant="secondary">{row.gapCount} closed</Badge>
+                        ) : (
+                          <Badge variant={row.highestPriority === "HIGH" ? "danger" : "warning"}>
+                            {row.gapCount} {labelFor(PRIORITY_LABELS, row.highestPriority)}
+                          </Badge>
+                        )}
                         {(isExpanded ? row.openGaps : row.openGaps.slice(0, 3)).map((gap) => {
                           // On the staff-closed view the chip is the WINNING RUN's answer, not the
                           // case row's — that one froze when the person closed the case (#569) — and

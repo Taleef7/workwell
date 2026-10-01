@@ -95,7 +95,8 @@ export function PanelsTab({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        Who works each {providerFilterLabel().toLowerCase()}&apos;s {SUBJECT.plural}. New gaps open on the
+        {/* "PCP" stays upper case: lower-casing the label read "each pcp's patients" (#661). */}
+        Who works each {providerFilterLabel() === "PCP" ? "PCP" : providerFilterLabel().toLowerCase()}&apos;s {SUBJECT.plural}. New gaps open on the
         panel&apos;s owner, and changing an owner moves that panel&apos;s open gaps with it — except any a
         person assigned by hand, which stay put.{" "}
         {unmapped > 0 ? (
