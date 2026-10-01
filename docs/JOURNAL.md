@@ -14,6 +14,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   stops growing (nothing is old enough to delete until December). Since #705 the nightly takes 40-50
   minutes instead of 80-98. The Programs freshness banner reads the schedule (`GET /api/runs/schedule`), so a
   weekend is not reported as a missed update.
+- **CMS137's card shows both rates (#697, owner decision).** It showed one number, 12.9%, which reads
+  as Engagement, and nothing said Initiation (37.4%) existed or could be worked. Engagement requires
+  Initiation, so every patient who missed Initiation already has a case, and each case says which rate
+  was missed. The card now lists each rate under the headline and says so; the measure page's CMS rate
+  box says the same. No chip or list per rate: it would re-list a subset of the same cases.
 - **A measure's trend is warm in every time zone (#615).** The measure page asks for its trend in the
   browser's zone, and the trend memo was keyed by it, so the nightly warm (no zone) never served that
   page: on Maui the first visitor after a run waited 19 s for cms130's trend, and 0.2 s without the zone.
