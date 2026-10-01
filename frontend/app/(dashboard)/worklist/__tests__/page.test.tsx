@@ -527,3 +527,57 @@ describe("WorklistPage — from My panel, the gap view says it is the whole prac
     expect(screen.queryByRole("link", { name: /view by gap instead/i })).toBeNull();
   });
 });
+
+describe("WorklistPage — search as you type (#658)", () => {
+  const searchBox = () => screen.getByRole("textbox", { name: /^search$/i });
+
+  it("filters once the typing settles, without Enter, and asks for the finished name only", async () => {
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+    await userEvent.type(searchBox(), "Naomi");
+    await waitFor(() => expect(navHolder.current.params.get("search")).toBe("Naomi"));
+    await waitFor(() => expect(listCalls().at(-1)).toContain("search=Naomi"));
+    // One request for the settled term, not one per keystroke.
+    expect(listCalls().filter((u) => /search=N(a|ao|aom)?(&|$)/.test(u))).toEqual([]);
+  });
+
+  it("applies at once on Enter, and clearing the box removes the filter", async () => {
+    render(<WorklistPage />);
+    await userEvent.type(searchBox(), "Carter{Enter}");
+    expect(navHolder.current.params.get("search")).toBe("Carter");
+    await userEvent.clear(searchBox());
+    await waitFor(() => expect(navHolder.current.params.get("search")).toBeNull());
+  });
+
+  it("writes Enter's term once, even when the URL is slow to catch up", async () => {
+    render(<WorklistPage />);
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+    // The router has not landed the write yet: the params stay as they were. (The mock is shared by
+    // the file's tests, so its call log starts clean here.)
+    navHolder.current.navigation.useRouter().replace.mockClear();
+    navHolder.current.navigation.useRouter().replace.mockImplementationOnce(() => {});
+    await userEvent.type(searchBox(), "Carter{Enter}");
+    await new Promise((r) => setTimeout(r, 600));
+    const writes = navHolder.current.navigation.useRouter().replace.mock.calls.filter(([url]) => String(url).includes("search=Carter"));
+    expect(writes).toHaveLength(1);
+  });
+
+  it("an outside change while the typing is still settling wins, in the box and the URL", async () => {
+    render(<WorklistPage />);
+    await userEvent.type(searchBox(), "Nao");
+    navHolder.current.setUrl("/worklist?search=Lani");
+    await new Promise((r) => setTimeout(r, 600));
+    expect(navHolder.current.params.get("search")).toBe("Lani");
+    expect(searchBox()).toHaveValue("Lani");
+  });
+
+  it("takes an outside URL change (back, a link) into the box", async () => {
+    navHolder.current.setUrl("/worklist?search=Carter");
+    render(<WorklistPage />);
+    expect(searchBox()).toHaveValue("Carter");
+    navHolder.current.setUrl("/worklist?search=Lani");
+    await waitFor(() => expect(searchBox()).toHaveValue("Lani"));
+    navHolder.current.setUrl("/worklist");
+    await waitFor(() => expect(searchBox()).toHaveValue(""));
+  });
+});
