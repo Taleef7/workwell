@@ -23,8 +23,9 @@ let currentMeasureId = "cms125";
 vi.mock("next/navigation", () => ({
   useParams: () => ({ measureId: currentMeasureId }),
 }));
+const auth = vi.hoisted(() => ({ role: "ROLE_ADMIN" }));
 vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({ user: { role: "ROLE_ADMIN" } }),
+  useAuth: () => ({ user: { role: auth.role } }),
 }));
 vi.mock("@/components/run-status-provider", () => ({
   useRunStatus: () => ({ isActive: false, startTracking: vi.fn() }),
@@ -64,6 +65,7 @@ function deferred<T>() {
 const EMPTY_DRIVERS = { bySite: [], byRole: [], byOutcomeReason: [] };
 
 beforeEach(() => {
+  auth.role = "ROLE_ADMIN";
   setSubject("employee");
   currentMeasureId = "cms125";
   get.mockReset();
@@ -152,7 +154,7 @@ describe("ProgramDetailPage — per-slice paint", () => {
     const note = await screen.findByTestId("outlook-not-forecastable");
     expect(note).toHaveTextContent("No 90-day forecast for this measure.");
     expect(note).toHaveTextContent("not when the qualifying test was done");
-    expect(within(note).getByRole("link", { name: "work list" })).toHaveAttribute("href", "/cases?measureId=cms125");
+    expect(within(note).getByRole("link", { name: "work list" })).toHaveAttribute("href", "/worklist?measureId=cms125&panel=all");
     expect(screen.queryByText("Upcoming due soon")).toBeNull();
     expect(screen.queryByText("Predicted 90d")).toBeNull();
     expect(screen.queryByText("Expiring")).toBeNull();
@@ -329,5 +331,28 @@ describe("ProgramDetailPage — per-slice paint", () => {
     // The refresh did NOT reset the panel to its skeleton: 7 is still there while the new read runs.
     expect(screen.getByText("7")).toBeInTheDocument();
     expect(screen.queryByText("Risk outlook unavailable")).toBeNull();
+  });
+});
+
+describe("ProgramDetailPage — its case link follows the role (#698)", () => {
+  const serve = () =>
+    get.mockImplementation((url: string) => {
+      if (url === "/api/programs" || url.startsWith("/api/programs?")) return Promise.resolve(PROGRAMS);
+      if (url.includes("/top-drivers")) return Promise.resolve(EMPTY_DRIVERS);
+      if (url.includes("/risk-outlook")) return Promise.resolve(null);
+      return Promise.resolve([]);
+    });
+
+  it("opens the whole practice's work list for a case manager", async () => {
+    serve();
+    render(<ProgramDetailPage />);
+    expect(await screen.findByRole("link", { name: "Open cases for this measure" })).toHaveAttribute("href", "/worklist?measureId=cms125&panel=all");
+  });
+
+  it("keeps Cases for a role without the work list", async () => {
+    auth.role = "ROLE_VIEWER";
+    serve();
+    render(<ProgramDetailPage />);
+    expect(await screen.findByRole("link", { name: "Open cases for this measure" })).toHaveAttribute("href", "/cases?measureId=cms125");
   });
 });

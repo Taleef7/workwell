@@ -194,3 +194,22 @@ describe("DashboardLayout without a session", () => {
     expect(screen.queryByText("Content")).toBeNull();
   });
 });
+
+describe("DashboardLayout — the work list is the daily screen (#698)", () => {
+  it("lists Worklist before Cases", () => {
+    viewport(false);
+    renderShell();
+    const worklist = screen.getByTestId("nav-worklist");
+    const cases = screen.getByTestId("nav-cases");
+    expect(worklist.compareDocumentPosition(cases) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("says the badge counts open gaps not yet contacted, not patients", async () => {
+    viewport(false);
+    apiMock.getWithHeaders.mockResolvedValueOnce({ data: [], headers: new Headers({ "X-Total-Count": "15900" }) });
+    renderShell();
+    const badge = await screen.findByTestId("worklist-badge");
+    expect(badge).toHaveAttribute("title", "15,900 open gaps with no outreach yet");
+    expect(badge).toHaveTextContent("15,900 open gaps with no outreach yet");
+  });
+});

@@ -34,6 +34,7 @@ import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
+import { casesHref } from "@/lib/worklist-links";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { payerFilterLabel, payerGroupButtonLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
@@ -462,7 +463,11 @@ export default function WorklistPage() {
             {total === 1 ? SUBJECT.singular : SUBJECT.plural} with open gaps.
           </p>
         </div>
-        <Link href="/cases" className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-300">
+        {/* The same question one row per gap, filters kept (#698). */}
+        <Link
+          href={casesHref({ measureId: measureFilter, outcome: outcomeFilter, site: siteId, providerId: providerFilter, search: searchFilter, staffClosed: statusView === "staff_closed" })}
+          className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-300"
+        >
           View by gap instead →
         </Link>
       </header>

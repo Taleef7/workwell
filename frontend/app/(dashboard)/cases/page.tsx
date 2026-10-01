@@ -23,6 +23,7 @@ import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
+import { worklistHref } from "@/lib/worklist-links";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
@@ -635,9 +636,23 @@ export default function CasesPage() {
         <p className="text-sm uppercase tracking-[0.3em] text-neutral-300">Caseflow</p>
         <h2 className="mt-2 text-3xl font-semibold text-white">Cases</h2>
         <p className="mt-3 max-w-2xl text-neutral-300">
-          Your daily worklist of {SUBJECT.plural} flagged by the latest measure runs. Each card links to the structured
-          evidence that explains why the case is open, including {isPatientTerm ? "exclusion" : "waiver"} context when an exclusion applies.
+          One row per gap: the open cases by default, with the closed and excluded ones behind the tabs. Each card links to the
+          structured evidence that explains why the case opened, including {isPatientTerm ? "exclusion" : "waiver"} context when an exclusion applies.
         </p>
+        {/* The daily screen is the work list, one row per patient (#698); this keeps the measure and status. */}
+        <Link
+          href={worklistHref({
+            measureId: measureFilter,
+            outcome: outcomeFilter,
+            site: siteFilter || siteId,
+            providerId: providerFilter,
+            search: urlSearch,
+            staffClosed: statusFilter === "staff_closed",
+          })}
+          className="mt-3 inline-block text-sm font-medium text-white underline underline-offset-4 hover:text-neutral-200"
+        >
+          Work by {SUBJECT.singular} on the work list →
+        </Link>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">

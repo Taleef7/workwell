@@ -493,3 +493,28 @@ describe("WorklistPage on a phone or narrow tablet (#700)", () => {
     expect(row).toHaveClass("bg-primary-50/60");
   });
 });
+
+describe("WorklistPage — the daily screen links to the same gaps by gap (#698)", () => {
+  it("'View by gap instead' keeps the measure and the gap status", async () => {
+    navHolder.current.setUrl("/worklist?measureId=cms125&outcome=OVERDUE");
+    render(<WorklistPage />);
+    expect(await screen.findByRole("link", { name: /view by gap instead/i })).toHaveAttribute("href", "/cases?measureId=cms125&outcome=OVERDUE");
+  });
+
+  it("from the closed-by-staff view, opens Cases' closed-by-staff view", async () => {
+    navHolder.current.setUrl("/worklist?status=staff_closed&measureId=cms125");
+    render(<WorklistPage />);
+    expect(await screen.findByRole("link", { name: /view by gap instead/i })).toHaveAttribute("href", "/cases?measureId=cms125&status=staff_closed");
+  });
+});
+
+describe("WorklistPage — 'View by gap instead' keeps the PCP and the search too (#698 review)", () => {
+  it("carries providerId and search, which Cases reads", async () => {
+    navHolder.current.setUrl("/worklist?measureId=cms125&providerId=pcp-7&search=smith");
+    render(<WorklistPage />);
+    expect(await screen.findByRole("link", { name: /view by gap instead/i })).toHaveAttribute(
+      "href",
+      "/cases?measureId=cms125&providerId=pcp-7&search=smith",
+    );
+  });
+});

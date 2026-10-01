@@ -10,8 +10,9 @@ const filtersHolder = { value: { siteId: "", from: "", to: "" } };
 vi.mock("@/components/global-filter-context", () => ({
   useGlobalFilters: () => filtersHolder.value,
 }));
+const auth = { role: "ROLE_ADMIN" };
 vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({ user: { role: "ROLE_ADMIN" } }),
+  useAuth: () => ({ user: { role: auth.role } }),
 }));
 vi.mock("@/components/run-status-provider", () => ({
   useRunStatus: () => ({ isActive: false, startTracking: vi.fn() }),
@@ -38,6 +39,7 @@ const program = {
 };
 
 beforeEach(() => {
+  auth.role = "ROLE_ADMIN";
   filtersHolder.value = { siteId: "", from: "", to: "" };
   get.mockReset().mockImplementation((url: string) => {
     if (url.startsWith("/api/programs/overview")) return Promise.resolve([program]);
@@ -46,18 +48,18 @@ beforeEach(() => {
 });
 
 describe("ProgramsPage status chips", () => {
-  // Every chip lands on the patient roster, scoped to that measure's column. The count already
-  // knows the cohort, so the click must not hand back a screen that has to be re-filtered — and the
-  // destination has to NAME each patient. Overdue/Due Soon/Missing Data used to go to the cases
-  // worklist, which is a different surface organised around case state.
-  it("renders each chip as a deep link into the measure-scoped patient roster", async () => {
+  // A gap chip opens the work list, the case manager's daily screen (#698): one row per patient,
+  // filtered to the measure and the status, so the click names each patient without re-filtering. The
+  // chips used to open the Cases list (organised around case state), then the roster; the work list is
+  // the patient-first list of open gaps the practice asked for.
+  it("renders each gap chip as a deep link into the measure-scoped work list", async () => {
     render(<ProgramsPage />);
     const overdue = await screen.findByRole("link", { name: /overdue/i });
-    expect(overdue).toHaveAttribute("href", "/compliance?measureId=cms125&status=OVERDUE");
+    expect(overdue).toHaveAttribute("href", "/worklist?measureId=cms125&outcome=OVERDUE&panel=all");
     expect(screen.getByRole("link", { name: /due soon/i })).toHaveAttribute(
-      "href", "/compliance?measureId=cms125&status=DUE_SOON");
+      "href", "/worklist?measureId=cms125&outcome=DUE_SOON&panel=all");
     expect(screen.getByRole("link", { name: /missing data/i })).toHaveAttribute(
-      "href", "/compliance?measureId=cms125&status=MISSING_DATA");
+      "href", "/worklist?measureId=cms125&outcome=MISSING_DATA&panel=all");
     // Patients outside the measure's population are not the measure's concern and get no chip (#637).
     expect(screen.queryByRole("link", { name: /not in population/i })).toBeNull();
   });
@@ -84,7 +86,14 @@ describe("ProgramsPage status chips", () => {
       url.startsWith("/api/programs/overview") ? Promise.resolve([{ ...program, overdue: 0 }]) : Promise.resolve([]));
     render(<ProgramsPage />);
     const overdue = await screen.findByRole("link", { name: /overdue 0/i });
-    expect(overdue).toHaveAttribute("href", "/compliance?measureId=cms125&status=OVERDUE");
+    expect(overdue).toHaveAttribute("href", "/worklist?measureId=cms125&outcome=OVERDUE&panel=all");
+  });
+
+  it("keeps a role without the work list on the roster, for every chip", async () => {
+    auth.role = "ROLE_VIEWER";
+    render(<ProgramsPage />);
+    expect(await screen.findByRole("link", { name: /overdue/i })).toHaveAttribute("href", "/compliance?measureId=cms125&status=OVERDUE");
+    expect(screen.getByRole("link", { name: /missing data/i })).toHaveAttribute("href", "/compliance?measureId=cms125&status=MISSING_DATA");
   });
 
   it("links compliant and excluded chips to the measure-scoped compliance roster", async () => {
@@ -109,10 +118,10 @@ describe("ProgramsPage status chips", () => {
     filtersHolder.value = { siteId: "clinic-1", from: "2026-01-01", to: "2026-06-30" };
     render(<ProgramsPage />);
     const overdue = await screen.findByRole("link", { name: /overdue/i });
-    // The roster honours site; it has no date filter, so from/to are deliberately NOT forwarded —
-    // implying a scope the destination cannot apply would break the "matches the clicked count" rule
-    // in the other direction.
-    expect(overdue).toHaveAttribute("href", "/compliance?measureId=cms125&status=OVERDUE&site=clinic-1");
+    // Both destinations honour site; neither is asked for a date range, so from/to are deliberately
+    // NOT forwarded — implying a scope the destination does not apply would break the "matches the
+    // clicked count" rule in the other direction.
+    expect(overdue).toHaveAttribute("href", "/worklist?measureId=cms125&outcome=OVERDUE&site=clinic-1&panel=all");
     expect(screen.getByRole("link", { name: /: compliant/i })).toHaveAttribute(
       "href",
       "/compliance?measureId=cms125&status=COMPLIANT&site=clinic-1",
@@ -145,5 +154,19 @@ describe("ProgramsPage status chips", () => {
     render(<ProgramsPage />);
     expect(await screen.findByText("Compliance 25.0%")).toBeInTheDocument();
     expect(screen.getByText("2 / 8")).toBeInTheDocument();
+  });
+});
+
+describe("ProgramsPage gap chips and the work list (#698)", () => {
+  it("opens the whole practice, never the viewer's own panel: the chip counted the practice", async () => {
+    render(<ProgramsPage />);
+    expect(await screen.findByRole("link", { name: /overdue/i })).toHaveAttribute("href", expect.stringContaining("panel=all"));
+    expect(screen.getByRole("link", { name: /Open cases/ })).toHaveAttribute("href", expect.stringContaining("panel=all"));
+  });
+
+  it("keeps a role without the work list on Cases for Open cases", async () => {
+    auth.role = "ROLE_VIEWER";
+    render(<ProgramsPage />);
+    expect(await screen.findByRole("link", { name: /Open cases/ })).toHaveAttribute("href", "/cases?measureId=cms125");
   });
 });

@@ -73,8 +73,8 @@ describe("ProgramsPage — one rate per card (#637)", () => {
     for (const gone of [/Top Sites/i, /Top Roles/i, /By Reason/i, /View detail/i, /Workflow status/i, /Evaluations \(latest runs\)/i]) {
       expect(screen.queryByText(gone)).toBeNull();
     }
-    // What stays: the worklist link, and the whole card still opens the measure page.
-    expect(screen.getByRole("link", { name: /Open cases \(6\)/ })).toHaveAttribute("href", "/cases?measureId=cms137");
+    // What stays: the work list link (#698), and the whole card still opens the measure page.
+    expect(screen.getByRole("link", { name: /Open cases \(6\)/ })).toHaveAttribute("href", "/worklist?measureId=cms137&panel=all");
     expect(screen.getByRole("link", { name: /View .* detail/ })).toHaveAttribute("href", "/programs/cms137");
   });
 });
