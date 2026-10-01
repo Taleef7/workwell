@@ -7,6 +7,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-01
 
+- **The Cases "Excluded" tab says what it counts (#655 checklist).** Programs' Excluded chip counts the
+  patients the latest run excludes (1,327); the tab lists every case closed as excluded, by a run or a
+  staff rerun, across every year, and keeps one after the patient becomes compliant (1,519). The tab now
+  says so; both numbers are right.
 - **Headings that describe the rows under them (#661, #655 checklist).** The work list's closed-by-staff
   view said "patients with open gaps", headed its column "Open gaps" and ranked closed cases "1 High"; it
   now says closed and counts them. The Panels tab no longer carries the patient list's subtitle, and says
