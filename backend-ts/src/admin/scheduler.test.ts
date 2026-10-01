@@ -26,6 +26,9 @@ import {
   type SchedulerTickDeps,
   computeNextFireAt,
   shouldFireAt,
+  parseSchedulerDays,
+  SCHEDULER_CRON,
+  nightlySchedule,
 } from "./scheduler.ts";
 import { __resetRuntimeHealth, runtimeHealth } from "./runtime-health.ts";
 
@@ -594,4 +597,99 @@ test("with retention unset the tick compacts NOTHING — the default deployment 
   };
   assert.equal(await runTick(instrumented as never, Date.UTC(2026, 6, 1, 12, 0, 0)), true);
   assert.equal(compactions, 0);
+});
+
+// Weekdays only (WORKWELL_SCHEDULER_DAYS=1-5): Maui's nightly recomputes 20,000 synthetic patients on
+// metered compute, and nobody reads the sandbox at the weekend. 2026-10-02 is a Friday.
+const WEEKDAYS = new Set([1, 2, 3, 4, 5]);
+const at = (iso: string) => Date.parse(iso);
+
+test("weekdays only: after Friday's run the next is Monday's anchor, and nothing is due at the weekend", () => {
+  const input = { lastRunAtMs: at("2026-10-02T12:05:00Z"), anchorHourUtc: 12, days: WEEKDAYS };
+  assert.equal(computeNextFireAt({ ...input, nowMs: at("2026-10-02T13:00:00Z") }), "2026-10-05T12:00:00.000Z");
+  assert.equal(shouldFireAt({ ...input, nowMs: at("2026-10-03T12:30:00Z") }), false, "Saturday");
+  assert.equal(shouldFireAt({ ...input, nowMs: at("2026-10-04T12:30:00Z") }), false, "Sunday");
+  assert.equal(shouldFireAt({ ...input, nowMs: at("2026-10-05T12:00:00Z") }), true, "Monday's anchor");
+});
+
+test("weekdays only: a Saturday that owes nothing does not become owed, and a weekday is unchanged", () => {
+  // The last run was Friday well before its anchor (past a 6-hour floor): Friday still owes its run.
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: at("2026-10-02T03:00:00Z"), nowMs: at("2026-10-02T03:05:00Z"), anchorHourUtc: 12, minGapMs: 6 * 3_600_000, days: WEEKDAYS }),
+    "2026-10-02T12:00:00.000Z",
+  );
+  // A run made by hand on Saturday morning does not create a Saturday or Sunday nightly.
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: at("2026-10-03T03:00:00Z"), nowMs: at("2026-10-03T03:05:00Z"), anchorHourUtc: 12, minGapMs: 6 * 3_600_000, days: WEEKDAYS }),
+    "2026-10-05T12:00:00.000Z",
+  );
+  // Tuesday to Wednesday is the everyday answer.
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: at("2026-10-06T12:05:00Z"), nowMs: at("2026-10-06T13:00:00Z"), anchorHourUtc: 12, days: WEEKDAYS }),
+    "2026-10-07T12:00:00.000Z",
+  );
+  // No schedule: every day, as before.
+  assert.equal(
+    computeNextFireAt({ lastRunAtMs: at("2026-10-02T12:05:00Z"), nowMs: at("2026-10-02T13:00:00Z"), anchorHourUtc: 12, days: null }),
+    "2026-10-03T12:00:00.000Z",
+  );
+});
+
+test("WORKWELL_SCHEDULER_DAYS reads cron's day-of-week form, and a bad value means every day", () => {
+  assert.deepEqual([...parseSchedulerDays("1-5")!], [1, 2, 3, 4, 5]);
+  assert.deepEqual([...parseSchedulerDays("1,3,5")!], [1, 3, 5]);
+  assert.deepEqual([...parseSchedulerDays(" 0-1 , 6 ")!], [0, 1, 6]);
+  // Cron's 7 is Sunday too: "5-7" is Friday to Sunday, not every day.
+  assert.deepEqual([...parseSchedulerDays("5-7")!].sort(), [0, 5, 6]);
+  assert.deepEqual([...parseSchedulerDays("7")!], [0]);
+  for (const everyDay of [undefined, "", "*", "0-6", "1-7"]) assert.equal(parseSchedulerDays(everyDay), null, String(everyDay));
+  for (const bad of ["mon-fri", "1-8", "5-1", "1,,2"]) assert.equal(parseSchedulerDays(bad), null, bad);
+});
+
+test("the displayed cron carries the day-of-week field", () => {
+  const before = process.env.WORKWELL_SCHEDULER_DAYS;
+  try {
+    process.env.WORKWELL_SCHEDULER_DAYS = "1-5";
+    assert.match(SCHEDULER_CRON(), / 1,2,3,4,5$/);
+    delete process.env.WORKWELL_SCHEDULER_DAYS;
+    assert.match(SCHEDULER_CRON(), / \*$/);
+  } finally {
+    if (before === undefined) delete process.env.WORKWELL_SCHEDULER_DAYS;
+    else process.env.WORKWELL_SCHEDULER_DAYS = before;
+  }
+});
+
+test("the tick reads WORKWELL_SCHEDULER_DAYS itself: no weekend nightly, and weekend ticks touch no database", async () => {
+  const before = process.env.WORKWELL_SCHEDULER_DAYS;
+  process.env.WORKWELL_SCHEDULER_DAYS = "1-5";
+  try {
+    const stores = await freshStores();
+    await createPriorSchedulerRun(stores, "2026-10-02T12:05:00.000Z"); // Friday's nightly
+    setSchedulerEnabled(true);
+    assert.equal(await runTick(deps(stores), Date.parse("2026-10-03T12:30:00Z")), false, "Saturday's anchor does not fire");
+    // The tick cached Monday's anchor, so Sunday's ticks cost no database round trip.
+    assert.equal(shouldSkipTickWithoutDb(Date.parse("2026-10-04T12:30:00Z")), true, "Sunday");
+    assert.equal(shouldSkipTickWithoutDb(Date.parse("2026-10-05T12:00:00Z")), false, "Monday's anchor");
+    assert.equal(await runTick(deps(stores), Date.parse("2026-10-05T12:00:00Z")), true, "Monday fires");
+  } finally {
+    if (before === undefined) delete process.env.WORKWELL_SCHEDULER_DAYS;
+    else process.env.WORKWELL_SCHEDULER_DAYS = before;
+    setSchedulerEnabled(false);
+  }
+});
+
+test("GET /api/runs/schedule's source: the hour and the weekdays, null for every day", () => {
+  const before = process.env.WORKWELL_SCHEDULER_DAYS;
+  try {
+    process.env.WORKWELL_SCHEDULER_DAYS = "1-5";
+    assert.deepEqual(nightlySchedule().days, [1, 2, 3, 4, 5]);
+    delete process.env.WORKWELL_SCHEDULER_DAYS;
+    assert.equal(nightlySchedule().days, null);
+    assert.equal(typeof nightlySchedule().anchorHourUtc, "number");
+    // The page restates dueAtMs, so it gets the scheduler's own floor rather than guessing one.
+    assert.equal(nightlySchedule().minGapMs, 23.5 * 3_600_000);
+  } finally {
+    if (before === undefined) delete process.env.WORKWELL_SCHEDULER_DAYS;
+    else process.env.WORKWELL_SCHEDULER_DAYS = before;
+  }
 });

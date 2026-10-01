@@ -567,7 +567,7 @@ export default function ProgramDetailPage() {
           <ConfirmDialog
             open={runConfirmOpen}
             title="Run this measure now?"
-            description={`This evaluates every ${SUBJECT.singular} for ${program.measureName}. On a large practice it can take about 15 minutes, and other pages are slower while it runs. The nightly run already does this every day.`}
+            description={`This evaluates every ${SUBJECT.singular} for ${program.measureName}. On a large practice it can take about 15 minutes, and other pages are slower while it runs. The nightly run already does this.`}
             confirmLabel="Start run"
             cancelLabel="Cancel"
             onCancel={() => setRunConfirmOpen(false)}

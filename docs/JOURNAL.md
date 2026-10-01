@@ -7,6 +7,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-09-30
 
+- **Maui's database costs less: weekday nightlies and 90-day outcome retention.** September's Neon bill
+  ($6.44: 51.6 compute hours, 2.6 GB-month) is almost all the nightly recompute of 20,000 synthetic
+  patients; nothing polls the database while idle. `WORKWELL_SCHEDULER_DAYS` (cron day-of-week, unset =
+  every day) now runs Maui's nightly Monday to Friday, and retention drops from 400 to 90 days so storage
+  stops growing (nothing is old enough to delete until December). Since #705 the nightly takes 40-50
+  minutes instead of 80-98. The Programs freshness banner reads the schedule (`GET /api/runs/schedule`), so a
+  weekend is not reported as a missed update.
 - **CMS137's card shows both rates (#697, owner decision).** It showed one number, 12.9%, which reads
   as Engagement, and nothing said Initiation (37.4%) existed or could be worked. Engagement requires
   Initiation, so every patient who missed Initiation already has a case, and each case says which rate

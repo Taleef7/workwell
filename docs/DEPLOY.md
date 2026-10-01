@@ -214,7 +214,8 @@ Deploy and reconcile must ship **identical** values (`official-flip-config.test.
 | `WORKWELL_MAUI_CORPUS_SEED` | unset (`maui-py2027-v1`) | unset | Changing it makes *different people* under the same ids. |
 | `WORKWELL_RUN_CHUNK_SIZE` | `500` | unset (500) | Subjects per chunk; bounds memory. |
 | `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC` | `12` | unset (12) | Nightly hour (12 UTC = 02:00 HST). The 23.5-hour debounce is a floor beneath the anchor, not the cadence. |
-| `WORKWELL_OUTCOME_RETENTION_DAYS` | **`400`** | unset (off) | ADR-073/077. Keeps each subject's newest row per `(measure, period)`, run rows and case-cited rows. Needs the keep-set indexes `schema-pg.ts` creates. |
+| `WORKWELL_SCHEDULER_DAYS` | `1-5` | unset (every day) | UTC weekdays the nightly runs on, cron day-of-week form (0 or 7 = Sunday). Maui skips the weekend: each nightly is metered compute. A bad value means every day. The Programs freshness banner reads it (`GET /api/runs/schedule`), so a weekend is not a missed update. When 31 December falls on a weekend (2028) the year's last nightly is the Friday before: start a run by hand to score the last days of the year. |
+| `WORKWELL_OUTCOME_RETENTION_DAYS` | **`90`** | unset (off) | ADR-073/077. 90 days on the sandbox since 2026-09-30 (was 400) to stop storage growing; revisit before a real performance year. Keeps each subject's newest row per `(measure, period)`, run rows and case-cited rows. Needs the keep-set indexes `schema-pg.ts` creates. |
 
 Clinical facts follow the calendar year of each run's evaluation date. Turning retention on deletes a lot
 at once: run the first pass by hand with `pnpm outcomes:compact`, then restart the backend (below).

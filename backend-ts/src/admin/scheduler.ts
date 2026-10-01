@@ -41,7 +41,7 @@ import { emitAlert, resolveAlertChannels, type AlertChannel } from "../run/alert
  * Display-only cron expression, DERIVED from the anchor hour so the admin surface cannot show one time
  * beside a `nextFireAt` at another. It was the literal "0 0 6 * * *" while the anchor defaulted to 12.
  */
-export const SCHEDULER_CRON = (): string => `0 0 ${SCHEDULER_ANCHOR_HOUR_UTC()} * * *`;
+export const SCHEDULER_CRON = (): string => `0 0 ${SCHEDULER_ANCHOR_HOUR_UTC()} * * ${schedulerDaysSpec()}`;
 
 /** How many hours must elapse between scheduler-triggered ALL_PROGRAMS runs. */
 const SCHEDULER_RUN_INTERVAL_HOURS = 24;
@@ -158,6 +158,58 @@ const SCHEDULER_ANCHOR_HOUR_UTC = (): number => {
   return parsed;
 };
 
+/**
+ * The UTC weekdays the nightly runs on, from `WORKWELL_SCHEDULER_DAYS` in cron's day-of-week form
+ * (0 or 7 = Sunday … 6 = Saturday; a list, a range, or both: `1-5`, `1,3,5`, `5-7`). Unset, empty or `*`
+ * means every day. Weekdays only (`1-5`) skips two of seven recomputes on a deployment nobody reads at
+ * the weekend: on Maui each one is 20,000 synthetic patients on metered compute. An unreadable value
+ * warns and falls back to every day, so a typo never stops the nightly.
+ */
+export function parseSchedulerDays(raw: string | undefined): ReadonlySet<number> | null {
+  const spec = (raw ?? "").trim();
+  if (spec === "" || spec === "*") return null;
+  const days = new Set<number>();
+  for (const part of spec.split(",")) {
+    const m = /^\s*([0-7])\s*(?:-\s*([0-7])\s*)?$/.exec(part);
+    const from = m ? Number(m[1]) : NaN;
+    const to = m ? (m[2] === undefined ? from : Number(m[2])) : NaN;
+    if (!m || to < from) {
+      warnOnce(spec, `[workwell] WORKWELL_SCHEDULER_DAYS="${spec}" is not a day-of-week list (0-7, ascending ranges); running every day.`);
+      return null;
+    }
+    for (let d = from; d <= to; d++) days.add(d % 7); // cron's 7 is Sunday too
+  }
+  return days.size === 7 ? null : days;
+}
+const warnedSpecs = new Set<string>();
+function warnOnce(spec: string, message: string): void {
+  if (warnedSpecs.has(spec)) return;
+  warnedSpecs.add(spec);
+  console.warn(message);
+}
+const SCHEDULER_DAYS = (): ReadonlySet<number> | null => parseSchedulerDays(process.env.WORKWELL_SCHEDULER_DAYS);
+
+/**
+ * When the nightly runs, for the Programs page's freshness banner: it judges a missing run against
+ * the schedule, so a weekend with no nightly on a weekdays-only deployment is not reported as a missed
+ * one. `days` is null for every day. Env-only, no database read.
+ */
+export function nightlySchedule(): { enabled: boolean; anchorHourUtc: number; days: number[] | null; minGapMs: number } {
+  const days = SCHEDULER_DAYS();
+  return {
+    enabled: schedulerEnabled,
+    anchorHourUtc: SCHEDULER_ANCHOR_HOUR_UTC(),
+    days: days ? [...days].sort((a, b) => a - b) : null,
+    // The page restates `dueAtMs`, so it needs the same floor (#741 review).
+    minGapMs: DEFAULT_MIN_GAP_MS,
+  };
+}
+/** The day-of-week field of the display cron. */
+function schedulerDaysSpec(): string {
+  const days = SCHEDULER_DAYS();
+  return days ? [...days].sort((a, b) => a - b).join(",") : "*";
+}
+
 export interface NextFireInput {
   /** `startedAt` of the last scheduler run, in ms; null when the deployment has never run one. */
   lastRunAtMs: number | null;
@@ -165,6 +217,8 @@ export interface NextFireInput {
   anchorHourUtc?: number;
   /** The debounce, as a FLOOR under the anchor rather than the cadence itself. */
   minGapMs?: number;
+  /** The UTC weekdays the nightly may run on; null for every day. Defaults to `WORKWELL_SCHEDULER_DAYS`. */
+  days?: ReadonlySet<number> | null;
 }
 
 /**
@@ -228,7 +282,12 @@ function dueAtMs(input: NextFireInput): number {
   // it is at most 24 h after any post-anchor run, and pushing it is the night-skipping defect this
   // function's header describes.
   const todayStillOwed = lastRunAtMs < owedToday && owedToday - lastRunAtMs >= minGapMs;
-  return todayStillOwed ? owedToday : anchorOn(1);
+  // A day off the schedule is not owed: move on to the next anchor on a scheduled weekday (at most six
+  // days on, since a schedule names at least one day).
+  const days = input.days === undefined ? SCHEDULER_DAYS() : input.days;
+  let offset = todayStillOwed ? 0 : 1;
+  while (days && !days.has(new Date(anchorOn(offset)).getUTCDay()) && offset < 8) offset++;
+  return anchorOn(offset);
 }
 
 export function shouldFireAt(input: NextFireInput): boolean {
