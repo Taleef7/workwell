@@ -686,6 +686,8 @@ test("GET /api/runs/schedule's source: the hour and the weekdays, null for every
     delete process.env.WORKWELL_SCHEDULER_DAYS;
     assert.equal(nightlySchedule().days, null);
     assert.equal(typeof nightlySchedule().anchorHourUtc, "number");
+    // The page restates dueAtMs, so it gets the scheduler's own floor rather than guessing one.
+    assert.equal(nightlySchedule().minGapMs, 23.5 * 3_600_000);
   } finally {
     if (before === undefined) delete process.env.WORKWELL_SCHEDULER_DAYS;
     else process.env.WORKWELL_SCHEDULER_DAYS = before;

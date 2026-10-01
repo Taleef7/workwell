@@ -27,29 +27,36 @@ export type FreshnessNotice =
 /** With no schedule known, a nightly runs every 24 hours; past 36 without a new one, one has been missed. */
 export const OVERDUE_AFTER_MS = 36 * 60 * 60 * 1000;
 
-/** The nightly's schedule, from `GET /api/runs/schedule`: its UTC hour and weekdays (null = every day). */
+/**
+ * The nightly's schedule, from `GET /api/runs/schedule`: its UTC hour, its weekdays (null = every day)
+ * and the scheduler's debounce floor, so this page and the scheduler agree on when a run is due.
+ */
 export interface NightlySchedule {
   anchorHourUtc: number;
   days: number[] | null;
+  minGapMs?: number;
 }
 
 /** How long past a scheduled nightly's start its absence is still not a missed run. */
 export const SCHEDULED_GRACE_MS = 12 * 60 * 60 * 1000;
 
+/** The scheduler's own floor (`DEFAULT_MIN_GAP_MS`, backend `admin/scheduler.ts`), for an older server that does not send it. */
+const SCHEDULER_MIN_GAP_MS = 23.5 * 60 * 60 * 1000;
+
 /**
- * The first scheduled nightly at least 12 hours after a run started: the one whose absence would mean
- * a miss. At least 12 hours, because the scheduler counts a run shortly before the day's hour as that
- * day's run. On a weekdays-only deployment Friday's run is followed by Monday's, so the weekend
- * between is not "no update".
+ * When the scheduler next runs after a run that started at `startedMs`: its own rule (`dueAtMs`),
+ * restated. The day's hour is still owed only if the run started before it AND at least the floor
+ * (23.5 h) before it; otherwise the next day's. Then any day off the schedule is skipped, so on a
+ * weekdays-only deployment Friday's run is followed by Monday's and the weekend is not "no update".
  */
 export function nextScheduledAfter(startedMs: number, schedule: NightlySchedule): number {
   const start = new Date(startedMs);
-  for (let day = 0; day <= 8; day++) {
-    const anchor = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + day, schedule.anchorHourUtc);
-    const weekday = new Date(anchor).getUTCDay();
-    if (anchor - startedMs >= SCHEDULED_GRACE_MS && (schedule.days === null || schedule.days.includes(weekday))) return anchor;
-  }
-  return startedMs + OVERDUE_AFTER_MS - SCHEDULED_GRACE_MS; // an empty schedule: fall back to the daily rule
+  const anchorOn = (day: number) => Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + day, schedule.anchorHourUtc);
+  const minGap = schedule.minGapMs ?? SCHEDULER_MIN_GAP_MS;
+  const owedToday = anchorOn(0);
+  let offset = startedMs < owedToday && owedToday - startedMs >= minGap ? 0 : 1;
+  while (schedule.days && !schedule.days.includes(new Date(anchorOn(offset)).getUTCDay()) && offset < 8) offset++;
+  return anchorOn(offset);
 }
 
 const upper = (s: string) => s.trim().toUpperCase();

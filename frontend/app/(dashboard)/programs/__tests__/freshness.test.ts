@@ -64,6 +64,17 @@ describe("freshnessNotice against a weekdays-only schedule", () => {
     expect(new Date(nextScheduledAfter(Date.parse("2026-10-06T11:50:00Z"), WEEKDAYS)).toISOString()).toBe("2026-10-07T12:00:00.000Z");
   });
 
+  it("agrees with the scheduler's 23.5-hour floor: an early run serves its day, a late one the next anchor", () => {
+    // An overdue run at Thursday 00:00 is within 23.5 h of Thursday 12:00, so the scheduler counts it as
+    // Thursday's and next runs Friday 12:00; a 12-hour rule would have expected Thursday 12:00.
+    expect(new Date(nextScheduledAfter(Date.parse("2026-10-08T00:00:00Z"), WEEKDAYS)).toISOString()).toBe("2026-10-09T12:00:00.000Z");
+    expect(freshnessNotice([run("COMPLETED", "2026-10-08T00:00:00Z")], Date.parse("2026-10-09T00:30:00Z"), WEEKDAYS)).toBeNull();
+    // A run after the day's hour: the next is tomorrow's, even though it is under 23.5 h away.
+    expect(new Date(nextScheduledAfter(Date.parse("2026-10-06T13:00:00Z"), WEEKDAYS)).toISOString()).toBe("2026-10-07T12:00:00.000Z");
+    // A run further before the hour than the floor leaves that day's run owed (the floor is the server's).
+    expect(new Date(nextScheduledAfter(Date.parse("2026-10-05T10:00:00Z"), { ...WEEKDAYS, minGapMs: 3_600_000 })).toISOString()).toBe("2026-10-05T12:00:00.000Z");
+  });
+
   it("says nothing over the weekend, where the daily rule would have warned from Friday night", () => {
     for (const at of ["2026-10-03T01:00:00Z", "2026-10-04T20:00:00Z", "2026-10-05T11:00:00Z", "2026-10-05T23:59:00Z"]) {
       expect(freshnessNotice(friday, Date.parse(at), WEEKDAYS)).toBeNull();

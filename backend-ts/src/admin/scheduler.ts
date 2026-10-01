@@ -194,9 +194,15 @@ const SCHEDULER_DAYS = (): ReadonlySet<number> | null => parseSchedulerDays(proc
  * the schedule, so a weekend with no nightly on a weekdays-only deployment is not reported as a missed
  * one. `days` is null for every day. Env-only, no database read.
  */
-export function nightlySchedule(): { enabled: boolean; anchorHourUtc: number; days: number[] | null } {
+export function nightlySchedule(): { enabled: boolean; anchorHourUtc: number; days: number[] | null; minGapMs: number } {
   const days = SCHEDULER_DAYS();
-  return { enabled: schedulerEnabled, anchorHourUtc: SCHEDULER_ANCHOR_HOUR_UTC(), days: days ? [...days].sort((a, b) => a - b) : null };
+  return {
+    enabled: schedulerEnabled,
+    anchorHourUtc: SCHEDULER_ANCHOR_HOUR_UTC(),
+    days: days ? [...days].sort((a, b) => a - b) : null,
+    // The page restates `dueAtMs`, so it needs the same floor (#741 review).
+    minGapMs: DEFAULT_MIN_GAP_MS,
+  };
 }
 /** The day-of-week field of the display cron. */
 function schedulerDaysSpec(): string {
