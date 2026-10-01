@@ -20,6 +20,10 @@ describe("links between the work list, Cases and Compliance (#698)", () => {
     expect(worklistHref({ measureId: "cms2" })).toBe("/worklist?measureId=cms2");
   });
 
+  it("carries an assignee to the work list", () => {
+    expect(worklistHref({ measureId: "cms2", assignee: "a@b.dev", wholePractice: true })).toBe("/worklist?measureId=cms2&assignee=a%40b.dev&panel=all");
+  });
+
   it("opens either list's closed-by-staff view on request", () => {
     expect(casesHref({ measureId: "cms2", staffClosed: true })).toBe("/cases?measureId=cms2&status=staff_closed");
     expect(worklistHref({ measureId: "cms2", staffClosed: true })).toBe("/worklist?measureId=cms2&status=staff_closed");

@@ -552,7 +552,7 @@ export default function CompliancePage() {
               <>
                 {" "}
                 {/* The open gaps to work are on the work list (#698); the measure and a gap status carry over. */}
-                <Link href={worklistHref({ measureId, outcome: status, site: siteId, wholePractice: true })} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
+                <Link href={worklistHref({ measureId, outcome: status, site: siteId, providerId, wholePractice: true })} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
                   Work the open gaps on the work list →
                 </Link>
               </>

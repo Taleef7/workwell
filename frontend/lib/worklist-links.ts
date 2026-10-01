@@ -17,6 +17,8 @@ export interface ListScope {
   /** The PCP filter (`providerId`): the same query key on the work list and Cases. */
   providerId?: string | null;
   search?: string | null;
+  /** An assignee's email: the work list's `assignee` filter, which Cases' "My Cases" view is. */
+  assignee?: string | null;
   /** The closed-by-staff view, which both lists have (`status=staff_closed`). */
   staffClosed?: boolean;
 }
@@ -29,6 +31,7 @@ function params(scope: ListScope): URLSearchParams {
   if (scope.site) p.set("site", scope.site);
   if (scope.providerId) p.set("providerId", scope.providerId);
   if (scope.search?.trim()) p.set("search", scope.search.trim());
+  if (scope.assignee) p.set("assignee", scope.assignee);
   if (scope.staffClosed) p.set("status", "staff_closed");
   return p;
 }

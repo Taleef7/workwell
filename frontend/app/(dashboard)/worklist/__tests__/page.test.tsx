@@ -518,3 +518,12 @@ describe("WorklistPage — 'View by gap instead' keeps the PCP and the search to
     );
   });
 });
+
+describe("WorklistPage — from My panel, the gap view says it is the whole practice (#742 review)", () => {
+  it("relabels the link, because Cases has no panel filter to carry", async () => {
+    navHolder.current.setUrl("/worklist?panel=me&measureId=cms125");
+    render(<WorklistPage />);
+    expect(await screen.findByRole("link", { name: /view the whole practice by gap/i })).toHaveAttribute("href", "/cases?measureId=cms125");
+    expect(screen.queryByRole("link", { name: /view by gap instead/i })).toBeNull();
+  });
+});

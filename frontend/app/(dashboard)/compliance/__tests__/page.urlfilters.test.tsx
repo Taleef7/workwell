@@ -309,3 +309,14 @@ describe("CompliancePage — no work list link for a role without the work list 
     expect(screen.queryByRole("link", { name: /work the open gaps/i })).toBeNull();
   });
 });
+
+describe("CompliancePage — the work list link keeps the PCP filter (#742 review)", () => {
+  it("carries providerId", async () => {
+    navHolder.current.setUrl("/compliance?measureId=cms125&status=OVERDUE&providerId=pcp-7");
+    render(<CompliancePage />);
+    expect(await screen.findByRole("link", { name: /work the open gaps/i })).toHaveAttribute(
+      "href",
+      "/worklist?measureId=cms125&outcome=OVERDUE&providerId=pcp-7&panel=all",
+    );
+  });
+});

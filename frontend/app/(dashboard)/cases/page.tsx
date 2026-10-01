@@ -639,7 +639,10 @@ export default function CasesPage() {
           One row per gap: the open cases by default, with the closed and excluded ones behind the tabs. Each card links to the
           structured evidence that explains why the case opened, including {isPatientTerm ? "exclusion" : "waiver"} context when an exclusion applies.
         </p>
-        {/* The daily screen is the work list, one row per patient (#698); this keeps the measure and status. */}
+        {/* The daily screen is the work list, one row per patient (#698); this keeps the measure and status.
+            Cases lists the whole practice, so the work list does too (`panel=all`): a staff member who owns
+            a panel would otherwise land on "My panel" with fewer cases than this page (#742 review). "My
+            Cases" is an assignee filter, which the work list has too. */}
         <Link
           href={worklistHref({
             measureId: measureFilter,
@@ -647,7 +650,9 @@ export default function CasesPage() {
             site: siteFilter || siteId,
             providerId: providerFilter,
             search: urlSearch,
+            assignee: view === "mine" ? user?.email : null,
             staffClosed: statusFilter === "staff_closed",
+            wholePractice: true,
           })}
           className="mt-3 inline-block text-sm font-medium text-white underline underline-offset-4 hover:text-neutral-200"
         >
