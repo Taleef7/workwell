@@ -359,7 +359,7 @@ export default function ProgramsPage() {
                     <p className="mt-0.5">
                       {/* A lower-is-better headline counts a miss on ANY rate, so it gets no such sentence. */}
                       {programRate.lowerIsBetter ? "" : `${programRate.label} counts ${SUBJECT.plural} who met every rate that applies to them. `}
-                      A miss on any rate opens a case, and the case names the rate missed.
+                      A miss on any rate opens a case that names the rate missed; a case staff closed stays closed unless someone reopens it.
                     </p>
                   </div>
                 );

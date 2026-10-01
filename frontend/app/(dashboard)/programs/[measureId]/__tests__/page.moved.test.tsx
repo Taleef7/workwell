@@ -74,7 +74,7 @@ describe("ProgramDetailPage — what moved here from the card (#637)", () => {
     expect(within(tile).queryByText(/counted in no rate/i)).toBeNull();
     // #697: case work covers both rates, and the page says so.
     expect(within(tile).getByTestId("measure-rate-cases-cms137")).toHaveTextContent(
-      "Case work covers every rate: a miss on any rate opens a case for the patient, and the case names the rate missed. A case staff closed stays closed until the chart changes.",
+      "Case work covers every rate: a miss on any rate opens a case for the patient that names the rate missed. A run never reopens a case staff closed; only a person can reopen it.",
     );
   });
 

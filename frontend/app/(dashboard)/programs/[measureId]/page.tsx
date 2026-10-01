@@ -256,7 +256,7 @@ export default function ProgramDetailPage() {
               </p>
               {program.measureRate.rates.length > 1 ? (
                 <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400" data-testid={`measure-rate-cases-${program.measureId}`}>
-                  Case work covers every rate: a miss on any rate opens a case for the {SUBJECT.singular}, and the case names the rate missed. A case staff closed stays closed until the chart changes.
+                  Case work covers every rate: a miss on any rate opens a case for the {SUBJECT.singular} that names the rate missed. A run never reopens a case staff closed; only a person can reopen it.
                 </p>
               ) : null}
               {program.measureRate.evaluationErrors > 0 ? (

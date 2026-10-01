@@ -95,7 +95,7 @@ describe("ProgramsPage — a multi-rate measure shows each rate on its card (#69
     const rates = await screen.findByTestId("card-rates-cms137");
     expect(rates).toHaveTextContent("Initiation 37.4% · Engagement 12.9%");
     expect(rates).toHaveTextContent(
-      "Compliance counts patients who met every rate that applies to them. A miss on any rate opens a case, and the case names the rate missed.",
+      "Compliance counts patients who met every rate that applies to them. A miss on any rate opens a case that names the rate missed; a case staff closed stays closed unless someone reopens it.",
     );
     // Still one headline, and still not the measure page's CMS tile.
     expect(screen.getByText("Compliance 40.0%")).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe("ProgramsPage — a multi-rate measure shows each rate on its card (#69
     render(<ProgramsPage />);
     const rates = await screen.findByTestId("card-rates-cms137");
     expect(rates).not.toHaveTextContent(/met every rate/);
-    expect(rates).toHaveTextContent("A miss on any rate opens a case, and the case names the rate missed.");
+    expect(rates).toHaveTextContent("A miss on any rate opens a case that names the rate missed; a case staff closed stays closed unless someone reopens it.");
   });
 
   it("names an unlabelled rate by position and says so where a rate has no score", async () => {
