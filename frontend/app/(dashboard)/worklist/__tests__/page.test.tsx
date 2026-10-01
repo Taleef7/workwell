@@ -571,6 +571,18 @@ describe("WorklistPage — search as you type (#658)", () => {
     expect(searchBox()).toHaveValue("Lani");
   });
 
+  it("Clear filters also clears a search that has not landed yet", async () => {
+    // Another filter is what shows "Clear filters" while the search is still settling.
+    navHolder.current.setUrl("/worklist?measureId=cms125");
+    render(<WorklistPage />);
+    await userEvent.type(searchBox(), "Nao");
+    await userEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    await new Promise((r) => setTimeout(r, 600));
+    expect(navHolder.current.params.get("search")).toBeNull();
+    expect(navHolder.current.params.get("measureId")).toBeNull();
+    expect(searchBox()).toHaveValue("");
+  });
+
   it("takes an outside URL change (back, a link) into the box", async () => {
     navHolder.current.setUrl("/worklist?search=Carter");
     render(<WorklistPage />);

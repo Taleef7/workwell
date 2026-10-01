@@ -710,6 +710,11 @@ export default function WorklistPage() {
             type="button"
             className="text-primary-700 hover:underline dark:text-primary-300"
             onClick={() => {
+              // Clear the box too, and with it any search still settling: if `search` was not yet in
+              // the URL, nothing else would cancel its timer, and the list would filter again 400 ms
+              // after it was cleared (#744 review).
+              lastWrittenSearchRef.current = "";
+              setSearchTerm("");
               setPage(0);
               router.replace(pathname, { scroll: false });
             }}
