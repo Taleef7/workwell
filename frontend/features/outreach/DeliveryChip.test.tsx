@@ -30,6 +30,12 @@ describe("DeliveryChip (UX-14 passive meta tier)", () => {
     expect(chip.className).toContain("text-[10px]");
   });
 
+  it("says what happened to a simulated send, not the deployment's mode (#661)", () => {
+    const { getByText, queryByText } = render(<DeliveryChip status="SIMULATED" />);
+    expect(getByText("Recorded, not sent")).toBeInTheDocument();
+    expect(queryByText(/simulated/i)).toBeNull();
+  });
+
   it("actionable status chips stay in the louder semibold tier — the contrast the tier creates", () => {
     const { getByText } = render(<ComplianceChip cell={{ status: "OVERDUE", method: "" }} />);
     const chip = getByText("Overdue");

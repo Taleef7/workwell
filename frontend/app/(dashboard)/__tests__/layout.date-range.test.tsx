@@ -53,19 +53,29 @@ const renderAt = (path: string) => {
 };
 
 // Both the desktop header and the mobile bar carry the selectors, so each count is per layout.
-describe("DashboardLayout date range (#699)", () => {
-  it.each(["/programs", "/programs/hierarchy", "/programs/cms125"])(
-    "hides the date range on %s, whose figures are measurement-year rates",
+describe("DashboardLayout date range (#699, #661)", () => {
+  // Matched on the label's START: the label now says which date it filters, and an exact "Date range"
+  // query would find nothing on every page and pass the "hidden" cases for the wrong reason.
+  const ranges = () => screen.queryAllByLabelText(/^Date range/);
+
+  it.each(["/programs", "/programs/hierarchy", "/programs/cms125", "/compliance", "/people", "/cases/abc", "/programsx"])(
+    "hides the date range on %s, which it does not filter",
     (path) => {
       renderAt(path);
-      expect(screen.queryAllByLabelText("Date range")).toHaveLength(0);
+      expect(ranges()).toHaveLength(0);
       // Only the range goes; the site selector is untouched.
       expect(screen.getAllByLabelText("Filter by site")).toHaveLength(2);
     },
   );
 
-  it.each(["/worklist", "/cases", "/runs", "/programsx"])("keeps the date range on %s", (path) => {
+  it.each([
+    ["/worklist", "Date range: when the gap was opened", /^Opened: /],
+    ["/cases", "Date range: when the gap was opened", /^Opened: /],
+    ["/runs", "Date range: when the run started", /^Started: /],
+  ])("on %s it says which date it filters", (path, label, shown) => {
     renderAt(path);
-    expect(screen.getAllByLabelText("Date range")).toHaveLength(2);
+    const controls = screen.getAllByLabelText(label);
+    expect(controls).toHaveLength(2);
+    for (const control of controls) expect(control).toHaveTextContent(shown);
   });
 });

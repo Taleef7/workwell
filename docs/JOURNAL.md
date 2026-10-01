@@ -7,6 +7,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-01
 
+- **Headings that describe the rows under them (#661, #655 checklist).** The work list's closed-by-staff
+  view said "patients with open gaps", headed its column "Open gaps" and ranked closed cases "1 High"; it
+  now says closed and counts them. The Panels tab no longer carries the patient list's subtitle, and says
+  "each PCP's" (it read "pcp's"). The header's date range shows only where it filters (work list, Cases,
+  Runs) and says which date ("Opened: last 7 days", "Started: …"); it sat on Compliance, People and case
+  pages changing nothing. A simulated outreach's chip reads "Recorded, not sent", not "Simulated".
 - **One answer per patient, on the page and in search (#655 checklist).** Global search showed each
   patient's newest outcome of any measure as the stored bucket: on the pilot every result read "MISSING
   DATA", including a patient compliant on CMS2 and outside the other five populations (pat-00491, checked

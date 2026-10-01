@@ -77,19 +77,27 @@ const nav = [
 const ENGINEERING_HREFS = new Set(["/measures", "/studio", "/runs", "/api-docs"]);
 
 /**
- * The Programs pages report measurement-year figures, so a date range has nothing to scope there, and
- * scoping only some of a card's numbers set them against each other (#699). The control is hidden on
- * them; a range chosen elsewhere is kept in the URL for the pages that use it.
+ * Which date the header's range filters on this page, or null where it filters nothing (#661).
+ *
+ * Three lists read it: the work list and Cases filter on when a gap's case was OPENED (`createdFrom`/
+ * `createdTo`, DATA_MODEL_CONTRACTS §6.3), Runs on when a run STARTED. It used to show everywhere but
+ * Programs as a bare "Last 7 days", which reads as "gaps due this week" on the work list and changed
+ * nothing at all on Compliance, People or a case page. A range chosen on one page is kept in the URL
+ * for the pages that use it. (Programs reports measurement-year figures, #699.)
  */
-const usesDateRange = (pathname: string | null): boolean =>
-  !(pathname === "/programs" || (pathname?.startsWith("/programs/") ?? false));
+const dateRangeMeaning = (pathname: string | null): "Opened" | "Started" | null =>
+  pathname === "/worklist" || pathname === "/cases" ? "Opened" : pathname === "/runs" ? "Started" : null;
 
 const DATE_PRESETS = [
-  { value: "7d", label: "Last 7 days" },
-  { value: "30d", label: "Last 30 days" },
-  { value: "90d", label: "Last 90 days" },
-  { value: "all", label: "All time" },
+  { value: "7d", label: "last 7 days" },
+  { value: "30d", label: "last 30 days" },
+  { value: "90d", label: "last 90 days" },
+  { value: "all", label: "any time" },
 ] as const;
+
+/** "Opened: last 7 days" — the option says which date it is about. */
+const datePresetOptions = (meaning: "Opened" | "Started") =>
+  DATE_PRESETS.map((p) => ({ value: p.value, label: `${meaning}: ${p.label}` }));
 
 /** A nav item is current on its own page and every page under it (`/cases/123` is Cases). */
 function isNavActive(pathname: string | null, href: string): boolean {
@@ -298,7 +306,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const showDateRange = usesDateRange(pathname);
+  const dateMeaning = dateRangeMeaning(pathname);
 
   return (
     <SidebarProvider>
@@ -406,14 +414,14 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                   size="sm"
                   className="w-36"
                 />
-                {showDateRange ? (
+                {dateMeaning ? (
                   <Select
-                    aria-label="Date range"
+                    aria-label={dateMeaning === "Opened" ? "Date range: when the gap was opened" : "Date range: when the run started"}
                     value={datePreset}
                     onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
-                    options={[...DATE_PRESETS]}
+                    options={datePresetOptions(dateMeaning)}
                     size="sm"
-                    className="w-36"
+                    className="w-48"
                   />
                 ) : null}
               </GlobalFilterGroup>
@@ -434,12 +442,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 size="sm"
                 className="flex-1"
               />
-              {showDateRange ? (
+              {dateMeaning ? (
                 <Select
-                  aria-label="Date range"
+                  aria-label={dateMeaning === "Opened" ? "Date range: when the gap was opened" : "Date range: when the run started"}
                   value={datePreset}
                   onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
-                  options={[...DATE_PRESETS]}
+                  options={datePresetOptions(dateMeaning)}
                   size="sm"
                   className="flex-1"
                 />
