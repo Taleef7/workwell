@@ -7,6 +7,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-01
 
+- **Headings that describe the rows under them (#661, #655 checklist).** The work list's closed-by-staff
+  view said "patients with open gaps", headed its column "Open gaps" and ranked closed cases "1 High"; it
+  now says closed and counts them. The Panels tab no longer carries the patient list's subtitle, and says
+  "each PCP's" (it read "pcp's"); its "Actions" column, reported empty, is a screen-reader header whose
+  cell holds Unassign once a panel has an owner (none does yet), so it stays. The header's date range
+  shows only where it filters (work list, Cases, Runs) and says which date ("Opened: last 7 days",
+  "Started: …"); it sat on Compliance, People and case pages changing nothing, and the sidebar badge no
+  longer applies it. A simulated outreach's chip reads "Recorded, not sent", not "Simulated".
 - **The work-list search filters as you type (#658, #655 checklist).** It applied only on Enter, with
   nothing saying so. It now filters 400 ms after the typing settles; Enter still applies at once,
   clearing the box removes the filter, and back/forward or a link updates the box.

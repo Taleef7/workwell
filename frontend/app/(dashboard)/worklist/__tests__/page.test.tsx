@@ -528,6 +528,34 @@ describe("WorklistPage — from My panel, the gap view says it is the whole prac
   });
 });
 
+describe("WorklistPage — the heading describes the rows under it (#661)", () => {
+  it("the closed-by-staff view says closed, not open, and does not rank closed cases", async () => {
+    navHolder.current.setUrl("/worklist?status=staff_closed");
+    render(<WorklistPage />);
+    expect(await screen.findByText(/with gaps closed by staff\./)).toBeInTheDocument();
+    expect(screen.queryByText(/with open gaps/)).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Closed by staff" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Open gaps" })).toBeNull();
+    expect(await screen.findByText("2 closed")).toBeInTheDocument();
+    expect(screen.queryByText(/^2 High$/)).toBeNull();
+  });
+
+  it("the open view keeps its wording", async () => {
+    render(<WorklistPage />);
+    expect(await screen.findByText(/with open gaps\./)).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Open gaps" })).toBeInTheDocument();
+    expect(await screen.findByText("2 High")).toBeInTheDocument();
+  });
+
+  it("the Panels tab carries no patient-list line: it describes itself", async () => {
+    navHolder.current.setUrl("/worklist?tab=panels");
+    render(<WorklistPage />);
+    expect(await screen.findByRole("heading", { name: "Work list" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/^One row per/)).toBeNull());
+    expect(screen.queryByText(/with open gaps/)).toBeNull();
+  });
+});
+
 describe("WorklistPage — search as you type (#658)", () => {
   const searchBox = () => screen.getByRole("textbox", { name: /^search$/i });
 

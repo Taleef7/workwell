@@ -500,10 +500,24 @@ export default function WorklistPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Work list</h1>
+          {/* The line describes the rows under it, so it follows the tab and the Work view (#661): it
+              said "with open gaps" over the closed-by-staff list and over the Panels table. The Panels
+              tab describes itself, so there is no page line over it. */}
+          {tab === "panels" ? null : (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            One row per {SUBJECT.singular}, with every open gap. {total.toLocaleString()}{" "}
-            {total === 1 ? SUBJECT.singular : SUBJECT.plural} with open gaps.
+            {statusView === "staff_closed" ? (
+              <>
+                One row per {SUBJECT.singular}, with every gap staff closed and what CQL says about it today.{" "}
+                {total.toLocaleString()} {total === 1 ? SUBJECT.singular : SUBJECT.plural} with gaps closed by staff.
+              </>
+            ) : (
+              <>
+                One row per {SUBJECT.singular}, with every open gap. {total.toLocaleString()}{" "}
+                {total === 1 ? SUBJECT.singular : SUBJECT.plural} with open gaps.
+              </>
+            )}
           </p>
+          )}
         </div>
         {/* The same question one row per gap, filters kept (#698). Cases has no "My panel" filter (the
             work list resolves a staff member's panel on the server), so from My panel the link says it
@@ -815,7 +829,7 @@ export default function WorklistPage() {
               <th className="p-3 @max-4xl:hidden">{SUBJECT.Singular}</th>
               <th className="p-3 @max-4xl:hidden">{providerFilterLabel()}</th>
               {payersAvailable ? <th className="p-3 @max-4xl:hidden">{payerFilterLabel}</th> : null}
-              <th className="p-3 @max-4xl:hidden">Open gaps</th>
+              <th className="p-3 @max-4xl:hidden">{statusView === "staff_closed" ? "Closed by staff" : "Open gaps"}</th>
               <th className="p-3 @max-4xl:hidden">Owner</th>
               <th className="w-10 p-3 @max-4xl:hidden" />
             </tr>
@@ -827,7 +841,9 @@ export default function WorklistPage() {
             ) : rows.length === 0 ? (
               <tr className="@max-4xl:block">
                 <td colSpan={7} className="p-6 text-center text-neutral-500 @max-4xl:block dark:text-neutral-400">
-                  No {SUBJECT.plural} with open gaps match these filters.
+                  {statusView === "staff_closed"
+                    ? `No ${SUBJECT.plural} with gaps closed by staff match these filters.`
+                    : `No ${SUBJECT.plural} with open gaps match these filters.`}
                 </td>
               </tr>
             ) : (
@@ -882,9 +898,15 @@ export default function WorklistPage() {
                     ) : null}
                     <td className={`p-3 ${cardBody} @max-4xl:p-0 @max-4xl:pt-1`}>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant={row.highestPriority === "HIGH" ? "danger" : "warning"}>
-                          {row.gapCount} {labelFor(PRIORITY_LABELS, row.highestPriority)}
-                        </Badge>
+                        {/* A closed case's priority is no call to act, so the closed view counts the
+                            gaps and does not rank them ("1 High" over a closed case, #661). */}
+                        {statusView === "staff_closed" ? (
+                          <Badge variant="secondary">{row.gapCount} closed</Badge>
+                        ) : (
+                          <Badge variant={row.highestPriority === "HIGH" ? "danger" : "warning"}>
+                            {row.gapCount} {labelFor(PRIORITY_LABELS, row.highestPriority)}
+                          </Badge>
+                        )}
                         {(isExpanded ? row.openGaps : row.openGaps.slice(0, 3)).map((gap) => {
                           // On the staff-closed view the chip is the WINNING RUN's answer, not the
                           // case row's — that one froze when the person closed the case (#569) — and

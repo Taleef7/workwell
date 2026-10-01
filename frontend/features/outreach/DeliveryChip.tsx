@@ -23,7 +23,18 @@ export function DeliveryChip({
   const sizeClass = size === "xs" ? "text-[10px]" : "text-xs";
   return (
     <span className={`${metaChipClass(status)} ${sizeClass} ${className}`.trim()}>
-      {label ?? formatStatusLabel(status ?? "NOT_SENT")}
+      {label ?? deliveryLabel(status)}
     </span>
   );
+}
+
+/**
+ * What happened to the message, in the staff's words. `SIMULATED` is the deployment's MODE (the
+ * simulated email provider), and the chip read "Simulated", which says nothing about the message
+ * (#661). What did happen: WorkWell recorded the outreach and sent nothing. The admin delivery log
+ * passes its own `label` and keeps the raw value.
+ */
+function deliveryLabel(status: string | null | undefined): string {
+  if ((status ?? "").toUpperCase() === "SIMULATED") return "Recorded, not sent";
+  return formatStatusLabel(status ?? "NOT_SENT");
 }

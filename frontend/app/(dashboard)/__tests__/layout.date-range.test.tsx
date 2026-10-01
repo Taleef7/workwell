@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardLayout from "../layout";
 
@@ -13,10 +13,11 @@ vi.mock("@/components/auth-provider", () => ({
 }));
 
 let currentPath = "/programs";
+let currentSearch = "";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => currentPath,
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(currentSearch),
 }));
 
 const apiMock = {
@@ -43,8 +44,9 @@ beforeEach(() => {
   }));
 });
 
-const renderAt = (path: string) => {
+const renderAt = (path: string, search = "") => {
   currentPath = path;
+  currentSearch = search;
   return render(
     <DashboardLayout>
       <div>Content</div>
@@ -53,19 +55,47 @@ const renderAt = (path: string) => {
 };
 
 // Both the desktop header and the mobile bar carry the selectors, so each count is per layout.
-describe("DashboardLayout date range (#699)", () => {
-  it.each(["/programs", "/programs/hierarchy", "/programs/cms125"])(
-    "hides the date range on %s, whose figures are measurement-year rates",
+describe("DashboardLayout date range (#699, #661)", () => {
+  // Matched on the label's START: the label now says which date it filters, and an exact "Date range"
+  // query would find nothing on every page and pass the "hidden" cases for the wrong reason.
+  const ranges = () => screen.queryAllByLabelText(/^Date range/);
+
+  it.each(["/programs", "/programs/hierarchy", "/programs/cms125", "/compliance", "/people", "/cases/abc", "/programsx"])(
+    "hides the date range on %s, which it does not filter",
     (path) => {
       renderAt(path);
-      expect(screen.queryAllByLabelText("Date range")).toHaveLength(0);
+      expect(ranges()).toHaveLength(0);
       // Only the range goes; the site selector is untouched.
       expect(screen.getAllByLabelText("Filter by site")).toHaveLength(2);
     },
   );
 
-  it.each(["/worklist", "/cases", "/runs", "/programsx"])("keeps the date range on %s", (path) => {
+  it("hides the date range on the work list's Panels tab, a provider table it does not filter", () => {
+    renderAt("/worklist", "tab=panels");
+    expect(ranges()).toHaveLength(0);
+  });
+
+  it.each([
+    ["/worklist", "Date range: when the gap was opened", /^Opened: /],
+    ["/cases", "Date range: when the gap was opened", /^Opened: /],
+    ["/runs", "Date range: when the run started", /^Started: /],
+  ])("on %s it says which date it filters", (path, label, shown) => {
     renderAt(path);
-    expect(screen.getAllByLabelText("Date range")).toHaveLength(2);
+    const controls = screen.getAllByLabelText(label);
+    expect(controls).toHaveLength(2);
+    for (const control of controls) expect(control).toHaveTextContent(shown);
+  });
+});
+
+describe("the sidebar's open-gap badge ignores the date range (#661)", () => {
+  it("counts by site only, even on a page where a range is chosen", async () => {
+    apiMock.getWithHeaders.mockClear();
+    renderAt("/worklist", "site=Kihei+Clinic&from=2026-09-24&to=2026-10-01");
+    await waitFor(() =>
+      expect(apiMock.getWithHeaders.mock.calls.map((c) => String(c[0])).some((u) => u.includes("outreach=none"))).toBe(true),
+    );
+    const badge = apiMock.getWithHeaders.mock.calls.map((c) => String(c[0])).find((u) => u.includes("outreach=none"))!;
+    expect(badge).toContain("site=Kihei");
+    expect(badge).not.toMatch(/[?&](from|to)=/);
   });
 });
