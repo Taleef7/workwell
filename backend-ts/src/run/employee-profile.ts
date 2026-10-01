@@ -10,7 +10,7 @@
  * data (outcomes, open cases, audit timeline) is real.
  */
 import type { CaseStore } from "../stores/case-store.ts";
-import type { OutcomeStore } from "../stores/outcome-store.ts";
+import type { OutcomeRecord, OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { employeeById, employees, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
@@ -21,7 +21,8 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { deriveCell, type DisplayState } from "../compliance/roster-vocabulary.ts";
-import { isCatalogActiveRunnable } from "../compliance/panels.ts";
+import { AVAILABLE_PANELS, RUNNABLE_PANELS } from "../compliance/panels.ts";
+import { isCompletedRun, isPopulationRun } from "../program/rollup-shared.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
@@ -36,8 +37,9 @@ export interface MeasureOutcomeSummary {
   /**
    * This outcome read the way the roster table reads an outcome (`deriveCell`), so an
    * out-of-population MISSING_DATA shows OUT_OF_POPULATION here too, not "missing data" (#671).
-   * Same reading, not always the same row: this is the newest outcome from any run, while the table
-   * reads the latest completed population run, so a single-patient rerun can differ until the next.
+   * And the same ROW the table reads: the measure's winning population run. It used to be the newest
+   * outcome from any run, so a single-patient rerun, or the nightly while it ran, gave the page's
+   * summary one answer and its table another.
    */
   displayStatus: DisplayState;
   lastRunDate: string;
@@ -89,7 +91,15 @@ export interface EmployeeSearchResult {
   name: string;
   role: string;
   site: string;
-  latestOutcome: string | null;
+  /**
+   * The subject's ACTIVE cases (open or in progress), every cycle: exactly the rows of the Open Cases
+   * table on the page the result opens. The work list shows only each measure's current cycle, so the
+   * two can differ while an older cycle's case is still open (before the first run of a new year, or
+   * where the rollover close-out failed). It replaced `latestOutcome`, the newest outcome of ANY measure as the
+   * stored bucket, which named one arbitrary measure, read an out-of-population patient as "MISSING
+   * DATA", and could come from a measure the deployment no longer runs.
+   */
+  openGaps: number;
 }
 
 export interface EmployeeProfileDeps {
@@ -150,13 +160,12 @@ function humanReadable(eventType: string, actor: string | null, measureName: str
 
 /** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
 export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: string): Promise<EmployeeProfileResponse | null> {
-  // Load the subject's persisted history before identity resolution so a configured wc profile can
-  // rehydrate after a worker restart. Requiring at least one row avoids fabricating profiles for
-  // arbitrary wc| ids; seam-off continues to resolve only the static catalog.
-  const history = await deps.outcomes.listOutcomesForEmployee(externalId, 100000);
+  // A configured wc profile rehydrates from persisted outcomes after a worker restart. Requiring at
+  // least one row avoids fabricating profiles for arbitrary wc| ids; seam-off continues to resolve only
+  // the static catalog.
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
   const emp = employeeById(externalId) ?? (
-    webChartConfigured && history.length > 0
+    webChartConfigured && (await deps.outcomes.hasOutcomes(externalId))
       ? directoryForRows([{ subjectId: externalId }], true, deps.webChartEnv, DIRECTORY).employeeById(externalId)
       : null
   );
@@ -175,14 +184,30 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   const openCaseByMeasure = new Map<string, string>();
   for (const c of openCases) openCaseByMeasure.set(c.measureId, c.id);
 
-  // Latest outcome per measure (newest-first history, dedupe by measure), for the measures this
-  // deployment runs: the roster table beside it shows only those, and an old authored measure's last
-  // outcome read as one more quality measure the practice is scored on (#671).
-  const seen = new Set<string>();
+  // One outcome per measure this deployment runs, from that measure's WINNING population run: the row
+  // the roster table beside this section reads (`buildRoster`), so the two cannot disagree. A measure
+  // outside the panels (an old authored one) read as one more measure the practice is scored on (#671).
+  // A single-patient rerun is not a winner, and neither is a run still in flight.
+  const measureIds = [...new Set(AVAILABLE_PANELS.flatMap((p) => RUNNABLE_PANELS[p]))];
+  const winners = await deps.outcomes.listLatestPopulationRuns(measureIds, { excludeScale: true, excludeTrendHistory: true });
+  const runByMeasure = new Map<string, string>();
+  for (const w of winners) {
+    if (!isPopulationRun(w.runScopeType) || !isCompletedRun(w.runStatus)) continue;
+    if (!runByMeasure.has(w.measureId)) runByMeasure.set(w.measureId, w.runId);
+  }
+  const winningRows: OutcomeRecord[] = [];
+  // In turn, not `Promise.all`: one page view must not take a connection per measure at once.
+  for (const measureId of measureIds) {
+    const runId = runByMeasure.get(measureId);
+    if (!runId) continue;
+    // Rows arrive evaluated_at ASC, so the last is the one the roster's derivation keeps.
+    const rows = await deps.outcomes.listOutcomes(runId, { measureId, subjectId: externalId });
+    const row = rows.filter((r) => r.measureId === measureId && r.subjectId === externalId).at(-1);
+    if (row) winningRows.push(row);
+  }
+
   const measureOutcomes: MeasureOutcomeSummary[] = [];
-  for (const o of history) {
-    if (seen.has(o.measureId) || !isCatalogActiveRunnable(o.measureId)) continue;
-    seen.add(o.measureId);
+  for (const o of winningRows) {
     const wf = deriveWhyFlagged(o.evidence, o.measureId, o.evaluationPeriod, o.status);
     const window = typeof wf.compliance_window_days === "number" ? wf.compliance_window_days : null;
     // daysSinceLastExam = actual recency; daysUntilDue = window − recency (negative ⇒ overdue).
@@ -256,7 +281,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   };
 }
 
-/** GET /api/employees/search?q=&limit= — name/externalId/role substring (min 2 chars), + latest outcome. */
+/** GET /api/employees/search?q=&limit= — name/externalId/role substring (min 2 chars), + open gaps. */
 export async function searchEmployees(deps: EmployeeProfileDeps, q: string, limit: number): Promise<EmployeeSearchResult[]> {
   if (!q || q.trim().length < 2) return [];
   const needle = q.trim().toLowerCase();
@@ -266,11 +291,24 @@ export async function searchEmployees(deps: EmployeeProfileDeps, q: string, limi
   )
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, safeLimit);
+  if (matches.length === 0) return [];
 
-  return Promise.all(
-    matches.map(async (e) => {
-      const latest = (await deps.outcomes.listOutcomesForEmployee(e.externalId, 1))[0] ?? null;
-      return { externalId: e.externalId, name: e.name, role: e.role, site: e.site, latestOutcome: latest?.status ?? null };
-    }),
-  );
+  // ONE read for every match (it was one outcome query per match). Unbounded by design: up to 50
+  // subjects with one open case per (measure, cycle) each, and a capped read would undercount.
+  const open = await deps.cases.listCases({
+    employeeIds: matches.map((e) => e.externalId),
+    statuses: [...ACTIVE_CASE_STATUSES],
+    limit: 100000,
+    offset: 0,
+  });
+  const openBySubject = new Map<string, number>();
+  for (const c of open) openBySubject.set(c.employeeId, (openBySubject.get(c.employeeId) ?? 0) + 1);
+
+  return matches.map((e) => ({
+    externalId: e.externalId,
+    name: e.name,
+    role: e.role,
+    site: e.site,
+    openGaps: openBySubject.get(e.externalId) ?? 0,
+  }));
 }

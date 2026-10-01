@@ -7,6 +7,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-01
 
+- **One answer per patient, on the page and in search (#655 checklist).** Global search showed each
+  patient's newest outcome of any measure as the stored bucket: on the pilot every result read "MISSING
+  DATA", including a patient compliant on CMS2 and outside the other five populations (pat-00491, checked
+  live). It now shows the patient's open gaps ("2 open gaps", nothing for none), the rows of the Open
+  Cases table on the page it opens, read in one query for all results instead of one per result. The
+  patient page's summary read the newest outcome from any run while its table read each measure's
+  winning population run, so a one-patient rerun, or the nightly while it ran, gave the page two
+  answers; the summary now reads the winning run too.
 - **The work list is the case manager's daily screen (#698, owner decision).** Three screens listed
   patients and gaps and nothing said which to use; the Programs chips opened Compliance and "Open
   cases" opened Cases. For a case manager the gap chips (Overdue, Due Soon, Missing Data) and "Open

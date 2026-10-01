@@ -29,7 +29,7 @@ const searchResults = [
     name: "Nilo Gray",
     role: "Patient",
     site: "Kihei Clinic",
-    latestOutcome: null,
+    openGaps: 0,
   },
 ];
 
@@ -39,14 +39,14 @@ const multipleResults = [
     name: "Ari Wren",
     role: "Patient",
     site: "Wailuku Clinic",
-    latestOutcome: "COMPLIANT",
+    openGaps: 0,
   },
   {
     externalId: "pat-002",
     name: "Nia Calder",
     role: "Patient",
     site: "Kihei Clinic",
-    latestOutcome: "OVERDUE",
+    openGaps: 2,
   },
 ];
 
@@ -176,5 +176,15 @@ describe("GlobalSearch", () => {
     await new Promise((resolve) => setTimeout(resolve, 350));
     expect(screen.queryByText("Nilo Gray")).not.toBeInTheDocument();
     expect(screen.queryByText(`No ${SUBJECT.plural} found`)).not.toBeInTheDocument();
+  });
+});
+
+describe("GlobalSearch: open gaps, never one measure's stored status", () => {
+  it("says how many open gaps a person has, and nothing for none", async () => {
+    render(<GlobalSearch />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "multi" } });
+    const nia = await screen.findByRole("button", { name: /Nia Calder/ });
+    expect(nia).toHaveTextContent("2 open gaps");
+    expect(screen.getByRole("button", { name: /Ari Wren/ })).not.toHaveTextContent(/open gap/);
   });
 });

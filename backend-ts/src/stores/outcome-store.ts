@@ -367,8 +367,8 @@ export interface OutcomeStore {
    */
   listOutcomesForMeasure(measureId: string, opts?: MeasureScanOptions): Promise<MeasureOutcomeRow[]>;
   /**
-   * The latest `limit` outcomes for one employee (by subjectId), newest-first — the employee-profile
-   * history, identity resolution, and the compliance API's windowed `latest` scan (which applies its
+   * The latest `limit` outcomes for one employee (by subjectId), newest-first — identity resolution
+   * and the compliance API's windowed `latest` scan (which applies its
    * own finalization check per row). Bounded scan over the outcomes table. The MCP tools moved to
    * {@link listLatestFinalizedOutcomePerMeasure} (#491) — a raw read here has no run-status filter.
    */
