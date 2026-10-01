@@ -70,6 +70,11 @@ describe("DashboardLayout date range (#699, #661)", () => {
     },
   );
 
+  it("hides the date range on the work list's Panels tab, a provider table it does not filter", () => {
+    renderAt("/worklist", "tab=panels");
+    expect(ranges()).toHaveLength(0);
+  });
+
   it.each([
     ["/worklist", "Date range: when the gap was opened", /^Opened: /],
     ["/cases", "Date range: when the gap was opened", /^Opened: /],

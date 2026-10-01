@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -80,13 +80,18 @@ const ENGINEERING_HREFS = new Set(["/measures", "/studio", "/runs", "/api-docs"]
  * Which date the header's range filters on this page, or null where it filters nothing (#661).
  *
  * Three lists read it: the work list and Cases filter on when a gap's case was OPENED (`createdFrom`/
- * `createdTo`, DATA_MODEL_CONTRACTS §6.3), Runs on when a run STARTED. The sidebar badge does not read it. It used to show everywhere but
- * Programs as a bare "Last 7 days", which reads as "gaps due this week" on the work list and changed
- * nothing at all on Compliance, People or a case page. A range chosen on one page is kept in the URL
- * for the pages that use it. (Programs reports measurement-year figures, #699.)
+ * `createdTo`, DATA_MODEL_CONTRACTS §6.3), Runs on when a run STARTED. The sidebar badge does not
+ * read it, and neither does the work list's Panels tab (`tab=panels`, a provider table from
+ * `/api/panels`). It used to show everywhere but Programs as a bare "Last 7 days", which reads as "gaps
+ * due this week" on the work list and changed nothing at all on Compliance, People or a case page. A
+ * range chosen on one page is kept in the URL for the pages that use it. (Programs reports
+ * measurement-year figures, #699.)
  */
-const dateRangeMeaning = (pathname: string | null): "Opened" | "Started" | null =>
-  pathname === "/worklist" || pathname === "/cases" ? "Opened" : pathname === "/runs" ? "Started" : null;
+const dateRangeMeaning = (pathname: string | null, tab: string | null): "Opened" | "Started" | null =>
+  pathname === "/worklist" ? (tab === "panels" ? null : "Opened")
+    : pathname === "/cases" ? "Opened"
+    : pathname === "/runs" ? "Started"
+    : null;
 
 const DATE_PRESETS = [
   { value: "7d", label: "last 7 days", short: "7 days" },
@@ -201,6 +206,8 @@ function ShellSidebar({ children }: { children: React.ReactNode }) {
 }
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
+  // Read before any early return: a hook's call order must not depend on the sign-in state.
+  const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
   const { token, user, logout, reconnecting } = useAuth();
@@ -309,7 +316,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const dateMeaning = dateRangeMeaning(pathname);
+  const dateMeaning = dateRangeMeaning(pathname, searchParams.get("tab"));
 
   return (
     <SidebarProvider>
