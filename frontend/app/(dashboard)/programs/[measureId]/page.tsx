@@ -16,7 +16,8 @@ import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { SkeletonCard } from "@/components/skeleton-loader";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { canRunMeasures } from "@/lib/rbac";
+import { canManageCases, canRunMeasures } from "@/lib/rbac";
+import { casesHref, worklistHref } from "@/lib/worklist-links";
 import { OUTCOME_LABELS, ROLE_LABELS, labelFor } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { niceDomain, chartTooltipStyle } from "@/lib/charts";
@@ -361,7 +362,7 @@ export default function ProgramDetailPage() {
                 No 90-day forecast for this measure. The CMS measure logic scores the measurement year, counting
                 some tests from earlier years, and its result records whether a patient met the measure but not
                 when the qualifying test was done, so there is no date to count forward from. Today&apos;s gaps are
-                on the <Link href={`/cases?measureId=${encodeURIComponent(measureId)}`} className="underline">work list</Link>.
+                on the <Link href={canManageCases(user?.role) ? worklistHref({ measureId, wholePractice: true }) : casesHref({ measureId })} className="underline">work list</Link>.
               </p>
             ) : null}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -555,7 +556,11 @@ export default function ProgramDetailPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Link href={`/cases?measureId=${encodeURIComponent(program.measureId)}`} className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm font-medium text-neutral-800 dark:text-neutral-200">
+            {/* The work list for a case manager (#698); Cases for anyone else, as before. */}
+            <Link
+              href={canManageCases(user?.role) ? worklistHref({ measureId: program.measureId, wholePractice: true }) : casesHref({ measureId: program.measureId })}
+              className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm font-medium text-neutral-800 dark:text-neutral-200"
+            >
               Open cases for this measure
             </Link>
             {mayRun ? (

@@ -55,16 +55,16 @@ describe("ProgramsPage — every number on a card describes one population (#699
     }
   });
 
-  it("carries the site on the Open cases link, so Cases shows the count the card shows", async () => {
+  it("carries the site on the Open cases link, so the work list shows the count the card shows (#698)", async () => {
     filtersHolder.value = { siteId: "Kihei Clinic", from: "", to: "" };
     render(<ProgramsPage />);
     const link = await screen.findByRole("link", { name: "Open cases (6)" });
-    expect(link).toHaveAttribute("href", "/cases?measureId=cms125&site=Kihei+Clinic");
+    expect(link).toHaveAttribute("href", "/worklist?measureId=cms125&site=Kihei+Clinic&panel=all");
   });
 
   it("links Open cases to the measure alone when no site is chosen", async () => {
     render(<ProgramsPage />);
     const link = await screen.findByRole("link", { name: "Open cases (6)" });
-    expect(link).toHaveAttribute("href", "/cases?measureId=cms125");
+    expect(link).toHaveAttribute("href", "/worklist?measureId=cms125&panel=all");
   });
 });

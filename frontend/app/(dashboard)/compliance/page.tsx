@@ -9,6 +9,7 @@ import { useRunStatus } from "@/components/run-status-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases, canRunMeasures } from "@/lib/rbac";
+import { worklistHref } from "@/lib/worklist-links";
 import { emitToast } from "@/lib/toast";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
@@ -547,6 +548,15 @@ export default function CompliancePage() {
           <h1 className="text-xl font-semibold">Individual Compliance Status</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
             {`Every ${SUBJECT.singular} across the selected panel — compliant and excluded included. The inverse of the worklist.`}
+            {canAssignFromRoster ? (
+              <>
+                {" "}
+                {/* The open gaps to work are on the work list (#698); the measure and a gap status carry over. */}
+                <Link href={worklistHref({ measureId, outcome: status, site: siteId, providerId, wholePractice: true })} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
+                  Work the open gaps on the work list →
+                </Link>
+              </>
+            ) : null}
           </p>
         </div>
         {canRecalc ? (

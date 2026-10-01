@@ -16,8 +16,9 @@ vi.mock("next/navigation", async () => {
   return navHolder.current.navigation;
 });
 
+const auth = vi.hoisted(() => ({ role: "ROLE_ADMIN" }));
 vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({ user: { role: "ROLE_ADMIN" } }),
+  useAuth: () => ({ user: { role: auth.role } }),
 }));
 vi.mock("@/components/global-filter-context", () => ({
   useGlobalFilters: () => ({ siteId: "", from: "", to: "" }),
@@ -33,6 +34,7 @@ function rosterCalls(): string[] {
 }
 
 beforeEach(() => {
+  auth.role = "ROLE_ADMIN";
   navHolder.current.setUrl("/compliance");
   get.mockReset().mockResolvedValue([]);
   getWithHeaders.mockReset().mockImplementation((url: string) => {
@@ -281,5 +283,40 @@ describe("CompliancePage panel filters (PCP / age band / sex)", () => {
     render(<CompliancePage />);
     await waitFor(() => expect(rosterCalls().length).toBeGreaterThan(0));
     expect(await screen.findByLabelText(/PCP|Provider/i)).toBeTruthy();
+  });
+});
+
+describe("CompliancePage — the open gaps are worked on the work list (#698)", () => {
+  it("links a case manager to the work list, keeping the measure and a gap status", async () => {
+    navHolder.current.setUrl("/compliance?measureId=cms125&status=OVERDUE");
+    render(<CompliancePage />);
+    expect(await screen.findByRole("link", { name: /work the open gaps/i })).toHaveAttribute("href", "/worklist?measureId=cms125&outcome=OVERDUE&panel=all");
+  });
+
+  it("drops a status that is not a gap: compliant patients have none to work", async () => {
+    navHolder.current.setUrl("/compliance?measureId=cms125&status=COMPLIANT");
+    render(<CompliancePage />);
+    expect(await screen.findByRole("link", { name: /work the open gaps/i })).toHaveAttribute("href", "/worklist?measureId=cms125&panel=all");
+  });
+});
+
+describe("CompliancePage — no work list link for a role without the work list (#698 review)", () => {
+  it("shows a viewer no link to a screen they cannot use", async () => {
+    auth.role = "ROLE_VIEWER";
+    navHolder.current.setUrl("/compliance?measureId=cms125&status=OVERDUE");
+    render(<CompliancePage />);
+    await screen.findByText(/every patient|every employee/i);
+    expect(screen.queryByRole("link", { name: /work the open gaps/i })).toBeNull();
+  });
+});
+
+describe("CompliancePage — the work list link keeps the PCP filter (#742 review)", () => {
+  it("carries providerId", async () => {
+    navHolder.current.setUrl("/compliance?measureId=cms125&status=OVERDUE&providerId=pcp-7");
+    render(<CompliancePage />);
+    expect(await screen.findByRole("link", { name: /work the open gaps/i })).toHaveAttribute(
+      "href",
+      "/worklist?measureId=cms125&outcome=OVERDUE&providerId=pcp-7&panel=all",
+    );
   });
 });

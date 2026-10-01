@@ -34,6 +34,7 @@ import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
+import { casesHref } from "@/lib/worklist-links";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { payerFilterLabel, payerGroupButtonLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
@@ -462,8 +463,14 @@ export default function WorklistPage() {
             {total === 1 ? SUBJECT.singular : SUBJECT.plural} with open gaps.
           </p>
         </div>
-        <Link href="/cases" className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-300">
-          View by gap instead →
+        {/* The same question one row per gap, filters kept (#698). Cases has no "My panel" filter (the
+            work list resolves a staff member's panel on the server), so from My panel the link says it
+            widens to the whole practice rather than silently doing so (#742 review). */}
+        <Link
+          href={casesHref({ measureId: measureFilter, outcome: outcomeFilter, site: siteId, providerId: providerFilter, search: searchFilter, staffClosed: statusView === "staff_closed" })}
+          className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-300"
+        >
+          {effectivePanel === "me" ? "View the whole practice by gap →" : "View by gap instead →"}
         </Link>
       </header>
 

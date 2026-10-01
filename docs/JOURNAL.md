@@ -5,6 +5,18 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-01
+
+- **The work list is the case manager's daily screen (#698, owner decision).** Three screens listed
+  patients and gaps and nothing said which to use; the Programs chips opened Compliance and "Open
+  cases" opened Cases. For a case manager the gap chips (Overdue, Due Soon, Missing Data) and "Open
+  cases" now open the whole practice's work list filtered to the measure and status (`panel=all`, or
+  a staff member who owns a panel saw their panel's share of the number); Compliant and Excluded stay on
+  Compliance, and other roles keep their links. Worklist sits above Cases in the sidebar; Cases says it
+  is one row per gap (it called itself the daily worklist); each screen links to the others keeping the
+  measure and status; the sidebar badge says it counts open gaps not yet contacted, not patients. A gap
+  chip can read more than the list it opens: it counts gaps staff closed, which the list does not.
+
 ## 2026-09-30
 
 - **Maui's database costs less: weekday nightlies and 90-day outcome retention.** September's Neon bill

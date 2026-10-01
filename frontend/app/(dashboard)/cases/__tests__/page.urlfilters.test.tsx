@@ -87,3 +87,42 @@ describe("CasesPage URL filters", () => {
     });
   });
 });
+
+describe("CasesPage — one row per gap, with the work list as the daily screen (#698)", () => {
+  it("no longer calls itself the daily worklist, and links to the work list with the measure and status", async () => {
+    navHolder.current.setUrl("/cases?measureId=cms125&outcome=OVERDUE");
+    render(<CasesPage />);
+    const link = await screen.findByRole("link", { name: /on the work list/i });
+    expect(link).toHaveAttribute("href", "/worklist?measureId=cms125&outcome=OVERDUE&panel=all");
+    expect(screen.queryByText(/your daily worklist/i)).toBeNull();
+    expect(screen.getByText(/one row per gap: the open cases by default/i)).toBeInTheDocument();
+  });
+});
+
+describe("CasesPage — the work list link keeps the PCP, the search and the closed-by-staff view (#698 review)", () => {
+  it("carries providerId and search", async () => {
+    navHolder.current.setUrl("/cases?measureId=cms125&providerId=pcp-7&search=smith");
+    render(<CasesPage />);
+    expect(await screen.findByRole("link", { name: /on the work list/i })).toHaveAttribute(
+      "href",
+      "/worklist?measureId=cms125&providerId=pcp-7&search=smith&panel=all",
+    );
+  });
+
+  it("from the closed-by-staff tab, opens the work list's closed-by-staff view", async () => {
+    navHolder.current.setUrl("/cases?status=staff_closed&measureId=cms125");
+    render(<CasesPage />);
+    expect(await screen.findByRole("link", { name: /on the work list/i })).toHaveAttribute("href", "/worklist?measureId=cms125&status=staff_closed&panel=all");
+  });
+});
+
+describe("CasesPage — the work list link is the same cohort (#742 review)", () => {
+  it("'My Cases' carries over as the work list's assignee filter", async () => {
+    navHolder.current.setUrl("/cases?view=mine&measureId=cms125");
+    render(<CasesPage />);
+    expect(await screen.findByRole("link", { name: /on the work list/i })).toHaveAttribute(
+      "href",
+      "/worklist?measureId=cms125&assignee=admin%40example.com&panel=all",
+    );
+  });
+});

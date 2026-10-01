@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { SkeletonCard } from "@/components/skeleton-loader";
-import { canRunMeasures } from "@/lib/rbac";
+import { canManageCases, canRunMeasures } from "@/lib/rbac";
+import { GAP_STATUSES, worklistHref } from "@/lib/worklist-links";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { TenantOption } from "@/features/compliance/types";
@@ -88,6 +89,8 @@ export default function ProgramsPage() {
   const api = useApi();
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role) && canSeeEngineering(user?.role);
+  // The work list is a case manager's screen; a gap chip opens it only for a role that has it (#698).
+  const mayWorkGaps = canManageCases(user?.role);
   const { isActive: runActive, startTracking } = useRunStatus();
   // No date range: a card reports measurement-year figures, and scoping only its open cases to a range
   // set "Overdue 1,643" beside "Open cases (364)" (#699). The header hides the range on this page.
@@ -375,7 +378,7 @@ export default function ProgramsPage() {
                       key={bucket}
                       label={text}
                       tone={tone}
-                      href={chipHref(program.measureId, bucket, { siteId, tenant })}
+                      href={chipHref(program.measureId, bucket, { siteId, tenant }, mayWorkGaps)}
                       ariaLabel={`${label}: ${text}`}
                     />
                   );
@@ -392,7 +395,7 @@ export default function ProgramsPage() {
               </div>
 
               <div className="relative z-10 mt-4">
-                <Link href={openCasesHref(program.measureId, siteId)} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
+                <Link href={openCasesHref(program.measureId, siteId, mayWorkGaps)} className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400">
                   Open cases ({program.openCaseCount})
                 </Link>
               </div>
@@ -430,11 +433,19 @@ function chipHref(
   measureId: string,
   bucket: "COMPLIANT" | "DUE_SOON" | "OVERDUE" | "MISSING_DATA" | "EXCLUDED",
   scope: { siteId: string; tenant: string },
+  mayWorkGaps: boolean,
 ): string | undefined {
   // The generated scale tenant has counts but NO roster: `buildRoster` excludes scale runs and
   // subjects entirely, so every chip would land on an empty grid under a badge reading thousands.
   // A plain badge says "this number has no list behind it"; a link that lies does not.
   if (scope.tenant === "mhn") return undefined;
+  // A gap opens the work list, the case manager's daily screen (#698), filtered to this measure and
+  // status. Not under a System selection, which the work list has no filter for, and not for a role
+  // without the work list. Compliant and Excluded patients have no gap, so they stay on the roster.
+  if (mayWorkGaps && !scope.tenant && GAP_STATUSES.has(bucket)) {
+    // The chip counts the whole practice, so the list is the whole practice, not the viewer's own panel.
+    return worklistHref({ measureId, outcome: bucket, site: scope.siteId, wholePractice: true });
+  }
   // EVERY chip drills into the compliance roster, scoped to that measure's column — the destination
   // names each patient, which is what the chip is being asked for: the count already knows the
   // cohort, so clicking it must not hand back a screen the user has to re-filter.
@@ -449,10 +460,11 @@ function chipHref(
 }
 
 /** The card's open-case count is site-scoped, so its link carries the site: without it Cases answered
- *  for every site and reset the site filter ("Open cases (340)" opened 1,643, #699). Cases has no
- *  System filter, so with a System selected (an engineering view) the destination still spans every
- *  system. */
-function openCasesHref(measureId: string, siteId: string): string {
+ *  for every site and reset the site filter ("Open cases (340)" opened 1,643, #699). Neither list has
+ *  a System filter, so with a System selected (an engineering view) the destination still spans every
+ *  system. A case manager lands on the work list (#698); Cases stays the link for anyone else. */
+function openCasesHref(measureId: string, siteId: string, mayWorkGaps: boolean): string {
+  if (mayWorkGaps) return worklistHref({ measureId, site: siteId, wholePractice: true });
   const params = new URLSearchParams();
   params.set("measureId", measureId);
   if (siteId) params.set("site", siteId);

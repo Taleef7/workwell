@@ -54,8 +54,10 @@ const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 // (Cases, Worklist, Campaigns) are scoped to the roles whose API calls won't 403.
 const nav = [
   { href: "/programs", label: "Programs", icon: BarChart3 },
-  { href: "/cases", label: "Cases", icon: Shield, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
+  // The work list is the case manager's daily screen, so it comes first; Cases is the same gaps one
+  // row per gap (#698).
   { href: "/worklist", label: "Worklist", icon: ClipboardList, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
+  { href: "/cases", label: "Cases", icon: Shield, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/compliance", label: "Compliance", icon: ListChecks },
   { href: "/people", label: "People", icon: Users, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   // The ACO's attributed lists (ADR-082). CM/ADMIN because EVERY method on /api/subject-lists is —
@@ -341,7 +343,17 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                     label={item.label}
                     icon={<Icon className="h-5 w-5" />}
                     isActive={active}
-                    badge={hasGap ? worklistGapCount : undefined}
+                    // The badge counts open GAPS no one has contacted yet, while the page counts PATIENTS
+                    // with any open gap, so it says what it is: 15,900 beside a page reading 10,400 looked
+                    // like a mismatch (#698).
+                    badge={
+                      hasGap ? (
+                        <span title={`${worklistGapCount.toLocaleString()} open gaps with no outreach yet`} data-testid="worklist-badge">
+                          {worklistGapCount.toLocaleString()}
+                          <span className="sr-only"> open gaps with no outreach yet</span>
+                        </span>
+                      ) : undefined
+                    }
                     onClick={() => router.push(target)}
                     className="min-h-11 lg:min-h-0"
                     data-testid={navTestId(item.href)}
