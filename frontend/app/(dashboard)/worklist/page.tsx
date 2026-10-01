@@ -458,12 +458,12 @@ export default function WorklistPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Work list</h1>
+          {/* The line describes the rows under it, so it follows the tab and the Work view (#661): it
+              said "with open gaps" over the closed-by-staff list and over the Panels table. The Panels
+              tab describes itself, so there is no page line over it. */}
+          {tab === "panels" ? null : (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            {/* The line describes the rows under it, so it follows the tab and the Work view (#661): it
-                said "with open gaps" over the closed-by-staff list and over the Panels table. */}
-            {tab === "panels" ? (
-              <>One row per {providerFilterLabel()}, with who works their {SUBJECT.plural}.</>
-            ) : statusView === "staff_closed" ? (
+            {statusView === "staff_closed" ? (
               <>
                 One row per {SUBJECT.singular}, with every gap staff closed and what CQL says about it today.{" "}
                 {total.toLocaleString()} {total === 1 ? SUBJECT.singular : SUBJECT.plural} with gaps closed by staff.
@@ -475,6 +475,7 @@ export default function WorklistPage() {
               </>
             )}
           </p>
+          )}
         </div>
         {/* The same question one row per gap, filters kept (#698). Cases has no "My panel" filter (the
             work list resolves a staff member's panel on the server), so from My panel the link says it

@@ -80,7 +80,7 @@ const ENGINEERING_HREFS = new Set(["/measures", "/studio", "/runs", "/api-docs"]
  * Which date the header's range filters on this page, or null where it filters nothing (#661).
  *
  * Three lists read it: the work list and Cases filter on when a gap's case was OPENED (`createdFrom`/
- * `createdTo`, DATA_MODEL_CONTRACTS §6.3), Runs on when a run STARTED. It used to show everywhere but
+ * `createdTo`, DATA_MODEL_CONTRACTS §6.3), Runs on when a run STARTED. The sidebar badge does not read it. It used to show everywhere but
  * Programs as a bare "Last 7 days", which reads as "gaps due this week" on the work list and changed
  * nothing at all on Compliance, People or a case page. A range chosen on one page is kept in the URL
  * for the pages that use it. (Programs reports measurement-year figures, #699.)
@@ -89,15 +89,18 @@ const dateRangeMeaning = (pathname: string | null): "Opened" | "Started" | null 
   pathname === "/worklist" || pathname === "/cases" ? "Opened" : pathname === "/runs" ? "Started" : null;
 
 const DATE_PRESETS = [
-  { value: "7d", label: "last 7 days" },
-  { value: "30d", label: "last 30 days" },
-  { value: "90d", label: "last 90 days" },
-  { value: "all", label: "any time" },
+  { value: "7d", label: "last 7 days", short: "7 days" },
+  { value: "30d", label: "last 30 days", short: "30 days" },
+  { value: "90d", label: "last 90 days", short: "90 days" },
+  { value: "all", label: "any time", short: "any time" },
 ] as const;
 
-/** "Opened: last 7 days" — the option says which date it is about. */
-const datePresetOptions = (meaning: "Opened" | "Started") =>
-  DATE_PRESETS.map((p) => ({ value: p.value, label: `${meaning}: ${p.label}` }));
+/**
+ * "Opened: last 7 days" — the option says which date it is about. `short` is the phone bar's: there
+ * the control shares a row with the site, and the longer label truncated the period it exists to show.
+ */
+const datePresetOptions = (meaning: "Opened" | "Started", short = false) =>
+  DATE_PRESETS.map((p) => ({ value: p.value, label: `${meaning}: ${short ? p.short : p.label}` }));
 
 /** A nav item is current on its own page and every page under it (`/cases/123` is Cases). */
 function isNavActive(pathname: string | null, href: string): boolean {
@@ -240,9 +243,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
         params.set("status", "open");
         params.set("outreach", "none");
         params.set("limit", "1");
+        // Site only. The date range filters the lists that show it (#661); the badge is on every page,
+        // and a week picked on the work list kept narrowing it on pages with no control to see or clear.
         if (siteId) params.set("site", siteId);
-        if (from) params.set("from", from);
-        if (to) params.set("to", to);
         const { headers } = await api.getWithHeaders<unknown[]>(`/api/cases?${params.toString()}`);
         const count = Number(headers.get("X-Total-Count") ?? 0);
         if (mounted) setWorklistGapCount(Number.isFinite(count) ? count : 0);
@@ -254,7 +257,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [api, siteId, from, to, token, user]);
+  }, [api, siteId, token, user]);
 
   const sharedFilterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -447,7 +450,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                   aria-label={dateMeaning === "Opened" ? "Date range: when the gap was opened" : "Date range: when the run started"}
                   value={datePreset}
                   onValueChange={(v) => setDatePreset(v as "7d" | "30d" | "90d" | "all")}
-                  options={datePresetOptions(dateMeaning)}
+                  options={datePresetOptions(dateMeaning, true)}
                   size="sm"
                   className="flex-1"
                 />

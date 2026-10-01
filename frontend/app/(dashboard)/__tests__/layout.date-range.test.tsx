@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardLayout from "../layout";
 
@@ -13,10 +13,11 @@ vi.mock("@/components/auth-provider", () => ({
 }));
 
 let currentPath = "/programs";
+let currentSearch = "";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => currentPath,
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(currentSearch),
 }));
 
 const apiMock = {
@@ -43,8 +44,9 @@ beforeEach(() => {
   }));
 });
 
-const renderAt = (path: string) => {
+const renderAt = (path: string, search = "") => {
   currentPath = path;
+  currentSearch = search;
   return render(
     <DashboardLayout>
       <div>Content</div>
@@ -77,5 +79,18 @@ describe("DashboardLayout date range (#699, #661)", () => {
     const controls = screen.getAllByLabelText(label);
     expect(controls).toHaveLength(2);
     for (const control of controls) expect(control).toHaveTextContent(shown);
+  });
+});
+
+describe("the sidebar's open-gap badge ignores the date range (#661)", () => {
+  it("counts by site only, even on a page where a range is chosen", async () => {
+    apiMock.getWithHeaders.mockClear();
+    renderAt("/worklist", "site=Kihei+Clinic&from=2026-09-24&to=2026-10-01");
+    await waitFor(() =>
+      expect(apiMock.getWithHeaders.mock.calls.map((c) => String(c[0])).some((u) => u.includes("outreach=none"))).toBe(true),
+    );
+    const badge = apiMock.getWithHeaders.mock.calls.map((c) => String(c[0])).find((u) => u.includes("outreach=none"))!;
+    expect(badge).toContain("site=Kihei");
+    expect(badge).not.toMatch(/[?&](from|to)=/);
   });
 });

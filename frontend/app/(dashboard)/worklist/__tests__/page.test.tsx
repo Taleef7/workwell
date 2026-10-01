@@ -547,10 +547,11 @@ describe("WorklistPage — the heading describes the rows under it (#661)", () =
     expect(await screen.findByText("2 High")).toBeInTheDocument();
   });
 
-  it("the Panels tab is described as one row per provider, with no patient count", async () => {
+  it("the Panels tab carries no patient-list line: it describes itself", async () => {
     navHolder.current.setUrl("/worklist?tab=panels");
     render(<WorklistPage />);
-    expect(await screen.findByText(/^One row per (PCP|Provider), with who works their/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Work list" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/^One row per/)).toBeNull());
     expect(screen.queryByText(/with open gaps/)).toBeNull();
   });
 });
