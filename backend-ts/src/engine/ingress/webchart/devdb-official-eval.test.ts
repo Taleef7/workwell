@@ -77,7 +77,7 @@ import type { MeasureOutcome, OutcomeStatus } from "@work-well/measure-engine";
 import { webChartDataSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
 import { parseEnrollmentRoster, stampEnrollment, isEnrolled } from "../enrollment/roster.ts";
-import { MEASURE_BINDINGS } from "../../synthetic/measure-bindings.ts";
+import { withTestQualifyingVisit } from "../../../test-support/qualifying-visit.ts";
 import { officialMeasureExecutor, type OfficialBatchSubject } from "../../../wiring/official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "../../../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../../../wiring/official-artifacts.ts";
@@ -99,12 +99,12 @@ const EVAL = "2024-06-01";
  * change the day the measure is routed, and what it changes from and to.
  */
 const EXPECTED: Record<string, { official: Record<string, number>; divergence: Record<string, string> }> = {
-  // The real path: the sample carries no Encounter, so official CMS125 admits nobody, and the authored
-  // engine (no stamped enrollment) agrees. That is the true answer for this data.
+  // The real path: the sample carries no Encounter, so neither engine admits anyone to CMS125's
+  // population. That is the true answer for this data.
   cms125: { official: { MISSING_DATA: 56 }, divergence: {} },
 };
 
-/** With the population facts supplied as test data (`withPopulationFacts`), the two engines agree here. */
+/** With a qualifying visit supplied as test data (`withPopulationFacts`), the two engines agree here. */
 const EXPECTED_WITH_POPULATION_FACTS = { official: { MISSING_DATA: 52, OVERDUE: 4 }, divergence: {} };
 
 /** The subjects the authored engine finds actionable — official must find exactly these. */
@@ -145,52 +145,13 @@ async function liveBundles(measureId: string): Promise<unknown[]> {
   return bundles.map((b) => stampEnrollment(b as never, measureId, roster));
 }
 
-const QICORE_CONDITION = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition";
-const QICORE_ENCOUNTER = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter";
-
 /**
- * The two facts CMS125's initial population needs that the dev-DB sample does not carry, supplied as TEST
- * DATA for each patient the committed roster lists: a qualifying CPT 99213 office visit inside the
- * measurement period, and the authored measure's enrollment Condition. Ingest used to stamp both
- * (`stampEnrollment`, before F1); it no longer invents either, so a real tenant must supply real
- * encounters. These are the same resources the stamp produced, so the numerator tests below keep pinning
- * exactly what they pinned before.
+ * A qualifying visit added as TEST DATA (`test-support/qualifying-visit.ts`) for each patient the
+ * committed roster lists, because the sample carries no encounters and ingest no longer invents one. It is
+ * the same resource the roster used to stamp, so the numerator tests below keep pinning what they pinned.
  */
 function withPopulationFacts(bundles: readonly unknown[]): unknown[] {
-  const { code, valueSet } = MEASURE_BINDINGS["cms125"]!.enrollment;
-  return bundles.map((bundle) => {
-    const id = patientId(bundle);
-    if (!isEnrolled(roster, id, "cms125")) return bundle;
-    const b = clone(bundle) as { entry: Array<{ resource: unknown }> };
-    b.entry.push(
-      {
-        resource: {
-          resourceType: "Encounter",
-          meta: { profile: [QICORE_ENCOUNTER] },
-          id: `${id}-test-visit`,
-          status: "finished",
-          class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" },
-          subject: { reference: `Patient/${id}` },
-          type: [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213", display: "Office visit, established patient" }] }],
-          period: { start: "2024-03-03T09:00:00", end: "2024-03-03T09:30:00" },
-        },
-      },
-      {
-        resource: {
-          resourceType: "Condition",
-          meta: { profile: [QICORE_CONDITION] },
-          id: `${id}-${code}`,
-          subject: { reference: `Patient/${id}` },
-          clinicalStatus: { coding: [{ code: "active" }] },
-          verificationStatus: {
-            coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }],
-          },
-          code: { coding: [{ system: valueSet, code, display: code }] },
-        },
-      },
-    );
-    return b;
-  });
+  return bundles.map((bundle) => (isEnrolled(roster, patientId(bundle), "cms125") ? withTestQualifyingVisit(bundle) : bundle));
 }
 
 const officialExecutor = () => officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
@@ -291,8 +252,8 @@ for (const [measureId, expected] of Object.entries(EXPECTED)) {
 }
 
 test("ingest no longer puts the sample in CMS125's population: no Encounter is invented", { skip }, async () => {
-  // F1: the roster used to stamp a CPT 99213 visit on every listed patient, which is what admitted the
-  // four below. Without it, nobody in this Encounter-less sample is in the initial population.
+  // The roster used to stamp a CPT 99213 visit on every listed patient, which is what admitted the four
+  // below. Without it, nobody in this Encounter-less sample is in the initial population.
   const official = await officialFull("cms125", await liveBundles("cms125"));
   assert.equal(inIppCount(official), 0);
   for (const bundle of await liveBundles("cms125")) {
@@ -300,7 +261,7 @@ test("ingest no longer puts the sample in CMS125's population: no Encounter is i
   }
 });
 
-test("official cms125 with the population facts supplied: the two engines agree subject by subject", { skip }, async () => {
+test("official cms125 with a test-data visit: the two engines agree subject by subject", { skip }, async () => {
   const bundles = withPopulationFacts(await liveBundles("cms125"));
   const official = await officialOutcomes("cms125", bundles);
   const authored = await authoredOutcomes("cms125", bundles);

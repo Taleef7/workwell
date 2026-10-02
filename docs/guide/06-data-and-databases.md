@@ -59,9 +59,10 @@ computes. The integration is one seam with three interchangeable things behind i
 simulator, our own shim over the MariaDB, and a real tenant — so proving the contract against the
 cheap one proves it for the expensive one.
 
-**Measured on real WebChart data:** the sample carries no encounters, so official CMS125 admits
-nobody until a qualifying visit is supplied as test data (ingest never invents one). With it, official
-CMS125 admits 4 of 56 subjects to its initial population and agrees with the authored engine on all 56. Official CMS122 admits 0 of 56 — the
+**Measured on real WebChart data:** the sample carries no encounters, so official CMS125
+admits nobody until a qualifying visit is supplied as test data (ingest never invents one). With
+it, official CMS125 admits 4 of 56 subjects to its initial population and agrees with the
+authored engine on all 56. Official CMS122 admits 0 of 56 — the
 seed has no Conditions, and that measure's population requires a diabetes diagnosis the roster
 must never fabricate. That is a data gap, not a divergence, and the flip-snapshot tool reports it
 as inconclusive rather than as a failure.

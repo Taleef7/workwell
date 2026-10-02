@@ -65,7 +65,7 @@ import { qdmEntriesFor, translateQdm, type QdmTranslation } from "./qdm-entries.
  *
  * For a `ROSTER_ELIGIBLE_MEASURES` measure (an occupational program measure, never a CMS eCQM) the
  * pipeline evaluates `stampEnrollment(bundle, …)`, which overlays a roster-derived enrollment Condition.
- * Codex (#361) asked for that overlay to be reapplied at export so a receiver recalculates our answer.
+ * Review (#361) asked for that overlay to be reapplied at export so a receiver recalculates our answer.
  * **We deliberately do not**, on the ADR-037 rule that this exporter normalizes and never fabricates:
  * program membership is not patient data, and a receiver has no way to tell which entry was inferred.
  * Exporting real data and naming the omission is the lesser evil.

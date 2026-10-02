@@ -122,15 +122,15 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
 
    ```bash
    pnpm flip-snapshot --measure <id> --source synthetic --eval <YYYY-MM-DD>   # stack with no WORKWELL_WEBCHART_*
-   pnpm evaluate:webchart-live --list-patients > roster.json                   # WebChart stack: map the tenant's ids
    WORKWELL_WEBCHART_BASE_URL=… WORKWELL_WEBCHART_CLIENT_ID=… WORKWELL_WEBCHART_PRIVATE_KEY_B64=… \
-     pnpm flip-snapshot --measure <id> --source live --roster roster.json --eval <YYYY-MM-DD>
+     pnpm flip-snapshot --measure <id> --source live --eval <YYYY-MM-DD>       # WebChart stack
    ```
 
    Verdict **DO NOT FLIP** = official admits nobody while authored finds subjects (a data/mapping gap);
    **INCONCLUSIVE** = neither finds anyone; no verdict = proceed. It exits 0; a human decides — never
    wire it into CI. `--source fixture` is not a substitute for `live`; `synthetic` is an
-   engine-agreement check, not a roster forecast.
+   engine-agreement check, not a roster forecast. No roster is needed: measures with an official
+   artifact are never roster-stamped, so a tenant with no qualifying encounters reads INCONCLUSIVE.
 
 3. **Check the numerator, not just membership** (ADR-044: CPT vs LOINC mammograms made screened women
    OVERDUE).

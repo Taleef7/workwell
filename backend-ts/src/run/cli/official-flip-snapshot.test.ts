@@ -94,16 +94,11 @@ const base: MeasureSnapshot = {
   divergence: {},
 };
 
-test("ADR-044: --source live REFUSES without a tenant roster (the false all-clear)", () => {
-  // Review, #355 — the most serious defect in this PR. The committed `enrollment-roster.json` is keyed by
-  // the dev-DB's `wc-N` ids, and `stampEnrollment` is a silent NO-OP for any subject absent from the
-  // roster. Against a real tenant nobody would be enrolled, the OH roster's synthesized CPT-99213
-  // Encounter would never be stamped, authored cms125's `Has Qualifying Visit` would fail for everyone,
-  // and `authoredActionable` would collapse to 0 — flipping the verdict from DO NOT FLIP to
-  // "inert rather than wrong" on precisely the configuration ADR-042/044 document as broken.
-  assert.throws(() => parseArgs(["--measure", "cms125", "--source", "live"]), /requires --roster/);
-  assert.doesNotThrow(() => parseArgs(["--measure", "cms125", "--source", "live", "--roster", "r.json"]));
-  // The other two sources legitimately have their own rosters (fixture) or none (synthetic).
+test("--roster is refused by name: no measure this tool snapshots is ever roster-stamped", () => {
+  // Every measure here has an official artifact, and none is roster-eligible, so a roster could never
+  // change a verdict. An operator following old instructions is told so rather than silently ignored.
+  assert.throws(() => parseArgs(["--measure", "cms125", "--source", "live", "--roster", "r.json"]), /no longer used/);
+  assert.doesNotThrow(() => parseArgs(["--measure", "cms125", "--source", "live"]));
   assert.doesNotThrow(() => parseArgs(["--measure", "cms125", "--source", "fixture"]));
   assert.doesNotThrow(() => parseArgs(["--measure", "cms125"]));
 });

@@ -33,7 +33,7 @@ test("evaluateDevDb: the sample produces real (non-MISSING_DATA) outcomes — th
   const r = await devDb();
   const nonMissing = r.whitelist.reduce((a, m) => a + (m.total - m.counts.MISSING_DATA), 0);
   // 27: cms125 contributes none, because the sample carries no encounters and the roster no longer stamps
-  // a visit (F1). It was 31 while the stamp admitted wc-8/36/45/47.
+  // a visit. It was 31 while the stamp admitted wc-8/36/45/47.
   assert.equal(nonMissing, 27, `expected the deterministic dev-DB real-outcome total, got ${nonMissing}`);
   // at least one COMPLIANT and one OVERDUE somewhere across the whitelist
   assert.ok(r.whitelist.some((m) => m.counts.COMPLIANT > 0), "expected some COMPLIANT");

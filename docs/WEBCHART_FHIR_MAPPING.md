@@ -372,7 +372,7 @@ with no live API and **no MariaDB driver**:
 - **PR-3 — demo CLI.** `pnpm evaluate:webchart-devdb [--date YYYY-MM-DD]`
   (`webchart/devdb-cli.ts`) evaluates the committed sample across the whitelist and prints a per-measure
   outcome summary (naming the excluded measures — no silent caps) — the showable artifact. On the sample it
-  reports **28 real (non-MISSING_DATA) outcomes** (e.g. `obesity_bmi` 5 COMPLIANT / 8 OVERDUE / 43
+  reports **27 real (non-MISSING_DATA) outcomes** (e.g. `obesity_bmi` 5 COMPLIANT / 8 OVERDUE / 43
   MISSING_DATA over 56 patients).
 
 **Crosswalk firmed to MIE's actual codes.** The dev DB records **LDL as LOINC `2089-1`** and **BP as the
