@@ -7,6 +7,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-02
 
+- **"Most recent" no longer depends on the order results arrive in (#749).** Every authored measure
+  sorted its results by a FHIR element the engine cannot compare, so the sort reversed its input and
+  `Last()` returned the first result listed: the oldest, for data listed oldest-first. Same three BP
+  readings, two answers (OVERDUE oldest-first, COMPLIANT newest-first). The sort now keys on the CQL
+  date (`.value`) in every authored measure and the CQL generator. Maui's six run CMS's own CQL and the
+  TWH corpus emits one event per person, so neither showed it; the WebChart dev DB's full history did.
+  The seed rewrites, audited, any stored CQL that is exactly the pre-fix text (the MAT export, audit
+  packet and MCP tools hand that text out); an edited text is left alone.
 - **What WebChart can and cannot do, checked rather than assumed.** The teatea trial (RC202509), the
   docs and MIE's dev database were checked read-only. Findings:
   - WebChart has no CDS Hooks client.

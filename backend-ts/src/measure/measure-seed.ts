@@ -221,6 +221,51 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
   }
 }
 
+/**
+ * #749: before the fix every authored "most recent" define sorted by `(… as FHIR.dateTime)` with no
+ * `.value`, a key the engine cannot order. Runs use the compiled ELM, but the stored `cqlText` is what
+ * the MAT export, the audit packet and the MCP tools hand out, so a stack seeded before the fix kept
+ * the old sort there. `pre749Cql` reconstructs the text the seed wrote then from today's text.
+ */
+const PRE_749_SORT = /(sort by \((?:performed|occurrence|effective) as FHIR\.dateTime\))\.value/g;
+
+export function pre749Cql(current: string): string | null {
+  const old = current.replace(PRE_749_SORT, "$1");
+  return old === current ? null : old;
+}
+
+const normCql = (s: string) => s.replace(/\r\n/g, "\n").trimEnd();
+
+/**
+ * Rewrites a row's CQL to today's text only where it is exactly what the seed wrote before #749; a
+ * text anyone edited is left alone. Audit-first, and audited on every rewrite: `hasAuditEvent` keys on
+ * (event, version) only, so an earlier seed repair of the same version would otherwise hide this one.
+ */
+async function repairPre749SortCql(
+  store: MeasureStore,
+  cqlOf: (measureId: string) => string,
+  events: CaseEventStore,
+): Promise<void> {
+  for (const m of MEASURE_CATALOG) {
+    const current = cqlOf(m.id);
+    const old = current ? pre749Cql(current) : null;
+    if (!old) continue;
+    const row = await store.getLatest(m.id);
+    if (!row || normCql(row.cqlText) !== normCql(old)) continue;
+    await events.appendAudit({
+      eventType: "MEASURE_SEED_UPDATED",
+      entityType: "measure_version",
+      entityId: row.versionId,
+      actor: "system",
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: row.versionId,
+      payload: { measureId: m.id, fields: ["cqlText"], reason: "most-recent sort (#749)" },
+    });
+    await store.updateCql(m.id, current);
+  }
+}
+
 async function repairHypertensionSeedRow(
   store: MeasureStore,
   cqlOf: (measureId: string) => string,
@@ -273,6 +318,8 @@ async function repairHypertensionSeedRow(
  * `cqlOf` reconstructs CQL text for runnable measures.
  */
 export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: string) => string, events: CaseEventStore): Promise<void> {
+  // First, so a hypertension row the seed wrote before #749 reads as current to the repair below.
+  await repairPre749SortCql(store, cqlOf, events);
   await repairHypertensionSeedRow(store, cqlOf, events);
   const empty = await store.isEmpty();
   for (const m of MEASURE_CATALOG) {

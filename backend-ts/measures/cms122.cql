@@ -68,14 +68,14 @@ define "Most Recent HbA1c":
   Last([Observation: "HbA1c Laboratory Test"] O
     where O.status.value in {'final', 'amended', 'corrected'}
       and FHIRHelpers.ToDateTime(O.effective as FHIR.dateTime) in "Measurement Period"
-    sort by (effective as FHIR.dateTime))
+    sort by (effective as FHIR.dateTime).value)
 
 define "Most Recent GMI":
   Last([Observation] O
     where exists(O.code.coding c where c.system = 'http://loinc.org' and c.code = '97506-0')
       and O.status.value in {'final', 'amended', 'corrected'}
       and FHIRHelpers.ToDateTime(O.effective as FHIR.dateTime) in "Measurement Period"
-    sort by (effective as FHIR.dateTime))
+    sort by (effective as FHIR.dateTime).value)
 
 define "Most Recent Glycemic Assessment":
   if "Most Recent HbA1c" is null then "Most Recent GMI"

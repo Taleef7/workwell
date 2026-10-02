@@ -21,7 +21,7 @@ define "Most Recent LDL Screening Date":
   Last(
     [Procedure] P
       where exists(P.code.coding C where C.system = 'urn:workwell:vs:ldl-labs' and C.code = 'ldl-lab')
-      sort by (performed as FHIR.dateTime)
+      sort by (performed as FHIR.dateTime).value
   ).performed as FHIR.dateTime
 
 define "Days Since Last LDL Screening":

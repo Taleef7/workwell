@@ -21,7 +21,7 @@ define "Most Recent HbA1c Date":
   Last(
     [Procedure] P
       where exists(P.code.coding C where C.system = 'urn:workwell:vs:hba1c-labs' and C.code = 'hba1c-lab')
-      sort by (performed as FHIR.dateTime)
+      sort by (performed as FHIR.dateTime).value
   ).performed as FHIR.dateTime
 
 define "Days Since Last HbA1c":

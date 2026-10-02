@@ -201,7 +201,7 @@ define "Most Recent Event Date":
   Last(
     [Procedure] P
       where exists(P.code.coding C where C.system = '${b.event.valueSet}' and C.code = '${b.event.code}')
-      sort by (performed as FHIR.dateTime)
+      sort by (performed as FHIR.dateTime).value
   ).performed as FHIR.dateTime
 
 define "Days Since Last Event":
