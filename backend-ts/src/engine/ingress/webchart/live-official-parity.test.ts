@@ -39,7 +39,7 @@ import { normalizeWebChartBundle } from "./normalize.ts";
 import { officialMeasureExecutor, type OfficialBatchSubject } from "../../../wiring/official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "../../../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../../../wiring/official-artifacts.ts";
-import { parseEnrollmentRoster, stampEnrollment } from "../enrollment/roster.ts";
+import { parseEnrollmentRoster, isEnrolled } from "../enrollment/roster.ts";
 import { ECQM_CANONICAL_CODES, MAMMOGRAPHY_PROCEDURE_CPT } from "../../cql/bundled-ecqm-expansions.ts";
 
 const DIR = fileURLToPath(new URL("../../../../spike/webchart/", import.meta.url));
@@ -58,6 +58,32 @@ const skip = sidecarsPresent ? false : "run 'pnpm vendor:official' to fetch the 
 
 type Res = Record<string, unknown>;
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+/**
+ * A qualifying office visit inside the measurement period, added as TEST DATA for each patient the
+ * committed roster lists. The sample carries no Encounter and ingest no longer invents one (F1); this
+ * file's subject is how normalization treats sex and screenings, so it supplies the third conjunct of
+ * CMS125's initial population itself, exactly as the roster stamp used to.
+ */
+function withQualifyingVisit(bundle: unknown): unknown {
+  const b = clone(bundle) as { entry: Array<{ resource: Res }> };
+  const patient = b.entry.find((e) => e.resource?.["resourceType"] === "Patient")?.resource;
+  const id = typeof patient?.["id"] === "string" ? (patient["id"] as string) : undefined;
+  if (!id || !isEnrolled(roster, id, "cms125")) return bundle;
+  b.entry.push({
+    resource: {
+      resourceType: "Encounter",
+      meta: { profile: ["http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"] },
+      id: `${id}-test-visit`,
+      status: "finished",
+      class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" },
+      subject: { reference: `Patient/${id}` },
+      type: [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213" }] }],
+      period: { start: "2024-03-03T09:00:00", end: "2024-03-03T09:30:00" },
+    },
+  });
+  return b;
+}
 
 function resourcesOf(payload: unknown): Res[] {
   const entries = (payload as { entry?: Array<{ resource?: Res }> }).entry ?? [];
@@ -103,7 +129,7 @@ function liveBundles(mutate: (bundle: unknown) => unknown = (b) => b): unknown[]
   return asLiveServerWouldSend()
     .map((p) => normalizeWebChartBundle(p))
     .map((b) => mutate(b))
-    .map((b) => stampEnrollment(b as never, "cms125", roster, { evaluationDate: EVAL }));
+    .map((b) => withQualifyingVisit(b));
 }
 
 /**
@@ -394,7 +420,7 @@ test("the derived Observation actually satisfies the OFFICIAL NUMERATOR, not mer
   const withScreening = asLiveServerWouldSend()
     .map((p) => screened({ resourceType: "Bundle", type: "collection", entry: resourcesOf(p).map((resource) => ({ resource })) }))
     .map((b) => normalizeWebChartBundle(b))
-    .map((b) => stampEnrollment(b as never, "cms125", roster, { evaluationDate: EVAL }));
+    .map((b) => withQualifyingVisit(b));
 
   const numerator = async (bundles: readonly unknown[]) => {
     const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });

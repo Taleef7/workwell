@@ -90,9 +90,9 @@ export function parseArgs(argv: readonly string[]): SnapshotArgs {
 }
 
 /** Shared tail of both WebChart-shaped paths: roster-stamp each bundle and key it by `Patient.id`. */
-function stampAll(bundles: readonly unknown[], measureId: string, roster: EnrollmentRoster, evaluationDate: string) {
+function stampAll(bundles: readonly unknown[], measureId: string, roster: EnrollmentRoster) {
   return bundles.map((bundle) => {
-    const stamped = stampEnrollment(bundle as never, measureId, roster, { evaluationDate });
+    const stamped = stampEnrollment(bundle as never, measureId, roster);
     const id = ((stamped as { entry: Array<{ resource: { resourceType: string; id?: string } }> }).entry.find(
       (e) => e.resource.resourceType === "Patient",
     )?.resource.id ?? "unknown") as string;
@@ -122,7 +122,7 @@ async function liveSubjects(
   }
   const roster = parseEnrollmentRoster(JSON.parse(readFileSync(rosterPath, "utf8")));
   const bundles = await webChartDataSource(cfg, httpWebChartClient(cfg)).loadBundles();
-  const subjects = stampAll(bundles, measureId, roster, evaluationDate);
+  const subjects = stampAll(bundles, measureId, roster);
   // A roster that matches no subject is indistinguishable downstream from a tenant nobody is enrolled
   // in, and it is the likely shape of a copy-pasted or stale file. Refuse rather than report on it.
   if (subjects.length > 0 && !subjects.some((s) => isEnrolled(roster, s.subjectId, measureId))) {
@@ -147,7 +147,7 @@ async function fixtureSubjects(measureId: string, evaluationDate: string): Promi
   const payloads = JSON.parse(readFileSync(path.join(SPIKE_DIR, "devdb-patients.json"), "utf8")) as unknown[];
   const roster = parseEnrollmentRoster(JSON.parse(readFileSync(path.join(SPIKE_DIR, "enrollment-roster.json"), "utf8")));
   const source = webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient(payloads));
-  return stampAll(await source.loadBundles(), measureId, roster, evaluationDate);
+  return stampAll(await source.loadBundles(), measureId, roster);
 }
 
 /**

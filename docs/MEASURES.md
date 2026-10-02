@@ -472,7 +472,8 @@ Each outcome evidence payload includes:
 - **Live WebChart enrollment and groups (ADR-033).** When the live tenant seam is configured,
   `WORKWELL_WEBCHART_ENROLLMENT_JSON` may map raw Patient ids to explicitly enrolled measure ids.
   Otherwise the safe demo default enrolls every live subject in every `ROSTER_ELIGIBLE_MEASURES`
-  member. Enrollment only supplies occupational-health context: each measure's CQL age, sex,
+  member. No CMS eCQM is on that list, so nothing is ever stamped for one (until 2026-10-02 the roster
+  stamped a CPT 99213 visit for cms125). Enrollment only supplies occupational-health context: each measure's CQL age, sex,
   diagnosis, visit, exclusion, and clinical-data gates remain authoritative, and CQL alone sets
   `Outcome Status`. The demo-segment baseline (**All Employees**) now covers the fixed live site
   `WebChart` out of the box (`WEBCHART_LIVE_SITE`, folded into the seed's site list), so on any

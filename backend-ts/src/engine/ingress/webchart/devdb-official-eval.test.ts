@@ -42,8 +42,9 @@
  * wc-36, wc-45, wc-47). They did not before this commit: official found 0 actionable and put everyone
  * out of the initial population, whose official definition is
  * `AgeAt(end of MP) in [42..74] AND us-core-sex = SNOMED 248152002 AND exists Qualifying Encounters`.
- * Age passed (those four are 44–54) and the encounter passed (the OH roster stamps a CPT 99213 office
- * visit inside the period). The single failing conjunct was the extension: **0 of 56 patients carried
+ * Age passed (those four are 44–54) and the encounter passed (a CPT 99213 office visit inside the
+ * period, which this file now supplies as test data: the sample carries no encounters, and ingest no longer
+ * invents one). The single failing conjunct was the extension: **0 of 56 patients carried
  * `us-core-sex`**, because both places mapping WebChart's real `patients.sex` column into FHIR emitted
  * `Patient.gender` and stopped there. Both now emit both, and the fixture was regenerated from the dev DB
  * — byte-identical but for 28 added extensions, so nothing else about the sample moved.
@@ -75,7 +76,8 @@ import path from "node:path";
 import type { MeasureOutcome, OutcomeStatus } from "@work-well/measure-engine";
 import { webChartDataSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
-import { parseEnrollmentRoster, stampEnrollment } from "../enrollment/roster.ts";
+import { parseEnrollmentRoster, stampEnrollment, isEnrolled } from "../enrollment/roster.ts";
+import { MEASURE_BINDINGS } from "../../synthetic/measure-bindings.ts";
 import { officialMeasureExecutor, type OfficialBatchSubject } from "../../../wiring/official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "../../../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../../../wiring/official-artifacts.ts";
@@ -97,8 +99,13 @@ const EVAL = "2024-06-01";
  * change the day the measure is routed, and what it changes from and to.
  */
 const EXPECTED: Record<string, { official: Record<string, number>; divergence: Record<string, string> }> = {
-  cms125: { official: { MISSING_DATA: 52, OVERDUE: 4 }, divergence: {} },
+  // The real path: the sample carries no Encounter, so official CMS125 admits nobody, and the authored
+  // engine (no stamped enrollment) agrees. That is the true answer for this data.
+  cms125: { official: { MISSING_DATA: 56 }, divergence: {} },
 };
+
+/** With the population facts supplied as test data (`withPopulationFacts`), the two engines agree here. */
+const EXPECTED_WITH_POPULATION_FACTS = { official: { MISSING_DATA: 52, OVERDUE: 4 }, divergence: {} };
 
 /** The subjects the authored engine finds actionable — official must find exactly these. */
 const CMS125_ACTIONABLE = ["wc-8", "wc-36", "wc-45", "wc-47"];
@@ -135,7 +142,55 @@ function patientId(bundle: unknown): string {
 async function liveBundles(measureId: string): Promise<unknown[]> {
   const source = webChartDataSource({ baseUrl: "x", apiKey: "k" }, fixtureWebChartClient(payloads));
   const bundles = await source.loadBundles();
-  return bundles.map((b) => stampEnrollment(b as never, measureId, roster, { evaluationDate: EVAL }));
+  return bundles.map((b) => stampEnrollment(b as never, measureId, roster));
+}
+
+const QICORE_CONDITION = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition";
+const QICORE_ENCOUNTER = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter";
+
+/**
+ * The two facts CMS125's initial population needs that the dev-DB sample does not carry, supplied as TEST
+ * DATA for each patient the committed roster lists: a qualifying CPT 99213 office visit inside the
+ * measurement period, and the authored measure's enrollment Condition. Ingest used to stamp both
+ * (`stampEnrollment`, before F1); it no longer invents either, so a real tenant must supply real
+ * encounters. These are the same resources the stamp produced, so the numerator tests below keep pinning
+ * exactly what they pinned before.
+ */
+function withPopulationFacts(bundles: readonly unknown[]): unknown[] {
+  const { code, valueSet } = MEASURE_BINDINGS["cms125"]!.enrollment;
+  return bundles.map((bundle) => {
+    const id = patientId(bundle);
+    if (!isEnrolled(roster, id, "cms125")) return bundle;
+    const b = clone(bundle) as { entry: Array<{ resource: unknown }> };
+    b.entry.push(
+      {
+        resource: {
+          resourceType: "Encounter",
+          meta: { profile: [QICORE_ENCOUNTER] },
+          id: `${id}-test-visit`,
+          status: "finished",
+          class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" },
+          subject: { reference: `Patient/${id}` },
+          type: [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213", display: "Office visit, established patient" }] }],
+          period: { start: "2024-03-03T09:00:00", end: "2024-03-03T09:30:00" },
+        },
+      },
+      {
+        resource: {
+          resourceType: "Condition",
+          meta: { profile: [QICORE_CONDITION] },
+          id: `${id}-${code}`,
+          subject: { reference: `Patient/${id}` },
+          clinicalStatus: { coding: [{ code: "active" }] },
+          verificationStatus: {
+            coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }],
+          },
+          code: { coding: [{ system: valueSet, code, display: code }] },
+        },
+      },
+    );
+    return b;
+  });
 }
 
 const officialExecutor = () => officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
@@ -235,8 +290,28 @@ for (const [measureId, expected] of Object.entries(EXPECTED)) {
   });
 }
 
+test("ingest no longer puts the sample in CMS125's population: no Encounter is invented", { skip }, async () => {
+  // F1: the roster used to stamp a CPT 99213 visit on every listed patient, which is what admitted the
+  // four below. Without it, nobody in this Encounter-less sample is in the initial population.
+  const official = await officialFull("cms125", await liveBundles("cms125"));
+  assert.equal(inIppCount(official), 0);
+  for (const bundle of await liveBundles("cms125")) {
+    assert.ok(!resources(bundle).some((r) => r["resourceType"] === "Encounter"), `${patientId(bundle)} gained an Encounter`);
+  }
+});
+
+test("official cms125 with the population facts supplied: the two engines agree subject by subject", { skip }, async () => {
+  const bundles = withPopulationFacts(await liveBundles("cms125"));
+  const official = await officialOutcomes("cms125", bundles);
+  const authored = await authoredOutcomes("cms125", bundles);
+  assert.deepEqual(distribution(official), EXPECTED_WITH_POPULATION_FACTS.official);
+  const divergence: Record<string, string> = {};
+  for (const [subjectId, o] of official) if (authored.get(subjectId) !== o) divergence[subjectId] = `${authored.get(subjectId)}→${o}`;
+  assert.deepEqual(divergence, EXPECTED_WITH_POPULATION_FACTS.divergence);
+});
+
 test("official cms125 finds the same four actionable subjects the authored engine does", { skip }, async () => {
-  const official = await officialOutcomes("cms125", await liveBundles("cms125"));
+  const official = await officialOutcomes("cms125", withPopulationFacts(await liveBundles("cms125")));
   // Non-degeneracy, kept as insurance rather than claimed as the guard: the `deepEqual` below already
   // implies it (four non-MISSING_DATA ids out of 56 forces two distinct values), so this line cannot fail
   // alone. It earns its place only if that comparison is ever loosened. The docs should not cite it as
@@ -261,7 +336,7 @@ test("official cms125 finds the same four actionable subjects the authored engin
  */
 /** The same live path with `us-core-sex` removed — the pre-fix state, and the third-party-server state. */
 async function strippedOfSex(): Promise<unknown[]> {
-  return (await liveBundles("cms125")).map((bundle) => {
+  return withPopulationFacts(await liveBundles("cms125")).map((bundle) => {
     const b = clone(bundle);
     for (const r of resources(b)) {
       if (r["resourceType"] !== "Patient") continue;
@@ -386,7 +461,7 @@ const officialObservation = (subjectId: string, withCategory: boolean) => ({
 });
 
 async function withResourcesOn(subjectId: string, extra: readonly unknown[]): Promise<unknown[]> {
-  return (await liveBundles("cms125")).map((bundle) => {
+  return withPopulationFacts(await liveBundles("cms125")).map((bundle) => {
     if (patientId(bundle) !== subjectId) return bundle;
     const b = clone(bundle) as { entry: Array<{ resource: unknown }> };
     for (const resource of extra) b.entry.push({ resource: clone(resource) });
