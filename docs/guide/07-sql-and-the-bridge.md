@@ -45,7 +45,7 @@ lives there, and no compliance decision is ever made by a query.
 `wcdb-fhir-shim/` is a small standalone service and the one place in the repository allowed to hold
 a MariaDB driver (`mysql2`, approved by ADR-034 for that package alone — `backend-ts` is
 deliberately driver-free). It reads the WebChart database directly, joins `patients` to
-`observations_current` to `observation_codes`, and turns each row into a FHIR resource carrying
+`observations` to `observation_codes`, and turns each row into a FHIR resource carrying
 real LOINC, CPT and HCPCS codes. Then it serves those resources over exactly the endpoints a real
 WebChart tenant serves, so the app talks to it through one configuration value and cannot tell the
 difference. [Chapter 5](05-fhir.md) covers the mapping itself, including the two fields that turned
@@ -125,12 +125,12 @@ SELECT
 FROM (SELECT CAST(? AS DATE) AS eval_date) params
 CROSS JOIN patients p
 LEFT JOIN (
-  SELECT o.pat_id, MAX(DATE(COALESCE(o.obs_result_dt, o.obs_ts))) AS dt
-  FROM observations_current o
+  SELECT o.pat_id, MAX(DATE(o.observed_datetime)) AS dt
+  FROM observations o
   JOIN observation_codes oc ON oc.obs_code = o.obs_code
   WHERE oc.loinc_num IN ('85354-9','8480-6')
-    AND COALESCE(o.obs_result_dt, o.obs_ts) IS NOT NULL
-    AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) >= DATE('0001-01-01')
+    AND o.obs_status IN ('', 'F')
+    AND DATE(o.observed_datetime) >= DATE('0001-01-01')
   GROUP BY o.pat_id
 ) last_ev ON last_ev.pat_id = p.pat_id
 WHERE p.is_patient = 1

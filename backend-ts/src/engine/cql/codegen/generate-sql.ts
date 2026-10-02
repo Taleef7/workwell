@@ -4,7 +4,10 @@
  *
  * The second backend beside `generate-cql.ts`: the SAME windowed-recency rule params that compile to
  * CQL also template to parameterized MariaDB SQL over the WebChart dev-DB schema
- * (`patients ⋈ observations_current ⋈ observation_codes`). Transpiling from RULE PARAMS — never from
+ * (`patients ⋈ observations ⋈ observation_codes`). `observations` is the result history (dated by
+ * `observed_datetime`; only a final result, status '' or 'F', counts, so a deleted row or an unknown
+ * status is never an event); `observations_current` is WebChart's latest-per-code cache, whose dates are
+ * cache-refresh times — never a source. Transpiling from RULE PARAMS — never from
  * CQL text — sidesteps CQL's three-valued-logic/interval semantics; equivalence is proven
  * EMPIRICALLY per measure by the golden-parity harness (the CQL engine over the shim's FHIR output
  * is the oracle — ADR-025: a measure that has never passed parity is never served by SQL).
@@ -85,12 +88,12 @@ function perPatientSelect(input: GenerateSqlInput): string {
 FROM (SELECT CAST(? AS DATE) AS eval_date) params
 CROSS JOIN patients p
 LEFT JOIN (
-  SELECT o.pat_id, MAX(DATE(COALESCE(o.obs_result_dt, o.obs_ts))) AS dt
-  FROM observations_current o
+  SELECT o.pat_id, MAX(DATE(o.observed_datetime)) AS dt
+  FROM observations o
   JOIN observation_codes oc ON oc.obs_code = o.obs_code
   WHERE oc.loinc_num IN (${loincs})
-    AND COALESCE(o.obs_result_dt, o.obs_ts) IS NOT NULL
-    AND DATE(COALESCE(o.obs_result_dt, o.obs_ts)) >= DATE('0001-01-01')
+    AND o.obs_status IN ('', 'F')
+    AND DATE(o.observed_datetime) >= DATE('0001-01-01')
   GROUP BY o.pat_id
 ) last_ev ON last_ev.pat_id = p.pat_id
 WHERE p.is_patient = 1`;

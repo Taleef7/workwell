@@ -72,8 +72,8 @@ test("parseIngestYaml rejects non-numeric observation values and non-sequence ob
 function dataTypeOf(field: string): string {
   if (field === "pat_id" || field === "obs_code") return "int";
   if (field === "is_patient") return "smallint";
-  if (field === "obs_result_dec") return "decimal";
-  if (field === "birth_date" || field === "obs_result_dt") return "datetime";
+  if (field === "obs_result") return "mediumtext";
+  if (field === "birth_date" || field === "observed_datetime") return "datetime";
   return "varchar";
 }
 
@@ -102,11 +102,11 @@ test("validateFieldTypes passes on the real dev-wcdb type vocabulary and catches
   assert.match(ok, /type-checked \d+ field/);
   // A ported/newer WebChart that kept the field name but re-typed it must fail BEFORE any write.
   const retyped = catalogOf(MODEL_TOUCHES);
-  const obs = retyped.get("observations_current")!;
-  obs.find((f) => f.field === "obs_result_dec")!.dataType = "varchar";
+  const obs = retyped.get("observations")!;
+  obs.find((f) => f.field === "observed_datetime")!.dataType = "varchar";
   assert.throws(
     () => validateFieldTypes(retyped, MODEL_TYPE_EXPECTATIONS),
-    /obs_result_dec.*varchar.*writes number/,
+    /observed_datetime.*varchar.*writes datetime/,
   );
   // An unknown vocabulary entry is skipped (lenient), not failed.
   const exotic = catalogOf(MODEL_TOUCHES);
@@ -116,7 +116,11 @@ test("validateFieldTypes passes on the real dev-wcdb type vocabulary and catches
 
 interface StubState {
   patients: Array<{ pat_id: number; first_name: string; last_name: string; birth: string }>;
-  obs: Array<{ pat_id: number; obs_code: number }>;
+  obs: Array<{ pat_id: number; obs_code: number; result: string; observed: string; name: string }>;
+  /** The last observation INSERT, whole, for the columns written as literals. */
+  obsInsertSql?: string;
+  /** Rows an older ingest left in WebChart's latest-value cache table. */
+  cacheObs?: Array<{ pat_id: number }>;
   executed: string[];
 }
 
@@ -146,7 +150,7 @@ function stubIngestDb(state: StubState, opts: { failOnInsertOfLastName?: string 
       }
       if (sql.includes("FROM observation_codes")) {
         const loinc = String(params[0]);
-        return loinc === "0000-0" ? [] : [{ obs_code: 500 + Number(loinc.split("-")[0]!.slice(0, 3)) }];
+        return loinc === "0000-0" ? [] : [{ obs_code: 500 + Number(loinc.split("-")[0]!.slice(0, 3)), obs_name: `Name ${loinc}` }];
       }
       throw new Error(`unexpected query: ${sql}`);
     },
@@ -165,12 +169,18 @@ function stubIngestDb(state: StubState, opts: { failOnInsertOfLastName?: string 
         });
         return { insertId: patId };
       }
-      if (sql.startsWith("INSERT INTO observations_current")) {
-        state.obs.push({ pat_id: Number(params[0]), obs_code: Number(params[1]) });
+      if (sql.startsWith("INSERT INTO observations ")) {
+        const [pat_id, obs_code, result, observed, name] = params as [number, number, string, string, string];
+        state.obs.push({ pat_id: Number(pat_id), obs_code: Number(obs_code), result, observed, name });
+        state.obsInsertSql = sql;
         return { affectedRows: 1 };
       }
-      if (sql.startsWith("DELETE FROM observations_current")) {
+      if (sql.startsWith("DELETE FROM observations ")) {
         state.obs = state.obs.filter((o) => o.pat_id !== Number(params[0]));
+        return { affectedRows: 1 };
+      }
+      if (sql.startsWith("DELETE FROM observations_current ")) {
+        state.cacheObs = (state.cacheObs ?? []).filter((o) => o.pat_id !== Number(params[0]));
         return { affectedRows: 1 };
       }
       if (sql.startsWith("DELETE FROM patients")) {
@@ -226,6 +236,34 @@ test("ingest inserts patients + observations, is idempotent, and manifest rollba
 
   const rb2 = await rollback(db, manifestFor(first));
   assert.equal(rb2.notFound.length, 4, "rolling back already-removed rows is a clean no-op");
+});
+
+test("an ingested observation lands in the result history the readers use, valued and dated as written", async () => {
+  const state: StubState = { patients: [], obs: [], executed: [] };
+  const db = stubIngestDb(state);
+  const doc = parseIngestYaml(EXAMPLE);
+  await ingest(db, doc);
+  const first = doc.patients[0]!.observations[0]!;
+  const row = state.obs[0]!;
+  assert.equal(row.result, String(first.value), "the value is kept, as WebChart's text result");
+  assert.equal(row.observed, `${first.date} 00:00:00`, "dated by when it was observed");
+  assert.equal(row.name, `Name ${first.loinc}`, "named like the code it carries");
+  // The readers count only a final result, so the status is written, not left to the column default.
+  const [, cols, vals] = state.obsInsertSql!.match(/\(([^)]*)\) VALUES \(([^)]*)\)/)!;
+  const at = cols!.split(",").map((c) => c.trim()).indexOf("obs_status");
+  assert.ok(at >= 0, "the INSERT names obs_status");
+  assert.equal(vals!.split(",")[at]!.trim(), "'F'", "written as a final result");
+  assert.ok(!state.executed.some((s) => s.includes("observations_current")), "nothing is written to the cache table");
+});
+
+test("rollback also clears the cache-table rows an older ingest wrote", async () => {
+  const state: StubState = { patients: [], obs: [], executed: [] };
+  const db = stubIngestDb(state);
+  const rep = await ingest(db, parseIngestYaml(EXAMPLE));
+  state.cacheObs = rep.created.map((c) => ({ pat_id: c.patId }));
+  await rollback(db, manifestFor(rep));
+  assert.equal(state.cacheObs.length, 0);
+  assert.equal(state.obs.length, 0);
 });
 
 test("rollback never deletes a row the manifest didn't create: pre-existing collisions and reused pat_ids survive", async () => {
