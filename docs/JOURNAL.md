@@ -15,6 +15,18 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   TWH corpus emits one event per person, so neither showed it; the WebChart dev DB's full history did.
   The seed rewrites, audited, any stored CQL that is exactly the pre-fix text (the MAT export, audit
   packet and MCP tools hand that text out); an edited text is left alone.
+- **What WebChart can and cannot do, checked rather than assumed.** The teatea trial (RC202509), the
+  docs and MIE's dev database were checked read-only. Findings:
+  - WebChart has no CDS Hooks client.
+  - Bulk export works, per partition, with `_since`.
+  - Appointments, tasks and slots are not in FHIR.
+  - FHIR writes only Patient, Condition and Claim.
+  - The PCP and the payer type are not exposed.
+  - Most observations are uncoded.
+  - The API terms forbid persistent storage and cap calls at 15,000 a day.
+
+  The facts are in `WEBCHART_API_ASSUMPTIONS_2026-07.md` (two rows corrected: `_count` is refused, `_since`
+  works); six questions for MIE are in `OPEN_QUESTIONS.md` §4.
 
 ## 2026-10-01
 
