@@ -117,10 +117,14 @@ function main(): void {
   // offset (an offset is required only when a time-of-day is present). The recency measures use the day,
   // and the dev-DB timestamps carry no reliable zone, so date-only is both FHIR-valid and honest.
   const observations = queryJson(
-    `SELECT JSON_OBJECT('pat_id',o.pat_id,'loinc',oc.loinc_num,'name',oc.obs_name,'value',o.obs_result_dec,` +
-      `'dt',DATE_FORMAT(COALESCE(o.obs_result_dt,o.obs_ts),'%Y-%m-%d')) ` +
-      `FROM observations_current o JOIN observation_codes oc ON oc.obs_code=o.obs_code ` +
-      `WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' ORDER BY o.pat_id`,
+    // `observations` is the result history; `observations_current` is WebChart's latest-per-code cache,
+    // whose values are NULL on the seed and whose `obs_ts` is the cache-refresh time. Only a plain
+    // number in the text `obs_result` becomes a value.
+    `SELECT JSON_OBJECT('pat_id',o.pat_id,'loinc',oc.loinc_num,'name',oc.obs_name,` +
+      `'value',CASE WHEN o.obs_result REGEXP '^-?[0-9]+(\\\\.[0-9]+)?$' THEN CAST(o.obs_result AS DECIMAL(20,4)) END,` +
+      `'dt',DATE_FORMAT(o.observed_datetime,'%Y-%m-%d')) ` +
+      `FROM observations o JOIN observation_codes oc ON oc.obs_code=o.obs_code ` +
+      `WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' AND o.obs_status<>'DELETED' ORDER BY o.pat_id, o.obs_id`,
   );
   const procedures = queryJson(
     `SELECT JSON_OBJECT('pat_id',pat_id,'cpt',cpt_code,'dt',DATE_FORMAT(service_date,'%Y-%m-%d')) ` +

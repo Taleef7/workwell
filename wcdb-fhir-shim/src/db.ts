@@ -99,10 +99,14 @@ export function createDb(cfg: DbConfig = configFromEnv()): ShimDb {
     },
     async observationsForPatient(patId) {
       const [rows] = await pool.query(
-        "SELECT o.pat_id AS pat_id, oc.loinc_num AS loinc, oc.obs_name AS name, o.obs_result_dec AS value, " +
-          "DATE_FORMAT(COALESCE(o.obs_result_dt,o.obs_ts),'%Y-%m-%d') AS dt " +
-          "FROM observations_current o JOIN observation_codes oc ON oc.obs_code=o.obs_code " +
-          "WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' AND o.pat_id=? ORDER BY o.id",
+        // `observations` is the result history; `observations_current` is WebChart's latest-per-code cache,
+        // whose value columns are NULL on the seed and whose `obs_ts` is the cache-refresh time.
+        // `obs_result` is text: only a plain number becomes a value, so nothing reads as 0.
+        "SELECT o.pat_id AS pat_id, oc.loinc_num AS loinc, oc.obs_name AS name, " +
+          "CASE WHEN o.obs_result REGEXP '^-?[0-9]+(\\\\.[0-9]+)?$' THEN CAST(o.obs_result AS DECIMAL(20,4)) END AS value, " +
+          "DATE_FORMAT(o.observed_datetime,'%Y-%m-%d') AS dt " +
+          "FROM observations o JOIN observation_codes oc ON oc.obs_code=o.obs_code " +
+          "WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' AND o.obs_status<>'DELETED' AND o.pat_id=? ORDER BY o.obs_id",
         [patId],
       );
       return rows as ObservationRow[];

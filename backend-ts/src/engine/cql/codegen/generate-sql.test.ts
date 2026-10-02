@@ -32,6 +32,16 @@ test("windowed-recency SQL carries the CQL banding thresholds and LOINC set", ()
   }
 });
 
+test("the last event is read from the result history, not WebChart's latest-value cache", () => {
+  const g = generateSql(HYPERTENSION);
+  for (const sql of [g.perPatient, g.singlePatient, g.cohort]) {
+    assert.match(sql, /FROM observations o\b/);
+    assert.ok(!sql.includes("observations_current"), "the cache's dates are refresh times, not observation times");
+    assert.match(sql, /MAX\(DATE\(o\.observed_datetime\)\)/, "dated by when it was observed");
+    assert.match(sql, /o\.obs_status <> 'DELETED'/, "a superseded row is not an event");
+  }
+});
+
 test("grace period folds into the OVERDUE threshold only", () => {
   const g = generateSql({ ...HYPERTENSION, rule: { type: "windowed-recency", windowDays: 365, dueSoonDays: 30, gracePeriodDays: 14 } });
   assert.match(g.perPatient, /> 379 THEN 'OVERDUE'/);

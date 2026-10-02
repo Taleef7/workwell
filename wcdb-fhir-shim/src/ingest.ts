@@ -63,8 +63,8 @@ export interface IngestDoc {
 /** The exact (object, field) surface ingest writes/reads — validated against the model catalog. */
 export const MODEL_TOUCHES: Record<string, string[]> = {
   patients: ["pat_id", "first_name", "last_name", "sex", "birth_date", "is_patient"],
-  observations_current: ["pat_id", "obs_code", "obs_result_dec", "obs_result_dt"],
-  observation_codes: ["obs_code", "loinc_num"],
+  observations: ["pat_id", "obs_code", "obs_result", "observed_datetime", "obs_name"],
+  observation_codes: ["obs_code", "loinc_num", "obs_name"],
 };
 
 /** The value kind ingest writes into each touched field — checked against `model.data_type`. */
@@ -77,13 +77,14 @@ export const MODEL_TYPE_EXPECTATIONS: Record<string, Record<string, ValueKind>> 
     birth_date: "datetime",
     is_patient: "number",
   },
-  observations_current: {
+  observations: {
     pat_id: "number",
     obs_code: "number",
-    obs_result_dec: "number",
-    obs_result_dt: "datetime",
+    obs_result: "string",
+    observed_datetime: "datetime",
+    obs_name: "string",
   },
-  observation_codes: { obs_code: "number", loinc_num: "string" },
+  observation_codes: { obs_code: "number", loinc_num: "string", obs_name: "string" },
 };
 
 const LOINC_SHAPE = /^[0-9]{1,7}-[0-9]$/;
@@ -179,9 +180,9 @@ async function findPatientId(db: IngestDb, p: IngestPatient): Promise<number | u
   return rows.length ? Number(rows[0]!.pat_id) : undefined;
 }
 
-async function obsCodeForLoinc(db: IngestDb, loinc: string): Promise<number> {
+async function obsCodeForLoinc(db: IngestDb, loinc: string): Promise<{ code: number; name: string }> {
   const rows = await db.queryRows(
-    "SELECT obs_code FROM observation_codes WHERE loinc_num=? ORDER BY obs_code LIMIT 1",
+    "SELECT obs_code, obs_name FROM observation_codes WHERE loinc_num=? ORDER BY obs_code LIMIT 1",
     [loinc],
   );
   if (!rows.length) {
@@ -190,7 +191,7 @@ async function obsCodeForLoinc(db: IngestDb, loinc: string): Promise<number> {
         `Pick a code the WebChart dictionary already carries.`,
     );
   }
-  return Number(rows[0]!.obs_code);
+  return { code: Number(rows[0]!.obs_code), name: String(rows[0]!.obs_name ?? "") };
 }
 
 /**
@@ -211,7 +212,7 @@ export async function ingest(db: IngestRunner, doc: IngestDoc, opts: { dryRun?: 
   };
 
   // Plan phase (reads only): resolve existing patients + every LOINC before any write.
-  const plans: Array<{ p: IngestPatient; codes: Map<string, number> }> = [];
+  const plans: Array<{ p: IngestPatient; codes: Map<string, { code: number; name: string }> }> = [];
   for (const p of doc.patients) {
     const label = `${p.firstName} ${p.lastName} (${p.birthDate})`;
     const existing = await findPatientId(db, p);
@@ -219,7 +220,7 @@ export async function ingest(db: IngestRunner, doc: IngestDoc, opts: { dryRun?: 
       report.skippedExisting.push(`${label} → already pat_id ${existing}`);
       continue;
     }
-    const codes = new Map<string, number>();
+    const codes = new Map<string, { code: number; name: string }>();
     for (const ob of p.observations) {
       if (!codes.has(ob.loinc)) codes.set(ob.loinc, await obsCodeForLoinc(db, ob.loinc));
     }
@@ -241,9 +242,13 @@ export async function ingest(db: IngestRunner, doc: IngestDoc, opts: { dryRun?: 
       );
       const patId = Number(res.insertId);
       for (const ob of p.observations) {
+        // `observations` is the result history every reader uses, and the table WebChart's API writes;
+        // `observations_current` is its latest-per-code cache. The text columns with no default get ''.
+        const code = codes.get(ob.loinc)!;
         await tx.execute(
-          "INSERT INTO observations_current (pat_id, obs_code, obs_result_dec, obs_result_dt) VALUES (?,?,?,?)",
-          [patId, codes.get(ob.loinc)!, ob.value, `${ob.date} 00:00:00`],
+          "INSERT INTO observations (pat_id, obs_code, obs_result, observed_datetime, obs_name, " +
+            "template_id, test_comments, free_text, micro_result, interpretive_text) VALUES (?,?,?,?,?,'','','','','')",
+          [patId, code.code, String(ob.value), `${ob.date} 00:00:00`, code.name],
         );
       }
       report.inserted.push({ subjectId: `wc-${patId}`, name: label, observations: p.observations.length });
@@ -296,6 +301,8 @@ export async function rollback(db: IngestRunner, manifest: IngestManifest): Prom
         );
         continue;
       }
+      await tx.execute("DELETE FROM observations WHERE pat_id=?", [entry.patId]);
+      // A manifest from before ingest wrote `observations` put its rows in the cache table instead.
       await tx.execute("DELETE FROM observations_current WHERE pat_id=?", [entry.patId]);
       await tx.execute("DELETE FROM patients WHERE pat_id=?", [entry.patId]);
       report.removed.push(`${label} → pat_id ${entry.patId}`);
