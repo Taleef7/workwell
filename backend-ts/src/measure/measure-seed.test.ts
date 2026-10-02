@@ -1037,7 +1037,7 @@ test("seedMeasureStore — rewrites CQL the seed stored before #749, audited, on
   assert.equal(await countCqlRefreshedEvents(db2), 0);
 });
 
-test("seedMeasureStore — a #749 rewrite that fails after its audit is retried without a second audit", async () => {
+test("seedMeasureStore — a #749 rewrite that fails after its audit is completed on retry, audited again (over-claim, never silent)", async () => {
   class FailOnceStore extends SqliteMeasureStore {
     failed = false;
     override async updateCql(measureId: string, cqlText: string, compileStatus?: string) {
@@ -1058,5 +1058,19 @@ test("seedMeasureStore — a #749 rewrite that fails after its audit is retried 
   assert.equal(await countCqlRefreshedEvents(db), 1, "audit-first: the intent is recorded before the write");
   await seedMeasureStore(store, cqlOf, events);
   assert.equal((await store.getLatest("hypertension"))!.cqlText, CURRENT_SORT_CQL, "the retry completes the rewrite");
-  assert.equal(await countCqlRefreshedEvents(db), 1, "and does not record it twice");
+  assert.equal(await countCqlRefreshedEvents(db), 2, "each attempt is recorded: the ledger over-claims rather than miss a rewrite");
+});
+
+test("seedMeasureStore — a later save of the exact pre-#749 text is rewritten again, with its own audit", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const cqlOf = (measureId: string) => (measureId === "hypertension" ? CURRENT_SORT_CQL : "");
+  await seedOldHypertensionRow(store, { staleCqlOnly: true, cqlText: pre749Cql(CURRENT_SORT_CQL)! });
+  await seedMeasureStore(store, cqlOf, events);
+  // Someone saves the old text back (PUT /api/measures/:id/cql); the next boot rewrites it.
+  await store.updateCql("hypertension", pre749Cql(CURRENT_SORT_CQL)!);
+  await seedMeasureStore(store, cqlOf, events);
+  assert.equal((await store.getLatest("hypertension"))!.cqlText, CURRENT_SORT_CQL);
+  assert.equal(await countCqlRefreshedEvents(db), 2, "the second rewrite is not silent");
 });
