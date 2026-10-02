@@ -81,7 +81,7 @@ decision that WebChart keeps carrying certification and WorkWell does not chase 
 
 ```mermaid
 flowchart LR
-  T["patients JOIN observations_current JOIN observation_codes"]
+  T["patients JOIN observations JOIN observation_codes"]
   T --> M["fhir-mapping.ts - one row becomes one resource"]
   M --> R1["Patient with the us-core birth sex extension"]
   M --> R2["Observation with its real LOINC code"]

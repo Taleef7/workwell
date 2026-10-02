@@ -58,13 +58,15 @@ The CQL matches events by **inline code filters** on `code.coding.system`/`code`
 2. **`patients` holds patients *and* providers.** One table. `is_patient` distinguishes them; provider
    rows carry `license_number`, `dea_number`, `nat_pro_id`, and the `attending/referring/family_physician`
    FKs point back into `patients`.
-3. **Observations are EAV over a code dictionary.** A result row (`observations_current`) references an
+3. **Observations are EAV over a code dictionary.** A result row (`observations`) references an
    `obs_code` whose definition (name, type, **LOINC**, units, ranges) lives in `observation_codes`.
+   `observations_current` is WebChart's latest-per-(patient, code) cache, not the data: on the seed its
+   values are NULL on every LOINC row and its `obs_ts` is the cache-refresh time (corrected 2026-10-02).
 
 `information_schema.table_rows` is an unreliable InnoDB estimate — always `COUNT(*)`.
 
 Populated counts in the dev seed (verified): `patients` 72, `patient_mrns` 100, `encounters` 105,
-`observations_current` 1887, `observation_codes` 8230, `patient_procedures` 99, `encounter_orders` 225,
+`observations` 3385 (663 `DELETED`), `observations_current` 1887 (the cache), `observation_codes` 8230, `patient_procedures` 99, `encounter_orders` 225,
 `order_list` 1470 (catalog), `users` 69, `locations` 9, `documents` 569.
 
 ---
@@ -124,31 +126,31 @@ synthetic hierarchy.
 | `location` | `location`, `location_pat_id` |
 | `reasonCode` (dx) | `primary_diagnosis`, `diagnosis2..4` (ICD) |
 
-### 3.5 Observation ← `observations_current` ⋈ `observation_codes`  ← **primary lab/vital source**
+### 3.5 Observation ← `observations` ⋈ `observation_codes`  ← **primary lab/vital source**
 | FHIR | WebChart |
 |---|---|
-| `subject` | `observations_current.pat_id` |
+| `subject` | `observations.pat_id` |
 | `code.coding` | `observation_codes.loinc_num` (system LOINC) — **real LOINC present** |
 | `code.text` | `observation_codes.obs_name` |
-| `effectiveDateTime` | `observations_current.obs_result_dt` or `obs_ts` |
-| `valueQuantity.value` | `observations_current.obs_result_dec` (+ `obs_units` from the code) |
+| `effectiveDateTime` | `observations.observed_datetime` (zero dates dropped) |
+| `valueQuantity.value` | `observations.obs_result` when it is a plain number (it is text); otherwise no value |
 
 ```sql
-SELECT o.pat_id, oc.loinc_num, oc.obs_name, o.obs_result_dec, o.obs_result_dt, o.obs_ts
-FROM observations_current o
+SELECT o.pat_id, oc.loinc_num, oc.obs_name, o.obs_result, o.observed_datetime
+FROM observations o
 JOIN observation_codes oc ON oc.obs_code = o.obs_code
-WHERE oc.loinc_num IS NOT NULL;
+WHERE oc.loinc_num IS NOT NULL AND o.obs_status <> 'DELETED';
 ```
 
-> **Open item — coded/text observation values.** `observations_current` only carries `obs_result_dec`
-> (numeric) + `obs_result_dt` (datetime). The **rich** result model — `obs_result` (text),
-> `obs_result_code` + `obs_result_code_system` (coded answers, e.g. CWE race/ethnicity), `obs_flag`,
-> `obs_status`, `free_text`, `interpretive_text` — lives on the base **`observations`** table, which is
-> **empty in this dev seed**. So in this seed, non-numeric observation *values* are not recoverable.
-> **Confirm with MIE** which table is authoritative in production and whether `observations` is
-> populated there; the adapter's Observation query likely needs `observations` (full model) rather than
-> `observations_current` (numeric fast-path) for anything but decimals. Titer-proves-immunity (a deferred
-> WorkWell feature) depends on this — e.g. LOINC `16935-9` Hep B surface Ab is a coded/quantity result.
+`observations` is the full result history (one row per result; superseded rows are `DELETED`). Until
+2026-10-02 this section read `observations_current`, believing `observations` empty because
+`information_schema.table_rows` said so. The cache gave every LOINC row a NULL value and a cache-refresh
+date (patient 8's HbA1c read 2015-08-16; it was taken 2011-02-13).
+
+> **Open item — coded/text observation values.** `obs_result_code` + `obs_result_code_system` (coded
+> answers, e.g. CWE race/ethnicity) are empty on the seed and race/ethnicity are free text in
+> `obs_result`, so only numeric values are mapped. Titer-proves-immunity (a deferred WorkWell feature)
+> depends on coded results — e.g. LOINC `16935-9` Hep B surface Ab.
 
 ### 3.6 Procedure ← `patient_procedures` (+ `encounter_orders`)
 `patient_procedures` is a clean CPT/ICD-10 Procedure source: `cpt_code`, `icd10`, `concept_id`,
@@ -236,7 +238,7 @@ The PR-2 adapter's `loadBundles()` fans out per patient (or a bounded page of pa
 bundle from these reads:
 
 1. **Patient** — `patients` ⋈ `patient_mrns` (`WHERE is_patient=1`).
-2. **Observations** — `observations_current` ⋈ `observation_codes` (LOINC) [+ `observations` for coded/text once confirmed].
+2. **Observations** — `observations` ⋈ `observation_codes` (LOINC; `DELETED` rows excluded).
 3. **Procedures** — `patient_procedures` [+ completed `encounter_orders` ⋈ `order_list`].
 4. **Immunizations** — **not sourced here** (ICE, per the locked decision).
 5. **Conditions** — encounter diagnoses [+ problem list once confirmed].
@@ -320,7 +322,7 @@ path~~ (WebChart HTTP/FHIR API); ~~MariaDB driver~~ (not needed — HTTP/`fetch`
    data — a FHIR `$everything`/search, or per-resource endpoints? Pagination?
 3. **Auth:** Bearer token, API key header, OAuth client-credentials? (drives the `WebChartConfig` shape).
 4. **Which observation representation** the API returns for non-numeric results (the base `observations`
-   `obs_result`/`obs_result_code` model vs the `observations_current` numeric fast-path — §3.5).
+   `obs_result`/`obs_result_code` model — §3.5).
 5. **Program enrollment / OH roster:** where does *program membership* live (the enrollment gap in §4)?
    Is it a WorkWell-side roster, or does WebChart expose occupational-health program enrollment?
 6. **Provider/location** canonical keys for hierarchy attribution (§3.2/§3.3).
@@ -454,7 +456,7 @@ Authorization header path, timeouts/retries — everything the in-process shims 
 Doug's 2026-07-19 directive made the simulator one step more real: `wcdb-fhir-shim/` (standalone
 package, #309) serves the same client contract as §8.3 but answers each FHIR query by **running SQL
 against the dev-wcdb MariaDB live** — no fixture load step; the database is the source. Patients
-from `patients` (`is_patient=1`), Observations from `observations_current ⋈ observation_codes`
+from `patients` (`is_patient=1`), Observations from `observations ⋈ observation_codes`
 (LOINC-coded, final), Procedures from `patient_procedures` (CPT/HCPCS, completed);
 Condition/Immunization/Encounter return valid empty searchsets (enrollment stays WorkWell-side,
 §8.1). Its `src/fhir-mapping.ts` intentionally duplicates this doc's §3 shapes as implemented by

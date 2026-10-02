@@ -35,7 +35,7 @@ Env: `WCDB_HOST` (localhost) · `WCDB_PORT` (33306) · `WCDB_DATABASE` (wc_miehr
 |---|---|
 | `GET /fhir/metadata` | Minimal R4 CapabilityStatement (availability probe) |
 | `GET /fhir/Patient?_count=&_offset=` | Paged searchset over `patients` (`is_patient=1`); stable `wc-{pat_id}` ids; **same-origin** `link[next]` minted from the incoming Host header |
-| `GET /fhir/Observation?patient=wc-N` | `observations_current ⋈ observation_codes` → final LOINC-coded Observations (deterministic minted ids) |
+| `GET /fhir/Observation?patient=wc-N` | `observations ⋈ observation_codes` (non-`DELETED`; dated by `observed_datetime`; numeric `obs_result` → value) → final LOINC-coded Observations (deterministic minted ids) |
 | `GET /fhir/Procedure?patient=wc-N` | `patient_procedures` → completed CPT/HCPCS Procedures |
 | `GET /fhir/{Condition\|Immunization\|Encounter}?patient=` | Valid **empty** searchsets (no coded WCDB source; enrollment Conditions are stamped WorkWell-side) |
 | `GET /health` | `{ok:true}` |
@@ -61,7 +61,7 @@ npm run ingest -- --file patients.example.yaml --rollback  # delete exactly the 
 ```
 
 The WRITE half of the demo loop: AI-generated YAML patients (schema in `src/ingest.ts` /
-`patients.example.yaml`) are inserted into `patients` + `observations_current`, after which the
+`patients.example.yaml`) are inserted into `patients` + `observations`, after which the
 whole read pipeline picks them up immediately — shim FHIR, CQL, generated SQL, dashboards.
 
 Safeties (all fail-closed):

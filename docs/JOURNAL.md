@@ -7,6 +7,15 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-02
 
+- **The WebChart dev-DB tools read the result history, not a cache.** The shim, the generated
+  compliance SQL, the fixture export and the YAML ingest all read `observations_current`. That table
+  is WebChart's latest-per-code cache: NULL values on every LOINC row, and dates that are cache-refresh
+  times (patient 8's HbA1c read 2015 instead of its real 2011).
+  - They now read `observations`: 3,385 rows (the mapping doc had called it empty), dated by
+    `observed_datetime`, `DELETED` rows excluded.
+  - Ingest writes there, and rollback also clears rows an older ingest left in the cache.
+  - The full history is what surfaced #749. Live parity (SQL against CQL, per patient, both dates, with
+    and without the ingest fixtures) passes.
 - **"Most recent" no longer depends on the order results arrive in (#749).** Every authored measure
   sorted its results by a FHIR element the engine cannot compare, so the sort reversed its input and
   `Last()` returned the first result listed: the oldest, for data listed oldest-first. Same three BP
