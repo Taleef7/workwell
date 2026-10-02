@@ -5,6 +5,21 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-02
+
+- **What WebChart can and cannot do, checked rather than assumed.** The teatea trial (RC202509), the
+  docs and MIE's dev database were checked read-only. Findings:
+  - WebChart has no CDS Hooks client.
+  - Bulk export works, per partition, with `_since`.
+  - Appointments, tasks and slots are not in FHIR.
+  - FHIR writes only Patient, Condition and Claim.
+  - The PCP and the payer type are not exposed.
+  - Most observations are uncoded.
+  - The API terms forbid persistent storage and cap calls at 15,000 a day.
+
+  The facts are in `WEBCHART_API_ASSUMPTIONS_2026-07.md` (two rows corrected: `_count` is refused, `_since`
+  works); six questions for MIE are in `OPEN_QUESTIONS.md` §4.
+
 ## 2026-10-01
 
 - **A run no longer undoes a person's closure (#747).** An EXCLUDED outcome rewrote a staff-closed case

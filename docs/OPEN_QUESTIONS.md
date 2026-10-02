@@ -3,10 +3,10 @@
 > **A living register, not a dated snapshot.** Each entry carries the date it was raised and its
 > current status; answers are recorded in place and the entry is struck through rather than deleted,
 > so a question answered once is not asked again. Add the answer and the date, and move it to
-> §4 when it is closed.
+> §5 when it is closed.
 >
 > **What belongs here:** a question whose answer changes what we build or what we promise, addressed
-> to somebody outside the repo — the pilot group, the ACO, or the owner. Engineering work belongs in
+> to somebody outside the repo — the pilot group, the ACO, MIE, or the owner. Engineering work belongs in
 > a GitHub issue. Several of these have a filed issue for the *build* half; the issue is named where
 > one exists, and the question is what that issue waits on.
 >
@@ -14,7 +14,7 @@
 > already answered. This file exists because an unanswered question with no home decays silently —
 > every entry below had been raised at least once, some three times, with no record of an answer.
 
-**As of 2026-09-23.** Eight open.
+**As of 2026-10-02.** Fourteen open.
 
 ---
 
@@ -145,6 +145,71 @@ should show it is a separate call.
 
 ---
 
-## 4. Answered
+## 4. For MIE
+
+Raised 2026-10-02 from a check of the teatea trial, the docs and the dev database (the facts are in
+`WEBCHART_API_ASSUMPTIONS_2026-07.md`, "Verified on the teatea trial"). None has been asked yet.
+
+### 4.1 Can WebChart call WorkWell at the point of care?
+
+**Status:** unasked.
+
+WebChart has no CDS Hooks client: no setting, table or documentation mentions one. Its own decision
+support is Scripted Rules, which MIE programs and which cannot call out.
+- WorkWell's CDS service (`CDS_HOOKS.md`) is built and live, so the question is the caller.
+- Is a CDS Hooks client planned, in the classic UI or the new UI?
+- If not, can a SMART app open from inside a chart (a chart tab, with the open patient's context)? The
+  smart-configuration advertises `launch-ehr`; the docs put the launch on a home-page portlet with a
+  patient picker.
+- If a CDS Hooks client is coming: what are its `iss` and its JWKS URL?
+
+### 4.2 Do the API terms apply to WorkWell?
+
+**Status:** unasked.
+
+The published Terms of API Use forbid storing User Content beyond a session and cap use at 15,000 calls
+per app per day. WorkWell stores outcomes and evidence. A nightly over a practice through per-resource
+searches would exceed the cap; bulk export would not.
+
+### 4.3 Which provider is a patient's PCP?
+
+**Status:** unasked. Blocks the panels on live data (#564).
+
+`user_patients` roles hold a patient's providers, and "Primary Care Physician" (role 290) exists unused.
+`Patient.generalPractitioner` follows the attending physician on the trial.
+- Which role does the pilot group use?
+- Can FHIR carry it?
+
+### 4.4 Where are the measure exclusions recorded?
+
+**Status:** unasked.
+
+WebChart's own measure pages point hospice, palliative care and frailty to a "Long-Term, Chronic, and End
+of Life Care" page that is not published. Mastectomy (CMS125) and colectomy (CMS130) have no documented
+workflow. CQL only sees what reaches FHIR.
+
+### 4.5 Can WorkWell read changes and write back?
+
+**Status:** unasked. #641 (change signal), #565 (write-back).
+
+- Can a Refer-to-System send WorkWell HL7 events (ADT, ORU, MDM, SIU) over HTTPS?
+- Can MDM^T02 come in with an agreed document type?
+- Can an outside system create an assigned encounter, or a pending Due List order?
+- Bulk export: how is the Group id for a practice's patients discovered, and is `_type` meant to be
+  honoured?
+- Can `Coverage.type` carry the plan's Source of Payment Typology code?
+
+### 4.6 How should scanned screening documents count?
+
+**Status:** unasked.
+
+WebChart counts a scanned mammogram, colonoscopy, FOBT or similar document, and a Preventive Care "last
+reported" date, as screening evidence. Over FHIR these are mostly untyped DocumentReferences that the CMS
+measures do not read. So a patient can be compliant in WebChart and a gap in WorkWell. The two must be
+reconciled before anyone compares the numbers.
+
+---
+
+## 5. Answered
 
 *(Nothing yet. Move an entry here with its answer and the date it was given.)*
