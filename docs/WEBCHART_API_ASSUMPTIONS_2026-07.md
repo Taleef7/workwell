@@ -22,7 +22,7 @@ Question references point to `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.
 |---|---|---|
 | WorkWell receives a base API origin+app path in `WORKWELL_WEBCHART_BASE_URL` (e.g. `https://<practice>.webchartnow.com/webchart.cgi`); the FHIR root is `{baseUrl}/fhir`. | [VERIFIED] (endpoint directory + sandbox) | A1, C13 |
 | The API is FHIR **R4 (4.0.1)**, US Core 7.0.0, JSON only (`application/fhir+json`). | [VERIFIED] | A1 |
-| The worker population is enumerated with `GET {baseUrl}/fhir/Patient?_count=<pageSize>`. | [VERIFIED] Patient search exists; `_count` is [ASSUMED] (undocumented) | A2, C16 |
+| The worker population is enumerated with `GET {baseUrl}/fhir/Patient?_count=<pageSize>`. | **CORRECTED 2026-10-02:** the teatea trial refuses `_count` (400) and a bare `GET /Patient` (403). It is enumerated with `GET {baseUrl}/fhir/Patient?birthdate=le9999-12-31` and no `_count`, set by `WORKWELL_WEBCHART_PATIENT_SEARCH=birthdate=le9999-12-31` + `WORKWELL_WEBCHART_DISABLE_COUNT=true` | A2, C16 |
 | Search results are a FHIR R4 searchset `Bundle` whose `entry[].resource` values are `Patient` resources with stable `Patient.id` values. | [VERIFIED] | A2, B11 |
 | ~~Each patient is fetched with `GET /fhir/Patient/{id}/$everything`.~~ **CORRECTED:** the CapabilityStatement exposes **no `$everything`** — each patient is composed from paged per-resource searches `GET {baseUrl}/fhir/{Observation\|Condition\|Procedure\|Immunization\|Encounter}?patient={id}`, all supported with a `patient` search param. The only operation is `Group/$export` (Bulk Data 2.0). | [VERIFIED] | A2 |
 | WorkWell does not combine multiple patients into one evaluation bundle; the transport composes one collection Bundle per patient. | design invariant | A2, C16 |
