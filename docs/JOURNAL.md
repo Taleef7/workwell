@@ -5,6 +5,17 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-02
+
+- **"Most recent" no longer depends on the order results arrive in (#749).** Every authored measure
+  sorted its results by a FHIR element the engine cannot order, so on a person with several results
+  `Last()` returned the last one listed: the oldest, for data listed oldest-first. Same three BP
+  readings, two answers (OVERDUE oldest-first, COMPLIANT newest-first). The sort now keys on the CQL
+  date (`.value`) in every authored measure and the CQL generator. Maui's six run CMS's own CQL and the
+  TWH corpus emits one event per person, so neither showed it; the WebChart dev DB's full history did.
+  Deployed stacks keep their stored CQL text (the seed never overwrites a row), so Studio shows the old
+  sort line until re-saved; runs use the compiled ELM.
+
 ## 2026-10-01
 
 - **A run no longer undoes a person's closure (#747).** An EXCLUDED outcome rewrote a staff-closed case

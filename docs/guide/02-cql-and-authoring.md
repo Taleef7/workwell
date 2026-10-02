@@ -35,7 +35,7 @@ define "Most Recent Audiogram Date":
       where exists(P.code.coding C
         where C.system = 'urn:workwell:vs:audiogram-procedures'
           and C.code = 'audiogram-procedure')
-      sort by (performed as FHIR.dateTime)
+      sort by (performed as FHIR.dateTime).value
   ).performed as FHIR.dateTime
 
 define "Days Since Last Audiogram":
@@ -67,6 +67,9 @@ The parts worth naming:
 - **`define` introduces a named rule.** Each is independently evaluated and independently
   readable. `"Overdue"` reads almost as the sentence a policy manual would use, which is the
   design goal of the language.
+- **`sort by (performed as FHIR.dateTime).value`** sorts by a CQL date. Without `.value` the key is
+  a FHIR element the engine cannot order, so `Last()` returns whatever arrived last — the oldest
+  result on data listed oldest-first (#749).
 - **Rules reference rules.** `"Overdue"` builds on three others. The engine returns a value for
   every one of them, which is why a case screen can show the working and not just the verdict.
 - **`"Outcome Status"` is the verdict**, one of five strings. The engine treats anything else as
