@@ -139,6 +139,37 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     outOfPopulation,
   });
 
+  // A verification that threw is not a verdict. Before this branch its MISSING_DATA reopened a closed
+  // case and overwrote an open one's outcome. The attempt is recorded (audit first, as everywhere) and
+  // the run is PARTIAL_FAILURE, but the case is left exactly as it was.
+  if (hasEvaluationError) {
+    const failedPayload = {
+      priorOutcomeStatus: existing.currentOutcomeStatus,
+      verifiedStatus,
+      runId: run.id,
+      subjectId: existing.employeeId,
+      evaluationPeriod: existing.evaluationPeriod,
+      status: existing.status,
+      caseUnchanged: true,
+    };
+    await deps.events.recordCaseEvent({
+      action: { caseId, actionType: "RERUN_TO_VERIFY", actor, payload: failedPayload },
+      audit: {
+        eventType: "CASE_RERUN_FAILED",
+        entityType: "case",
+        entityId: caseId,
+        actor,
+        refRunId: run.id,
+        refCaseId: caseId,
+        refMeasureVersionId: existing.measureId,
+        payload: failedPayload,
+      },
+    });
+    await deps.runStore.appendLog(run.id, "WARN", "Verification failed; the case was left unchanged.");
+    await deps.runStore.finalizeRun(run.id, "PARTIAL_FAILURE");
+    return buildDetail(deps, caseId);
+  }
+
   const updatedCaseStatus = outOfPopulation ? "RESOLVED" : verificationCaseStatus(existing.status, verifiedStatus);
   const nextAction = outOfPopulation
     ? "No follow-up needed: not in the measure's initial population on verification rerun."
@@ -234,7 +265,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     });
   }
 
-  await deps.runStore.finalizeRun(run.id, hasEvaluationError ? "PARTIAL_FAILURE" : "COMPLETED");
+  await deps.runStore.finalizeRun(run.id, "COMPLETED");
   return buildDetail(deps, caseId);
 }
 

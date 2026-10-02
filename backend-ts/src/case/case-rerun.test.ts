@@ -10,6 +10,47 @@ const existing: CaseRecord = {
   closedAt: null, closedReason: null, closedBy: null,
 };
 
+test("rerunToVerify — a verification that throws records the attempt and leaves the case as it was", async () => {
+  // Before this guard the failure's MISSING_DATA reopened a closed case (and overwrote an open one).
+  const closed: CaseRecord = {
+    ...existing, id: "case-closed", employeeId: "emp-001", status: "CLOSED", currentOutcomeStatus: "OVERDUE",
+    closedAt: "2026-07-18T00:00:00.000Z", closedReason: "MANUAL_RESOLVE", closedBy: "nurse@example.test",
+  };
+  const patched: unknown[] = [];
+  const audits: Array<{ eventType: string; payload: unknown }> = [];
+  const outcomes: Array<{ status: string; evidence: unknown }> = [];
+  let finalStatus = "";
+  const deps = {
+    cases: { getCase: async () => closed, patchCase: async (_id: string, patch: unknown) => { patched.push(patch); return closed; } },
+    events: {
+      recordCaseEvent: async (e: { audit: { eventType: string; payload: unknown } }) => { audits.push(e.audit); },
+      appendAudit: async (a: { eventType: string; payload: unknown }) => { audits.push(a); },
+      caseTimeline: async () => [],
+      latestOutreachDeliveryStatus: async () => null,
+    },
+    outcomes: {
+      recordOutcome: async (o: { status: string; evidence: unknown }) => { outcomes.push(o); },
+      listOutcomes: async () => [],
+    },
+    runStore: {
+      createRun: async () => ({ id: "run-verify" }),
+      markRunning: async () => {},
+      appendLog: async () => {},
+      finalizeRun: async (_id: string, status: string) => { finalStatus = status; },
+    },
+    engine: { evaluate: async () => { throw new Error("engine down"); } },
+  } as unknown as RerunDeps;
+
+  const detail = await rerunToVerify(deps, closed.id, "tester");
+  assert.ok(detail, "the case detail is still returned");
+  assert.deepEqual(patched, [], "the case is never patched");
+  assert.deepEqual(audits.map((a) => a.eventType), ["CASE_RERUN_FAILED"], "the attempt is audited, as a failure");
+  assert.equal((audits[0]!.payload as { caseUnchanged?: boolean }).caseUnchanged, true);
+  assert.equal(outcomes.length, 1, "the failed outcome is still recorded");
+  assert.ok((outcomes[0]!.evidence as { evaluationError?: string }).evaluationError);
+  assert.equal(finalStatus, "PARTIAL_FAILURE");
+});
+
 test("rerunToVerify — wc CASE is a typed unsupported result before every mutation", async () => {
   const mutations: string[] = [];
   const mutated = (name: string) => async () => { mutations.push(name); throw new Error(`unexpected mutation: ${name}`); };

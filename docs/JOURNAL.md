@@ -11,7 +11,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   official batch), the outcome was stored as MISSING_DATA, and the case logic then treated that as a
   finding: it opened a case for a patient with none, reopened a resolved one, and rolled an old cycle's
   case over as if the patient had been evaluated. Now the failure is still recorded, the run is still
-  PARTIAL_FAILURE, and the patient's cases are left exactly as they were.
+  PARTIAL_FAILURE, and the patient's cases are left exactly as they were. A failed rerun-to-verify
+  now does the same: it records the attempt (`CASE_RERUN_FAILED`) instead of reopening a closed case.
 - **Ingest no longer invents a visit for CMS125.** On a live WebChart run the enrollment roster stamped a
   CPT 99213 office visit on every listed patient, which put them in CMS125's initial population whether
   or not a visit happened. That was a made-up clinical fact on the live path, so it is gone, and cms125

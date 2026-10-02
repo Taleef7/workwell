@@ -1120,6 +1120,50 @@ test("an evaluation failure never opens, reopens or updates a case", async () =>
     assert.deepEqual(caseEvents, [], "no case event is written for a failed evaluation");
     const outcomes = await outcomeStore.listOutcomes(res.runId);
     assert.equal(outcomes.length, 3, "the failures are still recorded");
+    const logs = await runStore.listLogs(res.runId, 200);
+    assert.ok(
+      logs.some((l) => l.level === "WARN" && /3 evaluation\(s\) failed; their cases were left untouched/.test(l.message)),
+      "the run says how many failures it left alone",
+    );
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("a failed official batch is re-thrown per subject and touches no case either", async () => {
+  // The batch path reaches the same catch as a single subject's failure; this pins that it stays inside it.
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  const batchFailing: RunPipelineDeps["engine"] = {
+    async evaluate() {
+      return { subjectId: "ignored", measure: "Audiogram", outcome: "OVERDUE", evidence: { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] } };
+    },
+    async evaluateBatch() {
+      throw new Error("batch down");
+    },
+  };
+  try {
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore, events, engine: batchFailing, employees: [employeeById("emp-001")!], segments: [] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+    assert.equal(res.status, "PARTIAL_FAILURE");
+    assert.deepEqual(await caseStore.listCases({ measureId: "audiogram" }), [], "no case was opened from the failed batch");
+    const [outcome] = await outcomeStore.listOutcomes(res.runId);
+    assert.equal(outcome?.status, "MISSING_DATA");
+    assert.ok((outcome?.evidence as { evaluationError?: string }).evaluationError, "the batch error is recorded");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("a failed evaluation outside every segment is not reported as gated by the segment", async () => {
+  // The segment WARN tells an operator to widen a segment for subjects who needed follow-up. A failure
+  // established no such need, so it must not inflate that count or point at the wrong repair.
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  try {
+    const subjects = ["emp-007", "emp-001"].map((id) => employeeById(id)!);
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore, events, engine: failingEngine, employees: subjects, segments: [welderSegment()] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+    const logs = await runStore.listLogs(res.runId, 200);
+    assert.ok(!logs.some((l) => /no segment makes them applicable/.test(l.message)), "no segment-gate WARN for failures");
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
   }

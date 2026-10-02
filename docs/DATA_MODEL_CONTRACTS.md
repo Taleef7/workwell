@@ -26,10 +26,11 @@ run (`compliance/live-cell.ts`).
 `CaseQuery.closure` also requires a terminal status (`closed_by IS NULL` matches every OPEN row).
 - **Out-of-population never opens a case (ADR-078):** the outcome persists as MISSING_DATA;
 `planCaseUpsert` no-ops, or closes an active case `RESOLVED`, `closed_reason='OUT_OF_POPULATION'`,
-`closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA opens one.
-- **An evaluation failure never touches a case.** An engine or batch error persists MISSING_DATA with
+`closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA from a completed evaluation opens one.
+- **A failed evaluation never changes a case.** An engine or batch error persists MISSING_DATA with
 `evaluationError` and marks the run PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
-over for that (subject, measure); the run logs a WARN with the count.
+over for that (subject, measure); the run logs a WARN with the count. A failed rerun-to-verify audits its
+attempt as `CASE_RERUN_FAILED` and leaves the case as it was.
 - **Dispositions** (`UpsertedCase`): `CREATED|UPDATED|REOPENED|RESOLVED|EXCLUDED|UNCHANGED`; each but
 `UNCHANGED` emits its `CASE_*` event. A re-confirm whose persisted `next_action` string changed (new
 missed rate, wording-table edit, NULL legacy value) is `UPDATED`, payload `nextAction`.
@@ -60,7 +61,7 @@ on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfil
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
-- **The sweep reports 56 hits across 20 files (2026-10-02); check the count, not the labels.** The files
+- **The sweep reports 58 hits across 20 files (2026-10-02); check the count, not the labels.** The files
 above account for 10; the other 10 are not violations: `panel-assignment` (mapping before consequences),
 `segments` and `outcome-compaction` (matcher artifacts / the ADR-073 d4 completion event),
 `subject-lists` (audit in `beforeComplete`), `evidence-service`, `audit-packet`, `materialize-run`,

@@ -634,11 +634,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   let failures = 0;
   let skipped = 0; // #263: subjects whose prior outcome was copied forward (evaluation skipped)
   /**
-   * The (measure, subject) pairs whose evaluation threw this run. A failure is persisted as MISSING_DATA
-   * with the error, but it is not a finding about the patient, so it must not open, reopen or update a
-   * case, nor count as "evaluated" for the cycle rollover below. Keyed `measureId\u0000subjectId`.
+   * The (measure, subject) pairs whose evaluation threw this run, and those that produced an answer (a
+   * real evaluation or a copy-forward). A failure is persisted as MISSING_DATA with the error, but it is
+   * not a finding about the patient, so it must not open, reopen or update a case. Only a pair that
+   * produced an answer counts as "evaluated" for the cycle rollover below, so a duplicate subject with
+   * one failed and one good item still rolls over. Keyed `measureId\u0000subjectId`.
    */
   const failedEvaluations = new Set<string>();
+  const answeredEvaluations = new Set<string>();
 
   // #263 incremental cache — inert unless BOTH the flag and the store are present (byte-identical
   // otherwise). Scope = this live-tenant pipeline only; the scale path is not wired. When value-set
@@ -1089,6 +1092,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           failedEvaluations.add(`${item.measureId}\u0000${item.employee.externalId}`);
         }
       }
+      if (!evaluationFailed) answeredEvaluations.add(`${item.measureId}\u0000${item.employee.externalId}`);
       pending.push({ item, period, status, evidence, plan, evaluatedNow, evaluationFailed, outOfPopulation });
       // Hand the event loop a turn, after the result is recorded (#563, ADR-085 d1).
       //
@@ -1217,7 +1221,8 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         (applicableMemo ??= isApplicable(item.employee, item.measureId, deps.segments ?? []));
       // `wc|` subjects are excluded deliberately, not by oversight: they never open cases at all (the
       // rerun-to-verify 409 above), so counting them here would report a gap no segment edit can close.
-      if (!closeOnly && !outOfPopulation && !isLiveWebChartSubject && NON_COMPLIANT.has(status) && !segmentApplicable()) {
+      // A failed evaluation needed no follow-up we know of, so it is not counted as gated by a segment.
+      if (!evaluationFailed && !closeOnly && !outOfPopulation && !isLiveWebChartSubject && NON_COMPLIANT.has(status) && !segmentApplicable()) {
         gatedBySegment.evaluations++;
         gatedBySegment.subjects.add(item.employee.externalId);
         if (gatedBySegment.sites.size < 12) gatedBySegment.sites.add(item.employee.site ?? "(no site)");
@@ -1538,7 +1543,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // A subject whose evaluation failed was not evaluated in the new cycle, so their old case stays open.
       const evaluated = new Set(
         items
-          .filter((i) => i.measureId === measureId && !failedEvaluations.has(`${measureId}\u0000${i.employee.externalId}`))
+          .filter((i) => i.measureId === measureId && answeredEvaluations.has(`${measureId}\u0000${i.employee.externalId}`))
           .map((i) => i.employee.externalId),
       );
       let openCases: CaseRecord[];
