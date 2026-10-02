@@ -1087,6 +1087,65 @@ test("Fable M10: a still-open PRIOR-cycle case is closed (CYCLE_ROLLED_OVER, aud
   }
 });
 
+const failingEngine: RunPipelineDeps["engine"] = {
+  async evaluate() {
+    throw new Error("engine down");
+  },
+};
+
+test("an evaluation failure never opens, reopens or updates a case", async () => {
+  // A failed evaluation is persisted as MISSING_DATA with the error, but it says nothing about the patient.
+  // Before this guard it opened a gap for a subject with no case, reopened a system-resolved one, and
+  // overwrote the outcome on an open one.
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  const subjects = ["emp-001", "emp-002", "emp-003"].map((id) => employeeById(id)!);
+  try {
+    const evaluationDate = "2097-03-03";
+    const period = bucketPeriodForMeasure("audiogram", evaluationDate);
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2097-01-01T00:00:00.000Z", measurementPeriodEnd: "2097-12-31T00:00:00.000Z" });
+    await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+    await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-002", measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+    const resolved = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-002", measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "COMPLIANT" });
+    assert.equal(resolved?.status, "RESOLVED", "emp-002 starts system-resolved");
+    const before = (await caseStore.listCases({ measureId: "audiogram" })).filter((c) => c.evaluationPeriod === period);
+    assert.equal(before.length, 2, "emp-003 starts with no case");
+
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore, events, engine: failingEngine, employees: subjects, segments: [] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate });
+    assert.equal(res.status, "PARTIAL_FAILURE");
+
+    const after = (await caseStore.listCases({ measureId: "audiogram" })).filter((c) => c.evaluationPeriod === period);
+    assert.deepEqual(after, before, "every case row is exactly as it was, and none was created");
+    const caseEvents = (await events.auditEventsByRun(res.runId)).filter((a) => a.eventType.startsWith("CASE_"));
+    assert.deepEqual(caseEvents, [], "no case event is written for a failed evaluation");
+    const outcomes = await outcomeStore.listOutcomes(res.runId);
+    assert.equal(outcomes.length, 3, "the failures are still recorded");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("a failed evaluation in a new cycle does not roll the old cycle's case over", async () => {
+  // The rollover closes a prior-cycle case because the subject was evaluated in the new one. A failed
+  // evaluation is not that, and closing the old case would lose the gap with nothing to replace it.
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  const office = employeeById("emp-007")!;
+  try {
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2020-01-01T00:00:00.000Z", measurementPeriodEnd: "2020-12-31T00:00:00.000Z" });
+    const stale = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2020-01-01", outcomeStatus: "OVERDUE" });
+    assert.equal(stale?.status, "OPEN");
+
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore, events, engine: failingEngine, employees: [office], segments: [] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+
+    assert.equal((await caseStore.getCase(stale!.id))?.status, "OPEN", "the old case stays open");
+    const rolled = (await events.auditEventsByRun(res.runId)).filter((a) => a.eventType === "CASE_RESOLVED");
+    assert.deepEqual(rolled, []);
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 test("Fable M11: an out-of-cohort COMPLIANT outcome still RESOLVES an existing open case (creation gated, resolution not)", async () => {
   const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
   const office = employeeById("emp-007")!; // Office Staff — out-of-cohort for the Welder audiogram segment

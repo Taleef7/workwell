@@ -7,6 +7,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-02
 
+- **A failed evaluation no longer opens care gaps.** When the engine threw (one subject, or a whole
+  official batch), the outcome was stored as MISSING_DATA, and the case logic then treated that as a
+  finding: it opened a case for a patient with none, reopened a resolved one, and rolled an old cycle's
+  case over as if the patient had been evaluated. Now the failure is still recorded, the run is still
+  PARTIAL_FAILURE, and the patient's cases are left exactly as they were.
 - **The WebChart dev-DB tools read the result history, not a cache.** The shim, the generated
   compliance SQL, the fixture export and the YAML ingest all read `observations_current`. That table
   is WebChart's latest-per-code cache: NULL values on every LOINC row, and dates that are cache-refresh

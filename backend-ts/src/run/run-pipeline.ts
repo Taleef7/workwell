@@ -633,6 +633,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   let nonCompliant = 0;
   let failures = 0;
   let skipped = 0; // #263: subjects whose prior outcome was copied forward (evaluation skipped)
+  /**
+   * The (measure, subject) pairs whose evaluation threw this run. A failure is persisted as MISSING_DATA
+   * with the error, but it is not a finding about the patient, so it must not open, reopen or update a
+   * case, nor count as "evaluated" for the cycle rollover below. Keyed `measureId\u0000subjectId`.
+   */
+  const failedEvaluations = new Set<string>();
 
   // #263 incremental cache — inert unless BOTH the flag and the store are present (byte-identical
   // otherwise). Scope = this live-tenant pipeline only; the scale path is not wired. When value-set
@@ -1080,6 +1086,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           evidence = { evaluationError: "engine failure", message: String((err as Error)?.message ?? err) };
           failures++;
           evaluationFailed = true;
+          failedEvaluations.add(`${item.measureId}\u0000${item.employee.externalId}`);
         }
       }
       pending.push({ item, period, status, evidence, plan, evaluatedNow, evaluationFailed, outOfPopulation });
@@ -1221,7 +1228,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // into the store. What changed is WHEN the write happens: the chunk's upserts go to the store in
       // one batched call after this loop, because a per-pair `await` was ~240,000 sequential round
       // trips to Neon on the pilot's six-measure nightly.
-      if (deps.caseStore && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
+      // An evaluation that threw says nothing about the patient: its MISSING_DATA would open a gap that
+      // does not exist, reopen a resolved case, or overwrite a real outcome on an open one. The outcome row
+      // above still records the failure; the case is left exactly as it was.
+      if (deps.caseStore && !evaluationFailed && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
         pendingCaseUpserts.push({
           input: {
             runId: runId,
@@ -1358,6 +1368,17 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         }
       }
     }
+  }
+
+  if (failedEvaluations.size > 0 && deps.caseStore) {
+    await deps.runStore
+      .appendLog(
+        runId,
+        "WARN",
+        `${failedEvaluations.size} evaluation(s) failed; their cases were left untouched (no case opened, ` +
+          `reopened, updated or rolled over). The failures are recorded as MISSING_DATA with the error.`,
+      )
+      .catch(() => {});
   }
 
   // A cohort that the segment gate silently drops, SURFACED — the same shape of hazard as ADR-043's
@@ -1514,7 +1535,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     const nowIso = new Date().toISOString();
     for (const measureId of measureIds) {
       const currentPeriod = bucketPeriodForMeasure(measureId, evalDate);
-      const evaluated = new Set(items.filter((i) => i.measureId === measureId).map((i) => i.employee.externalId));
+      // A subject whose evaluation failed was not evaluated in the new cycle, so their old case stays open.
+      const evaluated = new Set(
+        items
+          .filter((i) => i.measureId === measureId && !failedEvaluations.has(`${measureId}\u0000${i.employee.externalId}`))
+          .map((i) => i.employee.externalId),
+      );
       let openCases: CaseRecord[];
       try {
         openCases = await deps.caseStore.listCases({ measureId, statuses: [...ACTIVE_CASE_STATUSES], limit: 100000 });

@@ -27,6 +27,9 @@ run (`compliance/live-cell.ts`).
 - **Out-of-population never opens a case (ADR-078):** the outcome persists as MISSING_DATA;
 `planCaseUpsert` no-ops, or closes an active case `RESOLVED`, `closed_reason='OUT_OF_POPULATION'`,
 `closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA opens one.
+- **An evaluation failure never touches a case.** An engine or batch error persists MISSING_DATA with
+`evaluationError` and marks the run PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
+over for that (subject, measure); the run logs a WARN with the count.
 - **Dispositions** (`UpsertedCase`): `CREATED|UPDATED|REOPENED|RESOLVED|EXCLUDED|UNCHANGED`; each but
 `UNCHANGED` emits its `CASE_*` event. A re-confirm whose persisted `next_action` string changed (new
 missed rate, wording-table edit, NULL legacy value) is `UPDATED`, payload `nextAction`.
