@@ -206,6 +206,21 @@ test("planCaseUpsert (Codex P2): a SYSTEM-EXCLUDED case reopens when the outcome
 test("planCaseUpsert (Codex P2): a HUMAN-excluded case (closed_by set) stays closed even when actionable again", () => {
   assert.deepEqual(planCaseUpsert(st("EXCLUDED", "EXCLUDED", "admin@workwell.dev"), "OVERDUE", NOW), { op: "noop" });
 });
+
+test("planCaseUpsert (#747): an EXCLUDED outcome leaves a person's closure as they left it", () => {
+  // Manual resolve (CLOSED) and rerun-to-verify (RESOLVED) both set closed_by; neither becomes a system EXCLUDED.
+  assert.deepEqual(planCaseUpsert(st("CLOSED", "OVERDUE", "cm@workwell.dev"), "EXCLUDED", NOW), { op: "noop" });
+  assert.deepEqual(planCaseUpsert(st("RESOLVED", "COMPLIANT", "cm@workwell.dev"), "EXCLUDED", NOW), { op: "noop" });
+  // So the closure is still a person's when a later run finds the gap again: it stays closed.
+  assert.deepEqual(planCaseUpsert(st("CLOSED", "OVERDUE", "cm@workwell.dev"), "OVERDUE", NOW), { op: "noop" });
+});
+
+test("planCaseUpsert (#747): an EXCLUDED outcome still closes an active case and still moves a system closure", () => {
+  const fromOpen = { op: "update", disposition: "EXCLUDED", status: "EXCLUDED", closedAt: NOW, closedReason: "EXCLUDED", closedBy: null };
+  assert.deepEqual(planCaseUpsert(st("OPEN", "OVERDUE"), "EXCLUDED", NOW), fromOpen);
+  assert.deepEqual(planCaseUpsert(st("IN_PROGRESS", "OVERDUE"), "EXCLUDED", NOW), fromOpen);
+  assert.deepEqual(planCaseUpsert(st("RESOLVED", "COMPLIANT", null), "EXCLUDED", NOW), fromOpen);
+});
 // Task 8: routed measures read the official display table before the persisted authored overrides.
 test("official-routed nextActionFor reads the official display table first", () => {
   // Save and RESTORE rather than delete: this process runs the whole file, and deleting a variable
