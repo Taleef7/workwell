@@ -57,7 +57,7 @@ on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfil
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
-- **The sweep reports 55 hits across 20 files (2026-09-21); check the count, not the labels.** The files
+- **The sweep reports 56 hits across 20 files (2026-10-02); check the count, not the labels.** The files
 above account for 10; the other 10 are not violations: `panel-assignment` (mapping before consequences),
 `segments` and `outcome-compaction` (matcher artifacts / the ADR-073 d4 completion event),
 `subject-lists` (audit in `beforeComplete`), `evidence-service`, `audit-packet`, `materialize-run`,

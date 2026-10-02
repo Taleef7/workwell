@@ -21,7 +21,7 @@ define "Has Active Waiver":
 define "Most Recent Audiogram Date":
   Last(
     [Procedure: "Audiogram Procedures"] P
-      sort by (performed as FHIR.dateTime)
+      sort by (performed as FHIR.dateTime).value
   ).performed as FHIR.dateTime
 
 define "Days Since Last Audiogram":

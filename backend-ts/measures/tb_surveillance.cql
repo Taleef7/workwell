@@ -21,7 +21,7 @@ define "Most Recent TB Screen Date":
   Last(
     [Procedure] P
       where exists(P.code.coding C where C.system = 'urn:workwell:vs:tb-screening' and C.code = 'tb-screen')
-      sort by (performed as FHIR.dateTime)
+      sort by (performed as FHIR.dateTime).value
   ).performed as FHIR.dateTime
 
 define "Days Since Last TB Screen":

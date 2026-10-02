@@ -26,7 +26,7 @@ define "Most Recent Tdap Date":
   Last(
     [Immunization] I
       where exists(I.vaccineCode.coding C where C.system = 'urn:workwell:vs:tdap-vaccines' and C.code = 'tdap-vaccine')
-      sort by (occurrence as FHIR.dateTime)
+      sort by (occurrence as FHIR.dateTime).value
   ).occurrence as FHIR.dateTime
 
 define "Days Since Last Tdap":
