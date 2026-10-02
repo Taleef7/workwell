@@ -16,7 +16,8 @@ row, never a blanket `ON CONFLICT` status overwrite.
 - **IN_PROGRESS is preserved**; every open-case reader and count uses `ACTIVE_CASE_STATUSES`
 (`OPEN`+`IN_PROGRESS`). Deliberately `OPEN`-only (widening is an owner call): outreach-campaign targeting
 and the case on an MCP compliance answer.
-- **A human closure (`closed_by` set) is never reopened by a run**; only a system closure (auto-`RESOLVED`,
+- **A human closure (`closed_by` set) is never reopened or rewritten by a run** (an EXCLUDED outcome
+leaves it too, #747); only a system closure (auto-`RESOLVED`,
 or `EXCLUDED` whose waiver lapsed) reopens, and reopening a human one is an audited operator action. Its
 `current_outcome_status` is FROZEN at closure; CQL's current answer is read from `outcomes` on the winning
 run (`compliance/live-cell.ts`).

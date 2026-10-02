@@ -7,6 +7,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-01
 
+- **A run no longer undoes a person's closure (#747).** An EXCLUDED outcome rewrote a staff-closed case
+  as a system exclusion and cleared who closed it, so it left the closed-by-staff views and the next gap
+  reopened it as open work. A person's closure now stands against an exclusion, as it already did against
+  COMPLIANT and a gap; active cases and system closures still move to EXCLUDED.
 - **The Cases "Excluded" tab says what it counts (#655 checklist).** Programs' Excluded chip counts the
   patients the latest run excludes (1,327); the tab lists every case closed as excluded, by a run or a
   staff rerun, across every year, and keeps one after the patient becomes compliant (1,519). The tab now

@@ -303,6 +303,10 @@ export function planCaseUpsert(
 
   if (disposition === "EXCLUDED") {
     if (s === "EXCLUDED") return { op: "noop" };
+    // A person's closure stands, as it does against COMPLIANT and a gap (#747). Rewriting it as a system
+    // EXCLUDED cleared `closed_by`, so the case left the closed-by-staff views and a later gap reopened
+    // it as open work nobody chose. CQL's current answer is still read from `outcomes` (live-cell).
+    if (closureKindOf(existing) === "STAFF") return { op: "noop" };
     return { op: "update", disposition: "EXCLUDED", status: "EXCLUDED", closedAt: now, closedReason: "EXCLUDED", closedBy: null };
   }
 
