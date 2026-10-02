@@ -238,8 +238,11 @@ const normCql = (s: string) => s.replace(/\r\n/g, "\n").trimEnd();
 
 /**
  * Rewrites a row's CQL to today's text only where it is exactly what the seed wrote before #749; a
- * text anyone edited is left alone. Audit-first, and audited on every rewrite: `hasAuditEvent` keys on
- * (event, version) only, so an earlier seed repair of the same version would otherwise hide this one.
+ * text anyone edited is left alone. Audit-first and audited on EVERY rewrite, under its own event type.
+ * No `hasAuditEvent` guard: it keys on (event, version) only, so it cannot tell a retry of a failed write
+ * from a later rewrite (a Studio save of the exact pre-#749 text, rewritten again), and guarding would
+ * make that second rewrite silent. A failed write retried is therefore recorded twice — the ledger errs
+ * toward an over-claim, never a silent change (DATA_MODEL_CONTRACTS §4).
  */
 async function repairPre749SortCql(
   store: MeasureStore,
@@ -252,8 +255,8 @@ async function repairPre749SortCql(
     if (!old) continue;
     const row = await store.getLatest(m.id);
     if (!row || normCql(row.cqlText) !== normCql(old)) continue;
-    await events.appendAudit({
-      eventType: "MEASURE_SEED_UPDATED",
+    const audit: AppendAuditInput = {
+      eventType: "MEASURE_SEED_CQL_REFRESHED",
       entityType: "measure_version",
       entityId: row.versionId,
       actor: "system",
@@ -261,7 +264,8 @@ async function repairPre749SortCql(
       refCaseId: null,
       refMeasureVersionId: row.versionId,
       payload: { measureId: m.id, fields: ["cqlText"], reason: "most-recent sort (#749)" },
-    });
+    };
+    await events.appendAudit(audit);
     await store.updateCql(m.id, current);
   }
 }
