@@ -19,7 +19,7 @@ import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.t
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import { MEASURE_CATALOG, type MeasureSpec } from "./measure-catalog.ts";
-import { matchesSeedFingerprint, OFFICIAL_ONLY_PRE_CHANGE, seedMeasureStore } from "./measure-seed.ts";
+import { matchesSeedFingerprint, OFFICIAL_ONLY_PRE_CHANGE, pre749Cql, seedMeasureStore } from "./measure-seed.ts";
 import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
 const created: string[] = [];
 
@@ -991,4 +991,40 @@ test("promotion writes the activation audit BEFORE mutating, so a failing mutati
       .all<{ event_type: string }>();
     assert.equal(rows.results?.length ?? 0, 1, `${id} has exactly one MEASURE_ACTIVATED, not a duplicate`);
   }
+});
+
+// #749: the CQL text a stack stored before the most-recent sort fix.
+const CURRENT_SORT_CQL =
+  'define "Most Recent BP Screening Date":\n  Last([Procedure] P sort by (performed as FHIR.dateTime).value).performed as FHIR.dateTime';
+
+test("pre749Cql reconstructs the pre-fix seed text, and names nothing when the fix changed nothing", () => {
+  assert.equal(
+    pre749Cql(CURRENT_SORT_CQL),
+    'define "Most Recent BP Screening Date":\n  Last([Procedure] P sort by (performed as FHIR.dateTime)).performed as FHIR.dateTime',
+  );
+  assert.equal(pre749Cql('define "X": true'), null);
+});
+
+test("seedMeasureStore — rewrites CQL the seed stored before #749, audited, once; leaves an edited text alone", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const cqlOf = (measureId: string) => (measureId === "hypertension" ? CURRENT_SORT_CQL : "");
+  await seedOldHypertensionRow(store, { staleCqlOnly: true, cqlText: pre749Cql(CURRENT_SORT_CQL)! });
+
+  await seedMeasureStore(store, cqlOf, events);
+  assert.equal((await store.getLatest("hypertension"))!.cqlText, CURRENT_SORT_CQL, "the stored text now sorts by the CQL date");
+  assert.equal(await countSeedUpdatedEvents(db), 1, "the rewrite is audited");
+
+  await seedMeasureStore(store, cqlOf, events);
+  assert.equal(await countSeedUpdatedEvents(db), 1, "a second seed changes nothing and audits nothing");
+
+  // A text someone edited is theirs, even if it carries the old sort.
+  const db2 = await freshDb();
+  const store2 = new SqliteMeasureStore(db2);
+  const edited = `${pre749Cql(CURRENT_SORT_CQL)!}\n// edited in Studio`;
+  await seedOldHypertensionRow(store2, { staleCqlOnly: true, cqlText: edited });
+  await seedMeasureStore(store2, cqlOf, new SqliteCaseEventStore(db2));
+  assert.equal((await store2.getLatest("hypertension"))!.cqlText, edited);
+  assert.equal(await countSeedUpdatedEvents(db2), 0);
 });
