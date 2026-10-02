@@ -46,6 +46,21 @@ export class UnsupportedCaseRerunError extends Error {
   }
 }
 
+/**
+ * The verification ran and the engine threw. The attempt is already recorded (outcome, audit, a
+ * PARTIAL_FAILURE run) and the case is unchanged; callers must report a failure, never a completed rerun.
+ */
+export class CaseRerunFailedError extends Error {
+  readonly code = "verification_failed";
+  constructor(
+    readonly runId: string,
+    message = "Verification failed: the CQL engine returned no answer. The case was left unchanged.",
+  ) {
+    super(message);
+    this.name = "CaseRerunFailedError";
+  }
+}
+
 const verificationCaseStatus = (current: string, verified: string): string =>
   verified === "COMPLIANT"
     ? "RESOLVED"
@@ -167,7 +182,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     });
     await deps.runStore.appendLog(run.id, "WARN", "Verification failed; the case was left unchanged.");
     await deps.runStore.finalizeRun(run.id, "PARTIAL_FAILURE");
-    return buildDetail(deps, caseId);
+    throw new CaseRerunFailedError(run.id);
   }
 
   const updatedCaseStatus = outOfPopulation ? "RESOLVED" : verificationCaseStatus(existing.status, verifiedStatus);

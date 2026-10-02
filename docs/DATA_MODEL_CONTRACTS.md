@@ -30,7 +30,7 @@ run (`compliance/live-cell.ts`).
 - **A failed evaluation never changes a case.** An engine or batch error persists MISSING_DATA with
 `evaluationError` and marks the run PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
 over for that (subject, measure); the run logs a WARN with the count. A failed rerun-to-verify audits its
-attempt as `CASE_RERUN_FAILED` and leaves the case as it was.
+attempt as `CASE_RERUN_FAILED`, leaves the case as it was, and answers 500 `verification_failed` with the run id.
 - **Dispositions** (`UpsertedCase`): `CREATED|UPDATED|REOPENED|RESOLVED|EXCLUDED|UNCHANGED`; each but
 `UNCHANGED` emits its `CASE_*` event. A re-confirm whose persisted `next_action` string changed (new
 missed rate, wording-table edit, NULL legacy value) is `UPDATED`, payload `nextAction`.

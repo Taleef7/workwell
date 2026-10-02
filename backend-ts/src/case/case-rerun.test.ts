@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rerunToVerify, type RerunDeps } from "./case-rerun.ts";
+import { rerunToVerify, CaseRerunFailedError, type RerunDeps } from "./case-rerun.ts";
 import type { CaseRecord } from "../stores/case-store.ts";
 
 const existing: CaseRecord = {
@@ -41,8 +41,11 @@ test("rerunToVerify — a verification that throws records the attempt and leave
     engine: { evaluate: async () => { throw new Error("engine down"); } },
   } as unknown as RerunDeps;
 
-  const detail = await rerunToVerify(deps, closed.id, "tester");
-  assert.ok(detail, "the case detail is still returned");
+  await assert.rejects(
+    () => rerunToVerify(deps, closed.id, "tester"),
+    (err: unknown) => err instanceof CaseRerunFailedError && err.runId === "run-verify",
+    "the caller is told the verification failed, with the new run's id",
+  );
   assert.deepEqual(patched, [], "the case is never patched");
   assert.deepEqual(audits.map((a) => a.eventType), ["CASE_RERUN_FAILED"], "the attempt is audited, as a failure");
   assert.equal((audits[0]!.payload as { caseUnchanged?: boolean }).caseUnchanged, true);
