@@ -59,7 +59,9 @@ const MAMMOGRAPHY_CPT_TO_LOINC = new Map([
   ["G0202", "24606-6"],
 ]);
 const WELLNESS_MEASURES = ["diabetes_hba1c", "obesity_bmi", "cholesterol_ldl", "hypertension"];
-const FEMALE_MEASURES = ["cms125"]; // screening mammography — enrolled for female patients only
+// Inert in production since 2026-10-02 (no CMS eCQM is roster-stamped). Kept because the tests use the
+// fixture's cms125 list to choose which patients get a test-data qualifying visit.
+const FEMALE_MEASURES = ["cms125"]; // screening mammography — listed for female patients only
 
 type Row = Record<string, unknown>;
 
@@ -216,8 +218,9 @@ function main(): void {
     }
 
     bundles.push({ resourceType: "Bundle", type: "collection", entry: entries });
-    // Deterministic OH roster: every included patient is in the wellness panel; cms125 (mammography) for
-    // female patients. This is the WorkWell-side program membership the WebChart clinical data lacks.
+    // Deterministic OH roster: every included patient is in the wellness panel; cms125 (mammography) is
+    // listed for female patients (inert in production; see FEMALE_MEASURES). This is the WorkWell-side
+    // program membership the WebChart clinical data lacks.
     roster[subjectId] = [...WELLNESS_MEASURES, ...(sex === "F" ? FEMALE_MEASURES : [])];
   }
 

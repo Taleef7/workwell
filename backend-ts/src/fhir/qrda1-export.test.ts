@@ -357,17 +357,22 @@ test("QRDA I: the BUNDLE's birth date wins over the synthetic catalog's", () => 
 });
 
 test("QRDA I: a roster-eligible measure carries a CAVEAT, and a caveat is NOT a conformance failure", () => {
-  // The run evaluated `stampEnrollment(bundle, …)`, which overlays roster-derived enrollment evidence —
-  // for cms125 a SYNTHESIZED qualifying Encounter (ADR-042). Reapplying it here would assert a clinical
-  // encounter that did not happen (ADR-037), so the document omits it and NAMES the omission. That is a
-  // recalculation-fidelity limitation, not a structural defect, so the two are separate fields: folding
-  // them together would mark every live cms125 document non-conformant for something no validator raises.
+  // The run evaluated `stampEnrollment(bundle, …)`, which overlays a roster-derived enrollment Condition
+  // for a program measure. Program membership is not patient data, so the document omits it and NAMES
+  // the omission. That is a recalculation-fidelity limitation, not a structural defect, so the two are
+  // separate fields.
+  const audiogram = { ...outcome("COMPLIANT"), measureId: "audiogram" } as OutcomeRecord;
+  const [doc] = buildQrda1Documents(run, "audiogram", [audiogram], () => bundle);
+  assert.equal(doc!.caveats.length, 1);
+  assert.match(doc!.caveats[0]!, /roster-derived enrollment Condition/);
+  assert.match(doc!.xml, /OMITTED: audiogram is roster-eligible/, "and the document says so");
+});
+
+test("QRDA I: cms125 carries no roster caveat, because nothing is stamped for an eCQM any more", () => {
   const [doc] = buildQrda1Documents(run, "cms125", [outcome("COMPLIANT", officialEvidence(true))], () => bundle);
   assert.equal(doc!.conformant, true, "structurally conformant");
-  assert.deepEqual(doc!.nonConformanceReasons, []);
-  assert.equal(doc!.caveats.length, 1);
-  assert.match(doc!.caveats[0]!, /SYNTHESIZED qualifying Encounter/);
-  assert.match(doc!.xml, /OMITTED: cms125 is roster-eligible/, "and the document says so");
+  assert.deepEqual(doc!.caveats, []);
+  assert.ok(!doc!.xml.includes("OMITTED:"));
 });
 
 test("QRDA I: the bundle index resolves the id the PIPELINE actually persists (review + Codex, #361)", () => {

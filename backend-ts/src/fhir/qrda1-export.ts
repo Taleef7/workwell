@@ -63,24 +63,21 @@ import { qdmEntriesFor, translateQdm, type QdmTranslation } from "./qdm-entries.
 /**
  * The run evaluated a bundle this document does NOT reproduce, and that has to be said out loud.
  *
- * For a `ROSTER_ELIGIBLE_MEASURES` measure the pipeline evaluates `stampEnrollment(bundle, …)`, which
- * overlays a roster-derived enrollment Condition and — for cms125 — a **synthesized CPT 99213
- * Encounter**, because WebChart supplies none (ADR-042). Codex (#361) asked for that overlay to be
- * reapplied at export so a receiver recalculates our answer. **We deliberately do not**, on the
- * ADR-037 rule that this exporter normalizes and never fabricates: a QDM `Encounter, Performed` asserts
- * a clinical encounter *happened*, the roster's does not, and a receiver has no way to tell which entry
- * was inferred. Exporting real data and naming the omission is the lesser evil — the alternative is a
- * silent false clinical assertion inside a regulatory artifact.
+ * For a `ROSTER_ELIGIBLE_MEASURES` measure (an occupational program measure, never a CMS eCQM) the
+ * pipeline evaluates `stampEnrollment(bundle, …)`, which overlays a roster-derived enrollment Condition.
+ * Review (#361) asked for that overlay to be reapplied at export so a receiver recalculates our answer.
+ * **We deliberately do not**, on the ADR-037 rule that this exporter normalizes and never fabricates:
+ * program membership is not patient data, and a receiver has no way to tell which entry was inferred.
+ * Exporting real data and naming the omission is the lesser evil.
  *
  * The cost is real and is exactly what this string exists to make legible: a receiver recalculating
  * from this document may put the subject OUT of the initial population that WorkWell scored them in.
  */
 function rosterEvidenceCaveat(measureId: string): string {
   return (
-    `${measureId} is roster-eligible: the run evaluated a bundle carrying roster-derived enrollment ` +
-    `evidence (for cms125, a SYNTHESIZED qualifying Encounter — ADR-042) which this document omits ` +
-    `because it is not patient data. A receiver recalculating from these entries alone may place the ` +
-    `subject outside the initial population.`
+    `${measureId} is roster-eligible: the run evaluated a bundle carrying a roster-derived enrollment ` +
+    `Condition, which this document omits because program membership is not patient data. A receiver ` +
+    `recalculating from these entries alone may place the subject outside the initial population.`
   );
 }
 
@@ -441,8 +438,8 @@ function nonConformanceFrom(
  *
  * Kept separate from `qrda1NonConformance` deliberately. A structurally valid QRDA I that omits
  * roster-derived evidence is still a valid QRDA I; folding the two together would make `conformant`
- * mean two different things at once and would mark every live cms125 document non-conformant for a
- * reason no validator would ever raise.
+ * mean two different things at once and would mark a live program-measure document non-conformant for
+ * a reason no validator would ever raise.
  */
 export function qrda1Caveats(measureId: string, bundle: unknown): string[] {
   // Bundles are supplied only on the live path today, which is also the only path that stamps.

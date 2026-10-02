@@ -22,9 +22,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { OutcomeStatus } from "@work-well/measure-engine";
-import { webChartDataSource, evaluateSource } from "../data-source.ts";
+import { webChartDataSource, evaluateSource, type PatientDataSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "./webchart-client.ts";
-import { parseEnrollmentRoster, evaluateSourceWithRoster } from "../enrollment/roster.ts";
+import { parseEnrollmentRoster, evaluateSourceWithRoster, isEnrolled } from "../enrollment/roster.ts";
+import { withTestQualifyingVisit } from "../../../test-support/qualifying-visit.ts";
 // Single source of truth for the whitelist/excluded sets (the CLI module is import-safe — no side effects).
 import { DEVDB_EXCLUDED as EXCLUDED } from "./devdb-cli.ts";
 import { DEVDB_WHITELIST as WHITELIST } from "./report-table.ts";
@@ -83,17 +84,32 @@ test("cholesterol_ldl: LDL LOINC 2089-1 (MIE's actual code, new crosswalk row) e
   assert.equal(byId.get("wc-13"), "OVERDUE"); // LDL dated 2015
 });
 
-test("cms125: age-in-band enrolled female with roster visit → OVERDUE; age-out stays MISSING_DATA", async () => {
-  // Production CMS125v14 IPP = female + age 42–74 + qualifying visit (roster-stamped CPT 99213).
-  // wc-49 has a real HCPCS G0202 mammogram (2015) but birthDate 1990 → age 33 at EVAL → out of IPP.
-  // Age-in-band enrolled subjects (visit stamped by the OH roster) land OVERDUE: no mammogram in the
-  // official Oct-1 window, so non-numerator while still in denominator.
+test("cms125: nobody is admitted without a real visit — the roster no longer invents one", async () => {
+  // CMS125's population needs a qualifying encounter, and this sample carries none. The roster used to
+  // stamp a CPT 99213 visit, which made wc-8/36/45/47 OVERDUE on a visit that never happened.
   const byId = await runWithRoster("cms125");
-  assert.equal(byId.get("wc-49"), "MISSING_DATA", "wc-49 is female+enrolled but age 33 — out of 42–74 IPP");
-  assert.equal(byId.get("wc-8"), "OVERDUE");
-  assert.equal(byId.get("wc-36"), "OVERDUE");
-  assert.equal(byId.get("wc-45"), "OVERDUE");
-  assert.equal(byId.get("wc-47"), "OVERDUE");
+  assert.equal(byId.size, 56);
+  assert.deepEqual([...new Set(byId.values())], ["MISSING_DATA"]);
+});
+
+test("cms125 with a test-data visit: age-in-band women land OVERDUE, and age-out wc-49 stays out", async () => {
+  // The visit is TEST DATA, so the authored age gate (42–74) stays covered on every shard.
+  // wc-49 has a real HCPCS G0202 mammogram (2015) but was born in 1990, so she is out at 33.
+  const base = source();
+  const withVisits: PatientDataSource = {
+    kind: base.kind,
+    loadBundles: async () =>
+      (await base.loadBundles()).map((b) => {
+        const id = (b as { entry: Array<{ resource: { resourceType: string; id?: string } }> }).entry.find(
+          (e) => e.resource.resourceType === "Patient",
+        )?.resource.id;
+        return id && isEnrolled(roster, id, "cms125") ? withTestQualifyingVisit(b) : b;
+      }),
+  };
+  const res = await evaluateSourceWithRoster(withVisits, "cms125", roster, { evaluationDate: EVAL });
+  const byId = new Map(res.results.filter((r) => r.ok && r.outcome).map((r) => [r.outcome!.subjectId, r.outcome!.outcome]));
+  assert.equal(byId.get("wc-49"), "MISSING_DATA", "wc-49 is 33 — out of the 42–74 population");
+  for (const id of ["wc-8", "wc-36", "wc-45", "wc-47"]) assert.equal(byId.get(id), "OVERDUE", id);
 });
 
 test("the sample yields a real outcome distribution — NOT all MISSING_DATA (the proof)", async () => {
