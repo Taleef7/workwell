@@ -22,7 +22,7 @@ Question references point to `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.
 |---|---|---|
 | WorkWell receives a base API origin+app path in `WORKWELL_WEBCHART_BASE_URL` (e.g. `https://<practice>.webchartnow.com/webchart.cgi`); the FHIR root is `{baseUrl}/fhir`. | [VERIFIED] (endpoint directory + sandbox) | A1, C13 |
 | The API is FHIR **R4 (4.0.1)**, US Core 7.0.0, JSON only (`application/fhir+json`). | [VERIFIED] | A1 |
-| The worker population is enumerated with `GET {baseUrl}/fhir/Patient?_count=<pageSize>`. | [VERIFIED] Patient search exists; `_count` is [ASSUMED] (undocumented) | A2, C16 |
+| The worker population is enumerated with `GET {baseUrl}/fhir/Patient?_count=<pageSize>`. | **CORRECTED 2026-10-02:** the teatea trial refuses `_count` (400) and a bare `GET /Patient` (403). It is enumerated with `GET {baseUrl}/fhir/Patient?birthdate=le9999-12-31` and no `_count`, set by `WORKWELL_WEBCHART_PATIENT_SEARCH=birthdate=le9999-12-31` + `WORKWELL_WEBCHART_DISABLE_COUNT=true` | A2, C16 |
 | Search results are a FHIR R4 searchset `Bundle` whose `entry[].resource` values are `Patient` resources with stable `Patient.id` values. | [VERIFIED] | A2, B11 |
 | ~~Each patient is fetched with `GET /fhir/Patient/{id}/$everything`.~~ **CORRECTED:** the CapabilityStatement exposes **no `$everything`** — each patient is composed from paged per-resource searches `GET {baseUrl}/fhir/{Observation\|Condition\|Procedure\|Immunization\|Encounter}?patient={id}`, all supported with a `patient` search param. The only operation is `Group/$export` (Bulk Data 2.0). | [VERIFIED] | A2 |
 | WorkWell does not combine multiple patients into one evaluation bundle; the transport composes one collection Bundle per patient. | design invariant | A2, C16 |
@@ -33,11 +33,11 @@ Question references point to `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.
 
 | Assumption | Status | MIE question(s) |
 |---|---|---|
-| Searches are paged by `_count`; the server may cap the requested page size. | [ASSUMED] — `_count` and page size are **undocumented**; kept as the standard-FHIR conservative default | A2, A4, C16 |
+| Searches are paged by `_count`; the server may cap the requested page size. | **CORRECTED 2026-10-02:** the teatea trial answers any `_count` with **400**; a search returns everything with a numeric `Bundle.total` and no paging (`WORKWELL_WEBCHART_DISABLE_COUNT` exists for this) | A2, A4, C16 |
 | The next page is discovered from `Bundle.link[]` where `relation === "next"` and `url` is either absolute or relative; off-origin next links are refused (token protection). | [ASSUMED] (standard FHIR) | A2 |
 | Patient ordering is stable enough for batch traversal; WorkWell does not depend on a specific sort order for compliance semantics. | [ASSUMED] | A2 |
 | If a later population page fails, WorkWell evaluates the patients already listed and does not abort the whole batch. | design invariant | A2, A4, C16 |
-| No `_lastUpdated` search, no `history`, no versioning on any resource; the incremental-eval candidate is `Group/$export?_since=` (spec-defined, unverified). | [VERIFIED] (absence, from the CapabilityStatement); `_since` [ASSUMED] | A6 |
+| No `_lastUpdated` search, no `history`, no versioning on any resource; the incremental-eval candidate is `Group/$export?_since=`. | [VERIFIED] (absence; `_lastUpdated` → 400). **`_since` VERIFIED 2026-10-02** on teatea: `Group/{id}/$export` runs end to end (202 → poll → ndjson) and `_since` narrows the output; see the section below | A6 |
 
 ### Auth
 
@@ -60,6 +60,36 @@ Question references point to `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.
 | The transport is read-only and writes no `audit_events`; downstream state-changing run/case workflows retain the audit invariant. | design invariant | C14 |
 
 ---
+
+## Verified on the teatea trial, 2026-10-02
+
+WebChart EHR 8.4, release RC202509. Checked with WorkWell's registered backend client (read-only), the
+browser UI, docs.webchartnow.com and MIE's dev database. Synthetic data; a practice's configuration may
+differ. Open asks that follow from these are in `OPEN_QUESTIONS.md` §4.
+
+- **Bulk export works per partition.**
+  - `Group/{id}/$export` returns 202 → poll → ndjson, and needs the access token.
+  - The Groups are WebChart record partitions ("Test Patients", "Provider", "Insurance"…), not provider panels.
+  - `Group` search is refused (403), so there is no FHIR way to discover an id.
+  - `_since` is honoured; `_type` is ignored (other types come back too).
+  - `Patient/$export` returns 404; system-level `$export` returns 400.
+- **Not in FHIR:** Appointment, Slot, Schedule, Task, Communication. Searches return 400 and reads 404.
+- **Writes:** create/update only on Patient, Condition and Claim. Everything else is read-only.
+- **The PCP is sparse.** `Patient.generalPractitioner` is on 3 of 36 patients, matching a CareTeam "Attending
+  Physician". In the schema a patient's providers are `user_patients` roles. "Primary Care Physician" (role
+  290) exists unused, and "Referring Physician" carries the same SNOMED code (446050000).
+- **Coverage:** 2 of 36 patients, with no `Coverage.type`. The schema holds a Source of Payment Typology code
+  per plan (`insurance_plans.insurance_type_code`), which FHIR does not expose.
+- **Observations are mostly uncoded.** About 1,750 of 2,200 carry `data-absent-reason` for a code and a free-text
+  value. HbA1c (4548-4) and the BP components are LOINC-coded by default. BP comes as a panel (85354-9)
+  stamped `us-core-blood-pressure`, with `status: unknown`.
+- **Other coding:**
+  - Conditions: ICD-10 + SNOMED.
+  - Procedures: SNOMED.
+  - Immunizations: CVX.
+  - Document references: mostly type `UNK` (406 of 530).
+- **API terms** (docs: "Terms of API Use"): no persistent storage of User Content beyond a session, and 15,000
+  calls per app per day.
 
 ## Variant B — Proprietary REST over `wc_miehr_*` Shapes (documented fallback, not built)
 
