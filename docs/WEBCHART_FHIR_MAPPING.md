@@ -84,7 +84,8 @@ Populated counts in the dev seed (verified): `patients` 72, `patient_mrns` 100, 
 > `other`/`unknown` assert nothing), never overwriting one the server supplied, and tags it
 > `derived-from-gender` so an asserted sex is distinguishable from a recorded one. Gated by
 > `live-official-parity.test.ts`, which strips the extension from the committed fixture to reproduce the
-> live shape and pins that official CMS125 admits **4 of 56** with normalization and **0** without.
+> live shape and pins that official CMS125 admits **4 of 56** with normalization and **0** without (each
+> with a qualifying visit supplied as test data: the sample carries no encounters, and ingest invents none).
 >
 > The judgement is stated rather than hidden: administrative gender and recorded sex can legitimately
 > differ, so this is an inference. Reading a server's own `female` as not-female is also an inference —
@@ -371,7 +372,7 @@ with no live API and **no MariaDB driver**:
 - **PR-3 — demo CLI.** `pnpm evaluate:webchart-devdb [--date YYYY-MM-DD]`
   (`webchart/devdb-cli.ts`) evaluates the committed sample across the whitelist and prints a per-measure
   outcome summary (naming the excluded measures — no silent caps) — the showable artifact. On the sample it
-  reports **28 real (non-MISSING_DATA) outcomes** (e.g. `obesity_bmi` 5 COMPLIANT / 8 OVERDUE / 43
+  reports **27 real (non-MISSING_DATA) outcomes** (e.g. `obesity_bmi` 5 COMPLIANT / 8 OVERDUE / 43
   MISSING_DATA over 56 patients).
 
 **Crosswalk firmed to MIE's actual codes.** The dev DB records **LDL as LOINC `2089-1`** and **BP as the

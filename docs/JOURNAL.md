@@ -12,6 +12,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   finding: it opened a case for a patient with none, reopened a resolved one, and rolled an old cycle's
   case over as if the patient had been evaluated. Now the failure is still recorded, the run is still
   PARTIAL_FAILURE, and the patient's cases are left exactly as they were.
+- **Ingest no longer invents a visit for CMS125.** On a live WebChart run the enrollment roster stamped a
+  CPT 99213 office visit on every listed patient, which put them in CMS125's initial population whether
+  or not a visit happened. That was a made-up clinical fact on the live path, so it is gone, and cms125
+  is off the roster list. A test pins that no measure with an official artifact can be roster-eligible.
+  - Only the staging stack and the dev CLIs reached it; Maui and TWH run synthetic data.
+  - The dev-DB sample carries no encounters, so official CMS125 now admits nobody there. The tests that
+    probe sex mapping and mammography supply the visit as test data instead.
 - **The WebChart dev-DB tools read the result history, not a cache.** The shim, the generated
   compliance SQL, the fixture export and the YAML ingest all read `observations_current`. That table
   is WebChart's latest-per-code cache: NULL values on every LOINC row, and dates that are cache-refresh

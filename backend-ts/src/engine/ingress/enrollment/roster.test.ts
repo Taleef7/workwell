@@ -16,7 +16,8 @@ import { MEASURE_BINDINGS } from "../../synthetic/measure-bindings.ts";
 import type { EmployeeProfile } from "../../synthetic/employee-catalog.ts";
 import { webChartDataSource, jsonBucketDataSource, evaluateSource } from "../data-source.ts";
 import { fixtureWebChartClient } from "../webchart/webchart-client.ts";
-import { parseEnrollmentRoster, isEnrolled, stampEnrollment, evaluateSourceWithRoster } from "./roster.ts";
+import { parseEnrollmentRoster, isEnrolled, stampEnrollment, evaluateSourceWithRoster, ROSTER_ELIGIBLE_MEASURES } from "./roster.ts";
+import { VENDORED_OFFICIAL_MEASURE_IDS } from "../../../config/official-measure-ids.ts";
 
 const EVAL = "2026-06-12";
 
@@ -102,9 +103,7 @@ test("stampEnrollment: the stamped Condition is byte-identical to the synthetic 
   const built = buildSyntheticBundle(emp, deriveExamConfig(MEASURE_BINDINGS["audiogram"]!, "COMPLIANT"), evaluationDate);
   const builtCond = conditions(built).find((c) => c.id === "wc-1-hearing-enrollment") as Record<string, unknown>;
   const roster = parseEnrollmentRoster({ "wc-1": ["audiogram"] });
-  const stamped = stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster, {
-    evaluationDate,
-  });
+  const stamped = stampEnrollment(bundleWithProcedure("wc-1", "2026-03-01T00:00:00"), "audiogram", roster);
   const stampedCond = conditions(stamped)[0] as Record<string, unknown>;
 
   const { onsetDateTime, ...builtWithoutOnset } = builtCond;
@@ -165,10 +164,9 @@ test("stampEnrollment: no-ops for a clinical-enrollment measure — never fabric
   assert.equal(conditions(out).length, 0);
 });
 
-test("stampEnrollment (cms125): stamps enrollment Condition AND a qualifying office-visit Encounter (Codex P1 #280)", () => {
-  // Production CMS125v14 IPP requires a qualifying visit during the MP. WebChart clinical payloads
-  // typically have mammograms but no Encounter — the OH roster supplies both program membership and
-  // the eCQI-aligned visit evidence (CPT 99213), never a fabricated mammogram.
+test("stampEnrollment (cms125): adds nothing, so a patient with no real visit stays out of the population", () => {
+  // CMS125's initial population needs a qualifying encounter. A roster says nothing about whether a visit
+  // happened, so stamping one would put every listed patient in the denominator on a made-up visit.
   const roster = parseEnrollmentRoster({ "wc-49": ["cms125"] });
   const input: FhirBundle = {
     resourceType: "Bundle",
@@ -186,23 +184,18 @@ test("stampEnrollment (cms125): stamps enrollment Condition AND a qualifying off
       },
     ],
   };
-  const stamped = stampEnrollment(input, "cms125", roster, { evaluationDate: "2024-06-01" });
-  assert.equal(conditions(input).length, 0, "input must not be mutated");
-  assert.equal(conditions(stamped).length, 1);
-  const visit = stamped.entry
-    .map((e) => (e as { resource: Record<string, unknown> }).resource)
-    .find((r) => r.resourceType === "Encounter");
-  assert.ok(visit, "cms125 enrollment must stamp a qualifying office-visit Encounter");
-  assert.equal(visit!.id, "wc-49-office-visit");
-  assert.equal(visit!.status, "finished");
-  const typeCoding = (visit!.type as Array<{ coding: Array<{ code: string; system: string }> }>)[0]!.coding[0]!;
-  assert.equal(typeCoding.code, "99213");
-  assert.equal(typeCoding.system, "http://www.ama-assn.org/go/cpt");
-  // Visit day is ~90d before the evaluation date → inside the 12-month measurement period.
-  assert.equal((visit!.period as { start: string }).start, "2024-03-03T09:00:00");
-  // Idempotent: second stamp is a no-op.
-  const twice = stampEnrollment(stamped, "cms125", roster, { evaluationDate: "2024-06-01" });
-  assert.deepEqual(twice, stamped);
+  const stamped = stampEnrollment(input, "cms125", roster);
+  assert.equal(stamped, input, "an eCQM bundle is returned untouched");
+  const kinds = stamped.entry.map((e) => (e as { resource: { resourceType: string } }).resource.resourceType);
+  assert.deepEqual(kinds, ["Patient", "Procedure"], "no Encounter, no Condition");
+});
+
+test("no measure with a vendored official artifact is roster-eligible", () => {
+  // Official measures are populated by clinical data alone. A roster-eligible official measure would get
+  // a WorkWell-made enrollment Condition on every live run, so the two lists must never overlap.
+  const overlap = [...VENDORED_OFFICIAL_MEASURE_IDS].filter((id) => ROSTER_ELIGIBLE_MEASURES.has(id));
+  assert.ok(VENDORED_OFFICIAL_MEASURE_IDS.size > 0, "the vendored set must be readable, or this guard proves nothing");
+  assert.deepEqual(overlap, []);
 });
 
 test("stampEnrollment: no-ops on an unknown measure or a bundle with no Patient", () => {

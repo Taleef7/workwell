@@ -257,7 +257,7 @@ interface WorkItem {
  */
 function bundleFor(item: WorkItem, liveRoster: EnrollmentRoster | undefined, evalDate: string, bundleSource: SubjectBundleSource): unknown {
   return item.liveBundle !== undefined
-    ? stampEnrollment(item.liveBundle as FhirBundle, item.measureId, liveRoster!, { evaluationDate: evalDate })
+    ? stampEnrollment(item.liveBundle as FhirBundle, item.measureId, liveRoster!)
     : bundleSource.bundleFor(item.employee, item.measureId, item.target!, evalDate);
 }
 

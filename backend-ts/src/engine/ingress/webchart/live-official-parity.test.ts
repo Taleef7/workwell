@@ -39,7 +39,8 @@ import { normalizeWebChartBundle } from "./normalize.ts";
 import { officialMeasureExecutor, type OfficialBatchSubject } from "../../../wiring/official-executor-adapter.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "../../../wiring/official-terminology.ts";
 import { loadOfficialArtifact } from "../../../wiring/official-artifacts.ts";
-import { parseEnrollmentRoster, stampEnrollment } from "../enrollment/roster.ts";
+import { parseEnrollmentRoster, isEnrolled } from "../enrollment/roster.ts";
+import { withTestQualifyingVisit } from "../../../test-support/qualifying-visit.ts";
 import { ECQM_CANONICAL_CODES, MAMMOGRAPHY_PROCEDURE_CPT } from "../../cql/bundled-ecqm-expansions.ts";
 
 const DIR = fileURLToPath(new URL("../../../../spike/webchart/", import.meta.url));
@@ -58,6 +59,17 @@ const skip = sidecarsPresent ? false : "run 'pnpm vendor:official' to fetch the 
 
 type Res = Record<string, unknown>;
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+/**
+ * A qualifying visit added as TEST DATA (`test-support/qualifying-visit.ts`) for each patient the
+ * committed roster lists. The sample carries no Encounter and ingest no longer invents one; this file's
+ * subject is how normalization treats sex and screenings, so it supplies the visit itself.
+ */
+function withQualifyingVisit(bundle: unknown): unknown {
+  const patient = ((bundle as { entry?: Array<{ resource?: Res }> }).entry ?? []).find((e) => e.resource?.["resourceType"] === "Patient")?.resource;
+  const id = typeof patient?.["id"] === "string" ? (patient["id"] as string) : undefined;
+  return id && isEnrolled(roster, id, "cms125") ? withTestQualifyingVisit(bundle) : bundle;
+}
 
 function resourcesOf(payload: unknown): Res[] {
   const entries = (payload as { entry?: Array<{ resource?: Res }> }).entry ?? [];
@@ -103,7 +115,7 @@ function liveBundles(mutate: (bundle: unknown) => unknown = (b) => b): unknown[]
   return asLiveServerWouldSend()
     .map((p) => normalizeWebChartBundle(p))
     .map((b) => mutate(b))
-    .map((b) => stampEnrollment(b as never, "cms125", roster, { evaluationDate: EVAL }));
+    .map((b) => withQualifyingVisit(b));
 }
 
 /**
@@ -394,7 +406,7 @@ test("the derived Observation actually satisfies the OFFICIAL NUMERATOR, not mer
   const withScreening = asLiveServerWouldSend()
     .map((p) => screened({ resourceType: "Bundle", type: "collection", entry: resourcesOf(p).map((resource) => ({ resource })) }))
     .map((b) => normalizeWebChartBundle(b))
-    .map((b) => stampEnrollment(b as never, "cms125", roster, { evaluationDate: EVAL }));
+    .map((b) => withQualifyingVisit(b));
 
   const numerator = async (bundles: readonly unknown[]) => {
     const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
