@@ -1,8 +1,8 @@
 /**
  * #749: an authored measure's "most recent" result must not depend on the order the results arrive in.
- * `Last(... sort by (performed as FHIR.dateTime))` sorted by a FHIR element the runtime cannot order, so on
- * a person with several results `Last()` returned whichever came last in input order — the OLDEST, for
- * data listed oldest-first (the WebChart dev DB's full history does exactly that).
+ * `Last(... sort by (performed as FHIR.dateTime))` sorted by a FHIR element the runtime cannot compare:
+ * every comparison said "greater", the merge sort reversed the input, and `Last()` returned the FIRST
+ * result listed — the OLDEST, for data listed oldest-first (the WebChart dev DB's full history is).
  *
  * Every recency measure gets its in-window result AND its out-of-window one, in both orders, and must
  * read the in-window one both times.
@@ -51,8 +51,10 @@ const RECENCY = Object.keys(MEASURES).filter(
     existsSync(path.join(synthRoot, id, "present_old.json")),
 );
 
+// flu_vaccine runs here too but cannot fail on the sort: its 12-month period makes DUE_SOON (a last
+// vaccine outside the period yet within 365 days) unreachable, so the most recent date never decides it.
 test("the recency measures under test are the ones that carry the sort", () => {
-  for (const id of ["audiogram", "hypertension", "obesity_bmi", "cholesterol_ldl", "diabetes_hba1c", "tb_surveillance", "hazwoper", "flu_vaccine"]) {
+  for (const id of ["audiogram", "hypertension", "obesity_bmi", "cholesterol_ldl", "diabetes_hba1c", "tb_surveillance", "hazwoper", "adult_immunization"]) {
     assert.ok(RECENCY.includes(id), `${id} must be covered`);
   }
 });
@@ -77,6 +79,8 @@ test("authored cms122: the most recent HbA1c decides poor control, not the first
   const recentDay = String(recentObs.resource.effectiveDateTime).slice(0, 10);
   const earlier = new Date(`${recentDay}T00:00:00Z`);
   earlier.setUTCDate(earlier.getUTCDate() - 30);
+  // Both results inside the measurement year, or the earlier one would be ignored and prove nothing.
+  assert.equal(earlier.toISOString().slice(0, 4), EVAL.slice(0, 4), "the earlier result is still in the measurement year");
   // An earlier, poorly controlled result in the same year: superseded by the recent one.
   const older: Entry = {
     resource: {
