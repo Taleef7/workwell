@@ -134,15 +134,19 @@ synthetic hierarchy.
 | `code.text` | `observation_codes.obs_name` |
 | `effectiveDateTime` | `observations.observed_datetime` (zero dates dropped) |
 | `valueQuantity.value` | `observations.obs_result` when it is a plain number (it is text); otherwise no value |
+| `status` | `final`; only rows whose `obs_status` is `''` or `F` are read |
 
 ```sql
 SELECT o.pat_id, oc.loinc_num, oc.obs_name, o.obs_result, o.observed_datetime
 FROM observations o
 JOIN observation_codes oc ON oc.obs_code = o.obs_code
-WHERE oc.loinc_num IS NOT NULL AND o.obs_status <> 'DELETED';
+WHERE oc.loinc_num IS NOT NULL AND o.obs_status IN ('', 'F');
 ```
 
-`observations` is the full result history (one row per result; superseded rows are `DELETED`). Until
+`observations` is the full result history (one row per result; deleted and superseded rows are
+`DELETED`). The seed holds no other status. Any other status is left out rather than served as `final`,
+because a result that was never obtained would then count toward a measure. Which values WebChart writes
+is a question for MIE (`OPEN_QUESTIONS.md` §4.7). Until
 2026-10-02 this section read `observations_current`, believing `observations` empty because
 `information_schema.table_rows` said so. The cache gave every LOINC row a NULL value and a cache-refresh
 date (patient 8's HbA1c read 2015-08-16; it was taken 2011-02-13).
@@ -238,7 +242,7 @@ The PR-2 adapter's `loadBundles()` fans out per patient (or a bounded page of pa
 bundle from these reads:
 
 1. **Patient** — `patients` ⋈ `patient_mrns` (`WHERE is_patient=1`).
-2. **Observations** — `observations` ⋈ `observation_codes` (LOINC; `DELETED` rows excluded).
+2. **Observations** — `observations` ⋈ `observation_codes` (LOINC; final results only, §3.5).
 3. **Procedures** — `patient_procedures` [+ completed `encounter_orders` ⋈ `order_list`].
 4. **Immunizations** — **not sourced here** (ICE, per the locked decision).
 5. **Conditions** — encounter diagnoses [+ problem list once confirmed].
@@ -377,7 +381,7 @@ LOINC/HCPCS present): `diabetes_hba1c`, `obesity_bmi`, `cholesterol_ldl`, `hyper
 (one HCPCS `G0202` mammogram). **Named-excluded** (no matching seed data — asserted to stay MISSING_DATA,
 never silently dropped): the OSHA CPTs (`audiogram`/`tb_surveillance`/`hazwoper`), the CVX vaccine measures
 (`flu_vaccine`/`adult_immunization`/`mmr`/`varicella`/`hepatitis_b_vaccination_series` — ICE's domain), and
-`cms122` (value-based; the seed's `obs_result_dec` is null and it needs a diabetes dx the seed lacks).
+`cms122` (value-based; it needs a diabetes dx the seed lacks).
 
 Descriptive-only throughout: the adapter supplies coded FHIR; the CQL engine remains the sole source of
 compliance truth (ADR-008/ADR-017).

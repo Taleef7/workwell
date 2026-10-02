@@ -14,7 +14,7 @@
 > already answered. This file exists because an unanswered question with no home decays silently —
 > every entry below had been raised at least once, some three times, with no record of an answer.
 
-**As of 2026-10-02.** Fourteen open.
+**As of 2026-10-02.** Fifteen open.
 
 ---
 
@@ -207,6 +207,17 @@ WebChart counts a scanned mammogram, colonoscopy, FOBT or similar document, and 
 reported" date, as screening evidence. Over FHIR these are mostly untyped DocumentReferences that the CMS
 measures do not read. So a patient can be compliant in WebChart and a gap in WorkWell. The two must be
 reconciled before anyone compares the numbers.
+
+### 4.7 Which result statuses mean a final result?
+
+**Status:** unasked.
+
+The dev database's `observations.obs_status` holds only `''`, `F` and `DELETED`, so the dev tools read
+`''` and `F` as final and leave everything else out. A result that was preliminary, corrected or never
+obtained would count toward a measure if it were read as final. On the trial, FHIR serves blood-pressure
+panels with `status: unknown`.
+- Which `obs_status` values does WebChart write, and which are final?
+- How does WebChart's FHIR server map them to `Observation.status`?
 
 ---
 
