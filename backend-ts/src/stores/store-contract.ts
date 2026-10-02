@@ -1872,6 +1872,19 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     assert.equal(after?.closedBy, "cm@workwell.dev");
   });
 
+  test(`[${label}] the nightly's batch upsert leaves a rerun-verified closure too (#747)`, async () => {
+    const store = await freshStore();
+    const c = (await upsert(store, "OVERDUE"))!;
+    await store.patchCase(c.id, { status: "RESOLVED", currentOutcomeStatus: "COMPLIANT", closedAt: new Date().toISOString(), closedReason: "RERUN_VERIFIED", closedBy: "cm@workwell.dev" });
+    const key = { subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13" };
+    assert.deepEqual(await store.upsertFromOutcomes([{ ...key, runId: crypto.randomUUID(), outcomeStatus: "EXCLUDED" }]), [null]);
+    assert.deepEqual(await store.upsertFromOutcomes([{ ...key, runId: crypto.randomUUID(), outcomeStatus: "OVERDUE" }]), [null]);
+    const after = await store.getCase(c.id);
+    assert.equal(after?.status, "RESOLVED");
+    assert.equal(after?.closedReason, "RERUN_VERIFIED");
+    assert.equal(after?.closedBy, "cm@workwell.dev");
+  });
+
   test(`[${label}] concurrent upsert of a NEW key never throws a unique violation (Codex P2)`, async () => {
     const store = await freshStore();
     // Two runs hitting the same new (subject, measure, period) key at once (manual double-click /
