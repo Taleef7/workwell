@@ -63,7 +63,19 @@ export interface IngestDoc {
 /** The exact (object, field) surface ingest writes/reads — validated against the model catalog. */
 export const MODEL_TOUCHES: Record<string, string[]> = {
   patients: ["pat_id", "first_name", "last_name", "sex", "birth_date", "is_patient"],
-  observations: ["pat_id", "obs_code", "obs_result", "observed_datetime", "obs_name"],
+  observations: [
+    "pat_id",
+    "obs_code",
+    "obs_result",
+    "observed_datetime",
+    "obs_name",
+    "obs_status",
+    "template_id",
+    "test_comments",
+    "free_text",
+    "micro_result",
+    "interpretive_text",
+  ],
   observation_codes: ["obs_code", "loinc_num", "obs_name"],
 };
 
@@ -83,6 +95,12 @@ export const MODEL_TYPE_EXPECTATIONS: Record<string, Record<string, ValueKind>> 
     obs_result: "string",
     observed_datetime: "datetime",
     obs_name: "string",
+    obs_status: "string",
+    template_id: "string",
+    test_comments: "string",
+    free_text: "string",
+    micro_result: "string",
+    interpretive_text: "string",
   },
   observation_codes: { obs_code: "number", loinc_num: "string", obs_name: "string" },
 };
@@ -243,11 +261,13 @@ export async function ingest(db: IngestRunner, doc: IngestDoc, opts: { dryRun?: 
       const patId = Number(res.insertId);
       for (const ob of p.observations) {
         // `observations` is the result history every reader uses, and the table WebChart's API writes;
-        // `observations_current` is its latest-per-code cache. The text columns with no default get ''.
+        // `observations_current` is its latest-per-code cache. The text columns with no default get '',
+        // and the status is written as final ('F') rather than left to the column default, because the
+        // readers count only a final result.
         const code = codes.get(ob.loinc)!;
         await tx.execute(
-          "INSERT INTO observations (pat_id, obs_code, obs_result, observed_datetime, obs_name, " +
-            "template_id, test_comments, free_text, micro_result, interpretive_text) VALUES (?,?,?,?,?,'','','','','')",
+          "INSERT INTO observations (pat_id, obs_code, obs_result, observed_datetime, obs_name, obs_status, " +
+            "template_id, test_comments, free_text, micro_result, interpretive_text) VALUES (?,?,?,?,?,'F','','','','','')",
           [patId, code.code, String(ob.value), `${ob.date} 00:00:00`, code.name],
         );
       }

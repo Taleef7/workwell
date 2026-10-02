@@ -117,6 +117,8 @@ test("validateFieldTypes passes on the real dev-wcdb type vocabulary and catches
 interface StubState {
   patients: Array<{ pat_id: number; first_name: string; last_name: string; birth: string }>;
   obs: Array<{ pat_id: number; obs_code: number; result: string; observed: string; name: string }>;
+  /** The last observation INSERT, whole, for the columns written as literals. */
+  obsInsertSql?: string;
   /** Rows an older ingest left in WebChart's latest-value cache table. */
   cacheObs?: Array<{ pat_id: number }>;
   executed: string[];
@@ -170,6 +172,7 @@ function stubIngestDb(state: StubState, opts: { failOnInsertOfLastName?: string 
       if (sql.startsWith("INSERT INTO observations ")) {
         const [pat_id, obs_code, result, observed, name] = params as [number, number, string, string, string];
         state.obs.push({ pat_id: Number(pat_id), obs_code: Number(obs_code), result, observed, name });
+        state.obsInsertSql = sql;
         return { affectedRows: 1 };
       }
       if (sql.startsWith("DELETE FROM observations ")) {
@@ -245,6 +248,11 @@ test("an ingested observation lands in the result history the readers use, value
   assert.equal(row.result, String(first.value), "the value is kept, as WebChart's text result");
   assert.equal(row.observed, `${first.date} 00:00:00`, "dated by when it was observed");
   assert.equal(row.name, `Name ${first.loinc}`, "named like the code it carries");
+  // The readers count only a final result, so the status is written, not left to the column default.
+  const [, cols, vals] = state.obsInsertSql!.match(/\(([^)]*)\) VALUES \(([^)]*)\)/)!;
+  const at = cols!.split(",").map((c) => c.trim()).indexOf("obs_status");
+  assert.ok(at >= 0, "the INSERT names obs_status");
+  assert.equal(vals!.split(",")[at]!.trim(), "'F'", "written as a final result");
   assert.ok(!state.executed.some((s) => s.includes("observations_current")), "nothing is written to the cache table");
 });
 

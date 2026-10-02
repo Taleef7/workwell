@@ -72,6 +72,21 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): DbConfig {
   };
 }
 
+/**
+ * One patient's coded results. `observations` is the result history; `observations_current` is
+ * WebChart's latest-per-code cache, whose value columns are NULL on the seed and whose `obs_ts` is the
+ * cache-refresh time. `obs_result` is text: only a plain number becomes a value, so nothing reads as 0.
+ * Only a final result counts. The seed holds '' and 'F', plus 'DELETED' for removed rows; any other
+ * status (a preliminary, a "could not be obtained") is left out rather than served as `final`, until
+ * MIE says what WebChart stores there. `webchart-devdb-export.ts` reads by the same rule.
+ */
+export const OBSERVATIONS_FOR_PATIENT_SQL =
+  "SELECT o.pat_id AS pat_id, oc.loinc_num AS loinc, oc.obs_name AS name, " +
+  "CASE WHEN o.obs_result REGEXP '^-?[0-9]+(\\\\.[0-9]+)?$' THEN CAST(o.obs_result AS DECIMAL(20,4)) END AS value, " +
+  "DATE_FORMAT(o.observed_datetime,'%Y-%m-%d') AS dt " +
+  "FROM observations o JOIN observation_codes oc ON oc.obs_code=o.obs_code " +
+  "WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' AND o.obs_status IN ('','F') AND o.pat_id=? ORDER BY o.obs_id";
+
 export function createDb(cfg: DbConfig = configFromEnv()): ShimDb {
   const pool = mysql.createPool({
     host: cfg.host,
@@ -98,17 +113,7 @@ export function createDb(cfg: DbConfig = configFromEnv()): ShimDb {
       return rows as PatientRow[];
     },
     async observationsForPatient(patId) {
-      const [rows] = await pool.query(
-        // `observations` is the result history; `observations_current` is WebChart's latest-per-code cache,
-        // whose value columns are NULL on the seed and whose `obs_ts` is the cache-refresh time.
-        // `obs_result` is text: only a plain number becomes a value, so nothing reads as 0.
-        "SELECT o.pat_id AS pat_id, oc.loinc_num AS loinc, oc.obs_name AS name, " +
-          "CASE WHEN o.obs_result REGEXP '^-?[0-9]+(\\\\.[0-9]+)?$' THEN CAST(o.obs_result AS DECIMAL(20,4)) END AS value, " +
-          "DATE_FORMAT(o.observed_datetime,'%Y-%m-%d') AS dt " +
-          "FROM observations o JOIN observation_codes oc ON oc.obs_code=o.obs_code " +
-          "WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' AND o.obs_status<>'DELETED' AND o.pat_id=? ORDER BY o.obs_id",
-        [patId],
-      );
+      const [rows] = await pool.query(OBSERVATIONS_FOR_PATIENT_SQL, [patId]);
       return rows as ObservationRow[];
     },
     async proceduresForPatient(patId) {

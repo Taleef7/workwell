@@ -119,12 +119,13 @@ function main(): void {
   const observations = queryJson(
     // `observations` is the result history; `observations_current` is WebChart's latest-per-code cache,
     // whose values are NULL on the seed and whose `obs_ts` is the cache-refresh time. Only a plain
-    // number in the text `obs_result` becomes a value.
+    // number in the text `obs_result` becomes a value, and only a final result ('' or 'F') counts —
+    // the shim's `OBSERVATIONS_FOR_PATIENT_SQL` reads by the same rule.
     `SELECT JSON_OBJECT('pat_id',o.pat_id,'loinc',oc.loinc_num,'name',oc.obs_name,` +
       `'value',CASE WHEN o.obs_result REGEXP '^-?[0-9]+(\\\\.[0-9]+)?$' THEN CAST(o.obs_result AS DECIMAL(20,4)) END,` +
       `'dt',DATE_FORMAT(o.observed_datetime,'%Y-%m-%d')) ` +
       `FROM observations o JOIN observation_codes oc ON oc.obs_code=o.obs_code ` +
-      `WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' AND o.obs_status<>'DELETED' ORDER BY o.pat_id, o.obs_id`,
+      `WHERE oc.loinc_num IS NOT NULL AND oc.loinc_num<>'' AND o.obs_status IN ('','F') ORDER BY o.pat_id, o.obs_id`,
   );
   const procedures = queryJson(
     `SELECT JSON_OBJECT('pat_id',pat_id,'cpt',cpt_code,'dt',DATE_FORMAT(service_date,'%Y-%m-%d')) ` +

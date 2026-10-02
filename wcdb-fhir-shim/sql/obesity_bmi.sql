@@ -23,7 +23,7 @@ LEFT JOIN (
   FROM observations o
   JOIN observation_codes oc ON oc.obs_code = o.obs_code
   WHERE oc.loinc_num IN ('39156-5')
-    AND o.obs_status <> 'DELETED'
+    AND o.obs_status IN ('', 'F')
     AND DATE(o.observed_datetime) >= DATE('0001-01-01')
   GROUP BY o.pat_id
 ) last_ev ON last_ev.pat_id = p.pat_id
@@ -49,7 +49,7 @@ LEFT JOIN (
   FROM observations o
   JOIN observation_codes oc ON oc.obs_code = o.obs_code
   WHERE oc.loinc_num IN ('39156-5')
-    AND o.obs_status <> 'DELETED'
+    AND o.obs_status IN ('', 'F')
     AND DATE(o.observed_datetime) >= DATE('0001-01-01')
   GROUP BY o.pat_id
 ) last_ev ON last_ev.pat_id = p.pat_id
@@ -83,7 +83,7 @@ FROM (
     FROM observations o
     JOIN observation_codes oc ON oc.obs_code = o.obs_code
     WHERE oc.loinc_num IN ('39156-5')
-      AND o.obs_status <> 'DELETED'
+      AND o.obs_status IN ('', 'F')
       AND DATE(o.observed_datetime) >= DATE('0001-01-01')
     GROUP BY o.pat_id
   ) last_ev ON last_ev.pat_id = p.pat_id
