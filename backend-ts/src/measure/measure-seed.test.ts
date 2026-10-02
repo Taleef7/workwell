@@ -1005,6 +1005,13 @@ test("pre749Cql reconstructs the pre-fix seed text, and names nothing when the f
   assert.equal(pre749Cql('define "X": true'), null);
 });
 
+const countCqlRefreshedEvents = async (db: Awaited<ReturnType<typeof freshDb>>) => {
+  const rows = await db
+    .prepare("SELECT event_type FROM audit_events WHERE event_type = 'MEASURE_SEED_CQL_REFRESHED' AND entity_id = 'hypertension-v1.0'")
+    .all<{ event_type: string }>();
+  return (rows.results ?? []).length;
+};
+
 test("seedMeasureStore — rewrites CQL the seed stored before #749, audited, once; leaves an edited text alone", async () => {
   const db = await freshDb();
   const store = new SqliteMeasureStore(db);
@@ -1014,10 +1021,11 @@ test("seedMeasureStore — rewrites CQL the seed stored before #749, audited, on
 
   await seedMeasureStore(store, cqlOf, events);
   assert.equal((await store.getLatest("hypertension"))!.cqlText, CURRENT_SORT_CQL, "the stored text now sorts by the CQL date");
-  assert.equal(await countSeedUpdatedEvents(db), 1, "the rewrite is audited");
+  assert.equal(await countCqlRefreshedEvents(db), 1, "the rewrite is audited");
+  assert.equal(await countSeedUpdatedEvents(db), 0, "under its own event, not hypertension's spec repair");
 
   await seedMeasureStore(store, cqlOf, events);
-  assert.equal(await countSeedUpdatedEvents(db), 1, "a second seed changes nothing and audits nothing");
+  assert.equal(await countCqlRefreshedEvents(db), 1, "a second seed changes nothing and audits nothing");
 
   // A text someone edited is theirs, even if it carries the old sort.
   const db2 = await freshDb();
@@ -1026,5 +1034,29 @@ test("seedMeasureStore — rewrites CQL the seed stored before #749, audited, on
   await seedOldHypertensionRow(store2, { staleCqlOnly: true, cqlText: edited });
   await seedMeasureStore(store2, cqlOf, new SqliteCaseEventStore(db2));
   assert.equal((await store2.getLatest("hypertension"))!.cqlText, edited);
-  assert.equal(await countSeedUpdatedEvents(db2), 0);
+  assert.equal(await countCqlRefreshedEvents(db2), 0);
+});
+
+test("seedMeasureStore — a #749 rewrite that fails after its audit is retried without a second audit", async () => {
+  class FailOnceStore extends SqliteMeasureStore {
+    failed = false;
+    override async updateCql(measureId: string, cqlText: string, compileStatus?: string) {
+      if (!this.failed) {
+        this.failed = true;
+        throw new Error("simulated write failure");
+      }
+      return super.updateCql(measureId, cqlText, compileStatus);
+    }
+  }
+  const db = await freshDb();
+  const store = new FailOnceStore(db);
+  const events = new SqliteCaseEventStore(db);
+  const cqlOf = (measureId: string) => (measureId === "hypertension" ? CURRENT_SORT_CQL : "");
+  await seedOldHypertensionRow(store, { staleCqlOnly: true, cqlText: pre749Cql(CURRENT_SORT_CQL)! });
+
+  await assert.rejects(seedMeasureStore(store, cqlOf, events), /simulated write failure/);
+  assert.equal(await countCqlRefreshedEvents(db), 1, "audit-first: the intent is recorded before the write");
+  await seedMeasureStore(store, cqlOf, events);
+  assert.equal((await store.getLatest("hypertension"))!.cqlText, CURRENT_SORT_CQL, "the retry completes the rewrite");
+  assert.equal(await countCqlRefreshedEvents(db), 1, "and does not record it twice");
 });
