@@ -239,7 +239,7 @@ export default function ProgramDetailPage() {
                     Based on {fmtCount(rate.denominator)} {rate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
                   </p>
                 ) : null}
-                <RateEstimateNote id="rate-estimate-note" className="mt-1" />
+                <RateEstimateNote id="rate-estimate-note" className="mt-1" fhirLogic={ranOfficial} />
               </div>
               {delta !== null ? (
                 <p

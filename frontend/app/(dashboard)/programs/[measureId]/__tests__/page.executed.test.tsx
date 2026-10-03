@@ -113,6 +113,9 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     expect(screen.queryByText("CMS125FHIR")).toBeNull();
     // The outcome-by-version row carries the same version as the header.
     expect(screen.getByRole("cell", { name: "v1.0" })).toBeInTheDocument();
+    // Still an estimate, but no claim that CMS's FHIR logic produced it.
+    expect(screen.getByText("WorkWell's estimate. WebChart calculates and submits the reported rate.")).toBeInTheDocument();
+    expect(screen.queryByText(ESTIMATE)).toBeNull();
   });
 
   it("counts that fold in the authored scale tenant's are not labelled with the live run's artifact", async () => {
