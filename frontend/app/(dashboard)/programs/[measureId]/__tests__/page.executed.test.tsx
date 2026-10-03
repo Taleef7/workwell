@@ -111,6 +111,8 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     expect(screen.getByText(/^Version v1\.0/)).toBeInTheDocument();
     expect(screen.queryByText(/^Version 1\.0\.000/)).toBeNull();
     expect(screen.queryByText("CMS125FHIR")).toBeNull();
+    // Nor with the QDM measure version the catalog cites: authored CQL is not CMS125v14 either.
+    expect(screen.queryByTestId("measure-top-label")).toBeNull();
     // The outcome-by-version row carries the same version as the header.
     expect(screen.getByRole("cell", { name: "v1.0" })).toBeInTheDocument();
     // Still an estimate, but no claim that CMS's FHIR logic produced it.
@@ -125,6 +127,20 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     await screen.findByTestId("executed-logic");
     expect(screen.getByText(/^Version v1\.0/)).toBeInTheDocument();
     expect(screen.queryByText("CMS125FHIR")).toBeNull();
+    // Mixed totals carry no single measure identity: not the artifact, and not the QDM version either.
+    expect(screen.queryByTestId("measure-top-label")).toBeNull();
+  });
+
+  it("the label above the name is the executed artifact on an official run", async () => {
+    mockApi();
+    render(<ProgramDetailPage />);
+    expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("CMS125FHIR");
+  });
+
+  it("a measure whose policy reference is not a CMS measure version keeps it as the label", async () => {
+    mockApi({ executed: false, summary: program({ measureRate: null, policyRef: "OSHA 29 CFR 1910.95" }) });
+    render(<ProgramDetailPage />);
+    expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("OSHA 29 CFR 1910.95");
   });
 
   it("an authored measure keeps its catalog version and shows no executed-logic line", async () => {

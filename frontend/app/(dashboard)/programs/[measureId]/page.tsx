@@ -189,6 +189,10 @@ export default function ProgramDetailPage() {
   const ran = program?.measureRate?.official;
   const shownEcqmId = !ranOfficial ? undefined : ran?.ecqmId ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`) : executed?.ecqmId;
   const shownVersion = ranOfficial ? (ran?.version ?? executed?.version ?? program?.version) : program?.version;
+  // The label above the name names logic only when it is the logic that scored these numbers. A policy
+  // reference that is itself a versioned CMS measure id (CMS125v14) is a measure neither engine ran, so it
+  // never stands in for the artifact; any other policy reference (an OSHA citation) still shows.
+  const topLabel = shownEcqmId ?? (/^CMS\d+v\d+$/i.test(program?.policyRef ?? "") ? undefined : program?.policyRef);
   const rateDescribedBy = [rate.value === null ? "counted-yet-note" : null, showsRateEstimateNote() ? "rate-estimate-note" : null].filter(Boolean).join(" ") || undefined;
 
   const outcomeBreakdown = program
@@ -212,7 +216,9 @@ export default function ProgramDetailPage() {
       {program ? (
         <>
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-            <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{shownEcqmId ?? program.policyRef}</p>
+            {topLabel ? (
+              <p data-testid="measure-top-label" className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{topLabel}</p>
+            ) : null}
             <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(measureId, program.measureName)}</h2>
             <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {shownVersion}{yearLine ? ` · ${yearLine}` : ""}</p>
             {executed ? (
