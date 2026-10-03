@@ -118,11 +118,17 @@ export const hl7TsOrNull = (iso: unknown): string | null => {
  */
 export function qrdaMeasureReference(
   measureId: string,
-  official: { version?: string; artifactSha256?: string } | null,
+  official: { kind?: "derived"; version?: string; artifactSha256?: string } | null,
   artifact: { manifest: { sha256: string }; bundle: unknown } | null,
   identifiers: (a: never) => { versionSpecific?: string; versionIndependent?: string },
   indent: string,
 ): string {
+  // The routes refuse a translated run before building a document; this is the backstop. QRDA names a
+  // measure by CMS's eMeasure identity, which a WorkWell translation may not carry (LOCKED §4.3), and the
+  // fallback below would call it `:official:`.
+  if (official?.kind === "derived") {
+    throw new Error(`${measureId}: a WorkWell translation has no QRDA measure identity; refuse the export before reaching here`);
+  }
   if (!official) return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
   const shaMatches = artifact && (!official.artifactSha256 || artifact.manifest.sha256 === official.artifactSha256);
   const ids = shaMatches ? identifiers(artifact as never) : {};

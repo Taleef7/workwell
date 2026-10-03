@@ -7,6 +7,19 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-03
 
+- **A WorkWell translation can score the year it covers, and nothing else (C2a).** The engine now
+  chooses the artifact after the period: CMS's draft for a year it covers, otherwise a translation under
+  `measures/derived/<id>/` named in the new `WORKWELL_DERIVED_MEASURES`, otherwise CMS's draft with the
+  prior-year warning. Unset on every stack and no translation committed, so nothing changes today.
+  - Caches and the terminology expander key by artifact, not measure id. Keyed by id, a 2027 translation
+    would run on the 2026 value sets, which for CMS137 (a value-sets-only change) makes it the draft.
+  - One `isFqmScored` predicate replaces five `official-fqm:` prefix checks, so the out-of-population
+    rule (ADR-078) applies to a translation. `logicVersionFor(id)` became `logicFor(id, date)`.
+  - The router refuses an unfit translation (D1–D8: routed measure, WorkWell identity, one calendar
+    year, the VSAC release named, CMS's populations and strata, passing checks on this exact artifact,
+    a complete sidecar).
+  - A translated row writes `official.kind: "derived"` and a null `ecqmId`. QRDA I/III refuse it, the
+    MeasureReport uses the translation's own canonical, and a run mixing logic or periods is refused.
 - **WorkWell can compile CMS's QI-Core CQL, with results identical to CMS's own ELM.** The 2027
   translations need a compile path, and the docs said CMS's QI-Core CQL was uncompilable under our pinned
   translator (a 2026-07-05 spike). It compiles: the same `@cqframework/cql@4.0.0-beta.1` needs only

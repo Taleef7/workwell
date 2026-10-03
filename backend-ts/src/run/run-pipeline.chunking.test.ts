@@ -24,7 +24,6 @@ import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { planManualRun, finishOrFail, type ManualRunRequest, type RunPipelineDeps } from "./run-pipeline.ts";
 import type { BatchPhaseTiming } from "./phase-timing.ts";
-import { OFFICIAL_LOGIC_VERSION_PREFIX } from "../wiring/executor-router.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { SubjectBundleSource } from "../wiring/subject-bundle-source.ts";
 import type { RecordOutcomeInput, OutcomeRecord } from "../stores/outcome-store.ts";
@@ -192,8 +191,8 @@ function makeTestDeps(opts: {
         ]),
       );
     },
-    logicVersionFor: (measureId: string) =>
-      opts.officialRouting ? `${OFFICIAL_LOGIC_VERSION_PREFIX}1:artifact:terminology:${measureId}` : undefined,
+    logicFor: (measureId: string) =>
+      opts.officialRouting ? { version: `official-fqm:1:artifact:terminology:${measureId}`, kind: "official" as const, warning: null } : undefined,
   } as unknown as RunPipelineDeps["engine"];
 
   return {

@@ -36,12 +36,12 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
-import { OFFICIAL_LOGIC_VERSION_PREFIX, routedEngineForEnv } from "../wiring/executor-router.ts";
+import { isFqmScored, routedEngineForEnv, type RoutedEngine } from "../wiring/executor-router.ts";
 import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, runCandidates, type RunFilters } from "../run/read-models.ts";
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
-import { aggregateOfficialRun, runProducedOfficialEvidence } from "../fhir/run-aggregate.ts";
+import { aggregateOfficialRun, runProducedOfficialEvidence, scoringIdentityKey } from "../fhir/run-aggregate.ts";
 import { officialMeasureRate } from "../program/measure-rate.ts";
 import { resolveAlertChannels } from "../run/alert-channel.ts";
 import {
@@ -68,6 +68,7 @@ import {
   type OfficialReportIdentity,
   countPopulations,
   isEvaluationErrorEvidence,
+  officialReportIdentity,
   populationCountsFromStatus,
 } from "../fhir/measure-report.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
@@ -277,7 +278,7 @@ async function aggregateCountsForRun(
   measureId: string,
   env: RunsEnv,
 ): Promise<
-  | { counts: PopulationCounts[]; strata: StratumCounts[][]; unmeasured: number; evaluationErrors: number; official: OfficialReportIdentity | null }
+  | { counts: PopulationCounts[]; strata: StratumCounts[][]; unmeasured: number; evaluationErrors: number; official: OfficialReportIdentity | null; identityConflict: boolean }
   | { error: Response }
 > {
   // Provenance comes from the RUN, not from the current deployment flag (Codex P1). A run's outcomes
@@ -300,15 +301,53 @@ async function aggregateCountsForRun(
     // a measure with no official evidence has one rate. Wrapped so the return type is uniform. A status
     // histogram cannot see evidence, so it cannot count evaluation errors; this branch serves authored
     // runs (including `seed:scale`), whose exports never carried that count either.
-    return { counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)], strata: [], unmeasured: 0, evaluationErrors: 0, official: null };
+    return { counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)], strata: [], unmeasured: 0, evaluationErrors: 0, official: null, identityConflict: false };
   }
   // PAGED and per RATE (`fhir/run-aggregate.ts`), shared with the programs overview so the dashboard's
   // measure rate and this export are the same reduction of the same rows (ADR-077 d5). `unmeasured`
   // (ADR-074 d5/d11) and `evaluationErrors` (ADR-077 d6) travel with the counts so the two exports can
   // SAY how many rows the denominators leave out; a MeasureReport has no standard element for either
   // and QRDA III none, so both routes carry them as response headers instead of inventing an extension.
-  const { rates, strata, unmeasured, evaluationErrors, official: identity } = await aggregateOfficialRun(os, runId, measureId);
-  return { counts: rates, strata, unmeasured, evaluationErrors, official: identity };
+  const { rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict } = await aggregateOfficialRun(os, runId, measureId);
+  return { counts: rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict };
+}
+
+/**
+ * QRDA names a measure by CMS's eMeasure identity (its HQMF version-specific id), and a run scored by a
+ * WorkWell translation has no such identity it may carry: the 2027 QDM measure's ids would relabel
+ * QI-Core-executed counts (LOCKED §4.3), and the 2026 FHIR draft's would name logic that did not run.
+ * 422 like the other content refusals (`unsupported_run_scope`), never a document with a borrowed id.
+ */
+const derivedNotReportable = (format: string): Response =>
+  json(
+    {
+      error: "derived_logic_not_reportable",
+      message:
+        `${format} identifies a measure by CMS's eMeasure identity, and this run was scored by a WorkWell ` +
+        `translation, which may not carry one. The FHIR MeasureReport reports it under the translation's own canonical.`,
+    },
+    422,
+  );
+
+/**
+ * One report names one measure and one measurement period. A run whose rows for the measure were scored
+ * by more than one logic or period (a translation and CMS's draft, or two years) cannot be described by
+ * one document honestly, so it is refused rather than labelled with whichever row came first.
+ */
+const mixedLogic = (format: string): Response =>
+  json(
+    {
+      error: "mixed_logic",
+      message: `This run's outcomes for the measure were scored by more than one logic or measurement period, so one ${format} cannot name one measure and one period.`,
+    },
+    422,
+  );
+
+/** What the evaluated rows were scored by: whether any was a translation, and whether they disagree. */
+function rowScoring(rows: ReadonlyArray<{ evidence: unknown }>): { derived: boolean; mixed: boolean } {
+  const identities = rows.filter((r) => !isEvaluationErrorEvidence(r.evidence)).map((r) => officialReportIdentity(r.evidence));
+  const keys = new Set(identities.map(scoringIdentityKey).filter((k): k is string => k !== null));
+  return { derived: identities.some((i) => i?.kind === "derived"), mixed: keys.size > 1 };
 }
 
 /** Subjects counted in no rate (ADR-074 d5/d11), on the summary MeasureReport and QRDA III responses. */
@@ -457,11 +496,13 @@ async function scheduleAsyncRun(
  * out-of-population subjects back in the dashboard's denominator.
  */
 const outOfPopulationFlag = (
-  engine: { logicVersionFor?: (measureId: string) => string | undefined },
+  engine: Pick<RoutedEngine, "logicFor">,
   measureId: string,
+  /** The date the evaluation used: which logic scored it depends on the year. */
+  evaluationDate: string,
   inInitialPopulation: boolean | undefined,
 ): boolean | undefined =>
-  engine.logicVersionFor?.(measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX)
+  isFqmScored(engine.logicFor?.(measureId, evaluationDate))
     ? inInitialPopulation === false
     : undefined;
 
@@ -768,7 +809,7 @@ export async function handleRuns(
         runId: evalId,
         subjectId: result.subjectId,
         measureId: body.measureId,
-        outOfPopulation: outOfPopulationFlag(engine, body.measureId, result.inInitialPopulation),
+        outOfPopulation: outOfPopulationFlag(engine, body.measureId, evaluationPeriod, result.inInitialPopulation),
         evaluationPeriod,
         status: result.outcome,
         evidence,
@@ -955,7 +996,7 @@ export async function handleRuns(
             evaluationPeriod,
             status: result.outcome,
             evidence,
-            outOfPopulation: outOfPopulationFlag(engine, body.measureId, result.inInitialPopulation),
+            outOfPopulation: outOfPopulationFlag(engine, body.measureId, evaluationPeriod, result.inInitialPopulation),
           }),
         );
       } catch (err) {
@@ -1196,6 +1237,9 @@ export async function handleRuns(
     // delete, so the pass is visible here if it could have touched anything read above.
     const goneIAfter = await compacted(run, env);
     if (goneIAfter) return goneIAfter;
+    const scoring = rowScoring(rows);
+    if (scoring.derived) return derivedNotReportable("QRDA I");
+    if (scoring.mixed) return mixedLogic("QRDA I");
     const documents = buildQrda1Documents(run, measureId, rows, await qrda1BundleLookup(env, rows.map((r) => r.subjectId)));
     const nonConformant = documents.filter((d) => !d.conformant).length;
     return json({
@@ -1244,6 +1288,8 @@ export async function handleRuns(
     // before a compaction and be reduced after it.)
     const goneIiiAfter = await compacted(run, env);
     if (goneIiiAfter) return goneIiiAfter;
+    if (aggregate.official?.kind === "derived") return derivedNotReportable("QRDA III");
+    if (aggregate.identityConflict) return mixedLogic("QRDA III");
     // Every rate and every stratum (ADR-074). This route refused a multi-rate measure with a 501 until
     // 2026-09-06 rather than emit rate 1 under the measure's identity; the exporter now reports each
     // group under its own criterion names, with its own performance rate and Reporting Strata.
@@ -1297,6 +1343,7 @@ export async function handleRuns(
       // Second exposure check AFTER the read — see the QRDA III route for why.
       const goneMrAfter = await compacted(run, env);
       if (goneMrAfter) return goneMrAfter;
+      if (aggregate.identityConflict) return mixedLogic("summary MeasureReport");
       return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official, aggregate.strata), {
         [UNMEASURED_HEADER]: String(aggregate.unmeasured),
         [EVALUATION_ERRORS_HEADER]: String(aggregate.evaluationErrors),

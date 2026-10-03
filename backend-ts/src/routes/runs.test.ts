@@ -655,6 +655,67 @@ test("GET /api/runs/:id/qrda → well-formed QRDA III XML; 404 unknown run", asy
   assert.equal((await get(`/api/runs/${crypto.randomUUID()}/qrda`))!.status, 404);
 });
 
+/** A COMPLETED single-measure run whose rows carry the given official evidence, one per subject. */
+async function runWithEvidence(evidence: unknown[]): Promise<string> {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms137",
+    triggeredBy: "test",
+    requestedScope: { measureId: "cms137" },
+    measurementPeriodStart: "2027-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2027-12-31T23:59:59.999Z",
+    status: "COMPLETED",
+    startedAt: "2027-03-01T00:00:00.000Z",
+    completedAt: "2027-03-01T00:10:00.000Z",
+  });
+  await outcomeStore.recordOutcomes(
+    evidence.map((ev, i) => ({ runId: run.id, subjectId: `derived-${i}-${crypto.randomUUID()}`, measureId: "cms137", evaluationPeriod: "2027-01-01", status: "OVERDUE" as const, evidence: ev })),
+  );
+  return run.id;
+}
+
+const populations = [
+  { populationType: "initial-population", result: true },
+  { populationType: "denominator", result: true },
+  { populationType: "numerator", result: false },
+];
+const derivedEvidence = (period = { start: "2027-01-01", end: "2027-12-31" }) => ({
+  expressionResults: [],
+  official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1", engine: "fqm-execution", artifactSha256: "sha256:derived", populationResults: populations, measurementPeriod: period },
+});
+const officialEvidence = (period: { start: string; end: string }) => ({
+  expressionResults: [],
+  official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:official", populationResults: populations, measurementPeriod: period },
+});
+
+test("a run scored by a WorkWell translation: QRDA refuses it (no CMS identity to carry), the MeasureReport names the translation", async () => {
+  const runId = await runWithEvidence([derivedEvidence(), derivedEvidence()]);
+  for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`]) {
+    const res = (await get(path))!;
+    assert.equal(res.status, 422, path);
+    assert.equal(((await res.json()) as { error: string }).error, "derived_logic_not_reportable", path);
+  }
+  const mr = (await get(`/api/runs/${runId}/measure-report`))!;
+  assert.equal(mr.status, 200);
+  const report = (await mr.json()) as { measure: string };
+  assert.equal(report.measure, "urn:workwell:measure:cms137:translation", "reported under the translation's own canonical");
+  assert.doesNotMatch(JSON.stringify(report), /madie\.cms\.gov|:official:|137FHIR/, "and nothing in it claims CMS's measure");
+});
+
+test("a run whose rows were scored for two different years is refused rather than labelled with the first row", async () => {
+  const runId = await runWithEvidence([officialEvidence({ start: "2026-01-01", end: "2026-12-31" }), officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
+  for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`, `/api/runs/${runId}/measure-report`]) {
+    const res = (await get(path))!;
+    assert.equal(res.status, 422, path);
+    assert.equal(((await res.json()) as { error: string }).error, "mixed_logic", path);
+  }
+  const same = await runWithEvidence([officialEvidence({ start: "2027-01-01", end: "2027-12-31" }), officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
+  assert.equal((await get(`/api/runs/${same}/qrda?format=xml`))!.status, 200, "one logic, one period: exported as before");
+});
+
 test("Codex P2: a non-string triggeredBy is coerced to 'manual', never a 500", async () => {
   // Untrusted body: `{"triggeredBy":123}` must not throw `raw.trim is not a function`.
   const res = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: 123 });

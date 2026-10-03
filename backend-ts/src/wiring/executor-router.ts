@@ -78,8 +78,16 @@ import type { MeasureMeta } from "../engine/cql/measure-registry.ts";
 import type { StoresEnv } from "../stores/factory.ts";
 import type { VsacEnv } from "@work-well/measure-engine";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
+import { derivedIdentityProblems } from "../standards/derived-identity.ts";
 import { engineForEnv } from "./engine-factory.ts";
-import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
+import {
+  artifactKind,
+  loadDerivedArtifact,
+  loadOfficialArtifact,
+  selectArtifactForPeriod,
+  type ArtifactKind,
+  type OfficialArtifact,
+} from "./official-artifacts.ts";
 import {
   absentValueSets,
   cappedExpansions,
@@ -88,13 +96,16 @@ import {
   type LoadedTerminology,
 } from "./official-terminology.ts";
 import {
+  effectivePeriodWarning,
   officialMeasureExecutor,
+  officialMeasurementPeriod,
   type OfficialBatchSubject,
   requiredOids,
   type ExpandValueSet,
   type FqmCalculate,
 } from "./official-executor-adapter.ts";
 import {
+  derivedMeasureIds,
   officialMeasureIds,
   ungatedOfficialMeasures,
   type OfficialMeasuresEnv,
@@ -105,11 +116,40 @@ import { fqmWorkerCount, fqmWorkerEnabled, sharedFqmWorker, type BatchCalculator
 /** The extended shape the authored engine accepts — diagnostics pass an explicit library to run. */
 export type RoutableInput = EvaluateMeasureInput & { elm?: unknown; metaOverride?: MeasureMeta };
 
+/**
+ * The logic an engine executes for one measure ON ONE DATE: CMS's artifact, or a WorkWell translation for
+ * a year CMS's does not cover. `version` is what a cache keys and the compliance API reports; `warning` is
+ * the "scored with prior-year logic" sentence when the chosen artifact does not cover the year.
+ */
+export interface RoutedLogic {
+  version: string;
+  kind: ArtifactKind;
+  /** The translation's label ("WorkWell translation of CMS137v15"); absent for CMS's artifact. */
+  label?: string;
+  warning: string | null;
+}
+
+/**
+ * Whether a measure's outcome on that date comes from an fqm-executed artifact — CMS's or a WorkWell
+ * translation — and so carries population membership: the out-of-population rule (ADR-078) and the
+ * empty-population warning (ADR-043) apply. THE one predicate for that question: five call sites used to
+ * test a string prefix each, and a translation with its own prefix would have slipped past all five and
+ * opened a case for nearly every out-of-population patient.
+ */
+export function isFqmScored(logic: RoutedLogic | undefined): logic is RoutedLogic {
+  return logic !== undefined && (logic.kind === "official" || logic.kind === "derived");
+}
+
 export interface RoutedEngine {
   evaluate(input: RoutableInput): Promise<MeasureOutcome>;
   /**
-   * The identity of the LOGIC this engine executes for `measureId`, when that logic is not WorkWell's
+   * The LOGIC this engine executes for `measureId` on `evaluationDate`, when that logic is not WorkWell's
    * authored ELM. `undefined` means "authored" — the caller derives the identity the way it always has.
+   *
+   * The date is required, not optional: which artifact scores a measure depends on the year (decision 3),
+   * so a caller that asked without one would get an answer about a year it did not evaluate. Named
+   * `logicFor` rather than adding a parameter to the old `logicVersionFor` so every caller and every test
+   * stub had to change — a one-argument stub still type-checks against a two-argument signature.
    *
    * This exists because of a correctness hazard in incremental evaluation (#263/ADR-035), not as a
    * convenience. `incremental-eval.ts` derives `logic_version` by hashing `ELM_LIBRARIES[libraryName]`
@@ -124,7 +164,7 @@ export interface RoutedEngine {
    * that computes the outcome are the same object, so they cannot disagree, and a new call site gets it
    * for free instead of having to remember it.
    */
-  logicVersionFor?(measureId: string): string | undefined;
+  logicFor?(measureId: string, evaluationDate: string): RoutedLogic | undefined;
 
   /**
    * Evaluate one measure's whole roster in a single pass, or resolve `undefined` when this measure has
@@ -141,11 +181,11 @@ export interface RoutedEngine {
    *
    * **One method, not a `canBatch()` predicate plus a call.** Two signals about the same fact drift; the
    * `undefined` resolution IS the predicate, decided by the same `official` set the dispatch below reads.
-   * For the same reason it is deliberately NOT inferred from `logicVersionFor(id) !== undefined` — "has
+   * For the same reason it is deliberately NOT inferred from `logicFor(id, date) !== undefined` — "has
    * a declared logic identity" and "can be batched" happen to coincide today, and a coincidence relied
    * on is a coincidence that breaks quietly.
    *
-   * Like `logicVersionFor` it hangs off the ENGINE rather than being threaded alongside it, so a new
+   * Like `logicFor` it hangs off the ENGINE rather than being threaded alongside it, so a new
    * call site gets it for free instead of having to remember it (see that method's note).
    */
   evaluateBatch?(
@@ -173,18 +213,20 @@ export interface RoutedEngine {
  */
 export function officialLogicVersion(artifact: OfficialArtifact): string {
   const { version, sha256, terminology } = artifact.manifest;
-  return `${OFFICIAL_LOGIC_VERSION_PREFIX}${version}:${sha256}:${terminology?.sha256 ?? "unpinned"}`;
+  const prefix = artifactKind(artifact) === "derived" ? DERIVED_LOGIC_VERSION_PREFIX : OFFICIAL_LOGIC_VERSION_PREFIX;
+  return `${prefix}${version}:${sha256}:${terminology?.sha256 ?? "unpinned"}`;
 }
 
 /**
- * The prefix that marks a logic identity as an official artifact's rather than the authored ELM's.
- *
- * Exported because it is now READ as well as written: the run pipeline asks `logicVersionFor` whether a
- * measure is officially routed before applying an official-only check (ADR-043). Kept as one constant so
- * the producer above and that consumer cannot drift — a silent drift would make the check inert, which
- * is the failure mode it exists to prevent.
+ * The prefixes that mark a logic identity as CMS's artifact (`official-fqm:`) or a WorkWell translation
+ * (`derived-fqm:`), keeping both disjoint from the authored side's `sha256:<hex>`. Written here and read
+ * nowhere else: "is this fqm-scored?" is `isFqmScored`, never a prefix test at the call site.
  */
-export const OFFICIAL_LOGIC_VERSION_PREFIX = "official-fqm:";
+const OFFICIAL_LOGIC_VERSION_PREFIX = "official-fqm:";
+const DERIVED_LOGIC_VERSION_PREFIX = "derived-fqm:";
+
+/** The checks a translation must have passed, each against this exact artifact and terminology. */
+export const REQUIRED_DERIVED_ORACLES = ["cypress-deck", "terminology-equivalence"] as const;
 
 export interface RoutingCheckDeps {
   /**
@@ -210,6 +252,8 @@ export interface RoutingCheckDeps {
    * fires at all.
    */
   absentFor?: (artifact: OfficialArtifact) => string[];
+  /** Injectable for tests: no translation is committed yet, so a test supplies its own. */
+  loadDerived?: (catalogId: string) => OfficialArtifact | null;
 }
 
 /** Everything wrong with the current `WORKWELL_OFFICIAL_MEASURES`, as sentences. Empty means legal. */
@@ -321,7 +365,104 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
       );
     }
   }
+  problems.push(...derivedRoutingProblems(env, { loadTerminology, cappedFor, absentFor, loadDerived: deps.loadDerived ?? loadDerivedArtifact }));
   return problems;
+}
+
+/**
+ * Everything wrong with `WORKWELL_DERIVED_MEASURES` (decision 3). A translation may score a year only if
+ * it is everything CMS's artifact is — gated, proportion, same populations — plus a translation's own
+ * guarantees. Reported together with the official problems, so the router refuses either way.
+ *
+ *   D1 the measure is also official-routed: a translation stands in for one year, never for the measure;
+ *   D2 a translation is committed under measures/derived/<id>/ and its catalogId matches;
+ *   D3 its identity is WorkWell's (`derivedIdentityProblems`) — no CMS identity over its counts (§4.3);
+ *   D4 it covers exactly one calendar year, so it can never run outside the year it was checked for;
+ *   D5 its terminology names the VSAC release it was expanded from;
+ *   D6 its scoring, population basis, populations, improvement notation, group and stratifier ids equal
+ *      CMS's — the semantics table, case logic and MeasureReport strata are all keyed by the measure;
+ *   D7 every required check passed, against THIS artifact's hash and THIS terminology's hash;
+ *   D8 its terminology sidecar is present, matches its pin, and is neither capped nor missing a set.
+ */
+function derivedRoutingProblems(
+  env: OfficialMeasuresEnv,
+  deps: {
+    loadTerminology: (artifact: OfficialArtifact) => LoadedTerminology;
+    cappedFor: (artifact: OfficialArtifact) => Array<{ oid: string; have: number; declaredTotal: number }>;
+    absentFor: (artifact: OfficialArtifact) => string[];
+    loadDerived: (catalogId: string) => OfficialArtifact | null;
+  },
+): string[] {
+  const problems: string[] = [];
+  const official = officialMeasureIds(env as Record<string, unknown>);
+  for (const id of derivedMeasureIds(env as Record<string, unknown>)) {
+    if (!official.has(id)) {
+      problems.push(`${id}: named in WORKWELL_DERIVED_MEASURES but not in WORKWELL_OFFICIAL_MEASURES — a translation only ever stands in for a routed measure's CMS artifact`);
+      continue;
+    }
+    const translation = deps.loadDerived(id);
+    if (!translation) {
+      problems.push(`${id}: no executable translation is committed (see measures/derived/)`);
+      continue;
+    }
+    const manifest = translation.manifest;
+    if (manifest.catalogId !== id) problems.push(`${id}: the translation declares catalogId '${manifest.catalogId}'`);
+    problems.push(...derivedIdentityProblems(translation.bundle as never, manifest));
+
+    const ep = manifest.effectivePeriod;
+    const year = ep?.start?.slice(0, 4);
+    if (!ep?.start || !ep?.end || ep.start.slice(0, 10) !== `${year}-01-01` || ep.end.slice(0, 10) !== `${year}-12-31`) {
+      problems.push(`${id}: a translation must cover exactly one calendar year; it declares ${ep?.start ?? "?"}..${ep?.end ?? "?"}`);
+    }
+    if (!manifest.terminology?.completion?.manifest) {
+      problems.push(`${id}: the translation's terminology does not name the VSAC release it was expanded from`);
+    }
+
+    const base = loadOfficialArtifact(id);
+    if (base) {
+      for (const field of ["scoring", "populationBasis", "improvementNotation"] as const) {
+        if (manifest[field] !== base.manifest[field]) {
+          problems.push(`${id}: the translation's ${field} '${manifest[field]}' differs from CMS's '${base.manifest[field]}'`);
+        }
+      }
+      if (JSON.stringify(manifest.populations) !== JSON.stringify(base.manifest.populations)) {
+        problems.push(`${id}: the translation declares populations ${JSON.stringify(manifest.populations)}, CMS's ${JSON.stringify(base.manifest.populations)}`);
+      }
+      const shape = (artifact: OfficialArtifact) => JSON.stringify(groupShape(artifact));
+      if (shape(translation) !== shape(base)) {
+        problems.push(`${id}: the translation's group and stratifier ids differ from CMS's — every read of strata and rates is keyed by them`);
+      }
+    }
+
+    const oracles = manifest.derived?.oracles ?? [];
+    for (const name of REQUIRED_DERIVED_ORACLES) {
+      const record = oracles.find((o) => o.name === name);
+      if (!record || record.result !== "pass" || record.total <= 0 || record.agree !== record.total) {
+        problems.push(`${id}: the translation has no passing '${name}' check`);
+      } else if (record.ranAgainst.artifactSha256 !== manifest.sha256 || record.ranAgainst.terminologySha256 !== manifest.terminology?.sha256) {
+        problems.push(`${id}: the translation's '${name}' check ran against a different artifact or terminology than the one committed`);
+      }
+    }
+
+    const terminology = deps.loadTerminology(translation);
+    if (!terminology.ok) problems.push(`${id} (translation): ${terminology.problem}`);
+    for (const cap of deps.cappedFor(translation)) {
+      problems.push(`${id} (translation): value set ${cap.oid} expands to only ${cap.have} of ${cap.declaredTotal} codes`);
+    }
+    for (const oid of deps.absentFor(translation)) {
+      problems.push(`${id} (translation): value set ${oid} is declared but the translation's terminology holds no codes for it`);
+    }
+  }
+  return problems;
+}
+
+/** Each group's id with its stratifier ids — the keys rates and strata are read by. */
+function groupShape(artifact: OfficialArtifact): Array<{ id: unknown; strata: unknown[] }> {
+  const measure = ((artifact.bundle as { entry?: Array<{ resource?: Record<string, unknown> }> }).entry ?? [])
+    .map((e) => e.resource)
+    .find((r) => r?.["resourceType"] === "Measure");
+  const groups = (measure?.["group"] as Array<{ id?: unknown; stratifier?: Array<{ id?: unknown }> }> | undefined) ?? [];
+  return groups.map((g) => ({ id: g.id, strata: (g.stratifier ?? []).map((s) => s.id) }));
 }
 
 export interface RoutedEngineOptions extends RoutingCheckDeps {
@@ -356,9 +497,27 @@ export async function routedEngineForEnv(
   // The artifact's OWN terminology, at the commit its ELM came from — never our VSAC import. That is
   // what makes the MADiE gate evidence about this path rather than about a configuration nothing runs
   // (roadmap §7.3; the split is documented at length in official-terminology.ts).
-  const expand = options.expand ?? officialTerminologyExpander(loadOfficialArtifact);
+  const expand = options.expand ?? officialTerminologyExpander();
+
+  // ONE decision about which artifact scores a measure for a period, shared by the executor (what runs)
+  // and `logicFor` (what is reported and cached), so the two can never describe different logic. A
+  // translation is a candidate only for a measure named in WORKWELL_DERIVED_MEASURES, and the checks
+  // above have already refused any translation that is not fit to be one.
+  const derivedIds = derivedMeasureIds(env as Record<string, unknown>);
+  const loadDerived = options.loadDerived ?? loadDerivedArtifact;
+  const candidates = (measureId: string) => ({
+    official: loadOfficialArtifact(measureId),
+    derived: derivedIds.has(measureId) ? loadDerived(measureId) : null,
+  });
+  const select = (measureId: string, period: { start: string; end: string }) => selectArtifactForPeriod(candidates(measureId), period);
+
   const executor = officialMeasureExecutor({
     expand,
+    selectArtifact: select,
+    candidateArtifacts: (measureId) => {
+      const { official: base, derived } = candidates(measureId);
+      return [base, derived].filter((a): a is OfficialArtifact => a !== null);
+    },
     ...(options.calculate ? { calculate: options.calculate } : {}),
     ...(options.calculateBatch
       ? { calculateBatch: options.calculateBatch }
@@ -371,32 +530,38 @@ export async function routedEngineForEnv(
   // failure is the one worth reporting, unqualified by a race.
   for (const id of official) await executor.preflight(id);
 
-  // Resolved once, here, from the same artifacts the executor was just built over — so the identity a
-  // cache stores can never describe a different artifact than the one that produced the outcome.
-  const logicVersions = new Map<string, string>();
+  // Checked once, here, against the same artifacts the executor was just built over. Unreachable —
+  // `officialRoutingProblems` above already refused a missing artifact, and the load is memoized so the
+  // second call cannot fail where the first succeeded. It throws anyway rather than skipping, because a
+  // skip is the precise hazard the logic identity exists to close: `evaluate` would still route the
+  // measure officially (it consults `official`) while `logicFor` reported "authored", and the cache would
+  // record the authored ELM's hash for officially-produced outcomes. Silence is the one failure mode this
+  // file does not accept.
   for (const id of official) {
-    const artifact = loadOfficialArtifact(id);
-    // Unreachable — `officialRoutingProblems` above already refused a missing artifact, and the load is
-    // memoized so the second call cannot fail where the first succeeded. It throws anyway rather than
-    // skipping, because a skip here is the precise hazard this identity exists to close: `evaluate`
-    // would still route the measure officially (it consults `official`, not this map) while
-    // `logicVersionFor` reported "authored", and the cache would record the authored ELM's hash for
-    // officially-produced outcomes. Silence is the one failure mode this file does not accept.
-    if (!artifact) throw new Error(`${id}: routing validated but the official artifact could not be loaded`);
-    logicVersions.set(id, officialLogicVersion(artifact));
+    if (!loadOfficialArtifact(id)) throw new Error(`${id}: routing validated but the official artifact could not be loaded`);
   }
 
   return {
     /**
-     * Keyed by measure, which matches how a cache keys logic. It therefore does NOT account for the
+     * Keyed by measure and DATE, which matches how a cache keys logic. It does NOT account for the
      * per-INPUT `elm`/`metaOverride` escape below, under which a routed measure is evaluated authored.
      * That is sound only because the two callers cannot meet: the escape is used by the fidelity lab
      * and the Rule Builder, neither of which is a population run, and the incremental cache exists
      * only inside `finishManualRun`. A future caller that both overrides the library AND caches must
      * key on the library it asked for, not on the measure.
      */
-    logicVersionFor(measureId: string): string | undefined {
-      return logicVersions.get(measureId);
+    logicFor(measureId: string, evaluationDate: string): RoutedLogic | undefined {
+      if (!official.has(measureId)) return undefined;
+      const period = officialMeasurementPeriod(measureId, evaluationDate);
+      const artifact = select(measureId, period);
+      if (!artifact) throw new Error(`${measureId}: routing validated but no artifact covers ${period.start}..${period.end}`);
+      const label = artifact.manifest.derived?.label;
+      return {
+        version: officialLogicVersion(artifact),
+        kind: artifactKind(artifact),
+        ...(label && artifactKind(artifact) === "derived" ? { label } : {}),
+        warning: effectivePeriodWarning(artifact, period),
+      };
     },
     async evaluateBatch(
       measureId: string,

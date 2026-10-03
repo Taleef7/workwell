@@ -50,6 +50,20 @@ export interface OfficialRunAggregate extends RateAggregate {
    * same 20,000 evidence blobs per measure, six measures deep, on the programs overview's cold path.
    */
   producedOfficialEvidence: boolean;
+  /**
+   * True when the run's evaluated rows for this measure were scored by MORE THAN ONE logic — different
+   * artifacts (CMS's draft and a WorkWell translation, or two vendorings) or different measurement
+   * periods. One report cannot honestly name one measure and one period over such rows, so the
+   * exporters refuse it. A run created by `/evaluate` or `/import` resolves the date per call, which is
+   * how one open run can hold more than one year.
+   */
+  identityConflict: boolean;
+}
+
+/** What makes two rows' scoring the same logic: the artifact kind and hash, and the period counted. */
+export function scoringIdentityKey(identity: OfficialReportIdentity | null): string | null {
+  if (!identity) return null;
+  return JSON.stringify([identity.kind ?? "official", identity.artifactSha256 ?? null, identity.measurementPeriod?.start ?? null, identity.measurementPeriod?.end ?? null]);
 }
 
 /**
@@ -122,11 +136,21 @@ export async function aggregateOfficialRun(
   // `aggregator.add` already calls `officialMembership` on every non-error row (`membershipRatesFor` →
   // `membershipFor`), so every alert was already being emitted.
   let producedOfficialEvidence = false;
+  let identityConflict = false;
+  let firstKey: string | null = null;
   for (const row of await os.listOutcomeMembershipsForRun(runId, measureId)) {
     aggregator.add(row);
     if (isEvaluationErrorEvidence(row.evidence)) continue;
-    if (!identity) identity = officialReportIdentity(row.evidence);
+    const rowIdentity = officialReportIdentity(row.evidence);
+    if (!identity) identity = rowIdentity;
+    // Every evaluated row is compared, not just the first: the first row naming the report is only honest
+    // if every other row was scored the same way.
+    const key = scoringIdentityKey(rowIdentity);
+    if (key !== null) {
+      if (firstKey === null) firstKey = key;
+      else if (key !== firstKey) identityConflict = true;
+    }
     producedOfficialEvidence ||= officialMembership(row.evidence) !== null;
   }
-  return { ...aggregator.finish(), official: identity, producedOfficialEvidence };
+  return { ...aggregator.finish(), official: identity, producedOfficialEvidence, identityConflict };
 }

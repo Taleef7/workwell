@@ -19,7 +19,7 @@ import type { CaseStore, CaseRecord, UpsertCaseInput } from "../stores/case-stor
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { invalidateCaseSubjectInvariant } from "../case/worklist-read-model.ts";
 import type { EvaluateMeasureBinding, MeasureOutcome } from "@work-well/measure-engine";
-import { OFFICIAL_LOGIC_VERSION_PREFIX, type RoutedEngine } from "../wiring/executor-router.ts";
+import { isFqmScored, type RoutedEngine } from "../wiring/executor-router.ts";
 import { isApplicable } from "../segment/segment-applicability.ts";
 import type { PanelStore } from "../stores/panel-store.ts";
 import { panelMapFor, reconcilePanelAssignments } from "../case/panel-assignment.ts";
@@ -58,9 +58,6 @@ import { httpWebChartClient, type WebChartClient } from "../engine/ingress/webch
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 import { bucketPeriodForMeasure } from "./compliance-period.ts";
 import { runMeasurementPeriod } from "./run-period.ts";
-import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
-import { isVendoredOfficialMeasure } from "../config/official-measure-ids.ts";
-import { effectivePeriodWarning } from "../wiring/official-executor-adapter.ts";
 import type { QualitySnapshotStore } from "../stores/quality-snapshot-store.ts";
 import type { EvalStateStore } from "../stores/eval-state-store.ts";
 import type { ValueSetStore } from "../stores/value-set-store.ts";
@@ -104,13 +101,13 @@ export interface RunPipelineDeps {
   outcomeStore: OutcomeStore;
   /**
    * The measure engine. Every caller passes `routedEngineForEnv(env)`, which is the authored engine
-   * ITSELF while `WORKWELL_OFFICIAL_MEASURES` is unset — so the optional `logicVersionFor` below is
+   * ITSELF while `WORKWELL_OFFICIAL_MEASURES` is unset — so the optional `logicFor` below is
    * absent on every environment today. When a measure IS routed to the official artifact, that method
    * is how the incremental cache learns the logic it caches is no longer WorkWell's authored ELM
    * (#263/ADR-035 + roadmap §7.4 PR-8); reading it off the engine rather than taking it as a separate
    * dep is what makes the two structurally unable to disagree.
    */
-  engine: EvaluateMeasureBinding & Pick<RoutedEngine, "logicVersionFor" | "evaluateBatch">;
+  engine: EvaluateMeasureBinding & Pick<RoutedEngine, "logicFor" | "evaluateBatch">;
   /**
    * Where per-call phase timings go (#563). Absent ⇒ one `WORKWELL_RUNTIME` line on stdout, which is
    * what every deployment does. Injected rather than global for the same reason `alertChannels` is:
@@ -603,14 +600,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
 
   // ADR-072: surface a stale vendored effectivePeriod ON THE RUN, not just in the console. Only
   // officially-routed measures have an artifact to warn about; authored measures keep no such contract.
+  // The engine says which artifact scores this date, so the warning describes the logic that ran: a
+  // WorkWell translation covering the year replaces the prior-year warning with a line naming it.
   for (const measureId of new Set(measureIds)) {
-    if (!deps.engine.logicVersionFor?.(measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX)) continue;
-    if (!isVendoredOfficialMeasure(measureId)) continue;
-    const artifact = loadOfficialArtifact(measureId);
-    if (!artifact) continue;
-    const warning = effectivePeriodWarning(artifact, runMeasurementPeriod([measureId], evalDate));
-    if (warning) {
-      await deps.runStore.appendLog(runId, "WARN", warning).catch(() => {});
+    const logic = deps.engine.logicFor?.(measureId, evalDate);
+    if (!isFqmScored(logic)) continue;
+    if (logic.warning) await deps.runStore.appendLog(runId, "WARN", logic.warning).catch(() => {});
+    if (logic.kind === "derived") {
+      await deps.runStore.appendLog(runId, "INFO", `${measureId}: scored with ${logic.label ?? "a WorkWell translation"}`).catch(() => {});
     }
   }
   let items = planned.items;
@@ -672,7 +669,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           // Bound to THIS run's engine, so a measure routed to the official artifact cannot be
           // fingerprinted with the authored ELM's hash and have authored outcomes copied forward
           // (roadmap §7.4 PR-8). Absent on the authored engine ⇒ unchanged behavior.
-          engineLogicVersion: (measureId) => deps.engine.logicVersionFor?.(measureId),
+          engineLogicVersion: (measureId) => deps.engine.logicFor?.(measureId, evalDate)?.version,
         })
       : undefined;
 
@@ -1066,7 +1063,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           // for the same lesson) — but an authored "not in the initial population" is a workflow fact
           // (not enrolled in the hearing conservation program) whose case handling is unchanged. An
           // official `false` means the published logic ran and the subject is not the measure's concern.
-          outOfPopulation = (deps.engine.logicVersionFor?.(item.measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX) ?? false)
+          outOfPopulation = isFqmScored(deps.engine.logicFor?.(item.measureId, evalDate))
             ? result.inInitialPopulation === false
             : undefined;
           // ADR-043 — record membership from the FINAL outcome, whichever path produced it (batch prefetch
@@ -1455,14 +1452,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // property of the fixture, not an invariant. An official-specific message needs an official-specific
   // trigger.
   //
-  // The signal is the engine's own declared identity (ADR-040): `logicVersionFor` returns
-  // `official-fqm:<version>:<artifactSha>:<terminologySha>` for a routed measure and the authored ELM
-  // hash (or nothing) otherwise. Asking the engine what it ran beats re-reading the env here.
+  // The signal is the engine's own declared logic (ADR-040): `logicFor` reports CMS's artifact or a
+  // WorkWell translation for a routed measure, and nothing otherwise. Asking the engine what it ran beats
+  // re-reading the env here.
   //
   // De-duped for the same reason the batch pre-pass de-dupes `measureIds` — a repeated id would otherwise
   // name the same measure twice in the run message.
   const emptyIppMeasures = [...new Set(measureIds)].filter((measureId) => {
-    if (!deps.engine.logicVersionFor?.(measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX)) return false;
+    if (!isFqmScored(deps.engine.logicFor?.(measureId, evalDate))) return false;
     const seen = ippByMeasure.get(measureId);
     return seen !== undefined && seen.length > 1 && !seen.some(Boolean);
   });

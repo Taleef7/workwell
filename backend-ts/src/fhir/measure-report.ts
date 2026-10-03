@@ -505,6 +505,12 @@ export function populationCountsFromStatus(counts: OutcomeStatusCount[], measure
  * precisely so this is answerable from the record (ADR-031).
  */
 export interface OfficialReportIdentity {
+  /** `"derived"` when a WorkWell translation scored the outcome; absent for CMS's artifact. */
+  kind?: "derived";
+  /** The translation's WorkWell canonical and label, and the CMS measure it was derived from. Derived only. */
+  url?: string;
+  label?: string;
+  derivedFrom?: string;
   ecqmId?: string;
   version?: string;
   artifactSha256?: string;
@@ -524,6 +530,10 @@ export function officialReportIdentity(evidence: unknown): OfficialReportIdentit
   if (!official || typeof official !== "object") return null;
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
   return {
+    ...(official.kind === "derived" ? { kind: "derived" as const } : {}),
+    ...(official.kind === "derived" && str(official.url) ? { url: str(official.url) } : {}),
+    ...(official.kind === "derived" && str(official.label) ? { label: str(official.label) } : {}),
+    ...(official.kind === "derived" && str(official.derivedFrom) ? { derivedFrom: str(official.derivedFrom) } : {}),
     ...(str(official.ecqmId) ? { ecqmId: str(official.ecqmId) } : {}),
     ...(str(official.version) ? { version: str(official.version) } : {}),
     ...(str(official.artifactSha256) ? { artifactSha256: str(official.artifactSha256) } : {}),
@@ -571,6 +581,10 @@ export function reportingPeriod(
  */
 const measureCanonical = (measureId: string, official: OfficialReportIdentity | null): string => {
   if (!official) return `urn:workwell:measure:${measureId}`;
+  // A WorkWell translation reports under its OWN canonical, checked before anything else: the branch
+  // below would hand it CMS's canonical whenever its sha is missing, and the fallback after that would
+  // call it `:official:`. Either one labels a translation's counts as CMS's measure (LOCKED §4.3).
+  if (official.kind === "derived") return official.url ?? `urn:workwell:measure:${measureId}:translation`;
   const artifact = loadOfficialArtifact(measureId);
   // Only claim CMS's canonical for the artifact that ACTUALLY produced this outcome. A re-vendor between
   // the run and the export changes the sha; labelling the old report with the new canonical would assert
