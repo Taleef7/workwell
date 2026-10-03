@@ -105,10 +105,17 @@ export function rewriteDerivedIdentity<T extends Bundle>(bundle: T, identity: De
 
 /**
  * Everything that makes a translation's identity wrong, as sentences. Empty means it may be routed.
- * Checks the Measure, the manifest, and every library: each one is either listed as unchanged (and its
- * ELM hashes to the pin) or carries a WorkWell identity with no CMS host anywhere in it.
+ * Checks the Measure, the manifest, and every library: each one is either listed as unchanged — and then
+ * its ELM must be byte-identical to the same-named library in CMS's committed artifact, so "unchanged"
+ * is checked against CMS, not against a hash the translation declares about itself — or it carries a
+ * WorkWell identity with no CMS host anywhere in it. `base` is CMS's artifact for the measure; it is
+ * required, because without it "unchanged" cannot be checked at all.
  */
-export function derivedIdentityProblems(bundle: Bundle, manifest: OfficialManifest): string[] {
+export function derivedIdentityProblems(
+  bundle: Bundle,
+  manifest: OfficialManifest,
+  base: { bundle: unknown; manifest: Pick<OfficialManifest, "sha256"> } | null,
+): string[] {
   const id = manifest.catalogId;
   const problems: string[] = [];
   const derived = manifest.derived;
@@ -136,12 +143,21 @@ export function derivedIdentityProblems(bundle: Bundle, manifest: OfficialManife
   const related = (measure["relatedArtifact"] as Array<Record<string, unknown>> | undefined) ?? [];
   if (!related.some((r) => r["type"] === "derived-from")) problems.push(`${id}: the translated Measure has no derived-from link to the CMS measure`);
 
+  if (!base) problems.push(`${id}: CMS's artifact for this measure is not committed, so its 'unchanged' libraries cannot be checked`);
+  else if (derived.base.manifestSha256 !== base.manifest.sha256) {
+    problems.push(`${id}: the translation was built on CMS's artifact ${derived.base.manifestSha256}, but the committed one is ${base.manifest.sha256}`);
+  }
+  const cmsLibraries = new Map(librariesOf((base?.bundle ?? {}) as Bundle).map((l) => [`${String(l["name"])}|${String(l["version"])}`, libraryElmSha256(l)]));
   const unchanged = new Map(derived.unchangedLibraries.map((l) => [`${l.name}|${l.version}`, l.elmSha256]));
   for (const library of librariesOf(bundle)) {
     const key = `${String(library["name"])}|${String(library["version"])}`;
     const pinned = unchanged.get(key);
     if (pinned !== undefined) {
-      if (libraryElmSha256(library) !== pinned) problems.push(`${id}: library ${key} is listed as unchanged but its ELM does not match its pin`);
+      const actual = libraryElmSha256(library);
+      if (actual !== pinned) problems.push(`${id}: library ${key} is listed as unchanged but its ELM does not match its pin`);
+      else if (base && cmsLibraries.get(key) !== actual) {
+        problems.push(`${id}: library ${key} keeps CMS's identity but its ELM is not CMS's — a library WorkWell changed must carry WorkWell's identity`);
+      }
       continue;
     }
     const libraryUrl = String(library["url"] ?? "");

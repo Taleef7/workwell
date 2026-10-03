@@ -1368,6 +1368,8 @@ export async function handleRuns(
       // Second exposure check AFTER the rows are read — see the QRDA I route for why.
       const goneBundleAfter = await compacted(run, env);
       if (goneBundleAfter) return goneBundleAfter;
+      // The bundle's first entry is a summary over every row, labelled with one identity and period.
+      if (rowScoring(rows).mixed) return mixedLogic(`${type} MeasureReport`);
       // Errored subjects get no individual report (ADR-077 d6); the header says how many were left out.
       const errored = rows.filter((r) => isEvaluationErrorEvidence(r.evidence)).length;
       return fhir(buildMeasureReportBundle(run, measureId, rows, generatedAt), { [EVALUATION_ERRORS_HEADER]: String(errored) });

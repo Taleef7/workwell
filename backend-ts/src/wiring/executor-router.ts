@@ -382,7 +382,8 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
  *   D6 its scoring, population basis, populations, improvement notation, group and stratifier ids equal
  *      CMS's — the semantics table, case logic and MeasureReport strata are all keyed by the measure;
  *   D7 every required check passed, against THIS artifact's hash and THIS terminology's hash;
- *   D8 its terminology sidecar is present, matches its pin, and is neither capped nor missing a set.
+ *   D8 its terminology sidecar is present, matches its pin, and is neither capped nor missing a set;
+ *   D9 its bundle holds only a Measure and Libraries: an embedded ValueSet would outrank its sidecar.
  */
 function derivedRoutingProblems(
   env: OfficialMeasuresEnv,
@@ -407,7 +408,16 @@ function derivedRoutingProblems(
     }
     const manifest = translation.manifest;
     if (manifest.catalogId !== id) problems.push(`${id}: the translation declares catalogId '${manifest.catalogId}'`);
-    problems.push(...derivedIdentityProblems(translation.bundle as never, manifest));
+    const base = loadOfficialArtifact(id);
+    problems.push(...derivedIdentityProblems(translation.bundle as never, manifest, base));
+    // D9: only a Measure and its Libraries. fqm puts a bundle's own ValueSets into its code service ahead
+    // of the sidecar's, and an embedded versioned expansion outranks the sidecar's unversioned one — so a
+    // translation built from CMS's raw bundle would score 2027 with CMS's 2026 codes, silently.
+    const entries = (translation.bundle as { entry?: Array<{ resource?: { resourceType?: string } }> }).entry ?? [];
+    const stray = [...new Set(entries.map((e) => String(e.resource?.resourceType)).filter((t) => t !== "Measure" && t !== "Library"))];
+    if (stray.length > 0) {
+      problems.push(`${id}: the translated bundle carries ${stray.join(", ")} resources; only a Measure and its Libraries may be committed, because an embedded ValueSet outranks the translation's own expansion`);
+    }
 
     const ep = manifest.effectivePeriod;
     const year = ep?.start?.slice(0, 4);
@@ -418,7 +428,6 @@ function derivedRoutingProblems(
       problems.push(`${id}: the translation's terminology does not name the VSAC release it was expanded from`);
     }
 
-    const base = loadOfficialArtifact(id);
     if (base) {
       for (const field of ["scoring", "populationBasis", "improvementNotation"] as const) {
         if (manifest[field] !== base.manifest[field]) {

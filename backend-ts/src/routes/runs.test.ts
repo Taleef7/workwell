@@ -684,7 +684,7 @@ const populations = [
 ];
 const derivedEvidence = (period = { start: "2027-01-01", end: "2027-12-31" }) => ({
   expressionResults: [],
-  official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1", engine: "fqm-execution", artifactSha256: "sha256:derived", populationResults: populations, measurementPeriod: period },
+  official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation-2027", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1", engine: "fqm-execution", artifactSha256: "sha256:derived", populationResults: populations, measurementPeriod: period },
 });
 const officialEvidence = (period: { start: string; end: string }) => ({
   expressionResults: [],
@@ -701,13 +701,14 @@ test("a run scored by a WorkWell translation: QRDA refuses it (no CMS identity t
   const mr = (await get(`/api/runs/${runId}/measure-report`))!;
   assert.equal(mr.status, 200);
   const report = (await mr.json()) as { measure: string };
-  assert.equal(report.measure, "urn:workwell:measure:cms137:translation", "reported under the translation's own canonical");
+  assert.equal(report.measure, "urn:workwell:measure:cms137:translation-2027", "reported under the translation's own canonical, not a fallback");
+  assert.equal((await get(`/api/runs/${runId}/measure-report?type=bundle`))!.status, 200, "a bundle of one logic is still exported");
   assert.doesNotMatch(JSON.stringify(report), /madie\.cms\.gov|:official:|137FHIR/, "and nothing in it claims CMS's measure");
 });
 
 test("a run whose rows were scored for two different years is refused rather than labelled with the first row", async () => {
   const runId = await runWithEvidence([officialEvidence({ start: "2026-01-01", end: "2026-12-31" }), officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
-  for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`, `/api/runs/${runId}/measure-report`]) {
+  for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`, `/api/runs/${runId}/measure-report`, `/api/runs/${runId}/measure-report?type=bundle`, `/api/runs/${runId}/measure-report?type=individual`]) {
     const res = (await get(path))!;
     assert.equal(res.status, 422, path);
     assert.equal(((await res.json()) as { error: string }).error, "mixed_logic", path);

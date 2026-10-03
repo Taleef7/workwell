@@ -151,10 +151,20 @@ test("D1–D8: each unfit translation is refused with its own sentence", () => {
   expect(problemsWith(withManifest({ terminology: { ...derived.manifest.terminology!, completion: undefined } })), /does not name the VSAC release/);
   expect(problemsWith(withManifest({ scoring: "cohort" })), /scoring 'cohort' differs/);
   expect(problemsWith(withManifest({ populations: ["initial-population"] })), /declares populations/);
+  expect(problemsWith(withManifest({ improvementNotation: "decrease" })), /improvementNotation 'decrease' differs/);
+  expect(problemsWith(withManifest({ populationBasis: "Encounter" })), /populationBasis 'Encounter' differs/);
+  const regrouped = structuredClone(derived);
+  const groups = ((regrouped.bundle as { entry: Array<{ resource?: Record<string, unknown> }> }).entry.find((e) => e.resource?.["resourceType"] === "Measure")!.resource!["group"]) as Array<{ id?: string }>;
+  groups[0]!.id = "renamed-group";
+  expect(problemsWith(regrouped), /group and stratifier ids differ/);
+  const withValueSet = structuredClone(derived);
+  (withValueSet.bundle as { entry: unknown[] }).entry.push({ resource: { resourceType: "ValueSet", url: "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.1", version: "20250419" } });
+  expect(problemsWith(withValueSet), /carries ValueSet resources; only a Measure and its Libraries/);
   const oracles = derived.manifest.derived!.oracles;
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.filter((o) => o.name !== "terminology-equivalence") } })), /no passing 'terminology-equivalence' check/);
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => (o.name === "cypress-deck" ? { ...o, agree: 35 } : o)) } })), /no passing 'cypress-deck' check/);
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => ({ ...o, ranAgainst: { ...o.ranAgainst, artifactSha256: "sha256:other" } })) } })), /ran against a different artifact/);
+  expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => ({ ...o, ranAgainst: { ...o.ranAgainst, terminologySha256: "sha256:other" } })) } })), /different artifact or terminology/);
   expect(officialRoutingProblems(ENV as never, { ...checks, loadDerived: () => derived, loadTerminology: (a) => (a.kind === "derived" ? { ok: false, problem: "sidecar missing" } : terminologyOk(a)) }), /\(translation\): sidecar missing/);
   expect(officialRoutingProblems(ENV as never, { ...checks, loadDerived: () => derived, absentFor: (a) => (a.kind === "derived" ? ["2.16.9"] : []) }), /\(translation\): value set 2\.16\.9/);
   expect(officialRoutingProblems(ENV as never, { ...checks, loadDerived: () => derived, cappedFor: (a) => (a.kind === "derived" ? [{ oid: "2.16.8", have: 1000, declaredTotal: 1997 }] : []) }), /\(translation\): value set 2\.16\.8 expands to only 1000/);
@@ -206,6 +216,9 @@ test("the real sidecar loader and expander key by ARTIFACT: a translation never 
   const { loadOfficialTerminology, officialTerminologyExpander } = await import("./official-terminology.ts");
   const cmsTerminology = loadOfficialTerminology(official);
   if (!cmsTerminology.ok) {
+    // The official-cases CI job vendors the sidecar and runs this file with the flag set, so there a
+    // missing sidecar is a failure, never a skip that reads as coverage.
+    if (process.env.WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY === "true") assert.fail(cmsTerminology.problem);
     t.skip("cms137's terminology sidecar is fetched at build (pnpm vendor:official)");
     return;
   }

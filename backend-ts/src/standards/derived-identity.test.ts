@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { derivedCms137, FIXTURE_URL } from "../test-support/derived-fixture.ts";
 import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
+import { createHash } from "node:crypto";
 import { derivedIdentityProblems } from "./derived-identity.ts";
 
 interface Res {
@@ -19,7 +20,8 @@ const mainIn = (b: { entry: Array<{ resource: Res }> }) => {
   const url = (measureIn(b)["library"] as string[])[0];
   return b.entry.find((e) => e.resource["url"] === url)!.resource;
 };
-const problems = (bundle: unknown, manifest = fixture.manifest) => derivedIdentityProblems(bundle as never, manifest);
+const cms137 = loadOfficialArtifact("cms137")!;
+const problems = (bundle: unknown, manifest = fixture.manifest, base: typeof cms137 | null = cms137) => derivedIdentityProblems(bundle as never, manifest, base);
 const expect = (list: string[], pattern: RegExp) => assert.ok(list.some((p) => pattern.test(p)), `expected ${pattern} in ${JSON.stringify(list)}`);
 
 test("the rewritten committed CMS137 bundle is a valid translation identity", () => {
@@ -64,6 +66,31 @@ test("each identity fault produces its own sentence", () => {
   expect(problems(fixture.bundle, { ...fixture.manifest, version: "ww-2027.2" }), /manifest version/);
   const { derived: _omit, ...noBlock } = fixture.manifest;
   expect(problems(fixture.bundle, noBlock as never), /no derived block/);
+});
+
+test("'unchanged' is checked against CMS's own library, not against the translation's word for it", () => {
+  // The builder re-pinned an edited Hospice, as a builder that hashes its own output would.
+  const b = clone();
+  const library = b.entry.find((e) => e.resource.resourceType === "Library" && e.resource["name"] === "Hospice")!.resource;
+  const content = (library["content"] as Array<{ contentType: string; data: string }>).find((c) => c.contentType === "application/elm+json")!;
+  const elm = JSON.parse(Buffer.from(content.data, "base64").toString("utf8"));
+  elm.library.statements.def.pop();
+  content.data = Buffer.from(JSON.stringify(elm), "utf8").toString("base64");
+  const repinned = {
+    ...fixture.manifest,
+    derived: {
+      ...fixture.manifest.derived!,
+      unchangedLibraries: fixture.manifest.derived!.unchangedLibraries.map((l) =>
+        l.name === "Hospice" ? { ...l, elmSha256: `sha256:${createHash("sha256").update(Buffer.from(content.data, "base64")).digest("hex")}` } : l,
+      ),
+    },
+  };
+  expect(problems(b, repinned), /Hospice\|.+ keeps CMS's identity but its ELM is not CMS's/);
+});
+
+test("the translation must be built on the committed CMS artifact, and needs it to check anything", () => {
+  expect(problems(fixture.bundle, { ...fixture.manifest, derived: { ...fixture.manifest.derived!, base: { catalogId: "cms137", manifestSha256: "sha256:stale" } } }), /built on CMS's artifact sha256:stale/);
+  expect(problems(fixture.bundle, fixture.manifest, null), /CMS's artifact for this measure is not committed/);
 });
 
 test("an 'unchanged' CMS library whose ELM was in fact changed is caught by its pin", () => {

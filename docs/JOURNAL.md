@@ -15,9 +15,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
     would run on the 2026 value sets, which for CMS137 (a value-sets-only change) makes it the draft.
   - One `isFqmScored` predicate replaces five `official-fqm:` prefix checks, so the out-of-population
     rule (ADR-078) applies to a translation. `logicVersionFor(id)` became `logicFor(id, date)`.
-  - The router refuses an unfit translation (D1–D8: routed measure, WorkWell identity, one calendar
-    year, the VSAC release named, CMS's populations and strata, passing checks on this exact artifact,
-    a complete sidecar).
+  - The router refuses an unfit translation (D1–D9: routed measure, WorkWell identity with "unchanged"
+    libraries byte-identical to CMS's, one calendar year, the VSAC release named, CMS's populations and
+    strata, passing checks on this exact artifact, a complete sidecar, and no embedded ValueSets, which
+    fqm would prefer over the translation's own 2027 codes). The nightly sees the allowlist too.
   - A translated row writes `official.kind: "derived"` and a null `ecqmId`. QRDA I/III refuse it, the
     MeasureReport uses the translation's own canonical, and a run mixing logic or periods is refused.
 - **WorkWell can compile CMS's QI-Core CQL, with results identical to CMS's own ELM.** The 2027
