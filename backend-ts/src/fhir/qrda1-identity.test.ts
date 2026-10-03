@@ -153,6 +153,55 @@ test("merged resources are namespaced per document, so identical ids do not coll
   assert.equal(new Set(ids).size, ids.length, "no two resources in the merged bundle share an id");
 });
 
+/** The document with its encounter entry repeated, the copy's id and code replaced. */
+const withAnotherEncounter = (xml: string, id: string, code: string) => {
+  const start = xml.indexOf("    <entry><encounter");
+  const end = xml.indexOf("</encounter></entry>") + "</encounter></entry>".length;
+  const copy = xml.slice(start, end).replace(/<id extension="[^"]*" root/, `<id extension="${id}" root`).replace(/<code code="\d+" codeSystem="2\.16\.840\.1\.113883\.6\.12"/, `<code code="${code}" codeSystem="2.16.840.1.113883.6.12"`);
+  return `${xml.slice(0, end)}\n${copy}${xml.slice(end)}`;
+};
+
+const encountersOf = (documents: string[]) => {
+  const resources = resolveQrda1Documents(documents).subjects[0]!.bundle.entry.map((e) => e.resource as Record<string, any>);
+  return { resources, encounters: resources.filter((r) => r.resourceType === "Encounter"), conditions: resources.filter((r) => r.resourceType === "Condition") };
+};
+
+test("a duplicate document's REPEATED facts are merged once, so a visit is not counted twice", () => {
+  // Cypress's augmented duplicates carry the same clinical entries under a different MRN. Two copies of
+  // one visit with one diagnosis are two engagements to a measure that counts them (CMS137).
+  const { resources, encounters, conditions } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", family: "Diabetes Axult", encounterId: "e1", diagnosis: "75544000" }),
+  ]);
+  assert.equal(encounters.length, 1, "one visit");
+  assert.equal(conditions.length, 1, "one diagnosis");
+  const ids = new Set(resources.map((r) => `${r.resourceType}/${r.id}`));
+  assert.ok(ids.has(encounters[0]!.reasonReference[0].reference), "the kept visit still names its diagnosis");
+});
+
+test("only the repeated facts are dropped: a duplicate document's NEW facts survive", () => {
+  const { encounters } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }),
+    withAnotherEncounter(doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }), "e2", "99214"),
+  ]);
+  assert.deepEqual(encounters.map((e) => e.type[0].coding[0].code).sort(), ["99213", "99214"]);
+});
+
+test("the same visit with a DIFFERENT diagnosis is not a duplicate: a fact includes what it references", () => {
+  const { encounters, conditions } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "e1", diagnosis: "5602001" }),
+  ]);
+  assert.equal(encounters.length, 2);
+  assert.equal(conditions.length, 2);
+});
+
+test("a repeat WITHIN one document is kept: the document itself stated it twice", () => {
+  const twice = withAnotherEncounter(doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1" }), "e1", "99213");
+  const { encounters } = encountersOf([twice]);
+  assert.equal(encounters.length, 2);
+});
+
 test("a renamed resource is renamed in the references to it too, or the link silently matches nothing", () => {
   // An Encounter names its diagnosis Conditions by reference, and CQMCommon resolves a reference by exact
   // id. Namespacing the ids without the references left CMS137's encounter-diagnosis history pointing at

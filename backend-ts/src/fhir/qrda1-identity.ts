@@ -113,12 +113,89 @@ function withReferencesRenamed(value: unknown, renamed: ReadonlyMap<string, stri
   return out;
 }
 
+/** JSON with object keys sorted, so two equal resources stringify the same whatever their key order. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+}
+
+/**
+ * One person's clinical resources from several documents, as one list.
+ *
+ * - Ids are namespaced per document (`<document index>-<id>`): two documents can reuse a generated id.
+ * - References inside a document are renamed with the ids they point at, since the libraries match a
+ *   reference to its target by exact id.
+ * - A resource that states exactly the same fact as one an EARLIER document of this person already gave
+ *   (same content apart from its id, with references compared by what they point at) is dropped, and
+ *   references to it point at the kept copy. A sender's duplicate documents repeat their clinical
+ *   entries (Cypress's augmented duplicates do), and two copies of one visit are two visits to a
+ *   measure that counts engagements, as CMS137 does. Repeats within ONE document are kept: the document
+ *   itself stated them twice.
+ */
+export function mergeMemberResources(members: ReadonlyArray<{ index: number; resources: readonly unknown[] }>): unknown[] {
+  const out: unknown[] = [];
+  const keptByFact = new Map<string, string>(); // fingerprint -> kept `Type/newId`
+  for (const m of members) {
+    const resources = m.resources as Array<{ resourceType?: string; id?: string }>;
+    const byRef = new Map<string, { resourceType?: string; id?: string }>();
+    for (const r of resources) if (r?.id !== undefined) byRef.set(`${r.resourceType}/${r.id}`, r);
+    // A resource's fact: its content without the id, with each in-document reference replaced by the
+    // fact of what it points at (references run Encounter -> Condition, so this terminates).
+    const facts = new Map<unknown, string>();
+    const factOf = (r: { resourceType?: string; id?: string }, depth = 0): string => {
+      const known = facts.get(r);
+      if (known !== undefined) return known;
+      const resolve = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(resolve);
+        if (value === null || typeof value !== "object") return value;
+        const o: Record<string, unknown> = {};
+        for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+          const target = key === "reference" && typeof v === "string" ? byRef.get(v) : undefined;
+          o[key] = target && depth < 8 ? `fact:${factOf(target, depth + 1)}` : resolve(v);
+        }
+        return o;
+      };
+      const { id: _id, ...content } = r;
+      const fact = canonicalJson(resolve(content));
+      facts.set(r, fact);
+      return fact;
+    };
+    const renamed = new Map<string, string>();
+    const dropped = new Set<unknown>();
+    const firstSeenHere = new Map<string, string>();
+    for (const r of resources) {
+      if (r?.id === undefined) continue;
+      const ref = `${r.resourceType}/${r.id}`;
+      const fact = factOf(r);
+      const earlier = keptByFact.get(fact);
+      if (earlier !== undefined) {
+        renamed.set(ref, earlier);
+        dropped.add(r);
+        continue;
+      }
+      const fresh = `${r.resourceType}/${m.index}-${r.id}`;
+      renamed.set(ref, fresh);
+      if (!firstSeenHere.has(fact)) firstSeenHere.set(fact, fresh);
+    }
+    resources.forEach((r, i) => {
+      if (dropped.has(r)) return;
+      const rewritten = withReferencesRenamed(r, renamed) as Record<string, unknown>;
+      out.push({ ...rewritten, id: `${m.index}-${r?.id ?? i}` });
+    });
+    for (const [fact, ref] of firstSeenHere) if (!keptByFact.has(fact)) keptByFact.set(fact, ref);
+  }
+  return out;
+}
+
 /**
  * Merge a group's documents into one bundle.
  *
  * Resource ids are namespaced per source document: two documents about one person can legitimately carry
  * the same generated id, and a collision would silently drop half a split patient's data — which is the
- * exact failure this merge exists to prevent.
+ * exact failure this merge exists to prevent. `mergeMemberResources` does that, keeps references intact,
+ * and drops a fact a person's earlier document already stated.
  */
 function merge(
   members: Array<{ index: number; imported: Qrda1Import; identifiers: string[]; documentId?: string; text: string }>,
@@ -168,23 +245,15 @@ function merge(
   }
 
   const entry: Array<{ resource: unknown }> = chosen ? [{ resource: patient }] : [];
-  for (const m of members) {
-    // A document's resources reference each other (an Encounter names its diagnosis Conditions), so a
-    // renamed id must be renamed in those references too: CQMCommon matches a reference to its target by
-    // exact id, and a stale one silently matches nothing.
-    const renamed = new Map<string, string>();
-    for (const e of m.imported.bundle.entry) {
-      const resource = e.resource as { resourceType?: string; id?: string };
-      if (resource?.resourceType === "Patient" || resource?.id === undefined) continue;
-      renamed.set(`${resource.resourceType}/${resource.id}`, `${resource.resourceType}/${m.index}-${resource.id}`);
-    }
-    for (const e of m.imported.bundle.entry) {
-      const resource = e.resource as { resourceType?: string; id?: string };
-      if (resource?.resourceType === "Patient") continue;
-      const rewritten = withReferencesRenamed(resource, renamed) as Record<string, unknown>;
-      entry.push({ resource: { ...rewritten, id: `${m.index}-${resource?.id ?? entry.length}` } });
-    }
-  }
+  const clinical = mergeMemberResources(
+    members.map((m) => ({
+      index: m.index,
+      resources: m.imported.bundle.entry
+        .map((e) => e.resource)
+        .filter((r) => (r as { resourceType?: string })?.resourceType !== "Patient"),
+    })),
+  );
+  for (const resource of clinical) entry.push({ resource });
 
   return {
     subjectId: canonical.imported.patientId,
