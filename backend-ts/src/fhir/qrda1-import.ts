@@ -432,82 +432,6 @@ function assessmentNotDoneFrom(node: CdaNode, i: string): unknown {
   };
 }
 
-const LOINC = "http://loinc.org";
-const LOINC_SYSTOLIC = "8480-6";
-const LOINC_DIASTOLIC = "8462-4";
-
-/**
- * QDM records a blood pressure as two Physical Exam, Performed entries (systolic `8480-6` and diastolic
- * `8462-4`); QI-Core records it as ONE Observation whose components carry the two values, under the US
- * Core panel code `85354-9`. CMS165 reads the panel and nothing else, so unpaired readings leave every
- * controlled patient out of its numerator (Cypress 2027 deck: 11 of 11).
- *
- * This is the representation change between the two models, not new data: the two values, their codes
- * and their time all come from the source, and the panel code is the one the US Core profile requires
- * of any blood pressure. Pairing is deliberately strict: exactly one systolic and one diastolic Physical
- * Exam with identical timing (the same instant, or the same start and end) that carries a time of day.
- * Anything else (a lone reading, two systolics at one time, readings minutes apart, a date with no time)
- * is left exactly as imported, because choosing which two belong together would be a guess. The pair's
- * two resources are replaced by the panel, which keeps the systolic's id and timing.
- */
-function pairBloodPressures(entries: Array<{ resource: unknown }>): void {
-  type Exam = {
-    resourceType?: string;
-    id: string;
-    category?: Array<{ coding?: Array<{ code?: string }> }>;
-    code: { coding: Array<{ system: string; code: string }> };
-    effectiveDateTime?: string;
-    effectivePeriod?: { start?: string; end?: string };
-    valueQuantity?: unknown;
-  };
-  // The timing both halves must share EXACTLY: one instant, or one period with the same start and end.
-  // A date-only time (a document that gave no time of day, or only the hour, which the parser cannot
-  // keep) is not a pairing key: two readings hours apart would look identical.
-  const timingKey = (r: Exam): string | undefined => {
-    const hasTime = (v: string | undefined): v is string => typeof v === "string" && v.includes("T");
-    if (hasTime(r.effectiveDateTime)) return `at|${r.effectiveDateTime}`;
-    const p = r.effectivePeriod;
-    if (!r.effectiveDateTime && p && hasTime(p.start) && hasTime(p.end)) return `period|${p.start}|${p.end}`;
-    return undefined;
-  };
-  const groups = new Map<string, { systolic: number[]; diastolic: number[] }>();
-  entries.forEach((entry, index) => {
-    const r = entry.resource as Exam;
-    if (r.resourceType !== "Observation" || r.category?.[0]?.coding?.[0]?.code !== "exam") return;
-    const key = timingKey(r);
-    if (key === undefined || r.valueQuantity === undefined) return;
-    const loinc = r.code.coding.filter((c) => c.system === LOINC).map((c) => c.code);
-    const systolic = loinc.includes(LOINC_SYSTOLIC);
-    const diastolic = loinc.includes(LOINC_DIASTOLIC);
-    if (systolic === diastolic) return;
-    const group = groups.get(key) ?? { systolic: [], diastolic: [] };
-    (systolic ? group.systolic : group.diastolic).push(index);
-    groups.set(key, group);
-  });
-  const replaced = new Set<number>();
-  for (const group of groups.values()) {
-    if (group.systolic.length !== 1 || group.diastolic.length !== 1) continue;
-    const s = entries[group.systolic[0]!]!.resource as Exam;
-    const d = entries[group.diastolic[0]!]!.resource as Exam;
-    entries[group.systolic[0]!] = {
-      resource: {
-        resourceType: "Observation",
-        id: s.id,
-        status: "final",
-        category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }],
-        code: { coding: [{ system: LOINC, code: "85354-9", display: "Blood pressure panel with all children optional" }] },
-        ...(s.effectiveDateTime ? { effectiveDateTime: s.effectiveDateTime } : { effectivePeriod: s.effectivePeriod }),
-        component: [
-          { code: s.code, valueQuantity: s.valueQuantity },
-          { code: d.code, valueQuantity: d.valueQuantity },
-        ],
-      },
-    };
-    replaced.add(group.diastolic[0]!);
-  }
-  for (const index of [...replaced].sort((a, b) => b - a)) entries.splice(index, 1);
-}
-
 function procedureFrom(node: CdaNode, i: string): unknown {
   const code = concept(child(node, "code"));
   if (!code) return undefined;
@@ -793,7 +717,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
         // A screening/assessment Observation keeps its own `<code>` (the instrument) and `<value>` (the
         // result) — unlike Symptom below, which inverts them.
         : hasTemplate(candidate, T.assessmentPerformed) ? observationFrom(candidate, key, "survey")
-        // Blood-pressure halves are paired into one panel once the whole document is read.
+        // One Observation per reading, with its own code. A blood pressure's two halves are NOT paired into a
+        // US Core panel: that would supply the panel code (85354-9), which the document never states.
         : hasTemplate(candidate, T.physicalExamPerformed) ? observationFrom(candidate, key, "exam")
         : hasTemplate(candidate, T.symptom) ? symptomFrom(candidate, key)
         // Intervention, Performed IS a Procedure to the official artifacts — same retrieve, same
@@ -825,7 +750,6 @@ export function importQrda1Document(xml: string): Qrda1Import {
       untranslatedTemplates.push(datatypes[0] ?? roots[roots.length - 1] ?? "(no templateId)");
     }
   });
-  pairBloodPressures(entries);
 
   // A Patient-only bundle is the failure this whole module exists to avoid, and the section being
   // PRESENT but empty reaches it just as surely as the section being absent (Codex, #362). Our own

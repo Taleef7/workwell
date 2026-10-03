@@ -1056,33 +1056,19 @@ test("import: a TEXT result is kept as valueString — CMS130 asks only that the
   assert.equal(fobt!.valueString, "Negative");
 });
 
-test("import: a systolic and a diastolic Physical Exam at one instant become ONE blood-pressure panel", () => {
+test("import: a Physical Exam is one Observation per reading, and no panel code is supplied", () => {
+  // A blood pressure's two halves stay two readings with their own codes and values. Pairing them into a
+  // US Core panel would supply the panel code 85354-9, which the document never states.
   const { all, byId } = deckResources();
-  const panel = byId("sys-1");
-  assert.ok(panel, "the panel keeps the systolic reading's id");
-  assert.equal(panel!.code.coding[0].code, "85354-9");
-  assert.equal(panel!.category[0].coding[0].code, "vital-signs");
-  assert.equal(panel!.effectiveDateTime, "2025-12-10T17:05:00Z");
-  assert.deepEqual(
-    panel!.component.map((c: any) => [c.code.coding[0].code, c.valueQuantity.value, c.valueQuantity.unit]),
-    [["8480-6", 130, "mm[Hg]"], ["8462-4", 60, "mm[Hg]"]],
-    "both values, with their own codes and units, from the source",
-  );
-  assert.equal(byId("dia-1"), undefined, "the diastolic half is folded into the panel, not left beside it");
-  // A lone reading is not guessed into a pair: it stays the exam it was.
-  const lone = byId("sys-lone");
-  assert.equal(lone!.code.coding[0].code, "8480-6");
-  assert.equal(lone!.category[0].coding[0].code, "exam");
-  assert.equal(lone!.component, undefined);
-  assert.equal(all.filter((r) => r.code?.coding?.[0]?.code === "85354-9").length, 1);
-});
-
-test("import: two systolics at one instant are AMBIGUOUS, so nothing is paired", () => {
-  const ambiguous = deckDocument.replace("<effectiveTime value='20250301090000'/>", "<effectiveTime value='20251210170500'/>");
-  assert.notEqual(ambiguous, deckDocument, "the fixture must actually have been changed");
-  const { all } = deckResources(ambiguous);
-  assert.equal(all.filter((r) => r.code?.coding?.[0]?.code === "85354-9").length, 0, "which systolic belongs is a guess");
-  assert.equal(all.filter((r) => r.category?.[0]?.coding?.[0]?.code === "exam").length, 3, "all three stay as imported");
+  for (const [id, code, value] of [["sys-1", "8480-6", 130], ["dia-1", "8462-4", 60], ["sys-lone", "8480-6", 150]] as const) {
+    const reading = byId(id);
+    assert.ok(reading, id);
+    assert.equal(reading!.category[0].coding[0].code, "exam");
+    assert.deepEqual(reading!.code.coding.map((c: { code: string }) => c.code), [code]);
+    assert.equal(reading!.valueQuantity.value, value);
+    assert.equal(reading!.component, undefined);
+  }
+  assert.ok(!JSON.stringify(all).includes("85354-9"), "no resource carries a code the document did not state");
 });
 
 test("import: a Medication Order is an ORDER, never an active medication", () => {
@@ -1187,69 +1173,3 @@ test("import: an encounter id that is not a valid FHIR id still yields a resolva
   assert.equal(encounter.reasonReference[0].reference, `Condition/${condition.id}`);
 });
 
-/** Two Physical Exam halves (systolic 130, diastolic 80) sharing one effectiveTime element. */
-const bpHalves = (effectiveTime: string) => `<?xml version="1.0" encoding="UTF-8"?>
-<ClinicalDocument xmlns="urn:hl7-org:v3">
-  <recordTarget><patientRole><id extension="bp-1" root="1.3.6.1.4.1.115"/><patient><birthTime value='19600101'/></patient></patientRole></recordTarget>
-  <component><structuredBody><component><section>
-    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
-    ${[["s", "8480-6", "130"], ["d", "8462-4", "80"]].map(([id, code, value]) => `<entry><observation classCode="OBS" moodCode="EVN">
-      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
-      <id root="1.3.6.1.4.1.115" extension="${id}"/>
-      <code code="${code}" codeSystem="2.16.840.1.113883.6.1"/>
-      ${effectiveTime.replace("ID", id!)}
-      <value xsi:type="PQ" value="${value}" unit="mm[Hg]"/>
-    </observation></entry>`).join("\n")}
-  </section></component></structuredBody></component>
-</ClinicalDocument>`;
-
-test("import: two halves with the SAME relevant period pair into a panel that keeps the period", () => {
-  const { all, byId } = deckResources(bpHalves("<effectiveTime><low value='20250427080000'/><high value='20250427081500'/></effectiveTime>"));
-  const panel = byId("s");
-  assert.equal(panel!.code.coding[0].code, "85354-9");
-  assert.deepEqual(panel!.effectivePeriod, { start: "2025-04-27T08:00:00Z", end: "2025-04-27T08:15:00Z" });
-  assert.equal(panel!.effectiveDateTime, undefined);
-  assert.equal(byId("d"), undefined);
-  assert.equal(all.filter((r) => r.resourceType === "Observation").length, 1);
-});
-
-test("import: halves whose times carry no time of day are NOT paired, since hours apart would look identical", () => {
-  // `YYYYMMDDHH` is a valid HL7 time; the parser keeps only the date, so 08:00 and 14:00 read the same.
-  const hours = bpHalves("<effectiveTime value='20250427ID'/>").replace("20250427s", "2025042708").replace("20250427d", "2025042714");
-  const { all } = deckResources(hours);
-  assert.equal(all.filter((r) => r.code?.coding?.[0]?.code === "85354-9").length, 0);
-  assert.equal(all.filter((r) => r.category?.[0]?.coding?.[0]?.code === "exam").length, 2);
-});
-
-test("import: blood pressures pair by INSTANT, whatever the order or the time-zone spelling", () => {
-  // Two readings on one day: the second is diastolic-first and written with an offset that names the
-  // same instant as its systolic in UTC. Each pair must become its own panel with its own values.
-  const second = `
-    <entry><observation classCode="OBS" moodCode="EVN">
-      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
-      <id root="1.3.6.1.4.1.115" extension="dia-2"/>
-      <code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>
-      <effectiveTime value='20251210130000-0500'/>
-      <value xsi:type="PQ" value="85" unit="mm[Hg]"/>
-    </observation></entry>
-    <entry><observation classCode="OBS" moodCode="EVN">
-      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
-      <id root="1.3.6.1.4.1.115" extension="sys-2"/>
-      <code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>
-      <effectiveTime value='20251210180000'/>
-      <value xsi:type="PQ" value="145" unit="mm[Hg]"/>
-    </observation></entry>`;
-  const twoPairs = deckDocument.replace("    <entry><substanceAdministration", `${second}\n    <entry><substanceAdministration`);
-  assert.notEqual(twoPairs, deckDocument);
-  const { all, byId } = deckResources(twoPairs);
-  const panels = all.filter((r) => r.code?.coding?.[0]?.code === "85354-9");
-  assert.equal(panels.length, 2);
-  const values = (p: any) => p.component.map((c: any) => [c.code.coding[0].code, c.valueQuantity.value]);
-  assert.deepEqual(values(byId("sys-1")), [["8480-6", 130], ["8462-4", 60]]);
-  assert.deepEqual(values(byId("sys-2")), [["8480-6", 145], ["8462-4", 85]], "systolic first in the panel, from its own pair");
-  assert.equal(byId("sys-2")!.effectiveDateTime, "2025-12-10T18:00:00Z");
-  assert.equal(byId("dia-1"), undefined);
-  assert.equal(byId("dia-2"), undefined);
-  // Nothing else in the document was lost or duplicated by the splice.
-  for (const id of ["fobt-1", "sys-lone", "medorder-1", "noscreen-1", "enc-dx", "enc-dx-dx-1"]) assert.ok(byId(id), id);
-});
