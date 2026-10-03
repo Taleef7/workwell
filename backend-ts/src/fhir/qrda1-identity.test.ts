@@ -23,6 +23,12 @@ const doc = (opts: {
   birth?: string;
   encounterCode?: string;
   encounterId?: string;
+  /** The assigning authority (CDA `id/@root`) of the encounter's id. */
+  encounterRoot?: string;
+  /** `"none"`: no `<id>`; `"null-flavored"`: one marked unknown; `"root-only"`: `<id root=…/>` alone. */
+  encounterIdShape?: "none" | "null-flavored" | "root-only";
+  /** A SNOMED code carried as the encounter's QDM Encounter Diagnosis. */
+  diagnosis?: string;
 }) => `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3">
   <recordTarget><patientRole>
@@ -38,10 +44,15 @@ const doc = (opts: {
     <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
     <entry><encounter classCode="ENC" moodCode="EVN">
       <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
-      <id extension="${opts.encounterId ?? "enc-1"}" root="${MRN_ROOT}"/>
+      ${opts.encounterIdShape === "none" ? "" : opts.encounterIdShape === "root-only" ? `<id root="${opts.encounterRoot ?? MRN_ROOT}"/>` : `<id extension="${opts.encounterId ?? "enc-1"}" root="${opts.encounterRoot ?? MRN_ROOT}"${opts.encounterIdShape === "null-flavored" ? ' nullFlavor="UNK"' : ""}/>`}
       <code code="${opts.encounterCode ?? "99213"}" codeSystem="2.16.840.1.113883.6.12"/>
       <statusCode code="completed"/>
       <effectiveTime><low value='20240331080000'/><high value='20240331081500'/></effectiveTime>
+      ${opts.diagnosis ? `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.168"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <value code="${opts.diagnosis}" codeSystem="2.16.840.1.113883.6.96" xsi:type="CD"/>
+      </observation></entryRelationship>` : ""}
     </encounter></entry>
   </section></component></structuredBody></component>
 </ClinicalDocument>`;
@@ -144,6 +155,174 @@ test("merged resources are namespaced per document, so identical ids do not coll
     .map((e) => (e.resource as { id?: string }).id)
     .filter((id): id is string => id !== undefined);
   assert.equal(new Set(ids).size, ids.length, "no two resources in the merged bundle share an id");
+});
+
+/** The document with its encounter entry repeated, the copy's id and code replaced. */
+const withAnotherEncounter = (xml: string, id: string, code: string) => {
+  const start = xml.indexOf("    <entry><encounter");
+  const end = xml.indexOf("</encounter></entry>") + "</encounter></entry>".length;
+  const copy = xml.slice(start, end).replace(/<id extension="[^"]*" root/, `<id extension="${id}" root`).replace(/<code code="\d+" codeSystem="2\.16\.840\.1\.113883\.6\.12"/, `<code code="${code}" codeSystem="2.16.840.1.113883.6.12"`);
+  return `${xml.slice(0, end)}\n${copy}${xml.slice(end)}`;
+};
+
+const encountersOf = (documents: string[]) => {
+  const resources = resolveQrda1Documents(documents).subjects[0]!.bundle.entry.map((e) => e.resource as Record<string, any>);
+  return { resources, encounters: resources.filter((r) => r.resourceType === "Encounter"), conditions: resources.filter((r) => r.resourceType === "Condition") };
+};
+
+test("a duplicate document's REPEATED facts are merged once, so a visit is not counted twice", () => {
+  // Cypress's augmented duplicates carry the same clinical entries under a different MRN. Two copies of
+  // one visit with one diagnosis are two engagements to a measure that counts them (CMS137).
+  const { resources, encounters, conditions } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", family: "Diabetes Axult", encounterId: "e1", diagnosis: "75544000" }),
+  ]);
+  assert.equal(encounters.length, 1, "one visit");
+  assert.equal(conditions.length, 1, "one diagnosis");
+  const ids = new Set(resources.map((r) => `${r.resourceType}/${r.id}`));
+  assert.ok(ids.has(encounters[0]!.reasonReference[0].reference), "the kept visit still names its diagnosis");
+});
+
+test("only the repeated facts are dropped: a duplicate document's NEW facts survive", () => {
+  const { encounters } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }),
+    withAnotherEncounter(doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }), "e2", "99214"),
+  ]);
+  assert.deepEqual(encounters.map((e) => e.type[0].coding[0].code).sort(), ["99213", "99214"]);
+});
+
+test("the same visit with a DIFFERENT diagnosis is not a duplicate: a fact includes what it references", () => {
+  const { encounters, conditions } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "e1", diagnosis: "5602001" }),
+  ]);
+  assert.equal(encounters.length, 2);
+  assert.equal(conditions.length, 2);
+});
+
+test("identical content under DIFFERENT entry ids is two events, not a duplicate", () => {
+  // Two visits of one type at the same time from two documents map to identical resources; only the
+  // source's entry id says whether they are one event or two, so different ids keep both.
+  const { encounters } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "visit-a" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "visit-b" }),
+  ]);
+  assert.equal(encounters.length, 2);
+});
+
+test("the same entry id under two ASSIGNING AUTHORITIES is two entries, not a duplicate", () => {
+  // Entry "1" from one sender's system and entry "1" from another's are different events; the FHIR id is
+  // root-agnostic, so the CDA root (carried as the identifier's system) is what tells them apart.
+  const { encounters } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "1", encounterRoot: "2.16.840.1.113883.19.5.1" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "1", encounterRoot: "2.16.840.1.113883.19.5.2" }),
+  ]);
+  assert.equal(encounters.length, 2);
+  assert.deepEqual(encounters.map((e) => e.identifier[0].system).sort(), ["urn:oid:2.16.840.1.113883.19.5.1", "urn:oid:2.16.840.1.113883.19.5.2"]);
+});
+
+test("an entry the source did not identify is never merged across documents", () => {
+  // With no `<id>`, or a null-flavored one, the importer's id comes from the entry's position, which says
+  // nothing about which event it is; two such identical visits are two visits.
+  for (const shape of ["none", "null-flavored"] as const) {
+    const { encounters } = encountersOf([
+      doc({ mrn: "mrn-a", mbi: "MBI-1", encounterIdShape: shape }),
+      doc({ mrn: "mrn-b", mbi: "MBI-1", encounterIdShape: shape }),
+    ]);
+    assert.equal(encounters.length, 2, shape);
+    assert.equal(encounters.every((e) => e.identifier === undefined), true, `${shape}: no identifier is asserted`);
+  }
+});
+
+test("a diagnosis goes with its own encounter: two distinct visits never share one", () => {
+  // Same entry id under two authorities = two visits; each one's diagnosis Condition has no identity of
+  // its own and the same content, and must stay with its own visit rather than merge into the other's.
+  const { encounters, conditions } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "1", encounterRoot: "2.16.840.1.113883.19.5.1", diagnosis: "75544000" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "1", encounterRoot: "2.16.840.1.113883.19.5.2", diagnosis: "75544000" }),
+  ]);
+  assert.equal(encounters.length, 2);
+  assert.equal(conditions.length, 2);
+  const targets = encounters.map((e) => e.reasonReference[0].reference);
+  assert.equal(new Set(targets).size, 2, "each visit names its own diagnosis");
+});
+
+test("the merge does not depend on document order when one document states an entry twice", () => {
+  // Each fact keeps as many copies as the document that states it most often: here two, either way round.
+  const twice = withAnotherEncounter(doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1" }), "e1", "99213");
+  const once = doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "e1" });
+  assert.equal(encountersOf([twice, once]).encounters.length, 2);
+  assert.equal(encountersOf([once, twice]).encounters.length, 2);
+});
+
+test("a copied visit is recognised even when its diagnosis id came from the entry's position", () => {
+  // `ENC_1-dx-1` is not a valid FHIR id, so the diagnosis id falls back to the entry's position, and the
+  // second document has an extra entry first. The position-made id must not stop the visit merging.
+  const a = doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "ENC_1", diagnosis: "75544000" });
+  const extraFirst = (xml: string) => {
+    const start = xml.indexOf("    <entry><encounter");
+    const extra = `    <entry><encounter classCode="ENC" moodCode="EVN">
+      <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
+      <id extension="other" root="${MRN_ROOT}"/>
+      <code code="99214" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value='20240401080000'/><high value='20240401081500'/></effectiveTime>
+    </encounter></entry>
+`;
+    return xml.slice(0, start) + extra + xml.slice(start);
+  };
+  const b = extraFirst(doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "ENC_1", diagnosis: "75544000" }));
+  const { encounters, conditions } = encountersOf([a, b]);
+  assert.deepEqual(encounters.map((e) => e.type[0].coding[0].code).sort(), ["99213", "99214"], "the copied 99213 visit once");
+  assert.equal(conditions.length, 1);
+});
+
+test("an entry identified by a root alone merges like any other identified entry", () => {
+  const uuid = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+  const { encounters } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterIdShape: "root-only", encounterRoot: uuid }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterIdShape: "root-only", encounterRoot: uuid }),
+  ]);
+  assert.equal(encounters.length, 1);
+  assert.deepEqual(encounters[0]!.identifier, [{ system: "urn:ietf:rfc:3986", value: `urn:uuid:${uuid}` }]);
+});
+
+test("a repeat WITHIN one document is kept: the document itself stated it twice", () => {
+  const twice = withAnotherEncounter(doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1" }), "e1", "99213");
+  const { encounters } = encountersOf([twice]);
+  assert.equal(encounters.length, 2);
+});
+
+test("a renamed resource is renamed in the references to it too, or the link silently matches nothing", () => {
+  // An Encounter names its diagnosis Conditions by reference, and CQMCommon resolves a reference by exact
+  // id. Namespacing the ids without the references left CMS137's encounter-diagnosis history pointing at
+  // Conditions that no longer exist under that name, on this route only.
+  for (const documents of [
+    [doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" })],
+    [
+      doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "same-id", diagnosis: "75544000" }),
+      doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "same-id", diagnosis: "5602001" }),
+    ],
+  ]) {
+    const resources = resolveQrda1Documents(documents).subjects[0]!.bundle.entry.map((e) => e.resource as Record<string, any>);
+    const ids = new Set(resources.map((r) => `${r.resourceType}/${r.id}`));
+    const encounters = resources.filter((r) => r.resourceType === "Encounter");
+    assert.equal(encounters.length, documents.length);
+    for (const encounter of encounters) {
+      const references = [
+        ...(encounter.reasonReference ?? []).map((r: { reference: string }) => r.reference),
+        ...(encounter.diagnosis ?? []).map((d: { condition: { reference: string } }) => d.condition.reference),
+      ];
+      assert.equal(references.length, 2, "both links are present");
+      for (const reference of references) assert.ok(ids.has(reference), `${reference} resolves inside the merged bundle`);
+    }
+    // And each encounter still points at ITS OWN diagnosis, not the other document's.
+    const codeOf = (reference: string) => resources.find((r) => `${r.resourceType}/${r.id}` === reference)!.code.coding[0].code;
+    assert.deepEqual(
+      encounters.map((e) => codeOf(e.reasonReference[0].reference)).sort(),
+      documents.length === 1 ? ["75544000"] : ["5602001", "75544000"],
+    );
+  }
 });
 
 // ---------------------------------------------------------------- defects found in review of #389

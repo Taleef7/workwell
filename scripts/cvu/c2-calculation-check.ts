@@ -50,6 +50,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import { importQrda1Document } from "../../backend-ts/src/fhir/qrda1-import.ts";
+import { mergeMemberResources } from "../../backend-ts/src/fhir/qrda1-identity.ts";
 import { loadOfficialArtifact } from "../../backend-ts/src/wiring/official-artifacts.ts";
 import { officialTerminologyExpander } from "../../backend-ts/src/wiring/official-terminology.ts";
 import { expandArtifactTerminology, officialMeasurementPeriod } from "../../backend-ts/src/wiring/official-executor-adapter.ts";
@@ -189,18 +190,24 @@ export function mergeDocuments(
   docs: ReadonlyArray<{ file: string; label: string; bundle: { entry?: Array<{ resource: unknown }> } }>,
   key: string,
 ): Person {
-  const entries: Array<{ resource: unknown }> = [];
   const patients: Array<{ file: string; label: string; resource: Record<string, unknown> }> = [];
-  docs.forEach((doc, index) => {
+  for (const doc of docs) {
     for (const entry of doc.bundle.entry ?? []) {
-      const resource = entry.resource as { resourceType?: string; id?: string };
+      const resource = entry.resource as { resourceType?: string };
       if (resource?.resourceType === "Patient") {
         patients.push({ file: doc.file, label: doc.label, resource: resource as Record<string, unknown> });
-        continue;
       }
-      entries.push({ resource: { ...resource, id: `${index}-${resource?.id ?? entries.length}` } });
     }
-  });
+  }
+  // The production batch route's merge: namespaced ids, references kept intact, a repeated source entry once.
+  const entries: Array<{ resource: unknown }> = mergeMemberResources(
+    docs.map((doc, index) => ({
+      index,
+      resources: (doc.bundle.entry ?? [])
+        .map((e) => e.resource)
+        .filter((r) => (r as { resourceType?: string })?.resourceType !== "Patient"),
+    })),
+  ).map((resource) => ({ resource }));
 
   const chosen = patients[0];
   const conflicts: Array<{ field: string; values: string[] }> = [];

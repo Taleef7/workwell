@@ -7,6 +7,19 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-02
 
+- **The QRDA I importer reads what the Cypress decks carry.** It now takes text results, Physical Exams
+  (one Observation per reading), Medication Orders (as orders, never active medications), an Assessment
+  Not Performed with its reason, and encounter diagnoses. The batch merge keeps references intact and
+  merges a repeat of the same source entry across a person's duplicate documents, so a copied visit is
+  not counted twice. `scripts/cvu/bundle-agreement.ts` compares per patient against a Cypress bundle.
+  - 2027 deck (bundle 2026.1.0), vendored drafts, as production runs them: CMS122 64/64, CMS125 155/155,
+    CMS130 269/269, CMS137 36/36 (both rates), CMS2 375/379.
+  - CMS165 is not reachable through the QRDA I route yet: it alone runs with profile tagging required,
+    and imported resources carry no QI-Core profiles. Its draft also reads a blood pressure only as a US
+    Core panel, and pairing the two QDM readings into one would supply a code the document never states,
+    so they stay two readings; the question returns with profile stamping.
+  - The rest is logic, not import: CMS2's draft lacks the active-medication follow-up (2) and the 2027
+    next-day follow-up (2).
 - **The screens name the logic that runs, and call the rates estimates.** The routed measures show
   `CMS125FHIR` v1.0.000 (a CMS draft, derived from `CMS125v14`), not `CMS125v14`/`v1.0`/"published"
   (§4.3). On the patient profile every rate screen says WebChart submits the reported rate, and a run

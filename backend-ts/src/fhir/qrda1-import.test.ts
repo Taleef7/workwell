@@ -944,3 +944,285 @@ test("import: other nullFlavor spellings are open intervals too, not just UNK", 
     );
   }
 });
+
+// ---------------------------------------------------------------------------------------------------
+// The datatypes the 2027 Cypress decks carry for CMS2, CMS130, CMS137 and CMS165
+//
+// Shapes copied from `bundle-2026` (Cypress 2026.1.0) patients: a stool test with a text result, a
+// blood pressure as two Physical Exam entries, a Medication Order, an Assessment Not Performed with a
+// reason, and an encounter carrying an Encounter Diagnosis with a Rank.
+// ---------------------------------------------------------------------------------------------------
+
+const deckDocument = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:sdtc="urn:hl7-org:sdtc">
+  <recordTarget><patientRole><id extension="deck-1" root="1.3.6.1.4.1.115"/>
+    <patient><birthTime value='19731115150000'/></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="fobt-1"/>
+      <code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20250622143000'/>
+      <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
+        <code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>
+        <value xsi:type="ST">Negative</value>
+      </observation></entryRelationship>
+    </observation></entry>
+
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="sys-1"/>
+      <code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20251210170500'/>
+      <value xsi:type="PQ" value="130" unit="mm[Hg]"/>
+    </observation></entry>
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="dia-1"/>
+      <code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20251210170500'/>
+      <value xsi:type="PQ" value="60" unit="mm[Hg]"/>
+    </observation></entry>
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="sys-lone"/>
+      <code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20250301090000'/>
+      <value xsi:type="PQ" value="150" unit="mm[Hg]"/>
+    </observation></entry>
+
+    <entry><substanceAdministration classCode="SBADM" moodCode="RQO">
+      <templateId root="2.16.840.1.113883.10.20.24.3.47" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="medorder-1"/>
+      <statusCode code="active"/>
+      <effectiveTime xsi:type="IVL_TS"><low value='20250219173000'/><high value='20250219173000'/></effectiveTime>
+      <consumable><manufacturedProduct classCode="MANU"><manufacturedMaterial>
+        <code code="854901" codeSystem="2.16.840.1.113883.6.88"/>
+      </manufacturedMaterial></manufacturedProduct></consumable>
+      <author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value='20250219173000'/></author>
+    </substanceAdministration></entry>
+
+    <entry><observation classCode="OBS" moodCode="EVN" negationInd="true">
+      <templateId root="2.16.840.1.113883.10.20.24.3.144" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="noscreen-1"/>
+      <code code="73832-8" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20250816140000'/>
+      <author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value='20250816140000'/></author>
+      <entryRelationship typeCode="RSON"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.88" extension="2017-08-01"/>
+        <code code="77301-0" codeSystem="2.16.840.1.113883.6.1"/>
+        <value code="183932001" codeSystem="2.16.840.1.113883.6.96" xsi:type="CD"/>
+      </observation></entryRelationship>
+    </observation></entry>
+
+    <entry><encounter classCode="ENC" moodCode="EVN">
+      <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
+      <id extension="enc-dx" root="1.3.6.1.4.1.115"/>
+      <code code="99202" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value='20241128170000'/><high value='20241128173000'/></effectiveTime>
+      <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.168"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <value code="75544000" codeSystem="2.16.840.1.113883.6.96" xsi:type="CD"/>
+        <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+          <templateId root="2.16.840.1.113883.10.20.24.3.166" extension="2019-12-01"/>
+          <code code="263486008" codeSystem="2.16.840.1.113883.6.96"/>
+          <value xsi:type="INT" value="1"/>
+        </observation></entryRelationship>
+      </observation></entryRelationship>
+    </encounter></entry>
+
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+const deckResources = (xml = deckDocument) => {
+  const imported = importQrda1Document(xml);
+  const all = imported.bundle.entry.map((e) => e.resource as Record<string, any>);
+  return { imported, all, byId: (id: string) => all.find((r) => r.id === id) };
+};
+
+test("import: each resource keeps its source identifier, root as the system", () => {
+  // The FHIR id is root-agnostic; the identifier keeps the assigning authority, as an OID URN.
+  const { byId } = deckResources();
+  for (const id of ["fobt-1", "sys-1", "medorder-1", "noscreen-1", "enc-dx"]) {
+    assert.deepEqual(byId(id)!.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: id }], id);
+  }
+  const condition = byId("enc-dx-dx-1")!;
+  assert.equal(condition.identifier, undefined, "a generated Condition has no source identifier, and none is invented");
+});
+
+test("import: EVERY mapper keeps its entry's source identifier", () => {
+  // Each mapper is listed by the entry it builds, so dropping `identifierOf` from any one of them fails
+  // here: Assessment, Symptom, Intervention Performed and Order, Device Order, Medication Active, an
+  // inpatient Encounter and a Procedure from the exclusion fixture; a Diagnosis from its own entry.
+  const { of } = exclusionResources();
+  const all = ["Observation", "Procedure", "ServiceRequest", "DeviceRequest", "MedicationRequest", "Encounter"].flatMap(of);
+  for (const id of ["assess-1", "symptom-1", "intervention-1", "order-1", "device-1", "med-1", "enc-inpatient", "proc-icd10pcs"]) {
+    assert.deepEqual(all.find((r) => r.id === id)?.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: id }], id);
+  }
+  const diagnosis = importQrda1Document(deckDocument.replace("  </section></component>", `
+    <entry><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.137" extension="2021-08-01"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="dx-standalone"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <effectiveTime><low value='20240101080000'/></effectiveTime>
+        <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/>
+      </observation></entryRelationship>
+    </act></entry>
+  </section></component>`)).bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.id === "dx-standalone");
+  assert.deepEqual(diagnosis?.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: "dx-standalone" }]);
+});
+
+test("import: the identifier's shape follows the CDA id's", () => {
+  const encounterWith = (id: string) =>
+    deckResources(deckDocument.replace('<id extension="enc-dx" root="1.3.6.1.4.1.115"/>', id)).all.find((r) => r.resourceType === "Encounter")!;
+  // A UUID root is a urn:uuid, lower-cased as RFC 4122 compares it.
+  assert.deepEqual(encounterWith('<id root="BC01A5D1-3A34-4286-82CC-43EB04C972A7" extension="v1"/>').identifier, [
+    { system: "urn:uuid:bc01a5d1-3a34-4286-82cc-43eb04c972a7", value: "v1" },
+  ]);
+  // A URI root is its own system; a "root" with a space in it is not a URI and gives no identifier.
+  assert.deepEqual(encounterWith('<id root="urn:example:visits" extension="v1"/>').identifier, [{ system: "urn:example:visits", value: "v1" }]);
+  assert.equal(encounterWith('<id root="my system: x" extension="v1"/>').identifier, undefined);
+  // A root alone is a complete identifier (HL7 V3 II): carried as a URI value.
+  assert.deepEqual(encounterWith('<id root="3f2504e0-4f89-11d3-9a0c-0305e82c3301"/>').identifier, [
+    { system: "urn:ietf:rfc:3986", value: "urn:uuid:3f2504e0-4f89-11d3-9a0c-0305e82c3301" },
+  ]);
+  // A null-flavored id is the sender saying there is none.
+  assert.equal(encounterWith('<id root="1.3.6.1.4.1.115" extension="v1" nullFlavor="UNK"/>').identifier, undefined);
+  assert.equal(encounterWith('<id nullFlavor="NI"/>').identifier, undefined);
+});
+
+test("import: a TEXT result is kept as valueString — CMS130 asks only that the stool test has a result", () => {
+  const fobt = deckResources().byId("fobt-1");
+  assert.ok(fobt);
+  assert.equal(fobt!.valueString, "Negative");
+});
+
+test("import: a Physical Exam is one Observation per reading, and no panel code is supplied", () => {
+  // A blood pressure's two halves stay two readings with their own codes and values. Pairing them into a
+  // US Core panel would supply the panel code 85354-9, which the document never states.
+  const { all, byId } = deckResources();
+  for (const [id, code, value] of [["sys-1", "8480-6", 130], ["dia-1", "8462-4", 60], ["sys-lone", "8480-6", 150]] as const) {
+    const reading = byId(id);
+    assert.ok(reading, id);
+    assert.equal(reading!.category[0].coding[0].code, "exam");
+    assert.deepEqual(reading!.code.coding.map((c: { code: string }) => c.code), [code]);
+    assert.equal(reading!.valueQuantity.value, value);
+    assert.equal(reading!.component, undefined);
+  }
+  assert.ok(!JSON.stringify(all).includes("85354-9"), "no resource carries a code the document did not state");
+});
+
+test("import: a Medication Order is an ORDER, never an active medication", () => {
+  const order = deckResources().byId("medorder-1");
+  assert.ok(order);
+  assert.equal(order!.resourceType, "MedicationRequest");
+  assert.equal(order!.intent, "order");
+  // `isMedicationOrder` admits active|completed; `isMedicationActive` is Equal 'active'. `completed`
+  // keeps an order out of the dementia-medication exclusion, which reads active medications.
+  assert.equal(order!.status, "completed");
+  assert.equal(order!.authoredOn, "2025-02-19T17:30:00Z");
+  assert.equal(order!.medicationCodeableConcept.coding[0].code, "854901");
+});
+
+test("import: an Assessment Not Performed WITH a reason is a cancelled Observation carrying the reason", () => {
+  const { imported, byId } = deckResources();
+  const notDone = byId("noscreen-1");
+  assert.ok(notDone, "CMS2's denominator exception reads it");
+  assert.equal(notDone!.status, "cancelled", "and no positive screening read admits a cancelled one");
+  assert.equal(notDone!.code.coding[0].code, "73832-8");
+  assert.equal(notDone!.issued, "2025-08-16T14:00:00Z");
+  assert.deepEqual(notDone!.extension, [
+    {
+      url: "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-notDoneReason",
+      valueCodeableConcept: { coding: [{ system: "http://snomed.info/sct", code: "183932001" }] },
+    },
+  ]);
+  assert.equal(notDone!.valueCodeableConcept, undefined);
+  assert.deepEqual(imported.untranslatedTemplates, []);
+});
+
+test("import: a negation WITHOUT a reason stays untranslated — a reasonless 'not done' is not an exception", () => {
+  const reasonless = deckDocument.replace(/<entryRelationship typeCode="RSON">[\s\S]*?<\/entryRelationship>/, "");
+  assert.notEqual(reasonless, deckDocument);
+  const { imported, byId } = deckResources(reasonless);
+  assert.equal(byId("noscreen-1"), undefined);
+  assert.ok(imported.untranslatedTemplates.includes("2.16.840.1.113883.10.20.24.3.144"));
+});
+
+test("import: an Encounter Diagnosis becomes an encounter-diagnosis Condition the encounter references", () => {
+  const { byId } = deckResources();
+  const encounter = byId("enc-dx");
+  assert.ok(encounter);
+  const condition = byId("enc-dx-dx-1");
+  assert.ok(condition, "one Condition per diagnosis");
+  assert.equal(condition!.code.coding[0].code, "75544000");
+  assert.equal(condition!.category[0].coding[0].code, "encounter-diagnosis");
+  assert.equal(condition!.onsetDateTime, undefined, "an Encounter Diagnosis has no onset of its own, so none is given");
+  assert.equal(condition!.verificationStatus, undefined, "nor a verification status: none is minted");
+  // CQMCommon.encounterDiagnosis (CMS137's history) follows reasonReference; `diagnosis` keeps the rank.
+  assert.deepEqual(encounter!.reasonReference, [{ reference: "Condition/enc-dx-dx-1" }]);
+  assert.deepEqual(encounter!.diagnosis, [{ condition: { reference: "Condition/enc-dx-dx-1" }, rank: 1 }]);
+});
+
+test("import: a REPEATED encounter id still gives every diagnosis its own Condition id", () => {
+  // The library resolves each reference with `singleton from`, which throws on two matches, so two
+  // Conditions sharing an id would turn the subject into an evaluation error.
+  const encounterEntry = deckDocument.slice(deckDocument.indexOf("    <entry><encounter"), deckDocument.indexOf("</encounter></entry>") + "</encounter></entry>".length);
+  const repeated = deckDocument.replace(encounterEntry, `${encounterEntry}\n${encounterEntry.replace('code="75544000"', 'code="5602001"')}`);
+  assert.notEqual(repeated, deckDocument);
+  const { all } = deckResources(repeated);
+  const conditions = all.filter((r) => r.resourceType === "Condition");
+  assert.equal(conditions.length, 2);
+  assert.equal(new Set(conditions.map((c) => c.id)).size, 2, "two diagnoses, two ids");
+  const encounters = all.filter((r) => r.resourceType === "Encounter");
+  const codeOf = (reference: string) => conditions.find((c) => `Condition/${c.id}` === reference)!.code.coding[0].code;
+  assert.deepEqual(encounters.map((e) => codeOf(e.reasonReference[0].reference)), ["75544000", "5602001"], "each encounter keeps its own");
+});
+
+test("import: a generated diagnosis id never shadows a Condition the document itself named", () => {
+  // A standalone Diagnosis whose own id is exactly what the encounter's diagnosis would be called, and
+  // placed AFTER the encounter, so it is not yet known when the encounter is read.
+  const diagnosisEntry = `
+    <entry><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.137" extension="2021-08-01"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="enc-dx-dx-1"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <effectiveTime><low value='20240101080000'/></effectiveTime>
+        <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/>
+      </observation></entryRelationship>
+    </act></entry>`;
+  const shadowed = deckDocument.replace("  </section></component>", `${diagnosisEntry}\n  </section></component>`);
+  assert.notEqual(shadowed, deckDocument);
+  const { all } = deckResources(shadowed);
+  const conditions = all.filter((r) => r.resourceType === "Condition");
+  assert.equal(conditions.length, 2);
+  assert.equal(new Set(conditions.map((c) => c.id)).size, 2, "no two Conditions share an id");
+  const encounter = all.find((r) => r.id === "enc-dx")!;
+  const linked = conditions.find((c) => `Condition/${c.id}` === encounter.reasonReference[0].reference)!;
+  assert.equal(linked.code.coding[0].code, "75544000", "the encounter still points at its own diagnosis");
+});
+
+test("import: an encounter id that is not a valid FHIR id still yields a resolvable Condition id", () => {
+  const odd = deckDocument.replace('extension="enc-dx"', 'extension="visit/2024/11/28"');
+  assert.notEqual(odd, deckDocument);
+  const { all } = deckResources(odd);
+  const condition = all.find((r) => r.resourceType === "Condition")!;
+  assert.match(condition.id, /^[A-Za-z0-9.-]{1,64}$/);
+  const encounter = all.find((r) => r.resourceType === "Encounter")!;
+  assert.equal(encounter.reasonReference[0].reference, `Condition/${condition.id}`);
+});
+

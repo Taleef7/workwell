@@ -102,12 +102,135 @@ function group(identifiersPerDocument: string[][]): number[][] {
   return [...groups.values()];
 }
 
+/** A copy of `value` with every `reference` string found in `renamed` replaced by its new name. */
+function withReferencesRenamed(value: unknown, renamed: ReadonlyMap<string, string>): unknown {
+  if (Array.isArray(value)) return value.map((v) => withReferencesRenamed(v, renamed));
+  if (value === null || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = key === "reference" && typeof v === "string" && renamed.has(v) ? renamed.get(v) : withReferencesRenamed(v, renamed);
+  }
+  return out;
+}
+
+/** JSON with object keys sorted, so two equal resources stringify the same whatever their key order. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+}
+
+/**
+ * One person's clinical resources from several documents, as one list.
+ *
+ * - Ids are namespaced per document (`<document index>-<id>`): two documents can reuse a generated id.
+ * - References inside a document are renamed with the ids they point at, since the libraries match a
+ *   reference to its target by exact id.
+ * - A resource an EARLIER document of this person already gave is dropped, and references to it point at
+ *   the kept copy. A sender's duplicate documents repeat their clinical entries, and two copies of one
+ *   visit are two visits to a measure that counts engagements, as CMS137 does. A repeat is the same
+ *   SOURCE entry: the same asserted CDA identifier (assigning authority and id, carried as `identifier`),
+ *   the same content, and references that point at the same facts. Two distinct events can map to
+ *   identical content (two date-only visits of one type), and only the source's own identifier says they
+ *   are one, so an entry with no asserted identifier is never matched on its own; a resource with no
+ *   identity (an encounter's diagnosis) goes only with the entries that reference it. A document that
+ *   states an entry twice keeps both: each fact keeps as many copies as the document that states it most
+ *   often, so the result does not depend on the order the documents arrive in.
+ */
+export function mergeMemberResources(members: ReadonlyArray<{ index: number; resources: readonly unknown[] }>): unknown[] {
+  const out: unknown[] = [];
+  // fingerprint -> the kept copies so far, across documents. A fact keeps as many copies as the document
+  // that states it most often, whatever order the documents arrive in.
+  const keptByFact = new Map<string, string[]>();
+  for (const m of members) {
+    const resources = m.resources as Array<{ resourceType?: string; id?: string }>;
+    const byRef = new Map<string, { resourceType?: string; id?: string }>();
+    for (const r of resources) if (r?.id !== undefined) byRef.set(`${r.resourceType}/${r.id}`, r);
+    // A resource's fact: its content WITHOUT its FHIR id, which the importer may have made from the entry's
+    // position (the source's own id is in `identifier`), with each in-document reference replaced by the
+    // fact of what it points at (references run Encounter -> Condition, so this terminates).
+    const facts = new Map<unknown, string>();
+    const factOf = (r: { resourceType?: string; id?: string }, depth = 0): string => {
+      const known = facts.get(r);
+      if (known !== undefined) return known;
+      const resolve = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(resolve);
+        if (value === null || typeof value !== "object") return value;
+        const o: Record<string, unknown> = {};
+        for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+          const target = key === "reference" && typeof v === "string" ? byRef.get(v) : undefined;
+          o[key] = target && depth < 8 ? `fact:${factOf(target, depth + 1)}` : resolve(v);
+        }
+        return o;
+      };
+      const { id: _positional, ...content } = r;
+      const fact = canonicalJson(resolve(content));
+      facts.set(r, fact);
+      return fact;
+    };
+    const renamed = new Map<string, string>();
+    const dropped = new Set<unknown>();
+    const refOf = (r: { resourceType?: string; id?: string }) => `${r.resourceType}/${r.id}`;
+    // The nth copy of a fact in this document repeats the nth copy an earlier document kept, if there is one.
+    const seenHere = new Map<string, number>();
+    const dropAsRepeat = (r: { resourceType?: string; id?: string }): void => {
+      const fact = factOf(r);
+      const n = seenHere.get(fact) ?? 0;
+      seenHere.set(fact, n + 1);
+      const kept = keptByFact.get(fact) ?? [];
+      if (n >= kept.length) return;
+      renamed.set(refOf(r), kept[n]!);
+      dropped.add(r);
+    };
+    // Only an entry the SOURCE identified (a CDA `<id>` with its assigning authority, carried as
+    // `identifier`) can be a repeat of an earlier document's entry. An id the importer made up from an
+    // entry's position says nothing about which event it is, so such a resource is never matched on its own.
+    const identified = (r: { identifier?: unknown }) => Array.isArray(r.identifier) && r.identifier.length > 0;
+    for (const r of resources) if (r?.id !== undefined && identified(r as { identifier?: unknown })) dropAsRepeat(r);
+    // A resource with no identity of its own (an encounter's diagnosis Condition) goes with the entries that
+    // name it: it is dropped only when every resource in this document that references it was dropped as a
+    // repeat, and an earlier document kept the same one.
+    const referencedBy = new Map<string, unknown[]>();
+    const collectReferences = (owner: unknown, value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach((v) => collectReferences(owner, v));
+      if (value === null || typeof value !== "object") return;
+      for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+        if (key === "reference" && typeof v === "string" && byRef.has(v)) (referencedBy.get(v) ?? referencedBy.set(v, []).get(v)!).push(owner);
+        else collectReferences(owner, v);
+      }
+    };
+    for (const r of resources) collectReferences(r, r);
+    for (const r of resources) {
+      if (r?.id === undefined || identified(r as { identifier?: unknown })) continue;
+      const owners = referencedBy.get(refOf(r)) ?? [];
+      if (owners.length > 0 && owners.every((o) => dropped.has(o))) dropAsRepeat(r);
+    }
+    const keptHere = new Map<string, string[]>();
+    for (const r of resources) {
+      if (r?.id === undefined || dropped.has(r)) continue;
+      const fresh = `${r.resourceType}/${m.index}-${r.id}`;
+      renamed.set(refOf(r), fresh);
+      const fact = factOf(r);
+      (keptHere.get(fact) ?? keptHere.set(fact, []).get(fact)!).push(fresh);
+    }
+    resources.forEach((r, i) => {
+      if (dropped.has(r)) return;
+      const rewritten = withReferencesRenamed(r, renamed) as Record<string, unknown>;
+      out.push({ ...rewritten, id: `${m.index}-${r?.id ?? i}` });
+    });
+    for (const [fact, refs] of keptHere) keptByFact.set(fact, [...(keptByFact.get(fact) ?? []), ...refs]);
+  }
+  return out;
+}
+
 /**
  * Merge a group's documents into one bundle.
  *
  * Resource ids are namespaced per source document: two documents about one person can legitimately carry
  * the same generated id, and a collision would silently drop half a split patient's data — which is the
- * exact failure this merge exists to prevent.
+ * exact failure this merge exists to prevent. `mergeMemberResources` does that, keeps references intact,
+ * and merges a source entry (same CDA identifier and content) that a person's documents repeat.
  */
 function merge(
   members: Array<{ index: number; imported: Qrda1Import; identifiers: string[]; documentId?: string; text: string }>,
@@ -157,13 +280,15 @@ function merge(
   }
 
   const entry: Array<{ resource: unknown }> = chosen ? [{ resource: patient }] : [];
-  for (const m of members) {
-    for (const e of m.imported.bundle.entry) {
-      const resource = e.resource as { resourceType?: string; id?: string };
-      if (resource?.resourceType === "Patient") continue;
-      entry.push({ resource: { ...resource, id: `${m.index}-${resource?.id ?? entry.length}` } });
-    }
-  }
+  const clinical = mergeMemberResources(
+    members.map((m) => ({
+      index: m.index,
+      resources: m.imported.bundle.entry
+        .map((e) => e.resource)
+        .filter((r) => (r as { resourceType?: string })?.resourceType !== "Patient"),
+    })),
+  );
+  for (const resource of clinical) entry.push({ resource });
 
   return {
     subjectId: canonical.imported.patientId,
