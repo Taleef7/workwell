@@ -717,6 +717,22 @@ test("a run whose rows were scored for two different years is refused rather tha
   assert.equal((await get(`/api/runs/${same}/qrda?format=xml`))!.status, 200, "one logic, one period: exported as before");
 });
 
+test("authored rows and official rows in one run are two logics: refused, not summed under the artifact", async () => {
+  // An open run that took authored rows before a routing flip and official rows after it.
+  const authored = { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] };
+  const runId = await runWithEvidence([authored, officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
+  for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`, `/api/runs/${runId}/measure-report`, `/api/runs/${runId}/measure-report?type=bundle`, `/api/runs/${runId}/measure-report?type=individual`]) {
+    const res = (await get(path))!;
+    assert.equal(res.status, 422, path);
+    assert.equal(((await res.json()) as { error: string }).error, "mixed_logic", path);
+  }
+  // An ERRORED row was scored by nothing, so it is not a second logic: the run still exports.
+  const errored = await runWithEvidence([{ evaluationError: "CQL engine failure", message: "boom" }, officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
+  for (const path of [`/api/runs/${errored}/qrda?format=xml`, `/api/runs/${errored}/qrda1`, `/api/runs/${errored}/measure-report`, `/api/runs/${errored}/measure-report?type=individual`]) {
+    assert.equal((await get(path))!.status, 200, path);
+  }
+});
+
 test("Codex P2: a non-string triggeredBy is coerced to 'manual', never a 500", async () => {
   // Untrusted body: `{"triggeredBy":123}` must not throw `raw.trim is not a function`.
   const res = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: 123 });

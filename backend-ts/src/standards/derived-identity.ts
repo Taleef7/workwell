@@ -18,6 +18,8 @@ export const DERIVED_LIBRARY_PREFIX = "urn:workwell:library:";
 export const DERIVED_VERSION = /^ww-\d{4}\.\d+$/;
 const FORBIDDEN_IDENTIFIER_TYPES = new Set(["short-name", "version-specific", "version-independent", "publisher"]);
 const CMS_HOST = "madie.cms.gov";
+/** A refusal, not a sanitizer: CMS's authoring host named ANYWHERE in a field fails the field. */
+const NAMES_CMS_HOST = /madie\.cms\.gov/i;
 
 interface Resource {
   resourceType?: string;
@@ -138,7 +140,7 @@ export function derivedIdentityProblems(
     if (String(identifier["value"] ?? "").startsWith("urn:uuid:")) problems.push(`${id}: the translated Measure still carries a CMS UUID identifier`);
   }
   for (const field of ["url", "name", "title", "publisher", "library"] as const) {
-    if (JSON.stringify(measure[field] ?? "").includes(CMS_HOST)) problems.push(`${id}: the translated Measure's ${field} still names ${CMS_HOST}`);
+    if (NAMES_CMS_HOST.test(JSON.stringify(measure[field] ?? ""))) problems.push(`${id}: the translated Measure's ${field} still names ${CMS_HOST}`);
   }
   const related = (measure["relatedArtifact"] as Array<Record<string, unknown>> | undefined) ?? [];
   if (!related.some((r) => r["type"] === "derived-from")) problems.push(`${id}: the translated Measure has no derived-from link to the CMS measure`);
@@ -148,6 +150,7 @@ export function derivedIdentityProblems(
     problems.push(`${id}: the translation was built on CMS's artifact ${derived.base.manifestSha256}, but the committed one is ${base.manifest.sha256}`);
   }
   const cmsLibraries = new Map(librariesOf((base?.bundle ?? {}) as Bundle).map((l) => [`${String(l["name"])}|${String(l["version"])}`, libraryElmSha256(l)]));
+  const cmsLibraryNames = new Set(librariesOf((base?.bundle ?? {}) as Bundle).map((l) => String(l["name"])));
   const unchanged = new Map(derived.unchangedLibraries.map((l) => [`${l.name}|${l.version}`, l.elmSha256]));
   for (const library of librariesOf(bundle)) {
     const key = `${String(library["name"])}|${String(library["version"])}`;
@@ -160,11 +163,22 @@ export function derivedIdentityProblems(
       }
       continue;
     }
+    // A library WorkWell changed carries WorkWell's identity in EVERY field a reader keys on: its url, its
+    // name and version, and the identifier inside its ELM. A CMS name is a plain token (`CMS137FHIR`),
+    // not a hostname, so it is checked against CMS's own library names rather than for the host alone.
+    const libraryName = String(library["name"] ?? "");
+    const libraryVersion = String(library["version"] ?? "");
     const libraryUrl = String(library["url"] ?? "");
     if (!libraryUrl.startsWith(DERIVED_LIBRARY_PREFIX)) problems.push(`${id}: changed library ${key} has url '${libraryUrl}', not a WorkWell library canonical`);
+    if (cmsLibraryNames.has(libraryName)) problems.push(`${id}: changed library ${key} keeps CMS's library name '${libraryName}'`);
+    if (!DERIVED_VERSION.test(libraryVersion)) problems.push(`${id}: changed library ${key} has version '${libraryVersion}', not a ww- version`);
     const data = elmContent(library)?.data;
-    const elmIdentifier = data ? (JSON.parse(Buffer.from(data, "base64").toString("utf8")) as { library?: { identifier?: unknown } }).library?.identifier : undefined;
-    if (JSON.stringify(elmIdentifier ?? "").includes(CMS_HOST) || JSON.stringify([library["url"], library["name"]]).includes(CMS_HOST)) {
+    const elmIdentifier = data ? (JSON.parse(Buffer.from(data, "base64").toString("utf8")) as { library?: { identifier?: { id?: unknown; version?: unknown } } }).library?.identifier : undefined;
+    if (!elmIdentifier) problems.push(`${id}: changed library ${key} has no ELM identifier to check`);
+    else if (elmIdentifier.id !== libraryName || elmIdentifier.version !== libraryVersion) {
+      problems.push(`${id}: changed library ${key}'s ELM is identified as '${String(elmIdentifier.id)}|${String(elmIdentifier.version)}', not as the library itself`);
+    }
+    if (NAMES_CMS_HOST.test(JSON.stringify(elmIdentifier ?? "")) || NAMES_CMS_HOST.test(JSON.stringify([library["url"], library["name"]]))) {
       problems.push(`${id}: changed library ${key} still names ${CMS_HOST}`);
     }
   }

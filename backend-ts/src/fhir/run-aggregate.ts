@@ -60,9 +60,14 @@ export interface OfficialRunAggregate extends RateAggregate {
   identityConflict: boolean;
 }
 
-/** What makes two rows' scoring the same logic: the artifact kind and hash, and the period counted. */
-export function scoringIdentityKey(identity: OfficialReportIdentity | null): string | null {
-  if (!identity) return null;
+/**
+ * What makes two rows' scoring the same logic: the artifact kind and hash, and the period counted. An
+ * evaluated row with no official evidence was scored by authored CQL, which is a logic of its own: an
+ * open run that took authored rows before a routing flip and official rows after must not have the
+ * authored memberships summed under the official artifact's name.
+ */
+export function scoringIdentityKey(identity: OfficialReportIdentity | null): string {
+  if (!identity) return "authored";
   return JSON.stringify([identity.kind ?? "official", identity.artifactSha256 ?? null, identity.measurementPeriod?.start ?? null, identity.measurementPeriod?.end ?? null]);
 }
 
@@ -144,12 +149,10 @@ export async function aggregateOfficialRun(
     const rowIdentity = officialReportIdentity(row.evidence);
     if (!identity) identity = rowIdentity;
     // Every evaluated row is compared, not just the first: the first row naming the report is only honest
-    // if every other row was scored the same way.
+    // if every other row was scored the same way. An errored row was scored by nothing and is skipped above.
     const key = scoringIdentityKey(rowIdentity);
-    if (key !== null) {
-      if (firstKey === null) firstKey = key;
-      else if (key !== firstKey) identityConflict = true;
-    }
+    if (firstKey === null) firstKey = key;
+    else if (key !== firstKey) identityConflict = true;
     producedOfficialEvidence ||= officialMembership(row.evidence) !== null;
   }
   return { ...aggregator.finish(), official: identity, producedOfficialEvidence, identityConflict };

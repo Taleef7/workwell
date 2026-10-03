@@ -493,8 +493,10 @@ export async function routedEngineForEnv(
 ): Promise<RoutedEngine> {
   const authored = options.authored ?? (await engineForEnv(env));
   const official = officialMeasureIds(env as Record<string, unknown>);
-  // Identity on the default path — the wrapper below never exists in any environment today.
-  if (official.size === 0) return authored as RoutedEngine;
+  // Identity on the default path — the wrapper below never exists in any environment today. A
+  // translation allowlist with no official one is NOT that path: it is a misconfiguration (D1), and
+  // returning the authored engine here would score the measure with the wrong logic and say nothing.
+  if (official.size === 0 && derivedMeasureIds(env as Record<string, unknown>).size === 0) return authored as RoutedEngine;
 
   const problems = officialRoutingProblems(env, options);
   if (problems.length > 0) {

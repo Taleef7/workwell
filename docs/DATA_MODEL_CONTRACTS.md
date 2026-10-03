@@ -117,8 +117,9 @@ official-routed (`populationResults`, read by MeasureReport/QRDA; multi-rate add
 absent); `qrda1Import` on QRDA-I imports (finalize requires it on every outcome). An outcome scored by a
 WorkWell translation (decision 3) adds `official.kind: "derived"`, `label`, `url` and `derivedFrom`, and its
 `ecqmId` is `null`: read `kind` before falling back to any CMS identity. QRDA I/III refuse such a run
-(422 `derived_logic_not_reportable`); a run whose rows were scored by more than one logic or period is
-refused by QRDA I/III and the summary MeasureReport (422 `mixed_logic`).
+(422 `derived_logic_not_reportable`); a run whose evaluated rows were scored by more than one logic (CMS's
+artifact, a translation, authored CQL) or period is refused by QRDA I/III and every MeasureReport type
+(422 `mixed_logic`); an errored row counts as no logic.
 - **Evaluation failure** replaces the evidence with `{ "evaluationError": "CQL engine failure",
 "message": "<error text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`.
 
