@@ -114,7 +114,7 @@ import type {
   OutcomeStatus,
 } from "@work-well/measure-engine";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
+import { effectivePeriodCovers, loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";
 import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.ts";
 import type { BatchCalculator } from "./fqm-worker.ts";
@@ -369,10 +369,8 @@ export function effectivePeriodWarning(
   period: { start: string; end: string },
 ): string | null {
   const ep = artifact.manifest.effectivePeriod;
-  if (!ep?.start || !ep?.end) return null;
-  const covered = ep.start.slice(0, 10) <= period.start.slice(0, 10) && ep.end.slice(0, 10) >= period.end.slice(0, 10);
-  return covered ? null :
-    `${artifact.manifest.catalogId}: the vendored artifact declares effectivePeriod ${ep.start}..${ep.end} but this run's measurement period is ${period.start.slice(0, 10)}..${period.end.slice(0, 10)} — the logic is a prior-year vintage (ROADMAP MM-1d); re-vendor when CMS publishes the FHIR content for this year.`;
+  return effectivePeriodCovers(artifact.manifest, period) !== false ? null :
+    `${artifact.manifest.catalogId}: the vendored artifact declares effectivePeriod ${ep!.start}..${ep!.end} but this run's measurement period is ${period.start.slice(0, 10)}..${period.end.slice(0, 10)} — the logic is a prior-year vintage (ROADMAP MM-1d); re-vendor when CMS publishes the FHIR content for this year.`;
 }
 /**
  * Expand every value set the artifact's ELM retrieves, refusing if any comes back empty.

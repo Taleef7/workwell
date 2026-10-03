@@ -14,8 +14,10 @@ CQL, keeps the per-define evidence, and turns non-compliant outcomes into cases 
 - **Backend:** one TypeScript worker (`backend-ts/`, `@mieweb/cloud`) on a long-lived Node host
   (`src/server.ts` serves `src/worker.ts`). No JVM (ADR-008).
 - **Engine:** CQL compiles to ELM at build time; the ELM is committed and runs in-process on
-  `cql-execution`. A measure named in `WORKWELL_OFFICIAL_MEASURES` instead runs CMS's published
-  artifact through `fqm-execution` (ADR-045, ADR-078).
+  `cql-execution`. A measure named in `WORKWELL_OFFICIAL_MEASURES` instead runs CMS's FHIR (QI-Core)
+  artifact through `fqm-execution` (ADR-045, ADR-078): today the v1.0.000 drafts CMS posted for public
+  comment in January–February 2026, derived from the 2026 QDM measures. The measure read models name
+  that artifact as `identity.executed` (`CMS125FHIR` v1.0.000, derived from `CMS125v14`).
 - **Data:** PostgreSQL 16 on Neon (the `Pg*Store` ceiling, `workwell_spike` schema, created on boot
   with `IF NOT EXISTS`). SQLite floor for tests and local. `DATABASE_URL` picks the ceiling.
 - **Frontend:** Next.js 16 App Router, React 19, Tailwind 4, `@mieweb/ui` (ADR-004), NITRO grid from

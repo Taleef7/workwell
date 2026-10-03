@@ -33,6 +33,7 @@ interface Summary {
   complianceRate: number;
   openCaseCount: number;
   latestRunId: string | null;
+  includesAuthoredScaleCounts: boolean;
 }
 const audiogramOf = async (qs = "") =>
   ((await get(`/overview${qs}`).then((r) => r!.json())) as Summary[]).find((p) => p.measureId === "audiogram")!;
@@ -340,7 +341,9 @@ test("E13 PR-2: programs overview folds in the scale tenant counts (excluded by 
     ((await get(`/overview${qs}`).then((r) => r!.json())) as Summary[]).find((p) => p.measureId === "cholesterol_ldl")!;
 
   assert.equal((await cholOf()).totalEvaluated, 3, "scale counts included by default");
+  assert.equal((await cholOf()).includesAuthoredScaleCounts, true, "and the summary says the authored engine scored them");
   assert.equal((await cholOf("?tenant=twh")).totalEvaluated, 0, "scale excluded when scoped to twh");
+  assert.equal((await cholOf("?tenant=twh")).includesAuthoredScaleCounts, false);
   const mhn = await cholOf("?tenant=mhn");
   assert.equal(mhn.totalEvaluated, 3);
   assert.equal(mhn.compliant, 2);

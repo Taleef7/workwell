@@ -97,7 +97,16 @@ is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027,
-so every such run logs an `effectivePeriod` warning naming both periods until MM-1d lands.
+so every such run logs an `effectivePeriod` warning naming both periods until MM-1d lands, and the measure
+page says "Scored with the 2026 FHIR logic; 2027 logic not yet available" beside the rate (the programs
+summary's `logicVintage`, set only for a run that carried official evidence).
+
+**What runs, and what the rates are.** The vendored artifacts are CMS's FHIR versions of the measures
+(`CMS125FHIR` v1.0.000 and so on), drafts CMS posted for public comment in January–February 2026 and
+derived from the 2026 QDM measures (`CMS125v14`). The measure read models carry them as
+`identity.executed`; the measures grid and the measure page name that artifact and its version, and show the
+QDM measure only as what it was derived from (locked decision §4.3). WebChart calculates and submits the
+pilot group's reported rates, so on the patient profile every rate screen calls WorkWell's rate an estimate.
 
 > **MM-1d is not a re-vendor, and the content it needs does not exist yet (verified 2026-09-14).**
 > Two different PY2027 publications get conflated, and only one has happened. The **QDM/HQMF**
@@ -391,7 +400,7 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 
 **Demo claim that is honest:**
 
-> We evaluate CMS122v14 and CMS125v14 — the 2026 eCQI Eligible Clinician measures (MIPS 001 / 112) — with production CQL aligned to official population criteria — and, for **CMS122 and CMS125 on the demo/production stack since 2026-07-30**, replaced outright by CMS's published QI-Core artifacts (PR-9c / ADR-045, ADR-046). We can show structural fidelity (and for CMS122, a literal official package comparison). We do not claim full MAT multi-library submission packages or 2027 v15 until we cut over.
+> We evaluate CMS122v14 and CMS125v14 — the 2026 eCQI Eligible Clinician measures (MIPS 001 / 112) — with production CQL aligned to official population criteria — and, for **CMS122 and CMS125 on the demo/production stack since 2026-07-30**, replaced outright by CMS's FHIR (QI-Core) artifacts, CMS122FHIR and CMS125FHIR v1.0.000: drafts CMS posted for public comment in January–February 2026 (PR-9c / ADR-045, ADR-046). We can show structural fidelity (and for CMS122, a literal official package comparison). We do not claim full MAT multi-library submission packages or 2027 v15 until we cut over.
 
 **Remaining accuracy work:** Phase 2 DENEX (LTC/frailty); optional CMS125 literal ELM; annual roll-forward to v15/2027 when product targets that year.
 
@@ -403,7 +412,7 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 
 **49** official CMS electronic Clinical Quality Measures are seeded as v1.0 catalog entries, of which **43 remain Draft**: CMS125 and CMS122 are Active with full authored CQL (Category 3b), and CMS2, CMS130, CMS165 and CMS137 are Active official-only, where the vendored artifact IS the logic (ADR-072, ADR-078). The counts in the Category table at the top of this file are the same six and forty-three; **49** is also the number §"Terminology & standards currency" and the seeding note below both cite, so all four agree. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
 
-The measures page renders CMS IDs as blue mono badges to distinguish them from OSHA CFR citations and HEDIS references.
+The measures page renders CMS IDs as blue mono badges to distinguish them from OSHA CFR citations and HEDIS references. For a measure routed to an official artifact the badge is the artifact it runs (`CMS125FHIR`, "derived from CMS125v14") and the Version column is the artifact's (`1.0.000`), not the catalog's `v1.0`, which stays in the version ids.
 
 Two new measures added in 2026 vs 2025: CMS146v14 (Appropriate Testing for Pharyngitis) and CMS154v14 (Appropriate Treatment for URI) in the new Respiratory / Antimicrobial Stewardship domain; CMS1173v1 (Diagnostic Delay of VTE) added to Cardiovascular; CMS1154v1 (Screening for Abnormal Glucose Metabolism) added to Diabetes. CMS249v7 (DXA Scans) retired from 2026 eligible clinician list.
 

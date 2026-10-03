@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { loadOfficialArtifact, officialArtifactAvailable } from "./official-artifacts.ts";
+import { __clearOfficialArtifactCache, loadOfficialArtifact, loadOfficialManifest, officialArtifactAvailable, officialLogicVintage } from "./official-artifacts.ts";
 
 const ARTIFACT_ROOT = fileURLToPath(new URL("../../measures/official/", import.meta.url));
 const vendored = readdirSync(ARTIFACT_ROOT, { withFileTypes: true })
@@ -95,5 +95,29 @@ test("a traversing catalogId is REJECTED, not merely absent", () => {
   for (const id of ["../../etc/passwd", "../../../package", "", "cms122/../../..", "CMS122", "cms 122"]) {
     assert.equal(loadOfficialArtifact(id), null, `must reject: ${JSON.stringify(id)}`);
     assert.equal(officialArtifactAvailable(id), false);
+    assert.equal(loadOfficialManifest(id), null, `manifest read must reject: ${JSON.stringify(id)}`);
   }
+});
+
+test("loadOfficialManifest reads the manifest file itself, without the artifact loader's cache, and nothing for an absent id", () => {
+  // The tests above filled the artifact cache, which loadOfficialManifest consults first; clear it so
+  // this exercises the manifest-only read and compares it with the file, not with a cached object.
+  __clearOfficialArtifactCache();
+  const fromFile = JSON.parse(readFileSync(`${ARTIFACT_ROOT}cms165/manifest.json`, "utf8"));
+  assert.deepEqual(loadOfficialManifest("cms165"), fromFile);
+  assert.equal(loadOfficialManifest("cms165"), loadOfficialManifest("cms165"), "cached after the first read");
+  assert.equal(loadOfficialManifest("cms999"), null);
+});
+
+test("officialLogicVintage: a year the artifact was not written for is named; a covered year or an undeclared period is not", () => {
+  const manifest = loadOfficialManifest("cms165")!; // effectivePeriod 2026-01-01..2026-12-31
+  assert.deepEqual(officialLogicVintage(manifest, 2027), {
+    artifactYears: "2026",
+    measurementYear: 2027,
+    note: "Scored with the 2026 FHIR logic; 2027 logic not yet available",
+  });
+  assert.equal(officialLogicVintage(manifest, 2026), null, "the year it was written for");
+  assert.equal(officialLogicVintage(manifest, 2025)?.note, "Scored with the 2026 FHIR logic, not the 2025 logic");
+  assert.equal(officialLogicVintage({ effectivePeriod: null }, 2027), null, "absent means unknown, not stale");
+  assert.equal(officialLogicVintage({ effectivePeriod: { start: "2026-01-01" } }, 2027), null);
 });

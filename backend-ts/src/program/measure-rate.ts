@@ -28,7 +28,7 @@ export interface MeasureRate {
   source: "official-evidence";
   runId: string;
   /** The artifact the evidence names, when a row carried it. */
-  official: { ecqmId: string | null; version: string | null } | null;
+  official: { ecqmId: string | null; version: string | null; artifactSha256?: string | null } | null;
   rates: MeasureRateGroup[];
   /** Subjects counted in no rate (ADR-074 d5). */
   unmeasured: number;
@@ -89,7 +89,9 @@ export async function officialMeasureRate(
   const rate: MeasureRate = {
     source: "official-evidence",
     runId,
-    official: aggregate.official ? { ecqmId: aggregate.official.ecqmId ?? null, version: aggregate.official.version ?? null } : null,
+    official: aggregate.official
+      ? { ecqmId: aggregate.official.ecqmId ?? null, version: aggregate.official.version ?? null, artifactSha256: aggregate.official.artifactSha256 ?? null }
+      : null,
     rates: aggregate.rates.map((c, index) => {
       const effectiveDenominator = c.denom - c.denex - c.denexcep;
       return {

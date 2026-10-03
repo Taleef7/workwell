@@ -51,6 +51,8 @@ export type ProgramSummary = {
   /** The measure's own rate — the MeasureReport's reduction of the run's evidence — or null when the
    *  run carries no official evidence. Shown apart from the workflow rate (ADR-077 d5). */
   measureRate?: {
+    /** The artifact the run's evidence names (`ecqmId` as recorded, e.g. "125FHIR"). */
+    official?: { ecqmId: string | null; version: string | null } | null;
     rates: Array<{ label: string | null; ipp: number; denom: number; denex: number; denexcep: number; numer: number; effectiveDenominator: number; score: number | null }>;
     unmeasured: number;
     evaluationErrors: number;
@@ -58,6 +60,10 @@ export type ProgramSummary = {
   /** The year the latest run scored and the day it describes (#637). */
   measurementYear?: number | null;
   asOf?: string | null;
+  /** Set when the latest run scored a year its official artifact was not written for (2027 with 2026 logic). */
+  logicVintage?: { artifactYears: string; measurementYear: number; note: string } | null;
+  /** The counts include the generated scale tenant's, scored by the authored engine: label no artifact. */
+  includesAuthoredScaleCounts?: boolean;
 };
 
 export type TopDrivers = {

@@ -30,6 +30,7 @@ import { displayRate, formatRate, isSmallNumbers, type NotationSource } from "@/
 import { chartablePoints, trendMeta, type TrendPoint } from "./trend-meta";
 import { yearLineFor } from "./year-line";
 import { RunFreshnessBanner } from "./run-freshness-banner";
+import { RateEstimateNote, showsRateEstimateNote } from "@/components/rate-estimate-note";
 
 type ProgramSummary = {
   measureId: string;
@@ -260,7 +261,11 @@ export default function ProgramsPage() {
       <RunFreshnessBanner />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        <KpiCard label="Overall compliance" value={initialLoad ? "—" : formatRate(overallComplianceRate)} />
+        <KpiCard
+          label="Overall compliance"
+          value={initialLoad ? "—" : formatRate(overallComplianceRate)}
+          describedBy={showsRateEstimateNote() ? "rate-estimate-note" : undefined}
+        />
         <KpiCard label="Open cases" value={initialLoad ? "—" : fmtCount(openCases)} />
         <KpiCard
           label="Last run"
@@ -268,6 +273,8 @@ export default function ProgramsPage() {
           className="col-span-2 md:col-span-1"
         />
       </div>
+      {/* One note for every rate on the page: the overall KPI and each card's rate point at it. */}
+      <RateEstimateNote id="rate-estimate-note" />
 
       {tenant === "mhn" ? (
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
@@ -307,7 +314,11 @@ export default function ProgramsPage() {
           const programRate = displayRate(program, notation);
           const noteId = `lower-note-${program.measureId}`;
           const countedId = `counted-${program.measureId}`;
-          const describedBy = [programRate.lowerIsBetter ? noteId : null, programRate.value === null ? countedId : null].filter(Boolean).join(" ") || undefined;
+          const describedBy = [
+            programRate.lowerIsBetter ? noteId : null,
+            programRate.value === null ? countedId : null,
+            showsRateEstimateNote() ? "rate-estimate-note" : null,
+          ].filter(Boolean).join(" ") || undefined;
           const label = measureLabelFor(program.measureId, program.measureName);
           const nothingYet = CARD_CHIPS.every(([, , field]) => program[field] === 0);
           return (
@@ -420,11 +431,11 @@ export default function ProgramsPage() {
   );
 }
 
-function KpiCard({ label, value, className }: { label: string; value: string; className?: string }) {
+function KpiCard({ label, value, className, describedBy }: { label: string; value: string; className?: string; describedBy?: string }) {
   return (
     <div className={cn("rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900", className)}>
       <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p>
+      <p aria-describedby={describedBy} className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p>
     </div>
   );
 }

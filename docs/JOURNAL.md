@@ -20,6 +20,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
     so they stay two readings; the question returns with profile stamping.
   - The rest is logic, not import: CMS2's draft lacks the active-medication follow-up (2) and the 2027
     next-day follow-up (2).
+- **The screens name the logic that runs, and call the rates estimates.** The routed measures show
+  `CMS125FHIR` v1.0.000 (a CMS draft, derived from `CMS125v14`), not `CMS125v14`/`v1.0`/"published"
+  (§4.3). On the patient profile every rate screen says WebChart submits the reported rate, and a run
+  scored with last year's logic says so. Old descriptions are rewritten, audited first.
 - **The pilot stack has its own password.** The pilot accounts shared the demo password, which is printed
   in this public repository. The Maui deploy and self-heal now require `WORKWELL_PILOT_PASSWORD_HASH_MAUI`
   and pass it to the backend; the pilot accounts sign in only with that password. Local runs and CI keep

@@ -34,6 +34,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { AccessDenied } from "@/components/access-denied";
 import { ScrollRegion } from "@/components/scroll-region";
+import { RateEstimateNote } from "@/components/rate-estimate-note";
 
 type RunListItem = {
   runId: string;
@@ -1141,6 +1142,10 @@ export default function RunsPage() {
                 Compliant: {selectedRun.passRate.toFixed(1)}% of everyone evaluated ({selectedRun.compliantCount.toLocaleString()} of{" "}
                 {selectedRun.totalEvaluated.toLocaleString()})
               </p>
+              {/* Covers this rate and the CMS measure rate in the reconciliation below. This page lists
+                  runs from before and after the routing flip, so it names CMS's FHIR logic only for a
+                  run whose reconciliation shows official evidence. */}
+              <RateEstimateNote fhirLogic={Boolean(reconciliation?.official)} />
               <p className="text-xs text-neutral-600 dark:text-neutral-400">
                 Data Freshness: {selectedRun.dataFreshnessMinutes >= 0 ? `${selectedRun.dataFreshnessMinutes} min old` : "unknown"}
               </p>
