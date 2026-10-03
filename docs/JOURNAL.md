@@ -10,7 +10,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **The pilot stack has its own password.** The pilot accounts shared the demo password, which is printed
   in this public repository. The Maui deploy and self-heal now require `WORKWELL_PILOT_PASSWORD_HASH_MAUI`
   and pass it to the backend; the pilot accounts sign in only with that password. Local runs and CI keep
-  the demo password, and a malformed secret disables pilot sign-in rather than falling back to it.
+  the demo password. A malformed secret, or a missing one on the deployed stack, disables pilot sign-in
+  rather than falling back to the public password, and a test pins that both workflows ship it.
 - **Ingest no longer invents a visit for CMS125.** On a live WebChart run the enrollment roster stamped a
   CPT 99213 office visit on every listed patient, which put them in CMS125's initial population whether
   or not a visit happened. That was a made-up clinical fact on the live path, so it is gone, and cms125

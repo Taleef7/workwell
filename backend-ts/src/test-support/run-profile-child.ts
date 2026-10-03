@@ -19,6 +19,9 @@ export function runProfileChild(
   const env = { ...process.env };
   if (instance === undefined) delete env.WORKWELL_INSTANCE;
   else env.WORKWELL_INSTANCE = instance;
+  // The pilot password hash in a developer's shell would silently change which password the pilot
+  // accounts accept, so a child never inherits it; a test that wants it passes it explicitly.
+  if (!("WORKWELL_PILOT_PASSWORD_HASH" in extraEnv)) delete env.WORKWELL_PILOT_PASSWORD_HASH;
   for (const [key, value] of Object.entries(extraEnv)) {
     if (value === undefined) delete env[key];
     else env[key] = value;

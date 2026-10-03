@@ -136,8 +136,9 @@ jobs:
       PROD_DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_MAUI }}
-      # The pilot accounts' own password hash. KEEP IN SYNC with deploy-maui-mieweb.yml — a self-heal that
-      # dropped it would lock every pilot user out.
+      # The pilot accounts' own password hash. KEEP IN SYNC with deploy-maui-mieweb.yml (a test pins it):
+      # a self-heal that dropped it would disable pilot sign-in (the backend fails closed when it is unset
+      # on a production pilot stack).
       WORKWELL_PILOT_PASSWORD_HASH: ${{ secrets.WORKWELL_PILOT_PASSWORD_HASH_MAUI }}
       # Optional (#623): the failed-run alert webhook. KEEP IN SYNC with deploy-maui-mieweb.yml — a self-heal
       # that dropped it would silence the alerts exactly when the stack has just been unwell.

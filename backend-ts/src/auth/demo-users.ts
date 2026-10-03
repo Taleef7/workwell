@@ -9,8 +9,9 @@
  * The Java/Neon `demo_users` rows (bcrypt) are untouched; this is the TS backend's
  * own store, consistent with the strangler running alongside the JVM during cutover.
  */
-import { verifyPassword } from "./password.ts";
+import { isPasswordHash, verifyPassword } from "./password.ts";
 import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
+import { isProductionLike, type StartupEnv } from "../config/startup-safety.ts";
 
 export interface DemoUser {
   email: string;
@@ -29,15 +30,22 @@ const NO_LOGIN = "disabled";
 /**
  * The pilot accounts' password hash. The demo password is printed in this public repository, so the
  * deployed pilot stack sets its own PBKDF2 hash in `WORKWELL_PILOT_PASSWORD_HASH` (the deploy refuses to
- * run without it). Unset — local runs, CI and its end-to-end tests — the pilot accounts keep the demo
- * password. Set but not a PBKDF2 string, the pilot accounts cannot sign in at all, rather than silently
- * falling back to the public password.
+ * run without it). Unset on a local run or in CI, the pilot accounts keep the demo password. Unset on a
+ * production-like pilot stack, or set to anything that is not a valid hash, the pilot accounts cannot
+ * sign in at all: a dropped or mangled secret never quietly reopens the stack with the public password.
+ * The value itself is never logged.
  */
 export function pilotPasswordHash(env: Record<string, unknown> = process.env as Record<string, unknown>): string {
   const raw = typeof env.WORKWELL_PILOT_PASSWORD_HASH === "string" ? env.WORKWELL_PILOT_PASSWORD_HASH.trim() : "";
-  if (!raw) return DEMO_PASSWORD_HASH;
-  if (/^pbkdf2\$\d+\$[\w-]+\$[\w-]+$/.test(raw)) return raw;
-  console.error("[workwell] WORKWELL_PILOT_PASSWORD_HASH is not a PBKDF2 hash; pilot sign-in is disabled.");
+  if (!raw) {
+    if (env.WORKWELL_INSTANCE === "maui" && isProductionLike(env as StartupEnv)) {
+      console.error("[workwell] WORKWELL_PILOT_PASSWORD_HASH is unset on a production pilot stack; pilot sign-in is disabled.");
+      return NO_LOGIN;
+    }
+    return DEMO_PASSWORD_HASH;
+  }
+  if (isPasswordHash(raw)) return raw;
+  console.error("[workwell] WORKWELL_PILOT_PASSWORD_HASH is not a valid PBKDF2 hash; pilot sign-in is disabled.");
   return NO_LOGIN;
 }
 

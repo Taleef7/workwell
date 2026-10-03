@@ -71,27 +71,47 @@ test("pilotPasswordHash: unset keeps the demo hash, a PBKDF2 string is used, any
   console.error = () => {};
   try {
     assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: "Workwell123!" }), "disabled", "a plaintext value is never used");
+    assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: "pbkdf2$0$a$b" }), "disabled", "a hash verifyPassword would reject is not accepted");
+    assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: `${own}x$extra` }), "disabled", "trailing junk is not accepted");
+    assert.equal(pilotPasswordHash({ WORKWELL_INSTANCE: "maui", WORKWELL_ENVIRONMENT: "production" }), "disabled", "unset on a production pilot stack");
   } finally {
     console.error = original;
   }
+  assert.equal(pilotPasswordHash({ WORKWELL_INSTANCE: "maui" }), demo, "unset on a local pilot run keeps the demo password");
 });
 
-test("on the deployed pilot stack the pilot accounts take the stack's password and refuse the public one", async () => {
+test("on the deployed pilot stack every pilot account takes the stack's password and refuses the public one", async () => {
   const own = await hashPassword("pilot-only-test-password");
   const script = `
-    import { authenticate } from "./src/auth/demo-users.ts";
+    import { DEMO_USERS, authenticate } from "./src/auth/demo-users.ts";
     const out = {};
-    for (const pw of ["pilot-only-test-password", "Workwell123!"]) {
-      out[pw] = (await authenticate("quality-lead@maui.workwell.dev", pw))?.role ?? null;
+    for (const u of DEMO_USERS.filter((u) => u.email.endsWith("@maui.workwell.dev"))) {
+      out[u.email] = {
+        own: (await authenticate(u.email, "pilot-only-test-password"))?.role ?? null,
+        demo: (await authenticate(u.email, "Workwell123!"))?.role ?? null,
+      };
     }
-    console.log(JSON.stringify(out));
+    console.log(JSON.stringify({ out }));
   `;
-  const withHash = runProfileChild("maui", script, { WORKWELL_PILOT_PASSWORD_HASH: own });
-  assert.equal(withHash["pilot-only-test-password"], "ROLE_CASE_MANAGER");
-  assert.equal(withHash["Workwell123!"], null, "the password printed in this repo no longer opens the pilot stack");
-  const malformed = runProfileChild("maui", script, { WORKWELL_PILOT_PASSWORD_HASH: "not-a-hash" });
-  assert.equal(malformed["pilot-only-test-password"], null);
-  assert.equal(malformed["Workwell123!"], null, "a malformed secret never falls back to the public password");
+  const pilots = DEMO_USERS.filter((u) => u.email.endsWith("@maui.workwell.dev"));
+  assert.equal(pilots.length, 4);
+  const results = (env: Record<string, string>) => runProfileChild("maui", script, env) as { out: Record<string, { own: string | null; demo: string | null }>; stderr: string };
+
+  const withHash = results({ WORKWELL_PILOT_PASSWORD_HASH: own });
+  for (const u of pilots) {
+    assert.equal(withHash.out[u.email]?.own, u.role, `${u.email} signs in with the stack's password`);
+    assert.equal(withHash.out[u.email]?.demo, null, `${u.email} refuses the password printed in this repo`);
+  }
+
+  const malformed = results({ WORKWELL_PILOT_PASSWORD_HASH: "not-a-hash" });
+  for (const u of pilots) assert.deepEqual(malformed.out[u.email], { own: null, demo: null }, `${u.email} with a malformed secret`);
+  assert.match(malformed.stderr, /pilot sign-in is disabled/);
+  assert.ok(!malformed.stderr.includes("not-a-hash"), "the configured value is never logged");
+
+  // A production pilot stack whose secret went missing (a self-heal that dropped it) fails closed.
+  const unsetInProduction = results({ WORKWELL_PILOT_PASSWORD_HASH: "", WORKWELL_ENVIRONMENT: "production" });
+  for (const u of pilots) assert.deepEqual(unsetInProduction.out[u.email], { own: null, demo: null }, `${u.email} with no secret in production`);
+  assert.match(unsetInProduction.stderr, /unset on a production pilot stack/);
 });
 
 test("findDemoUser is case-insensitive and trims", () => {

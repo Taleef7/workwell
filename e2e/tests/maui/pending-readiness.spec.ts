@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { API_BASE, AS_ADMIN_READINESS, AS_QUALITY_LEAD_READINESS, MAUI_PASSWORD } from "./helpers";
+import { API_BASE, AS_ADMIN_READINESS, AS_QUALITY_LEAD_READINESS } from "./helpers";
 
 test.beforeEach(() => {
   test.skip(process.env.PLAYWRIGHT_PROFILE !== "maui", "maui profile only");
@@ -51,7 +51,9 @@ test.describe("Maui readiness — signed out", () => {
 
   test("a TWH account cannot authenticate against the Maui stack", async ({ request }) => {
     const res = await request.post(`${API_BASE}/api/auth/login`, {
-      data: { email: "viewer@workwell.dev", password: MAUI_PASSWORD },
+      // The TWH account's own (demo) password, so a 401 here means profile scoping refused it, not a
+      // wrong password: MAUI_PASSWORD is the pilot stack's password on a live run.
+      data: { email: "viewer@workwell.dev", password: "Workwell123!" },
     });
     expect(res.status()).toBe(401);
   });

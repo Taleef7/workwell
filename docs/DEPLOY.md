@@ -169,7 +169,7 @@ The deploy fails if a required secret is missing. Suffixed secrets map to unsuff
 | `LAUNCHPAD_API_URL`, `LAUNCHPAD_API_KEY` | Container Manager API (every deploy/reconcile) |
 | `DATABASE_URL_TWH` / `_MAUI` / `_STAGING` | Neon **pooled** URL per stack; also the backup job. Maui/staging read `_TWH` only to refuse a same-host paste |
 | `WORKWELL_AUTH_JWT_SECRET_TWH` / `_MAUI` / `_STAGING` | JWT signing secret |
-| `WORKWELL_PILOT_PASSWORD_HASH_MAUI` | PBKDF2 hash of the pilot accounts' password (the demo password is public). Rotate: `cd backend-ts; corepack pnpm@10 exec node --import tsx -e "import('./src/auth/password.ts').then(async (m) => console.log(await m.hashPassword(process.argv[1])))" '<new password>'`, then `gh secret set WORKWELL_PILOT_PASSWORD_HASH_MAUI` with the output, then redeploy Maui |
+| `WORKWELL_PILOT_PASSWORD_HASH_MAUI` | PBKDF2 hash of the pilot accounts' password (the demo password is public). Rotate with a long random password: run `cd backend-ts; corepack pnpm@10 exec node --import tsx -e "import('./src/auth/password.ts').then(async (m) => console.log(await m.hashPassword(process.argv[1])))" '<new password>'` and paste its output into `gh secret set WORKWELL_PILOT_PASSWORD_HASH_MAUI` (never `--body "…"`: the hash contains `$`), then redeploy with `workflow_dispatch` and `replace_existing=true` (a restart in place keeps the old env). Unset on the deployed stack, pilot sign-in is disabled |
 | `OPENAI_API_KEY` | AI surfaces |
 | `WORKWELL_VSAC_API_KEY_VENDOR` | build-time VSAC (Step 1a); CI, deploys, flip-gate, vendor, cross-engine-sweep |
 | `WORKWELL_VSAC_API_KEY_TWH` | runtime VSAC resolver on TWH **and** Maui |
@@ -354,7 +354,8 @@ The pilot group's sandbox (`deploy-maui-mieweb.yml`), with its own Neon project,
   `maui-latest` (backend) or the frontend's `:latest` at the deployed digest (`docker buildx imagetools
   create`). `reconcile-maui-mieweb.yml` heals from those, never onto a failed build.
 - Demo accounts are profile-scoped (#520): only `@maui.workwell.dev` accounts sign in on Maui, and they
-  are refused elsewhere. Password: the shared demo password in `backend-ts/src/auth/demo-users.ts`.
+  are refused elsewhere. Password: the stack's own, from `WORKWELL_PILOT_PASSWORD_HASH_MAUI` (local runs
+  and CI keep the demo password in `backend-ts/src/auth/demo-users.ts`).
 
 | Identifier | Role |
 |---|---|
