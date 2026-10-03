@@ -85,7 +85,7 @@ describe("HomePage terminology fallbacks", () => {
     expect(screen.getByText("A clean operating surface for primary-care compliance.")).toBeTruthy();
     expect(
       screen.getByText(
-        "Primary care clinical quality measures, case management, and a full audit trail. Works alongside WebChart, the system of record.",
+        "Primary care clinical quality measures, case management, and an audit trail. Works alongside WebChart, the system of record.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/occupational/i)).toBeNull();

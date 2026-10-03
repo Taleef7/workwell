@@ -29,8 +29,10 @@ flowchart LR
 **1. The synthetic roster.** On TWH, 150 employees; on Maui, a corpus of 20,000 patients. Both are generated in memory from a fixed seed, so the same run
 produces the same people every time. Their records carry genuine LOINC and CPT codes rather than
 invented ones, which matters because CMS's FHIR draft measures look for specific codes and would
-match nothing against made-up data. Each person's bundle holds the patient, their program
-enrollment, any documented waiver, and the qualifying event for the measure at hand.
+match nothing against made-up data. On TWH each person's bundle holds the patient, their program
+enrollment, any documented waiver, and the qualifying event for the measure at hand. A Maui bundle
+holds the patient and the dated clinical facts the six ACO measures read, with no enrollment or
+waiver.
 
 **2. WebChart through the shim.** `wcdb-fhir-shim` reads the seeded WebChart development database
 (`ghcr.io/mieweb/dev-wcdb`) over SQL and serves FHIR — [chapter 7](07-sql-and-the-bridge.md) has

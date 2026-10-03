@@ -47,7 +47,7 @@ rather than a two-engine diff, because an official-only measure has no authored 
 
 | Claim | Number | Reproduce / evidence |
 |---|---|---|
-| Test suite | 3,268 in CI · 3,207 pass · 61 skip (2026-10-03), across three shards since #575 (14.3m → 6.8m). | `cd backend-ts && pnpm test`. The skips need an optional input (the gitignored terminology sidecar, or locally a Postgres) and self-skip rather than passing vacuously. |
+| Test suite | 3,268 in CI · 3,207 pass · 61 skip (2026-10-03), across three shards since #575 (14.3m → 6.8m). | `cd backend-ts && pnpm test`. The skips need an optional input (mostly the gitignored terminology sidecar; also the live HAPI, ICE and shim-parity services, the `.official-content` checkout or a QRDA I sample file, and locally a Postgres) and self-skip rather than passing vacuously. |
 | CMS measures vs their own test decks | 455 of 455, 9 measures (2026-09-06, CMS137's 45 added by #529) | `pnpm test:official-cases`, after the two-step setup below |
 | CQL language conformance | 1,612 pass of 1,823 cases (2026-08-05; corrected 2026-08-26 — the harness had graded 12 commented-out tests, `docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`) | `pnpm cql-tests:fetch` then `pnpm cql-tests`, against `cqframework/cql-tests`. Failures cluster in the shared translator and engine, not our measures; five of the sixteen files are perfect, and they are the constructs our measures use. |
 | SQL vs the CQL engine | zero divergence — 4 measures × 56 patients × 2 dates (2026-07-20) | the shim parity suite, [chapter 7](07-sql-and-the-bridge.md) |

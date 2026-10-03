@@ -4,7 +4,7 @@ A one-page guide for quality leaders, nursing informatics teams, and clinical ex
 
 ## What WorkWell is
 
-WorkWell assists WebChart; it does not replace it. WebChart is the electronic health record (EHR). It carries Office of the National Coordinator (ONC) health IT certification, and it calculates and submits the practice's reported quality results. WorkWell reads the same kind of clinical records, evaluates each patient against clinical quality measures, and shows who has an open care gap, why, and what would close it. It keeps structured evidence for every outcome. Where WebChart reports the rates, as on the Maui sandbox, WorkWell's rates are an estimate, and its screens say so.
+WorkWell assists WebChart; it does not replace it. WebChart is the electronic health record (EHR). It carries Office of the National Coordinator (ONC) health IT certification, and it calculates and submits the practice's reported quality results. WorkWell reads the same kind of clinical records, evaluates each patient against clinical quality measures, and shows who has an open care gap, why, and what would close it. It keeps structured evidence for every outcome. Where WebChart reports the rates, as for the Maui pilot group, WorkWell's rates are an estimate, and the Maui sandbox's screens say so.
 
 WorkWell is one product with several instances, each set up for its setting: a sandbox for a primary-care group (Maui, where the subjects are patients) and an occupational-health instance for Total Worker Health (TWH, where the subjects are employees).
 
@@ -38,7 +38,7 @@ Both instances run entirely on synthetic clinical data. A separate staging stack
 
 ## Honesty guardrails
 
-- **Measure authorship:** Where an official measure exists, WorkWell runs it. Where none exists, WorkWell authors its own measure specifications from public statutes and clinical guidelines. Its HEDIS-style wellness measures are authored from public clinical guidance and cite HEDIS by name only.
+- **Measure authorship:** Where an instance runs a CMS measure, it runs CMS's own measure logic, not a rewrite. Not every vendored CMS measure runs yet: CMS68, CMS138 and CMS951 pass their official test cases but run on no instance. Where no national digital specification exists, as for the occupational measures, WorkWell authors its own measure specifications from public statutes and clinical guidelines. Its HEDIS-style wellness measures are authored from public clinical guidance and cite HEDIS by name only.
 - **Grounded standards claims:** Conformance claims are strictly limited to what is verified in [Standards Conformance](STANDARDS_CONFORMANCE.md). WorkWell validates clean aggregate QRDA documents and clean patient-level documents for official measures over its synthetic corpus against HL7 base standards (authored-measure patient-level QRDA is nonconformant by design), but does not claim ONC certification or official agency endorsements. OSHA does not certify software, and WorkWell's OSHA measures represent careful regulatory interpretation, not government validation.
 - **FHIR reporting timelines:** The CY2027 Physician Fee Schedule proposed rule (CMS-1848-P) sought comment on FHIR-based reporting (voluntary for performance years 2028–29, mandatory from 2030 for applicable APP Plus measures). That is a request for comment, not a proposal or a final rule.
 

@@ -143,8 +143,8 @@ In the Studio, the **Rule Builder tab** edits these parameters against a live ge
 preview, so an author can work declaratively and still see exactly what the parameters mean in the
 language of record.
 
-**Path 3: vendored from CMS.** For the nine vendored CMS measures we do not author anything — we take
-CMS's already-compiled FHIR draft artifact and run it unmodified.
+**Path 3: vendored from CMS.** For the nine vendored CMS measures we take CMS's
+already-compiled FHIR draft artifact and, where a stack routes it, run it unmodified.
 [Chapter 4](04-engine-and-routing.md) covers the twelve vendoring steps and the gates.
 
 ## Authoring from a regulation: the OSHA worked example

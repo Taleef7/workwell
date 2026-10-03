@@ -43,7 +43,7 @@ env:
   SITE_ID: 1
   APP_NAME: "WorkWell TWH"
   APP_TAGLINE: "Total Worker Health — safety and wellness unified."
-  APP_DESCRIPTION: "OSHA safety, clinical wellness, and CMS eCQM measures, case management, and a full audit trail. Works alongside WebChart, the system of record."
+  APP_DESCRIPTION: "OSHA safety, clinical wellness, and CMS eCQM measures, case management, and an audit trail. Works alongside WebChart, the system of record."
 
 # The two BUILD jobs push images to ghcr and restate this block with `packages: write` added — a
 # job-level block replaces the workflow-level one rather than extending it. The two DEPLOY jobs had
