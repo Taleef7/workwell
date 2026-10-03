@@ -71,6 +71,7 @@ test("pilotPasswordHash: unset keeps the demo hash, a PBKDF2 string is used, any
   console.error = () => {};
   try {
     assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: "Workwell123!" }), "disabled", "a plaintext value is never used");
+    assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: ` ${demo} ` }), "disabled", "the demo hash pasted as the secret is refused");
     assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: "pbkdf2$0$a$b" }), "disabled", "a hash verifyPassword would reject is not accepted");
     assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: `${own}x$extra` }), "disabled", "trailing junk is not accepted");
     assert.equal(pilotPasswordHash({ WORKWELL_INSTANCE: "maui", WORKWELL_ENVIRONMENT: "production" }), "disabled", "unset on a production pilot stack");

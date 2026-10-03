@@ -31,7 +31,8 @@ const NO_LOGIN = "disabled";
  * The pilot accounts' password hash. The demo password is printed in this public repository, so the
  * deployed pilot stack sets its own PBKDF2 hash in `WORKWELL_PILOT_PASSWORD_HASH` (the deploy refuses to
  * run without it). Unset on a local run or in CI, the pilot accounts keep the demo password. Unset on a
- * production-like pilot stack, or set to anything that is not a valid hash, the pilot accounts cannot
+ * production-like pilot stack, or set to anything that is not a valid hash (or to the demo hash itself,
+ * the one PBKDF2 string a copy-paste would most likely pick up from this repo), the pilot accounts cannot
  * sign in at all: a dropped or mangled secret never quietly reopens the stack with the public password.
  * The value itself is never logged.
  */
@@ -43,6 +44,10 @@ export function pilotPasswordHash(env: Record<string, unknown> = process.env as 
       return NO_LOGIN;
     }
     return DEMO_PASSWORD_HASH;
+  }
+  if (raw === DEMO_PASSWORD_HASH) {
+    console.error("[workwell] WORKWELL_PILOT_PASSWORD_HASH is the public demo password's hash; pilot sign-in is disabled.");
+    return NO_LOGIN;
   }
   if (isPasswordHash(raw)) return raw;
   console.error("[workwell] WORKWELL_PILOT_PASSWORD_HASH is not a valid PBKDF2 hash; pilot sign-in is disabled.");
