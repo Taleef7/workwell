@@ -25,8 +25,8 @@ const doc = (opts: {
   encounterId?: string;
   /** The assigning authority (CDA `id/@root`) of the encounter's id. */
   encounterRoot?: string;
-  /** `"none"` writes no `<id>` at all; `"null-flavored"` writes one the sender marks as unknown. */
-  encounterIdShape?: "none" | "null-flavored";
+  /** `"none"`: no `<id>`; `"null-flavored"`: one marked unknown; `"root-only"`: `<id root=…/>` alone. */
+  encounterIdShape?: "none" | "null-flavored" | "root-only";
   /** A SNOMED code carried as the encounter's QDM Encounter Diagnosis. */
   diagnosis?: string;
 }) => `<?xml version="1.0" encoding="UTF-8"?>
@@ -44,7 +44,7 @@ const doc = (opts: {
     <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
     <entry><encounter classCode="ENC" moodCode="EVN">
       <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
-      ${opts.encounterIdShape === "none" ? "" : `<id extension="${opts.encounterId ?? "enc-1"}" root="${opts.encounterRoot ?? MRN_ROOT}"${opts.encounterIdShape === "null-flavored" ? ' nullFlavor="UNK"' : ""}/>`}
+      ${opts.encounterIdShape === "none" ? "" : opts.encounterIdShape === "root-only" ? `<id root="${opts.encounterRoot ?? MRN_ROOT}"/>` : `<id extension="${opts.encounterId ?? "enc-1"}" root="${opts.encounterRoot ?? MRN_ROOT}"${opts.encounterIdShape === "null-flavored" ? ' nullFlavor="UNK"' : ""}/>`}
       <code code="${opts.encounterCode ?? "99213"}" codeSystem="2.16.840.1.113883.6.12"/>
       <statusCode code="completed"/>
       <effectiveTime><low value='20240331080000'/><high value='20240331081500'/></effectiveTime>
@@ -245,6 +245,46 @@ test("a diagnosis goes with its own encounter: two distinct visits never share o
   assert.equal(conditions.length, 2);
   const targets = encounters.map((e) => e.reasonReference[0].reference);
   assert.equal(new Set(targets).size, 2, "each visit names its own diagnosis");
+});
+
+test("the merge does not depend on document order when one document states an entry twice", () => {
+  // Each fact keeps as many copies as the document that states it most often: here two, either way round.
+  const twice = withAnotherEncounter(doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1" }), "e1", "99213");
+  const once = doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "e1" });
+  assert.equal(encountersOf([twice, once]).encounters.length, 2);
+  assert.equal(encountersOf([once, twice]).encounters.length, 2);
+});
+
+test("a copied visit is recognised even when its diagnosis id came from the entry's position", () => {
+  // `ENC_1-dx-1` is not a valid FHIR id, so the diagnosis id falls back to the entry's position, and the
+  // second document has an extra entry first. The position-made id must not stop the visit merging.
+  const a = doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "ENC_1", diagnosis: "75544000" });
+  const extraFirst = (xml: string) => {
+    const start = xml.indexOf("    <entry><encounter");
+    const extra = `    <entry><encounter classCode="ENC" moodCode="EVN">
+      <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
+      <id extension="other" root="${MRN_ROOT}"/>
+      <code code="99214" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value='20240401080000'/><high value='20240401081500'/></effectiveTime>
+    </encounter></entry>
+`;
+    return xml.slice(0, start) + extra + xml.slice(start);
+  };
+  const b = extraFirst(doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "ENC_1", diagnosis: "75544000" }));
+  const { encounters, conditions } = encountersOf([a, b]);
+  assert.deepEqual(encounters.map((e) => e.type[0].coding[0].code).sort(), ["99213", "99214"], "the copied 99213 visit once");
+  assert.equal(conditions.length, 1);
+});
+
+test("an entry identified by a root alone merges like any other identified entry", () => {
+  const uuid = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+  const { encounters } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterIdShape: "root-only", encounterRoot: uuid }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterIdShape: "root-only", encounterRoot: uuid }),
+  ]);
+  assert.equal(encounters.length, 1);
+  assert.deepEqual(encounters[0]!.identifier, [{ system: "urn:ietf:rfc:3986", value: `urn:uuid:${uuid}` }]);
 });
 
 test("a repeat WITHIN one document is kept: the document itself stated it twice", () => {
