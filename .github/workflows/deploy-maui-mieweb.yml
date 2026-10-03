@@ -42,7 +42,7 @@ env:
   SITE_ID: 1
   APP_NAME: "WorkWell Maui"
   APP_TAGLINE: "Primary care quality measures — clinical wellness and patient health."
-  APP_DESCRIPTION: "Primary care clinical quality measures, patient population wellness, complete case management, and a full audit trail — one reviewable dashboard."
+  APP_DESCRIPTION: "Primary care quality measures: who has an open gap and why, case management, and a full audit trail. WebChart calculates and submits the reported rates."
 
 # The two BUILD jobs push images to ghcr and restate this block with `packages: write` added — a
 # job-level block replaces the workflow-level one rather than extending it. The two DEPLOY jobs had

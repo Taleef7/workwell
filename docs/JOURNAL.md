@@ -5,6 +5,21 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-03
+
+- **The docs say what WorkWell is: it assists WebChart, and Maui and TWH are two instances of one
+  product.** The README opened as "an occupational-health compliance platform", and the guide described
+  only TWH. Across the README, the one-page explainer, the guide, the landing copy and the OpenAPI
+  description:
+  - WebChart calculates and submits the reported rates. Where it does, WorkWell's rate is an estimate.
+  - CMS's FHIR artifacts are drafts, not "published".
+  - Every measure count now names its instance.
+  - WebChart has no CDS Hooks client (checked 2026-10-02).
+  - The compliance API is a kept surface, not the integration contract (§4A.4).
+  - The CY2027 PFS rule sought comment on FHIR reporting.
+  - The audit rule has open exceptions (#598).
+  - CMS138 is refused by the router, like CMS68.
+
 ## 2026-10-02
 
 - **The measure page's top label is never a QDM version neither engine ran.** Checked live: TWH's cms125

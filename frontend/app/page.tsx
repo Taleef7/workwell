@@ -21,7 +21,7 @@ const domainCopy = DOMAIN_COPY[SUBJECT.domain] ?? { compliance: SUBJECT.domain.t
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE || `A clean operating surface for ${domainCopy.compliance} compliance.`;
-const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION || `${domainCopy.descriptionLead}, complete case management, and a full audit trail \u2014 one reviewable dashboard.`;
+const APP_DESCRIPTION = process.env.NEXT_PUBLIC_APP_DESCRIPTION || `${domainCopy.descriptionLead}, case management, and a full audit trail. Works alongside WebChart, the system of record.`;
 const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
 const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 

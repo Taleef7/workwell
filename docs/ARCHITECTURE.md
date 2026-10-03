@@ -8,7 +8,9 @@
 
 ## 1) System Overview
 
-WorkWell evaluates quality and compliance measures (CMS eCQMs and occupational/OSHA measures) with
+WorkWell assists WebChart and does not replace it: WebChart calculates and submits the practice's
+reported quality results. WorkWell evaluates quality and compliance measures (CMS eCQMs and
+occupational/OSHA measures) with
 CQL, keeps the per-define evidence, and turns non-compliant outcomes into cases people work.
 
 - **Backend:** one TypeScript worker (`backend-ts/`, `@mieweb/cloud`) on a long-lived Node host

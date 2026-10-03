@@ -2,7 +2,8 @@
 
 *Given a patient and a measure, are they compliant?*
 
-One subject, one measure, one stable answer. This is the contract an integrator builds against; everything
+One subject, one measure, one stable answer. This is a kept, versioned surface, not the integration contract (that is the card
+surface in [`CDS_HOOKS.md`](CDS_HOOKS.md) plus the Maui deployment); everything
 else under `/api/` is internal and moves with the frontend.
 
 > **Machine-readable and browsable.** This endpoint is described in the OpenAPI 3.1 document at
@@ -101,7 +102,7 @@ They are separate fields precisely so neither can be mistaken for the other.
 
 | value | what the population booleans are |
 |---|---|
-| `official-evidence` | The measure ran CMS's published artifact and these are **the CQM IG membership derivation (ADR-069) of the executor's persisted population vector**. Measured — the persisted `evidence_json` stays the executor's verbatim output, but the served booleans apply the IG's per-subject interaction formulas (a DENEX'd subject's `numerator` reads `false`; an exception co-true with the numerator reads `false`), so they may differ from the raw vector on flag combinations the formulas fold. |
+| `official-evidence` | The measure ran CMS's FHIR draft artifact and these are **the CQM IG membership derivation (ADR-069) of the executor's persisted population vector**. Measured — the persisted `evidence_json` stays the executor's verbatim output, but the served booleans apply the IG's per-subject interaction formulas (a DENEX'd subject's `numerator` reads `false`; an exception co-true with the numerator reads `false`), so they may differ from the raw vector on flag combinations the formulas fold. |
 | `status-derived` | The measure ran WorkWell-authored logic. **None of the five is measured population membership** — `initialPopulation` and `denominator` are constants, and the rest are inferred from `status`. For an *inverse* authored measure, `numerator` is inverted relative to eCQM convention. Treat the whole block as advisory. |
 | `evaluation-error` | No engine spoke for this subject: the evaluation threw and the persisted evidence is `{ evaluationError, message }`. **Every boolean is `false` — the subject is in no population** — and this label is why; it is not a measured "not in the initial population". Added 2026-09-08 (ADR-077 d6), additively: the other two values are unchanged. |
 

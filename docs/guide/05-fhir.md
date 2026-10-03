@@ -52,16 +52,16 @@ flowchart TB
   B --> EV["The qualifying events this measure reads: Procedure, Observation or Immunization, with real LOINC or CPT or CVX codings"]
 ```
 
-## CMS publishes every measure twice
+## CMS measures come in two versions
 
 The single most confusing fact in this ecosystem, and the root of a red grading result that had
 nothing to do with arithmetic:
 
 ```mermaid
 flowchart TB
-  C["CMS publishes each measure TWICE"]
+  C["Each CMS measure comes in TWO versions"]
   C --> QDM["The older version, written against QDM. This is the one certification uses today."]
-  C --> FH["The newer version, written against FHIR. Same clinical intent, current data model."]
+  C --> FH["The newer version, written against FHIR. A CMS draft. Same clinical intent, current data model."]
   QDM --> CY["Cypress, the official test harness, holds the QDM version"]
   FH --> WW["WorkWell runs the FHIR version, because we are FHIR native and so is WebChart's API"]
   CY -. "reads the measure identifier, sees a different one, and stops" .-> WW

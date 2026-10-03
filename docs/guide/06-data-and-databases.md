@@ -14,7 +14,7 @@ touches. The ingress-to-persistence order is drawn as a sequence in
 flowchart LR
   subgraph SRC["FOUR WAYS IN"]
     direction TB
-    D1["1. Synthetic roster - 150 employees generated from a fixed seed, carrying real LOINC and CPT codes. The demo and production stacks evaluate this."]
+    D1["1. Synthetic roster - generated from a fixed seed, carrying real LOINC and CPT codes. TWH evaluates 150 employees, Maui a generated 20,000-patient corpus."]
     D2["2. WebChart via the shim - wcdb-fhir-shim reads the dev MariaDB with SQL and serves FHIR. 56 patients. Local, opt-in."]
     D3["3. A live WebChart FHIR server - SMART Backend Services auth, paged searches, per-resource composition. The teatea trial tenant; staging."]
     D4["4. QRDA Category I import - somebody else's patient-level quality documents, parsed and mapped to FHIR."]
@@ -26,9 +26,9 @@ flowchart LR
   B --> E["engine.evaluate - the engine does not know or care which source produced the bundle. That is the point of the seam."]
 ```
 
-**1. The synthetic roster.** 150 employees generated in memory from a fixed seed, so the same run
+**1. The synthetic roster.** On TWH, 150 employees; on Maui, a corpus of 20,000 patients. Both are generated in memory from a fixed seed, so the same run
 produces the same people every time. Their records carry genuine LOINC and CPT codes rather than
-invented ones, which matters because the published CMS measures look for specific codes and would
+invented ones, which matters because CMS's FHIR draft measures look for specific codes and would
 match nothing against made-up data. Each person's bundle holds the patient, their program
 enrollment, any documented waiver, and the qualifying event for the measure at hand.
 
@@ -53,13 +53,13 @@ own homework: a third party's archive of 214 generated patients went through it,
 populations matched that third party's own published expected answers for every one of 150 of 150
 and 64 of 64 subjects on the two measures tested.
 
-**Why WebChart, and why through one seam.** WebChart is where the real occupational-health data
-is, it is the ONC-certified system MIE already ships, and it is the consumer for anything WorkWell
-computes. The integration is one seam with three interchangeable things behind it — a HAPI
+**Why WebChart, and why through one seam.** WebChart is the system of record: the ONC-certified
+EHR MIE ships, which holds the clinical data and calculates and submits the reported quality
+results. WorkWell reads from it and assists. The integration is one seam with three interchangeable things behind it — a HAPI
 simulator, our own shim over the MariaDB, and a real tenant — so proving the contract against the
 cheap one proves it for the expensive one.
 
-**Measured on real WebChart data:** the sample carries no encounters, so official CMS125
+**Measured on WebChart's seeded development data:** the sample carries no encounters, so official CMS125
 admits nobody until a qualifying visit is supplied as test data (ingest never invents one). With
 it, official CMS125 admits 4 of 56 subjects to its initial population and agrees with the
 authored engine on all 56. Official CMS122 admits 0 of 56 — the
@@ -109,8 +109,8 @@ HTTP.
 | `outcomes` | One row per person, measure and run: verdict plus `evidence_json` | after each evaluation |
 | `cases` | The workflow layer, keyed so it cannot duplicate | the upsert after each outcome |
 | `case_actions` | Operator actions: outreach, assign, escalate, rerun | route handlers |
-| `audit_events` | The append-only ledger. Every state change, no exceptions | everywhere state changes |
-| `measures` | The authoring catalog (63 measures, 14 runnable) | the Studio |
+| `audit_events` | The append-only ledger. The rule is every state change; not yet true on every path (#598) | everywhere state changes |
+| `measures` | The authoring catalog (63 measures; 14 runnable on TWH, 6 on Maui) | the Studio |
 | `measure_versions` | Per-version spec JSON, CQL text, compile status, test fixtures | the Studio |
 | `value_sets` | Terminology: OID, canonical URL, codes, expansion hash | value-set import / VSAC |
 | `measure_value_set_links` | Which measure uses which value set | the Studio |
@@ -167,8 +167,8 @@ Details of the case-upsert rules and the empty-population warning are in
 
 ## Where to see it in the app
 
-- `/compliance` — the roster grid: every person crossed with every active measure, live WebChart
-  subjects included.
+- `/compliance` — the roster grid: every person crossed with every active measure, plus live
+  WebChart subjects where a tenant is configured (staging).
 - `/runs` — run history with each run's log timeline.
 - The audit ledger exports from `/api/audit-events/export?format=csv`.
 - FHIR on the wire from the shim: `curl localhost:8085/fhir/Patient?_count=5`.

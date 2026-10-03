@@ -6,6 +6,11 @@ kept current: when a PR changes how something here works, the affected chapter c
 PR. Volatile numbers live in [chapter 9](09-state-and-roadmap.md) with their measurement dates, so
 the other chapters stay stable.
 
+WorkWell assists WebChart, the EHR that calculates and submits the practice's reported quality
+results; where WebChart reports the rates, WorkWell's are an estimate. It is one product with several instances: TWH, the
+occupational instance (employees), and Maui, a sandbox for the pilot group (patients). Both run on
+synthetic data.
+
 ## Where to start
 
 Read [chapter 1](01-big-picture.md) first — it is the map. After that the chapters are written to
@@ -83,7 +88,7 @@ flowchart TB
    result graded against CMS's own test patients — **455 of 455 exact**, across all 9 vendored
    measures, before anything runs against a real person.
 2. **② Data in** ([ch. 6](06-data-and-databases.md)) — four ways in, all producing the same
-   shape. The synthetic roster: 150 employees generated from a fixed seed, carrying real LOINC/CPT
+   shape. The synthetic roster, generated from a fixed seed (150 employees on TWH, 20,000 patients on Maui), carrying real LOINC/CPT
    codes so the official CMS logic has something genuine to match. WebChart, read two ways behind
    one seam — locally over SQL through the shim (56 patients, opt-in), or a live tenant over SMART
    Backend Services auth. And QRDA Category I import: someone else's patient-level quality
@@ -97,10 +102,11 @@ flowchart TB
    mammogram," it says "any code in this list of 92" — and the evaluation is assigned to the
    measure's own compliance cycle rather than today's date, the one decision that makes a nightly
    rerun update a case instead of duplicating it.
-4. **④ Evaluate**, routed per measure ([ch. 4](04-engine-and-routing.md)) — 12 of 14 measures run
+4. **④ Evaluate**, routed per measure ([ch. 4](04-engine-and-routing.md)) — on TWH, 12 of 14 measures run
    through our own engine: the compiled tree, the resolved code lists and the bundle handed to
    `cql-execution`, about 68 ms per person, returning a value for every named rule plus the
-   verdict. 2 of 14 run the CMS reference calculator directly against CMS's own unmodified file, in
+   verdict. CMS-routed measures (2 of 14 on TWH, all 6 on Maui) run the CMS reference calculator
+   directly against CMS's unmodified FHIR draft, in
    a quarantined package reached only by a lazy import, returning population membership instead —
    translated to our five verdicts using per-measure recorded semantics, because there is no safe
    default (a diabetes measure's numerator means poor control, the inverse of most).
@@ -108,14 +114,14 @@ flowchart TB
    verdict plus the value of every rule evaluated, never just the conclusion. The case is upserted
    under a key that cannot duplicate — an operator's in-progress status is preserved, a
    human-closed case is never reopened by a machine. A re-confirmation that changed nothing writes
-   no audit row; everything else writes an append-only `audit_events` row, no exceptions. Older
+   no audit row; everything else writes an append-only `audit_events` row (the rule; not yet true on every path, #598). Older
    open cycles for the same person and measure are closed as rolled over, the run finishes, and the
    monthly figures roll up last, once the run is already finished and structurally unable to fail
    it.
 6. **⑥ Outputs** ([ch. 1](01-big-picture.md), [5](05-fhir.md)) — five kinds of output, eight
-   artifacts. The dashboard, worklist and Studio for daily use. A versioned compliance API for
-   MIE's own code — one person, one measure, one answer, a 404 rather than an empty success when
-   no run covers the question. Spreadsheets for the compliance officer. The standards documents — a
+   artifacts. The dashboard, worklist and Studio for daily use. A versioned compliance API (one
+   person, one measure, one answer, a 404 rather than an empty success when no run covers the
+   question), kept and served but not the integration contract. Spreadsheets for the compliance officer. The standards documents — a
    FHIR MeasureReport and both QRDA formats, all validating clean against their official rulers.
    And an audit pack that puts a run, its outcomes, cases, audit rows and uploaded documents into
    one artifact a surveyor can hold.
@@ -137,8 +143,8 @@ For the same flows drawn as *sequences* — who calls what, in what order — se
    and the tree is committed. CMS's measures arrive already compiled and are reduced at build time
    too. When a real person is assessed there is no compiler, no download and no disk read in the
    path.
-2. **Routing is per measure, not per system.** Twelve of fourteen run logic we wrote; two run
-   CMS's published file untouched. Both return the same shape, and switching one over is a
+2. **Routing is per measure, not per system.** On TWH, twelve of fourteen run logic we wrote and two run
+   CMS's FHIR draft untouched; on Maui all six run the drafts. Both return the same shape, and switching one over is a
    reviewed configuration change with a diff.
 3. **The evidence is the product.** We keep the value of every rule the measure evaluated, not
    just the verdict. That is what lets a case screen say *why* somebody was flagged, and what an
@@ -156,7 +162,7 @@ For the same flows drawn as *sequences* — who calls what, in what order — se
 The guide explains; these specify. [`ARCHITECTURE.md`](../ARCHITECTURE.md) (module-level detail),
 [`DATA_MODEL_CONTRACTS.md`](../DATA_MODEL_CONTRACTS.md) (the data contracts; the table schemas are
 `backend-ts/src/stores/postgres/schema-pg.ts`), [`COMPLIANCE_API.md`](../COMPLIANCE_API.md), [`CDS_HOOKS.md`](../CDS_HOOKS.md) and
-[`PACKAGES.md`](../PACKAGES.md) (the integrator contracts — one answer, one workflow surface, one library),
+[`PACKAGES.md`](../PACKAGES.md) (the external surfaces — one answer, one workflow surface, one library; the card surface plus the Maui deployment is the integration contract),
 [`MEASURES.md`](../MEASURES.md) (the measure catalog in plain English),
 [`STANDARDS_CONFORMANCE.md`](../STANDARDS_CONFORMANCE.md) (what we claim and refuse to claim),
 [`ROADMAP_2026-08-30.md`](../ROADMAP_2026-08-30.md) (the approved plan — the Maui pilot;

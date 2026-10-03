@@ -12,7 +12,7 @@ timeline
   2026-06-19 : CQL-to-SQL decision memo - options and gating questions, no code
   2026-07-19 : Two directives - a FHIR shim over the WebChart DB, and generated SQL running inside it
   2026-07-20 : Both built (PRs 308-315, ADR-034) - SQL-vs-CQL parity green on day one
-  2026-07-24 : Recalibration - run the official published CMS measures, never reauthor them
+  2026-07-24 : Recalibration - run the official CMS FHIR draft measures, never reauthor them
   2026-08-04 : Roadmap re-cut (ADR-058) - WorkWell is supplementary to WebChart and does not pursue ONC certification. The engine and its packaging become the primary deliverable.
   2026-08-07 : Both npm packages published with signed provenance
   2026-08-08 : The system walkthrough - the source this guide was built from
@@ -34,12 +34,12 @@ supplements it.
 flowchart LR
   V["9 CMS measures vendored, code lists complete"] --> G["9 pass their authors' own test decks - 455 of 455"]
   G --> R["6 routed on the Maui pilot sandbox - cms122, cms125, cms2, cms130, cms165, cms137; 2 on TWH"]
-  A["14 runnable authored measures"] --> P["12 evaluate on our own engine in every run"]
+  A["14 authored measures, runnable on TWH"] --> P["12 run on our own engine there; cms122 and cms125 run the CMS drafts"]
 ```
 
 The three gated-but-unrouted measures (cms68, cms951, cms138) are not blocked by quality — cms68's
 `populationBasis` is `Encounter` and our model answers once per person (construction check 5), and
-none of the three is in the pilot's set. The six the pilot routes were judged by `pnpm flip-gate`
+none of the three is in the pilot's set. The four the pilot routes without an authored counterpart (cms2, cms130, cms165, cms137) were judged by `pnpm flip-gate`
 rather than a two-engine diff, because an official-only measure has no authored BEFORE
 ([chapter 4](04-engine-and-routing.md)).
 
@@ -47,7 +47,7 @@ rather than a two-engine diff, because an official-only measure has no authored 
 
 | Claim | Number | Reproduce / evidence |
 |---|---|---|
-| Test suite | 2,807 total · 2,783 pass · 1 fail · 23 skip (2026-09-20, measured on `main`'s backend) — the one failure is the standing local `corpus-membership` stale-sparse-checkout, not a product defect. CI shards it three ways since #575 (14.3m → 6.8m). | `cd backend-ts && pnpm test`. The **23** skips need the gitignored terminology sidecar or a local Postgres, and self-skip rather than passing vacuously — the count was 15 when this row was written on 2026-08-08 and this cell said so in one column while reporting 23 in the other. Both halves are the same run now. |
+| Test suite | 3,268 in CI · 3,207 pass · 61 skip (2026-10-03), across three shards since #575 (14.3m → 6.8m). | `cd backend-ts && pnpm test`. The skips need an optional input (the gitignored terminology sidecar, or locally a Postgres) and self-skip rather than passing vacuously. |
 | CMS measures vs their own test decks | 455 of 455, 9 measures (2026-09-06, CMS137's 45 added by #529) | `pnpm test:official-cases`, after the two-step setup below |
 | CQL language conformance | 1,612 pass of 1,823 cases (2026-08-05; corrected 2026-08-26 — the harness had graded 12 commented-out tests, `docs/evidence/CQL_RUNNER_HARNESS_DIFF_2026-08-26.md`) | `pnpm cql-tests:fetch` then `pnpm cql-tests`, against `cqframework/cql-tests`. Failures cluster in the shared translator and engine, not our measures; five of the sixteen files are perfect, and they are the constructs our measures use. |
 | SQL vs the CQL engine | zero divergence — 4 measures × 56 patients × 2 dates (2026-07-20) | the shim parity suite, [chapter 7](07-sql-and-the-bridge.md) |
@@ -56,7 +56,7 @@ rather than a two-engine diff, because an official-only measure has no authored 
 | MeasureReport vs base FHIR R4 | 0 errors; the DEQM profile gap is exactly 3 findings per report | `measure-report.test.ts` |
 | Independent Java engine running our artifacts | 362 of 387 across eight measures (255 of 278 on 2026-08-04; CMS137 44 of 45 on both rates on 2026-09-06; CMS130 63 of 64 on 2026-09-07) | 22 of the 25 exceptions trace to one helper reading a medication order's period — 8 proven by single-variable mutation, 14 consistent-with by inventory. CMS137's one is a millisecond-versus-second precision difference at the period's first instant, isolated by two mutations. CMS165 was swept the same day and is deliberately NOT in this total: 56 of its 68 patients fall out of the initial population on the Java side, which needs diagnosing before it says anything about either engine |
 | Subject-level agreement vs Cypress's expected results | 64 of 64 and 150 of 150, every population (2026-08-03) | reproduced against a second independently generated archive |
-| Routed in production | 6 on the Maui pilot sandbox, 2 on TWH (2026-09-08, ADR-078) | `WORKWELL_OFFICIAL_MEASURES` in `deploy-maui-mieweb.yml` (cms122, cms125, cms2, cms130, cms165, cms137) and in `deploy-twh-mieweb.yml` (cms122, cms125) |
+| Routed on the live sandboxes (synthetic data) | 6 on the Maui pilot sandbox, 2 on TWH (2026-09-08, ADR-078) | `WORKWELL_OFFICIAL_MEASURES` in `deploy-maui-mieweb.yml` (cms122, cms125, cms2, cms130, cms165, cms137) and in `deploy-twh-mieweb.yml` (cms122, cms125) |
 | Pilot page loads, BEFORE the 2026-09-10 read-path change (live Maui, 20,000 patients, ~1M retained outcome rows, warm second pass) | programs overview 6.3 s · site list 5.8 s (every page pays it) · order proposals 11.4 s for 10.7 MB · hierarchy rollup 8.7 s for 4.6 MB · roster page 2.8 s · cases page 0.5 s | `curl -w '%{time_total}'` against `maui-api-ts.os.mieweb.org` as the sandbox admin; the AFTER numbers are measured on the first deploy and recorded in `docs/JOURNAL.md` (2026-09-10), never predicted here |
 | Pilot page loads, AFTER the 2026-09-10 read-path change (same stack, same method, warm second pass) | programs overview 1.0–1.1 s · site list 0.7–1.3 s · order proposals 2.6 s for 65 KB (100-row page) · roster 1.4 s warm · trend 1.0 s · top-drivers 0.4–0.5 s · whole programs page 3.6 s warm | Measured post-deploy on 2026-09-10 and recorded in `docs/JOURNAL.md`. `risk-outlook` was untouched — see the row below, where it has since been measured again and is worse. The 3.6 s whole-page figure is what the same-day `?include=detail` change (13 requests → 1) then targets; its AFTER number is measured on the next deploy, never predicted here |
 | Pilot reads that have NOT been fixed, measured 2026-09-13 (live Maui, 20,000 patients; cold = first call after idle, warm = second) | ~~case CSV export **504 at 60.2 s, cold and warm**~~ (FIXED, and MEASURED on the sandbox 2026-09-15: **7.7 s cold, 6.5 s warm** — see the row below) · `risk-outlook` **504 cold, 8.2 s warm** · `top-drivers` 34.9 s cold, 0.57 s warm · programs overview 7.1 s cold, 3.6 s warm · `/api/runs` 32.5 s cold, 2.2 s warm · `/api/cases?limit=1` 1.0–1.1 s · `/api/worklist/patients` 0.8–0.9 s | `curl -w '%{time_total}'` against `maui-api-ts.os.mieweb.org`, recorded in the 2026-09-13 `docs/JOURNAL.md` entry. The export did not merely run slow: it held the whole connection pool, so while it ran every database-backed endpoint queued behind it (`/api/panels` 0.3 s idle → three consecutive 45 s timeouts, while `/api/version`, which touches no database, stayed at 0.2 s). That half is fixed and re-measured (row below). `programRiskOutlook` is the one read model never moved onto the latest-run winners of #547, and it is why the Maui e2e suite's one flake is the cms125 measure page rendering no heading in 20 s; it is PR B2's subject |
@@ -65,8 +65,8 @@ rather than a two-engine diff, because an official-only measure has no authored 
 | Open-case badge and the DB pool, the fix (code 2026-09-19, #561/#562, ADR-084; sandbox AFTER pending the deploy) | The badge (`/api/cases?status=open&outreach=none&limit=1`) loaded every ACTIVE case — 15,309 on the pilot — to return one number. Pushed into SQL as one statement returning the page plus `COUNT(*) OVER ()`. **Benchmarked at pilot scale (15,600 cases) against a real PostgreSQL 16 over the same link both ways: 789 ms median (581–979) → 90 ms (90–136); a real 50-row page 92 ms.** Both loaders agreed on 15,600. Alongside it the pool stops running on driver defaults and the 30 s `statement_timeout` becomes an owner-run role default, because Neon's proxy silently drops the startup parameter on BOTH endpoints (measured) | Local A/B, both paths in one process against one database, so the delta is the query shape rather than the network. **The sandbox numbers are measured after the deploy and recorded in `docs/JOURNAL.md`, never predicted here** — as for every row above. Not fixed by this: `/api/worklist/patients` keeps the uncapped pipeline (it groups every row) and is recorded as measured debt; the staff-closed list keeps it too, because its outcome filter reads what CQL says today per row and its header counts describe the whole list |
 | Programs dashboard read path, BEFORE the 2026-09-21 fix (live Maui, 20,000 patients, six routed measures; measured 17:59-18:20Z, outside the nightly window) | `/api/programs/overview` **503 `statement_timeout` at 30 s cold**, 3.2-3.7 s warm - `?include=detail&granularity=month` **59.8 s with every downstream memo already warm** - `/api/programs/sites` 17.2 s cold, 2.5 s warm - `/trend` 3.0-4.8 s per measure warm - `/top-drivers` 0.42-0.72 s - `/api/cases?status=open&limit=25` 0.50 s - `/api/exports/outcomes?runId=` 120,000 rows / 27.8 MB in 40.9 s | `curl -w '%{time_total}'` against `maui-api-ts.os.mieweb.org` as the sandbox admin. The detail figure is the finding, not the total: warm, the only work left in it is thirteen winners walks at 2.5-4 s each, and `programSites` warm (2.5 s, five strings) is that walk with nothing else attached. **The AFTER numbers are measured on the deploy and recorded in `docs/JOURNAL.md`, never predicted here** |
 | Programs dashboard read path, the fix (code 2026-09-21, ADR-087; **measured after the deploy**) | The winners probe is memoized under the candidate run list (the cheap `runs` statement IS the key), `aggregateOfficialRun` becomes ONE unordered statement instead of a one-row probe plus ten `LIMIT/OFFSET` pages each re-sorting 20,000 evidence rows, and the read models are warmed at BOOT as well as after each run | **AFTER, measured 2026-09-21 20:35-20:37Z on a cold container, warm second pass:** `/api/programs/overview` **0.74-0.89 s** (was 503 cold / 3.2-3.7 s warm) - `?include=detail&granularity=month` **1.57-2.58 s** (was 59.8 s) - `/api/programs/sites` **0.28 s** (was 17.2 s cold / 2.5 s warm) - `/trend` **0.28 s** per measure (was 3.0-4.8 s) - `/top-drivers` 0.27-0.30 s. **No 503 anywhere, including the first request on a cold container.** Browser-verified: the page renders 120,000 evaluations, 61.9% compliance, 15,298 open cases and six measure cards. **Still true and named rather than implied:** the FIRST request after a deploy is ~47 s if a caller beats the boot warm (a 200, not a 503); `outcomes (run_id, measure_id)` does not exist and is owner DDL - the largest single win left; and the overview still derives its status buckets from 120,000 rows in JavaScript where a `GROUP BY` would return 90, deferred because the site/tenant/profile predicates have no SQL form |
-| Pilot compliance rates, 2026-09-22 (ADR-086 #595, #637) | CMS122 72.4→52.8% (inverse) · CMS165 62.4→45.2% · CMS125 72.1→63.7% · CMS130 43.3→41.9% · CMS137 13.5→13.1% · CMS2 68.7→68.6% | Not a regression: the corpus cutoff now hides facts dated after the run, and the nightly evaluates as of TODAY, so these are **year-to-date** rates where the earlier ones were full-year rates computed from future-dated facts. They climb nightly until 12-31. Prior-year corpus history is the chosen fix for the 2027-01-01 cliff (#637) |
-| Pilot compliance rates, corrected 2026-09-10 (ADR-079) | CMS2 60.9→68.7% · CMS130 19.5→43.3% · CMS165 20.5→62.4% · CMS125 18.0→72.1% · CMS122 7.4→72.4% (inverse) · CMS137 0.4→13.5% | Not a data change: out-of-population patients were in the rate's denominator. `missingData` equalled `total − initialPopulation` exactly for all six measures, so the whole Missing Data column was out-of-population |
+| Maui sandbox rates (synthetic corpus, WorkWell's estimate), 2026-09-22 (ADR-086 #595, #637) | CMS122 72.4→52.8% (inverse) · CMS165 62.4→45.2% · CMS125 72.1→63.7% · CMS130 43.3→41.9% · CMS137 13.5→13.1% · CMS2 68.7→68.6% | Not a regression: the corpus cutoff now hides facts dated after the run, and the nightly evaluates as of TODAY, so these are **year-to-date** rates where the earlier ones were full-year rates computed from future-dated facts. They climb nightly until 12-31. Prior-year corpus history is the chosen fix for the 2027-01-01 cliff (#637) |
+| Maui sandbox rates, corrected 2026-09-10 (ADR-079) | CMS2 60.9→68.7% · CMS130 19.5→43.3% · CMS165 20.5→62.4% · CMS125 18.0→72.1% · CMS122 7.4→72.4% (inverse) · CMS137 0.4→13.5% | Not a data change: out-of-population patients were in the rate's denominator. `missingData` equalled `total − initialPopulation` exactly for all six measures, so the whole Missing Data column was out-of-population |
 
 ### A sandbox number is only a number if you record the conditions
 
@@ -99,7 +99,7 @@ cd backend-ts
 # CMS measures vs their own test decks — fetch the pinned content, then vendor the terminology
 pwsh -NoProfile -File scripts/fetch-official-cases.ps1   # ~34 MB, into the gitignored .official-content/
 pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations
-# …repeat for the other seven; ci.yml's `official-cases` job is the authoritative list
+# …repeat for the other eight; ci.yml's `official-cases` job is the authoritative list
 pnpm test:official-cases
 
 # CQL language conformance — refuses to report at all until the full corpus is present
@@ -107,11 +107,12 @@ pnpm cql-tests:fetch    # without this, `pnpm cql-tests` exits 2 and tells you t
 pnpm cql-tests
 ```
 
-**The full 455 of 455 needs a VSAC credential.** Two measures (CMS122 and CMS125) depend on a value
-set upstream ships capped at 1,000 codes; completing it means re-expanding from VSAC, which needs
-`WORKWELL_VSAC_API_KEY_VENDOR` and the `--complete-terminology` flag. Without the key those two
-measures vendor with the capped expansion — CI does exactly this on Dependabot's pushes and says so
-rather than reporting a pass it did not earn. The other six are byte-identical either way.
+**The full 455 of 455 needs a VSAC credential.** Four measures (CMS122, CMS125, CMS130 and CMS165)
+depend on value sets upstream ships capped at 1,000 codes, and CMS138 on one upstream omits. Completing
+them means re-expanding from VSAC, which needs `WORKWELL_VSAC_API_KEY_VENDOR` and the
+`--complete-terminology` flag. Without the key those five vendor as upstream shipped them. CI does
+exactly this on Dependabot's pushes and says so rather than reporting a pass it did not earn. The
+other four are byte-identical either way.
 
 ## Open gaps, named
 
@@ -155,7 +156,7 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
    clickable status-chip drill-downs, primary-care synthetic roster, MIPS↔CMS crosswalk in the UI —
    **all landed by 2026-09-01** — the crosswalk last, in #505 — and the Maui sandbox is live)
    → MM-1 (official-only measure onboarding for CMS2/CMS130/CMS165 — gated ≠ routable ≠ runnable —
-   per-measure gated flips, the PY2027 re-vendor, and CMS137 only if measure 305 survives the CY2027
+   per-measure gated flips, 2027 logic (CMS has not published FHIR versions of the 2027 measures, so until it exists a 2027 period scores with the 2026 drafts), and, for the real-data phase, CMS137 only if Quality ID 305 survives the CY2027
    final rule; **U1–U3 built by 2026-09-06**: the runnable rule and calendar period (ADR-072), the
    20,000-patient data-first corpus whose clinical facts follow the year each run scores (ADR-075),
    and CMS137 vendored, gated 45/45 and read as two rates with its strata carried into the

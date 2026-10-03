@@ -6,15 +6,24 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](backend-ts/package.json)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)](frontend/package.json)
 [![FHIR R4](https://img.shields.io/badge/FHIR-R4%20%2F%20QI--Core-red)](docs/STANDARDS_CONFORMANCE.md)
-[![Tests](https://img.shields.io/badge/backend%20tests-2021-success)](backend-ts)
+[![Tests](https://img.shields.io/badge/backend%20tests-3268-success)](backend-ts)
 
-**A clinical quality measure engine that runs CMS's *own published* eCQM artifacts — not a reimplementation of them.**
+**A clinical quality measure engine that assists [WebChart](https://www.mieweb.com/webchart/) and runs CMS's own FHIR measure artifacts, not a reimplementation of them.**
 
-WorkWell Measure Studio is an occupational-health compliance platform for **Total Worker Health**: it authors quality measures, evaluates them against FHIR patient data with a CQL engine, opens and tracks the resulting cases, and exports the evidence auditors ask for. It is built to plug into a real EHR — and does, against a live [WebChart](https://www.mieweb.com/webchart/) tenant.
+WorkWell Measure Studio evaluates patients against quality measures with a CQL engine, shows who has an open care gap and why, opens and tracks the follow-up work, and exports the evidence auditors ask for.
 
-**Where it sits.** WorkWell is **supplementary to WebChart** — the EHR carries ONC certification, and WorkWell deliberately does not pursue it. In the JS quality-measure ecosystem it **composes** [`fqm-execution`](https://github.com/projecttacoma/fqm-execution) and [`cql-execution`](https://github.com/cqframework/cql-execution) rather than competing with them: official eCQMs run through `fqm-execution` in production, the authored engine runs on `cql-execution`, and the packaging ([`@work-well/measure-engine`](https://www.npmjs.com/package/@work-well/measure-engine), [`docs/PACKAGES.md`](docs/PACKAGES.md)) exists so a consumer can take the engine without the occupational-health catalog.
+**It assists WebChart; it does not replace it.** WebChart is the ONC-certified record that calculates and submits the practice's reported quality results. Where WebChart reports the rates, as for the Maui pilot, WorkWell's rates are an estimate, and the screens say so. WorkWell does not pursue ONC certification.
 
-> **The interesting engineering problem.** A quality measure like *"CMS125: Breast Cancer Screening"* has an official, published definition. Most systems reimplement it and hope the reimplementation agrees. This one runs the published artifact **verbatim** — the same ELM CMS ships to MADiE — and keeps a second, independently-authored implementation alongside it as a correctness oracle. Where the two disagree, the disagreement is measured, written down, and turned into a test before anything ships.
+**One product, several instances.** Each deployment is configured for its setting:
+
+- **Maui**: a sandbox for a primary-care group entering a Medicare Shared Savings Program ACO (performance year 2027). Its subjects are patients, and it runs six CMS measures on CMS's FHIR drafts.
+- **TWH**: the occupational instance, for Total Worker Health. Its subjects are employees, and it runs WorkWell's own occupational and wellness measures alongside two CMS measures.
+
+A staging stack reads FHIR from a live WebChart trial tenant. All three run on synthetic data.
+
+**Where it sits in the JS ecosystem.** It **composes** [`fqm-execution`](https://github.com/projecttacoma/fqm-execution) and [`cql-execution`](https://github.com/cqframework/cql-execution) rather than competing with them: CMS's FHIR draft measures run through `fqm-execution` where they are routed, the authored engine runs on `cql-execution`, and the packaging ([`@work-well/measure-engine`](https://www.npmjs.com/package/@work-well/measure-engine), [`docs/PACKAGES.md`](docs/PACKAGES.md)) exists so a consumer can take the engine without WorkWell's measure catalog.
+
+> **The interesting engineering problem.** A quality measure like *"CMS125: Breast Cancer Screening"* has an official definition. Most systems reimplement it and hope the reimplementation agrees. This one runs CMS's artifact as shipped: the ELM of CMS's FHIR draft (`CMS125FHIR` v1.0.000, posted for public comment in January–February 2026). For CMS122 and CMS125 it also keeps a second, independently authored implementation as a correctness oracle. Where the two disagree, the disagreement is measured, written down, and turned into a test before anything ships.
 
 ---
 
@@ -41,6 +50,8 @@ WorkWell Measure Studio is an occupational-health compliance platform for **Tota
 ---
 
 ## A tour of the product
+
+The screenshots are from the TWH instance, where the subjects are employees. On Maui the subjects are patients.
 
 | | |
 |---|---|
@@ -72,7 +83,7 @@ flowchart TB
     subgraph engine["Measure engine — no app dependencies"]
         ROUTER{{"Executor router<br/>per-measure"}}
         AUTH["Authored engine<br/>cql-execution + cql-exec-fhir"]
-        OFF["Official executor<br/>CMS published ELM<br/>(quarantined package)"]
+        OFF["Official executor<br/>CMS FHIR draft ELM<br/>(quarantined package)"]
     end
 
     subgraph data["Data sources"]
@@ -84,7 +95,7 @@ flowchart TB
     subgraph store["Persistence"]
         PG[("PostgreSQL 16<br/>Neon")]
         SQLITE[("SQLite<br/>test floor")]
-        S3[("S3<br/>evidence")]
+        S3[("Cloudflare R2<br/>(S3 API) evidence")]
     end
 
     UI --> API
@@ -106,7 +117,7 @@ flowchart TB
 
 **Three boundaries are enforced by tests, not convention:**
 
-1. **The eval core is a package with two dependencies** — `packages/measure-engine/` (`@work-well/measure-engine`) depends on exactly **`cql-execution` and `cql-exec-fhir`**, uses no `node:` built-ins, and ships **no WorkWell measure content**: the catalog, the compiled ELM and the value-set expansions are constructor input, so a consumer gets the engine without our occupational-health catalog. Three tests hold the line — the package's own import closure, an app-side check that nothing deep-imports past its single entry point, and a containment test on what remains in `src/engine/` (content, ingress, the synthetic corpus, the CLI edge), which now *refuses* the CQL runtime and `@cqframework/cql` alike.
+1. **The eval core is a package with two dependencies** — `packages/measure-engine/` (`@work-well/measure-engine`) depends on exactly **`cql-execution` and `cql-exec-fhir`**, uses no `node:` built-ins, and ships **no WorkWell measure content**: the catalog, the compiled ELM and the value-set expansions are constructor input, so a consumer gets the engine without WorkWell's measure catalog. Three tests hold the line — the package's own import closure, an app-side check that nothing deep-imports past its single entry point, and a containment test on what remains in `src/engine/` (content, ingress, the synthetic corpus, the CLI edge), which now *refuses* the CQL runtime and `@cqframework/cql` alike.
 2. **`fqm-execution` lives in exactly one package** — `packages/official-executor/`, reached only through a lazy `await import`, policed by five boundary tests. The heavyweight official-execution dependency can never leak into the request path.
 3. **Storage is a port with two adapters** — a Postgres *ceiling* and a SQLite *floor* that satisfy the same contract test, so the whole suite runs with no database.
 
@@ -134,7 +145,7 @@ sequenceDiagram
     API->>ENG: evaluate(measure, bundles)
     alt measure is officially routed
         ENG->>ENG: prepare bundles for QI-Core
-        ENG->>ENG: run CMS's published ELM (batched)
+        ENG->>ENG: run CMS's FHIR draft ELM (batched)
     else default
         ENG->>ENG: run authored CQL
     end
@@ -146,7 +157,7 @@ sequenceDiagram
     API->>DB: finalize run (COMPLETED / PARTIAL_FAILURE)
 ```
 
-Every state change writes an `audit_event` — no exceptions. Case upsert is keyed `(employee, measure_version, evaluation_period)`, so a nightly re-run updates rather than duplicates, and never clobbers an operator's in-progress work.
+Every state change is meant to write an `audit_event`; a few paths still write it after the change rather than before, and [`docs/DATA_MODEL_CONTRACTS.md`](docs/DATA_MODEL_CONTRACTS.md) §4 lists them (#598). Case upsert is keyed `(employee, measure_version, evaluation_period)`, so a nightly re-run updates rather than duplicates, and never clobbers an operator's in-progress work.
 
 ---
 
@@ -154,23 +165,23 @@ Every state change writes an `audit_event` — no exceptions. Case upsert is key
 
 Per priority measure, three different claims — **gated** (its official MADiE test cases are a permanent CI gate), **routable** (the router's construction-time checks pass), and **routed** (a deployed environment actually runs the official artifact). Each is strictly stronger than the last, and the differences are the point:
 
-| Measure | MADiE gate | Routable | Routed in production |
+| Measure | MADiE gate | Routable | Routed on |
 |---|---|---|---|
-| CMS122 (Diabetes: HbA1c > 9%) | 55/55 | ✓ | **✓ demo/production** (2026-07-30) · **✓ pilot** |
-| CMS125 (Breast Cancer Screening) | 66/66 | ✓ | **✓ demo/production** (2026-07-30) · **✓ pilot** |
-| CMS2 (Depression Screening) | 36/36 | ✓ | **✓ pilot sandbox** (2026-09-08) |
+| CMS122 (Diabetes: HbA1c > 9%) | 55/55 | ✓ | **✓ TWH** (2026-07-30) · **✓ Maui** |
+| CMS125 (Breast Cancer Screening) | 66/66 | ✓ | **✓ TWH** (2026-07-30) · **✓ Maui** |
+| CMS2 (Depression Screening) | 36/36 | ✓ | **✓ Maui** (2026-09-08) |
 | CMS68 (Documentation of Medications) | 19/19 | **✗ episode-of-care** | — |
-| CMS130 (Colorectal Cancer Screening) | 64/64 | ✓ | **✓ pilot sandbox** (2026-09-08) |
-| CMS137 (SUD Treatment Initiation & Engagement) | 45/45 | ✓ multi-rate | **✓ pilot sandbox** (2026-09-08) |
-| CMS138 (Tobacco Screening & Cessation) | 47/47 * | ✓ | — |
-| CMS165 (Controlling High Blood Pressure) | 68/68 | ✓ | **✓ pilot sandbox** (2026-09-08) |
+| CMS130 (Colorectal Cancer Screening) | 64/64 | ✓ | **✓ Maui** (2026-09-08) |
+| CMS137 (SUD Treatment Initiation & Engagement) | 45/45 | ✓ multi-rate | **✓ Maui** (2026-09-08) |
+| CMS138 (Tobacco Screening & Cessation) | 47/47 * | **✗ no numerator semantics** | — |
+| CMS165 (Controlling High Blood Pressure) | 68/68 | ✓ | **✓ Maui** (2026-09-08) |
 | CMS951 (Kidney Health Evaluation) | 55/55 | ✓ | — |
 
-CMS68 is refused at **construction time**, not by convention: it declares `populationBasis: Encounter`, and the executor maps one population vector per subject, which cannot represent episodes. \* CMS138's green is a weaker claim than the other eight — upstream ships its bundle one value set short, so four codes are sourced from VSAC by us rather than shipped by CMS. Unrouted measures still evaluate their authored implementations everywhere.
+CMS68 is refused at **construction time**, not by convention: it declares `populationBasis: Encounter`, and the executor maps one population vector per subject, which cannot represent episodes. \* CMS138's green is a weaker claim than the other eight — upstream ships its bundle one value set short, so four codes are sourced from VSAC by us rather than shipped by CMS. CMS138 is refused too: it has no recorded numerator semantics yet. Only CMS122 and CMS125 also have an authored implementation, so no instance evaluates CMS68, CMS138 or CMS951 today.
 
-**"Pilot sandbox" is a sandbox, not a submission.** The six measures run over a 20,000-patient generated corpus on a separate deployment; running a real measurement year against real data is a later, separately gated decision ([`docs/PRODUCTION_READINESS_2026-07.md`](docs/PRODUCTION_READINESS_2026-07.md)). CMS137 stays routed only while Quality ID 305 survives the CY2027 final rule, and CMS165 needs blood pressures profile-stamped at ingest before real data.
+**Maui is a sandbox, not a submission.** The six measures run there over a 20,000-patient generated corpus; running a real measurement year against real data is a later, separately gated decision ([`docs/PRODUCTION_READINESS_2026-07.md`](docs/PRODUCTION_READINESS_2026-07.md)). Two conditions gate the real-data phase, not the sandbox: CMS137 stays only if Quality ID 305 survives the CY2027 final rule, and CMS165 needs blood pressures profile-stamped at ingest.
 
-**Alerting today is WorkWell-screens-only.** The CDS Hooks service is live and standards-conformant, but no client — WebChart included — invokes it yet; cards render the most recent finalized run when asked ([`docs/CDS_HOOKS.md`](docs/CDS_HOOKS.md), [guide ch. 10](docs/guide/10-scenarios.md)).
+**Alerting today is WorkWell-screens-only.** The CDS Hooks service is live and follows the CDS Hooks 2.0.1 shapes (self-graded), but WebChart has no CDS Hooks client (checked 2026-10-02), so nothing invokes it yet; cards render the most recent finalized run when asked ([`docs/CDS_HOOKS.md`](docs/CDS_HOOKS.md), [guide ch. 10](docs/guide/10-scenarios.md)).
 
 ---
 
@@ -181,7 +192,7 @@ This project is deliberately careful about what it claims. [`docs/STANDARDS_CONF
 | Surface | Standard | Level |
 |---|---|---|
 | Measure logic | HL7 **CQL** / ELM | Executed — JVM-free, build-time translation |
-| Patient data | **FHIR R4**, US Core / **QI-Core** | Executed — official artifacts evaluate real QI-Core bundles |
+| Patient data | **FHIR R4**, US Core / **QI-Core** | Executed — official artifacts evaluate synthetic QI-Core bundles |
 | Known-answer gate | Official **MADiE** test cases (9 measures) | **455/455 exact**, every rate of the multi-rate CMS137 compared — a permanent CI gate |
 | Terminology | **VSAC** value sets | The artifact's *own* expansions, fetched at build and pinned by SHA-256 |
 | Reporting | FHIR **MeasureReport**, **QRDA-I**, **QRDA-III** | MeasureReport **validator-verified at 0 base-R4 errors**; both QRDA-I and QRDA-III at **0 findings** against the HL7 base IG |
@@ -201,7 +212,7 @@ The parts of this repo worth reading if you care about how it is built:
 - **Vacuous-guard hunting.** Tests that self-skip when a fixture is missing are treated as a defect class in their own right — a suite that reads green because it never ran is worse than a red one. The sidecar-dependent gates are named explicitly in a CI step so they cannot silently drop out, and the flip checklist tells the operator to read the `skipped` count, not just `fail`.
 - **Ports and adapters throughout** — measure executor, data source, value-set resolver, outreach channel, immunization forecaster, evidence bucket, store layer. Each defaults to a simulated, store-backed or empty implementation and is *inert unless configured*; a default never invents clinical data.
 - **Reversibility as a design constraint.** Every seam is switchable by env var, and every switch is byte-identical to the previous behaviour when unset.
-- **2021 backend tests** on the SQLite floor with no external services (2006 pass, 15 self-skip without a local Postgres or the gitignored terminology sidecar — measured 2026-08-26); a Postgres contract suite that runs against a local `postgres:16` when present; and Playwright E2E.
+- **3,268 backend tests** in CI across three shards (2026-10-03), runnable on the SQLite floor with no external services; a few self-skip when an optional input such as a local Postgres or the gitignored terminology sidecar is absent. There is also a Postgres contract suite that runs against a local `postgres:16` when present, and Playwright E2E.
 
 ---
 
@@ -234,7 +245,7 @@ cd backend-ts
 pnpm evaluate --patient ./bundle.json --measure audiogram
 ```
 
-### Compare the authored engine against CMS's published artifact
+### Compare the authored engine against CMS's FHIR draft artifact
 
 ```bash
 # both engines, same bundles, per-subject diff + before/after distribution
@@ -254,7 +265,7 @@ backend-ts/          API worker, CQL engine, run pipeline, cases, exports, MCP, 
   measures/            authored CQL + vendored official artifacts
 frontend/            Next.js 16 dashboard, Studio, admin
 wcdb-fhir-shim/      standalone MariaDB → FHIR R4 shim (owns the DB driver)
-docs/                architecture, data model, ADRs, deploy, conformance, journal
+docs/                architecture, data model, deploy, conformance, journal
 e2e/                 Playwright end-to-end tests
 ```
 
@@ -266,12 +277,12 @@ e2e/                 Playwright end-to-end tests
 
 ## The integration surface
 
-What another system builds against — each contract versioned, documented, and refusing dishonest answers rather than guessing:
+The surfaces another system can use, each documented and refusing dishonest answers rather than guessing. The card service is how WorkWell is meant to reach WebChart; the compliance API is a kept, versioned surface, not the integration contract ([`docs/LOCKED_DECISIONS.md`](docs/LOCKED_DECISIONS.md) §4A.4):
 
-| Contract | What it is |
+| Surface | What it is |
 |---|---|
+| [CDS Hooks 2.0.1](docs/CDS_HOOKS.md) — `GET /cds-services`, invoke, feedback | Care-gap **cards** into a clinician's workflow: summary, plain-English reason, provenance, and a draft-order `suggestion` the clinician accepts — never `systemActions`, never `critical`. WebChart has no CDS Hooks client yet. |
 | [`GET /api/v1/compliance/{subject}/{measure}`](docs/COMPLIANCE_API.md) | One subject, one measure, one stable answer — status, population membership, and `populationsSource` saying where the booleans came from. **404 when no run has covered the subject**, never an empty 200. |
-| [CDS Hooks 2.0.1](docs/CDS_HOOKS.md) — `GET /cds-services`, invoke, feedback | Care-gap **cards** into a clinician's workflow: summary, plain-English reason, provenance, and a draft-order `suggestion` the clinician accepts — never `systemActions`, never `critical`. |
 | `GET /api/v1/openapi.json` · public `/api-docs` | Hand-authored OpenAPI 3.1.1 over the **promised** surface only, guarded by a two-way routed-path test. |
 | [MCP server](docs/MCP.md) | 13 read-only, role-gated tools (`/sse` stream + `/mcp/**` message endpoint) — an AI client reads compliance state; nothing mutates. |
 | [`@work-well/measure-engine`](https://www.npmjs.com/package/@work-well/measure-engine) · [`@work-well/measure-codegen`](https://www.npmjs.com/package/@work-well/measure-codegen) | The content-free eval core and codegen on the public registry, with SLSA provenance ([`docs/PACKAGES.md`](docs/PACKAGES.md)). |
@@ -299,15 +310,11 @@ Full surface in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Current focus
 
-Running CMS's own FHIR (QI-Core) artifacts in place of the authored implementations, one measure at a time, behind `WORKWELL_OFFICIAL_MEASURES`. **CMS122 and CMS125 are routed and live in production** (2026-07-30) — both evaluate CMS's FHIR (QI-Core) draft artifacts verbatim (v1.0.000, posted for public comment in January–February 2026). CMS122 shipped a PR later than CMS125: its official numerator counts *poor* glycemic control, so the MeasureReport canonical, `improvementNotation` and population membership all had to switch together first, and a self-contradictory report is worse than a delayed one. Six more measures — CMS2, CMS68, CMS130, CMS138, CMS165, and CMS951 — are vendored and MADiE-gated but not routed. CMS2 and CMS951 are routable but not yet routed; CMS130, CMS138, and CMS165 have no `OFFICIAL_MEASURE_SEMANTICS` entry yet, so routing construction refuses them until one is reviewed in; CMS68 is additionally not routable — it is an episode-of-care measure (population basis = Encounter), and the official executor's one-population-vector-per-subject mapping does not support episodes.
+**The Maui sandbox, before performance year 2027 starts on 2027-01-01.** The six ACO measures (CMS122, CMS125, CMS2, CMS130, CMS165 and CMS137) run there on CMS's FHIR drafts. The work is the GitHub milestone "Ready for January", and [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) is the running log. The owner's locked decisions are in [`docs/LOCKED_DECISIONS.md`](docs/LOCKED_DECISIONS.md).
 
-The approved active plan is [`docs/ROADMAP_2026-08-30.md`](docs/ROADMAP_2026-08-30.md) (the Maui pilot); the verification bar remains the FHIR-column set in [`docs/ROADMAP_2026-08-04.md`](docs/ROADMAP_2026-08-04.md) §4; the owner's locked decisions are in [`docs/LOCKED_DECISIONS.md`](docs/LOCKED_DECISIONS.md) and the running narrative in [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first).
+**2027 logic.** CMS has not published FHIR versions of the 2027 measures. Until 2027 logic exists that passes the 2027 test patients, a 2027 period is scored with the 2026 drafts, and the measure page says so. On the 2027 Cypress test deck (bundle 2026.1.0), the drafts as production runs them agree patient by patient for CMS122 (64/64), CMS125 (155/155), CMS130 (269/269) and CMS137 (36/36, both rates). CMS2 agrees for 375 of 379; its four differences are in the draft's logic, not the import. CMS165 cannot be loaded that way yet, because it reads only profile-tagged blood pressures.
 
-**Cypress CVU+ has now run (2026-08-02).** 22 submissions of 12 generated documents to a local Cypress v7.5.1: **both QRDA Category I and Category III validate with 0 findings against the HL7 base IG** — CDA schema and Schematron alike — for CMS122 and CMS125 across the five-target synthetic corpus. It took 240 findings to get there, and two are worth stating plainly because they are the kind a matrix hides. Our own Schematron checker had **no XSD layer**, so its "0 base-HL7 errors" was true and *narrower than it read*, with 76 findings in the gap. And Category III had every required population element attached to the **wrong template** — `…27.3.3` is Aggregate Count and sat on the outer observation — so the validator reported those elements missing while the ones that satisfied the rules were validated as nothing at all.
-
-**This is not the bar, and as of 2026-08-04 the bar itself changed.** That run measured the **export leg** over synthetic data. The Cypress **Calculation Check** path did later run, offline, and our numbers matched Cypress's own expected results exactly (64/64 and 150/150 subjects). The *submission* still came back red — and reading Cypress's source gave the reason: `extract_results_by_ids` short-circuits on measure identity. Cypress holds **CMS125v14 (QDM)**; we run **CMS125FHIR v1.0.000 (QI-Core)**, and the QI-Core artifact has no per-population UUIDs for QRDA III's identity model to carry. **QRDA Category III is an HQMF/QDM-identity format**, and no FHIR-lineage grader exists — MITRE's `cvu-fhir` was abandoned in April 2023. So **a Cypress Calculation Check green is retired as a goal**; relabelling to obtain one stays forbidden. QRDA I/III are kept as an interoperability bridge, still at 0 findings. Evidence: [`CVU_VALIDATION_RUN_2026-08-02.md`](docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md), [`CVU_C2_SUBMISSION_2026-08-03.md`](docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md).
-
-**What replaced it.** A named set of FHIR-column checks, each with its scope and limits written next to it. Two ran on 2026-08-04: our MeasureReports validate at **0 base-R4 errors** with the DEQM STU5 gap measured at exactly 3 per report ([`DEQM_VALIDATION_2026-08-04.md`](docs/evidence/DEQM_VALIDATION_2026-08-04.md)), and the official artifacts were cross-executed through **HAPI's `cqf-fhir-cr`** — a genuinely independent engine, unlike `fqm-testify` and `deqm-test-server`, which both wrap the library we already run. **255/278 cases agree across six measures**, and the largest group of exceptions is isolated by construction to one CQL conjunct ([`CROSS_ENGINE_2026-08-04.md`](docs/evidence/CROSS_ENGINE_2026-08-04.md)). Those findings are written up for the HL7 CMS7-FQR track in [`CONNECTATHON_DISCREPANCIES_2026-08-04.md`](docs/evidence/CONNECTATHON_DISCREPANCIES_2026-08-04.md).
+**Cypress is evidence, not the bar.** Both QRDA Category I and III validate at 0 findings against the HL7 base IG in a local Cypress v7.5.1 ([`CVU_VALIDATION_RUN_2026-08-02.md`](docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md)). A Cypress Calculation Check green was retired as a goal on 2026-08-04: Cypress grades by the QDM measure identity (`CMS125v14`), WorkWell runs the FHIR artifact (`CMS125FHIR`), and relabelling one as the other is forbidden ([`CVU_C2_SUBMISSION_2026-08-03.md`](docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md)). The bar is a named set of FHIR-column checks ([`docs/ROADMAP_2026-08-04.md`](docs/ROADMAP_2026-08-04.md) §4). Among them, MeasureReports validate at 0 base-R4 errors ([`DEQM_VALIDATION_2026-08-04.md`](docs/evidence/DEQM_VALIDATION_2026-08-04.md)), and HAPI's `cqf-fhir-cr`, an engine that is not ours, agrees with ours on 362 of 387 cases across eight measures (the `CROSS_ENGINE_*` reports in [`docs/evidence/`](docs/evidence/), from [`CROSS_ENGINE_2026-08-04.md`](docs/evidence/CROSS_ENGINE_2026-08-04.md) on).
 
 ## Documentation map
 
@@ -318,7 +325,7 @@ The approved active plan is [`docs/ROADMAP_2026-08-30.md`](docs/ROADMAP_2026-08-
 | [Normalization](docs/guide/normalization-for-quality-teams.md) | how clinical records move from the clinic EHR to a quality result |
 | [Architecture](docs/ARCHITECTURE.md) | system boundaries, module map |
 | [Data contracts](docs/DATA_MODEL_CONTRACTS.md) | idempotency, evidence and CSV contracts |
-| [Measures](docs/MEASURES.md) | the TWH measure catalog in plain English |
+| [Measures](docs/MEASURES.md) | the measure catalog in plain English (TWH and Maui) |
 | [Standards Conformance](docs/STANDARDS_CONFORMANCE.md) | what we may and may not claim |
 | [WebChart Mapping](docs/WEBCHART_FHIR_MAPPING.md) | EHR → FHIR crosswalk |
 | [AI Guardrails](docs/AI_GUARDRAILS.md) | prompts, fallbacks, the hard rule |

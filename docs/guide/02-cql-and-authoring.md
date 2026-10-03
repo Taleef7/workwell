@@ -95,7 +95,7 @@ flowchart LR
     G2 --> G3["measures/generated/audiogram.cql"]
   end
   subgraph OFF["Path 3 - vendored from CMS"]
-    O1["CMS's published artifact, already compiled - chapter 4"]
+    O1["CMS's FHIR draft artifact, already compiled - chapter 4"]
   end
   H1 --> C["compile-measures: CQL to committed ELM - chapter 3"]
   G3 -. "codegen-parity test: same Outcome Status through the real engine" .-> H1
@@ -143,8 +143,8 @@ In the Studio, the **Rule Builder tab** edits these parameters against a live ge
 preview, so an author can work declaratively and still see exactly what the parameters mean in the
 language of record.
 
-**Path 3: vendored from CMS.** For the eight official measures we do not author anything — we take
-CMS's published, already-compiled artifact and run it unmodified.
+**Path 3: vendored from CMS.** For the nine vendored CMS measures we do not author anything — we take
+CMS's already-compiled FHIR draft artifact and run it unmodified.
 [Chapter 4](04-engine-and-routing.md) covers the twelve vendoring steps and the gates.
 
 ## Authoring from a regulation: the OSHA worked example

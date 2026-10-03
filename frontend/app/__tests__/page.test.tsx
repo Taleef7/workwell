@@ -67,7 +67,7 @@ describe("HomePage terminology fallbacks", () => {
     expect(screen.getByText("A clean operating surface for occupational-health compliance.")).toBeTruthy();
     expect(
       screen.getByText((content, element) =>
-        (element?.tagName === "P" && content.includes("Occupational safety and clinical wellness measures") && content.includes("one reviewable dashboard")) ?? false,
+        (element?.tagName === "P" && content.includes("Occupational safety and clinical wellness measures") && content.includes("Works alongside WebChart")) ?? false,
       ),
     ).toBeTruthy();
   });
@@ -85,7 +85,7 @@ describe("HomePage terminology fallbacks", () => {
     expect(screen.getByText("A clean operating surface for primary-care compliance.")).toBeTruthy();
     expect(
       screen.getByText(
-        "Primary care clinical quality measures, complete case management, and a full audit trail — one reviewable dashboard.",
+        "Primary care clinical quality measures, case management, and a full audit trail. Works alongside WebChart, the system of record.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/occupational/i)).toBeNull();
