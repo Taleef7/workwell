@@ -346,7 +346,7 @@ const mixedLogic = (format: string): Response =>
 /** What the evaluated rows were scored by: whether any was a translation, and whether they disagree. */
 function rowScoring(rows: ReadonlyArray<{ evidence: unknown }>): { derived: boolean; mixed: boolean } {
   const identities = rows.filter((r) => !isEvaluationErrorEvidence(r.evidence)).map((r) => officialReportIdentity(r.evidence));
-  const keys = new Set(identities.map(scoringIdentityKey).filter((k): k is string => k !== null));
+  const keys = new Set(identities.map(scoringIdentityKey));
   return { derived: identities.some((i) => i?.kind === "derived"), mixed: keys.size > 1 };
 }
 

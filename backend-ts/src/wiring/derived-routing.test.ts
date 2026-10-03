@@ -201,6 +201,15 @@ test("logicFor names the logic that scores each date, and execution agrees with 
   assert.deepEqual(calculated, [FIXTURE_URL, official.manifest.url], "what ran is what logicFor reported, date by date");
 });
 
+test("a translation allowlist with no official one is refused at construction, never quietly authored", async () => {
+  await assert.rejects(
+    routedEngineForEnv({ WORKWELL_DERIVED_MEASURES: "cms137" } as never, { authored, ...checks, loadDerived: () => derived }),
+    /cms137: .*not in WORKWELL_OFFICIAL_MEASURES/,
+  );
+  // Neither allowlist set: the default path, the authored engine itself.
+  assert.equal(await routedEngineForEnv({} as never, { authored, ...checks, loadDerived: () => derived }), authored);
+});
+
 test("a translation the allowlist does not name is never a candidate, whatever is committed", async () => {
   const engine = await routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms137" } as never, {
     authored,

@@ -102,3 +102,42 @@ test("an 'unchanged' CMS library whose ELM was in fact changed is caught by its 
   content.data = Buffer.from(JSON.stringify(elm), "utf8").toString("base64");
   expect(problems(b), /Hospice\|.+ is listed as unchanged but its ELM does not match its pin/);
 });
+
+test("a library WorkWell changed carries WorkWell identity in every field, not just a WorkWell url", () => {
+  // Hospice, edited and therefore no longer listed as unchanged, given only a WorkWell url.
+  const b = clone();
+  const hospice = b.entry.find((e) => e.resource.resourceType === "Library" && e.resource["name"] === "Hospice")!.resource;
+  const cmsVersion = String(hospice["version"]);
+  hospice["url"] = "urn:workwell:library:Hospice";
+  const notUnchanged = {
+    ...fixture.manifest,
+    derived: { ...fixture.manifest.derived!, unchangedLibraries: fixture.manifest.derived!.unchangedLibraries.filter((l) => l.name !== "Hospice") },
+  };
+  const kept = problems(b, notUnchanged);
+  expect(kept, /changed library Hospice\|.+ keeps CMS's library name 'Hospice'/);
+  expect(kept, /changed library Hospice\|.+ has version '.+', not a ww- version/);
+
+  // Renamed and re-versioned on the resource, but the ELM inside still identifies itself as CMS's library.
+  hospice["name"] = "WorkWellHospice2027";
+  hospice["version"] = "ww-2027.1";
+  const renamed = problems(b, notUnchanged);
+  expect(renamed, new RegExp(`WorkWellHospice2027\\|ww-2027\\.1's ELM is identified as 'Hospice\\|${cmsVersion.replace(/\./g, "\\.")}'`));
+  assert.ok(!renamed.some((p) => /keeps CMS's library name|not a ww- version/.test(p)), JSON.stringify(renamed));
+
+  // Identified as itself all the way down: nothing left to refuse about that library.
+  const content = (hospice["content"] as Array<{ contentType: string; data: string }>).find((c) => c.contentType === "application/elm+json")!;
+  const elm = JSON.parse(Buffer.from(content.data, "base64").toString("utf8"));
+  elm.library.identifier = { id: "WorkWellHospice2027", version: "ww-2027.1" };
+  content.data = Buffer.from(JSON.stringify(elm), "utf8").toString("base64");
+  assert.deepEqual(problems(b, notUnchanged).filter((p) => p.includes("WorkWellHospice2027")), []);
+
+  // A changed library with no ELM cannot be checked, so it is refused.
+  hospice["content"] = [];
+  expect(problems(b, notUnchanged), /WorkWellHospice2027\|ww-2027\.1 has no ELM identifier to check/);
+});
+
+test("CMS's host is refused in any letter case: the check is a refusal, not a URL parser", () => {
+  const b = clone();
+  measureIn(b)["publisher"] = "MADiE.CMS.gov";
+  expect(problems(b), /publisher still names madie\.cms\.gov/);
+});
