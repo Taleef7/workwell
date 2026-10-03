@@ -32,8 +32,11 @@ const row = (runId: string, startedAt: string): OutcomeWithRun => ({
 const POPULATIONS = { ipp: true, denom: true, numer: false, denex: false, denexcep: false };
 const OFFICIAL = { official: { populationResults: POPULATIONS } };
 
-/** One winning run for cms122, scoring `year`, whose rows carry official evidence (optionally naming its artifact) or not. */
-const overviewFor = async (runId: string, year: number, official: boolean, artifact: Record<string, string> = {}) => {
+/**
+ * One winning run for cms122, scoring `year`, whose rows carry official evidence (optionally naming its
+ * artifact) or not; `scale` adds a completed run of the generated scale tenant, which the authored engine scores.
+ */
+const overviewFor = async (runId: string, year: number, official: boolean, artifact: Record<string, string> = {}, scale = false) => {
   __overviewMemo.clear();
   for (const memo of Object.values(__chartMemos)) memo.clear();
   resetMeasureRateMemo();
@@ -48,10 +51,11 @@ const overviewFor = async (runId: string, year: number, official: boolean, artif
         measureId === MEASURE
           ? [{ status: "COMPLIANT", evidence: official ? { official: { ...artifact, populationResults: POPULATIONS } } : { expressionResults: [] } }]
           : [],
-      aggregateScaleRun: async () => [],
+      aggregateScaleRun: async () => (scale ? [{ status: "COMPLIANT", count: 5 }] : []),
     } as unknown as OutcomeStore,
     runStore: {
-      listRuns: async () => [],
+      listRuns: async () =>
+        scale ? [{ id: "scale-1", triggeredBy: "seed:scale", status: "COMPLETED", scopeId: MEASURE, startedAt }] : [],
       getRun: async (id: string) =>
         id === runId
           ? { id, measurementPeriodStart: `${year}-01-01T00:00:00.000Z`, measurementPeriodEnd: `${year}-12-31T23:59:59.999Z`, startedAt, requestedScope: {} }
@@ -93,6 +97,14 @@ test("the run's evidence decides which artifact scored it: today's manifest spea
   // nothing about it. The digest has to travel from the evidence for this to be caught.
   const other = await overviewFor("run-vintage-other-artifact", 2027, true, { ecqmId: "122FHIR", version: "1.0.000", artifactSha256: "sha256:another" });
   assert.equal(other.logicVintage, null);
+});
+
+test("a total that folds in the authored scale tenant's counts carries no note about the artifact's year", async () => {
+  const summary = await overviewFor("run-vintage-scale", 2027, true, {}, true);
+  assert.equal(summary.includesAuthoredScaleCounts, true);
+  assert.equal(summary.totalEvaluated, 6, "the live row and the five scale rows");
+  assert.ok(summary.measureRate, "the live run still carried official evidence");
+  assert.equal(summary.logicVintage, null);
 });
 
 test("logicVintageOf needs an official run, a scored year and a manifest describing the run's artifact", () => {

@@ -557,7 +557,9 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
     s.measurementYear = period?.measurementYear ?? null;
     s.asOf = period?.asOf ?? null;
-    s.logicVintage = logicVintageOf(s.measureId, s.measureRate, period?.measurementYear ?? null);
+    // A total that folds in the authored scale tenant's counts was not all scored by the artifact, so
+    // it carries no note about that artifact's year.
+    s.logicVintage = s.includesAuthoredScaleCounts ? null : logicVintageOf(s.measureId, s.measureRate, period?.measurementYear ?? null);
   }
 
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
