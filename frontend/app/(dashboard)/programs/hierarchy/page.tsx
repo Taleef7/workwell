@@ -15,6 +15,7 @@ import { SkeletonRow } from "@/components/skeleton-loader";
 import { ScrollRegion } from "@/components/scroll-region";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { useMeasureIdentities } from "@/lib/measure-identity";
+import { RateEstimateNote, showsRateEstimateNote } from "@/components/rate-estimate-note";
 
 // The rollup root is the cross-system "All Systems" aggregate (E13 PR-1); open it by default.
 const ALL_SYSTEMS_ROOT_KEY = "all:all";
@@ -227,6 +228,7 @@ export default function HierarchyPage() {
           : `Compliance is compliant over the ${SUBJECT.plural} in each measure's population, counted once per measure.`}{" "}
         Exclusions are left out of the population, as on the measure cards.
       </p>
+      <RateEstimateNote id="hierarchy-estimate-note" />
 
       {error ? (
         <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
@@ -271,7 +273,7 @@ export default function HierarchyPage() {
           label="Compliance hierarchy table"
           className="rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
         >
-          <table aria-describedby="hierarchy-rate-note" className="w-full border-collapse text-sm">
+          <table aria-describedby={showsRateEstimateNote() ? "hierarchy-rate-note hierarchy-estimate-note" : "hierarchy-rate-note"} className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-[0.1em] text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
                 {/* The Name column stays put while the counts scroll under it on a phone. */}

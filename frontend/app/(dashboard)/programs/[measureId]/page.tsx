@@ -24,7 +24,8 @@ import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { ScrollRegion } from "@/components/scroll-region";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { formatExecutedLogic, useMeasureIdentities } from "@/lib/measure-identity";
+import { RateEstimateNote, showsRateEstimateNote } from "@/components/rate-estimate-note";
 import { displayRate, formatRate, isSmallNumbers, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
 import { chartablePoints } from "../trend-meta";
 import { yearLineFor } from "../year-line";
@@ -177,6 +178,11 @@ export default function ProgramDetailPage() {
   const prevRate = prevCounts ? displayRate(prevCounts, identity) : null;
   const delta = program && prevRate && rate.value !== null && prevRate.value !== null ? rate.value - prevRate.value : null;
   const yearLine = program ? yearLineFor([program], isPatientTerm) : null;
+  // The FHIR artifact an officially routed measure runs (from /api/measures). When it is known, the
+  // header names it and its version, never the catalog's QDM id and authoring version (§4.3).
+  const executed = identities[measureId]?.executed;
+  const shownVersion = executed?.version ?? program?.version;
+  const rateDescribedBy = [rate.value === null ? "counted-yet-note" : null, showsRateEstimateNote() ? "rate-estimate-note" : null].filter(Boolean).join(" ") || undefined;
 
   const outcomeBreakdown = program
     ? [
@@ -199,12 +205,22 @@ export default function ProgramDetailPage() {
       {program ? (
         <>
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-            <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{program.policyRef}</p>
+            <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{executed?.ecqmId ?? program.policyRef}</p>
             <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(measureId, program.measureName)}</h2>
-            <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {program.version}{yearLine ? ` · ${yearLine}` : ""}</p>
+            <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {shownVersion}{yearLine ? ` · ${yearLine}` : ""}</p>
+            {executed ? (
+              <p data-testid="executed-logic" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                {formatExecutedLogic(executed)}.
+              </p>
+            ) : null}
+            {program.logicVintage?.note ? (
+              <p data-testid="logic-vintage" role="note" className="mt-1 inline-block rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                {program.logicVintage.note}.
+              </p>
+            ) : null}
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <div>
-                <p aria-describedby={rate.value === null ? "counted-yet-note" : undefined} className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{rate.value === null ? `${rate.label} —` : `${rate.label} ${rate.value.toFixed(1)}%`}</p>
+                <p aria-describedby={rateDescribedBy} className="text-4xl font-semibold text-neutral-900 dark:text-neutral-100">{rate.value === null ? `${rate.label} —` : `${rate.label} ${rate.value.toFixed(1)}%`}</p>
                 {rate.lowerIsBetter ? (
                   <p id="lower-is-better-note" className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
                 ) : null}
@@ -216,6 +232,7 @@ export default function ProgramDetailPage() {
                     Based on {fmtCount(rate.denominator)} {rate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
                   </p>
                 ) : null}
+                <RateEstimateNote id="rate-estimate-note" className="mt-1" />
               </div>
               {delta !== null ? (
                 <p
@@ -255,6 +272,7 @@ export default function ProgramDetailPage() {
               <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
                 Scored the way CMS reports it: the measure&apos;s own numerator over its denominator, less exclusions and exceptions. The rate above is the work list&apos;s view of the same patients, so the two can differ.
               </p>
+              <RateEstimateNote className="mt-1" />
               {program.measureRate.rates.length > 1 ? (
                 <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400" data-testid={`measure-rate-cases-${program.measureId}`}>
                   Case work covers every rate: a miss on any rate opens a case for the {SUBJECT.singular} that names the rate missed. A run never reopens a case staff closed; only a person can reopen it.
@@ -543,7 +561,7 @@ export default function ProgramDetailPage() {
                 </thead>
                 <tbody>
                   <tr className="border-t border-neutral-200 dark:border-neutral-800">
-                    <td className="py-1 pr-3">{program.version}</td>
+                    <td className="py-1 pr-3">{shownVersion}</td>
                     <td className="py-1 pr-3">{program.compliant}</td>
                     <td className="py-1 pr-3">{program.dueSoon}</td>
                     <td className="py-1 pr-3">{program.overdue}</td>

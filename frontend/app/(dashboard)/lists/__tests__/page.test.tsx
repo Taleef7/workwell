@@ -10,6 +10,8 @@ import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
+import { setSubject, subject } from "@/test/mocks/terminology";
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 
 const getWithHeaders = vi.fn();
 const get = vi.fn();
@@ -40,6 +42,7 @@ const LIST = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setSubject("employee");
   get.mockImplementation(async (path: string) => {
     if (path === "/api/subject-lists") return [LIST];
     throw new Error(`unexpected GET ${path}`);
@@ -183,6 +186,35 @@ it("the report names each measure as every other page does, never by its id", as
   expect(await screen.findByText(/CMS125 · Breast Cancer Screening/)).toBeInTheDocument();
   expect(screen.queryByText("cms125")).not.toBeInTheDocument();
   expect(screen.getByRole("columnheader", { name: "Initial population" })).toBeInTheDocument();
+});
+
+it("on the patient deployment the report says its scores are WorkWell's estimate, not the submitted rate", async () => {
+  setSubject("patient");
+  get.mockImplementation(async (path: string) => {
+    if (path === "/api/subject-lists") return [LIST];
+    if (path === "/api/measures") return [];
+    if (path.includes("/report")) {
+      return {
+        measurementYear: 2027,
+        generatedAt: "2027-06-01T00:00:00.000Z",
+        members: { matched: 2, notFound: 0, ambiguous: 0, total: 2 },
+        compactedMeasures: [],
+        measures: [{
+          measureId: "cms125", ecqmId: "CMS125FHIR", runId: "run-1",
+          measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+          compactionStatus: "complete", matchedSubjects: 2, distinctSubjectsSeen: 2, missingFromRun: 0,
+          rates: [{ label: null, ipp: 2, denom: 2, denex: 0, denexcep: 0, numer: 1, effectiveDenominator: 2, score: 0.5 }],
+        }],
+      };
+    }
+    throw new Error(`unexpected GET ${path}`);
+  });
+  render(<ListsPage />);
+  await screen.findByText("ACO Q3 attribution");
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Compute" }));
+  await screen.findByText("50.0%");
+  expect(screen.getByText("WorkWell's estimate from CMS's FHIR logic. WebChart calculates and submits the reported rate.")).toBeInTheDocument();
 });
 
 it("a measure whose run aged out is named, with the reason, beside the ones that reported", async () => {

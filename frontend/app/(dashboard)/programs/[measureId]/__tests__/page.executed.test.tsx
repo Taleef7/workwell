@@ -1,0 +1,135 @@
+/**
+ * The measure page says which logic runs (CMS's FHIR draft, its version, the QDM measure it came from),
+ * that the rate is WorkWell's estimate rather than the reported one (patient deployment), and when a
+ * year is scored with logic written for another year.
+ */
+import React from "react";
+import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setSubject, subject } from "@/test/mocks/terminology";
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
+import ProgramDetailPage from "../page";
+
+const get = vi.fn();
+const apiMock = { get };
+vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
+
+vi.mock("next/navigation", () => ({
+  useParams: () => ({ measureId: "cms125" }),
+}));
+vi.mock("@/components/auth-provider", () => ({
+  useAuth: () => ({ user: { role: "ROLE_ADMIN" } }),
+}));
+vi.mock("@/components/run-status-provider", () => ({
+  useRunStatus: () => ({ isActive: false, startTracking: vi.fn() }),
+}));
+
+const EXECUTED = {
+  ecqmId: "CMS125FHIR",
+  version: "1.0.000",
+  status: "draft",
+  statusNote: "posted for public comment Jan–Feb 2026",
+  derivedFrom: "CMS125v14",
+};
+
+const program = (over: Record<string, unknown> = {}) => ({
+  measureId: "cms125",
+  measureName: "Breast Cancer Screening",
+  policyRef: "CMS125v14",
+  version: "v1.0",
+  latestRunId: "run-1",
+  latestRunAt: "2027-01-06T12:00:00Z",
+  totalEvaluated: 10,
+  denominator: 10,
+  compliant: 7,
+  dueSoon: 0,
+  overdue: 3,
+  missingData: 0,
+  excluded: 0,
+  complianceRate: 70,
+  openCaseCount: 3,
+  measurementYear: 2027,
+  asOf: "2027-01-06",
+  logicVintage: null,
+  measureRate: {
+    rates: [{ label: null, ipp: 10, denom: 10, denex: 0, denexcep: 0, numer: 7, effectiveDenominator: 10, score: 0.7 }],
+    unmeasured: 0,
+    evaluationErrors: 0,
+  },
+  ...over,
+});
+
+function mockApi({ executed = true, summary = program() }: { executed?: boolean; summary?: ReturnType<typeof program> } = {}) {
+  get.mockReset().mockImplementation((url: string) => {
+    if (url === "/api/measures") {
+      return Promise.resolve([
+        { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112", ...(executed ? { executed: EXECUTED } : {}) } },
+      ]);
+    }
+    if (url === "/api/programs") return Promise.resolve([summary]);
+    if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
+    if (url.includes("/risk-outlook")) return Promise.resolve(null);
+    return Promise.resolve([]);
+  });
+}
+
+const ESTIMATE = "WorkWell's estimate from CMS's FHIR logic. WebChart calculates and submits the reported rate.";
+
+describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => {
+  beforeEach(() => setSubject("patient"));
+
+  it("names the executed FHIR draft and its version, and keeps the identity heading", async () => {
+    mockApi();
+    render(<ProgramDetailPage />);
+    expect(await screen.findByTestId("executed-logic")).toHaveTextContent(
+      "Runs CMS125FHIR v1.0.000, a CMS FHIR draft (posted for public comment Jan–Feb 2026), derived from CMS125v14.",
+    );
+    expect(screen.getByRole("heading", { name: "MIPS 112 · CMS125 · Breast Cancer Screening" })).toBeInTheDocument();
+    expect(screen.getByText(/^Version 1\.0\.000/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Version v1\.0/)).toBeNull();
+    // The eyebrow names the executed artifact, not the QDM measure.
+    expect(screen.getByText("CMS125FHIR")).toBeInTheDocument();
+    expect(screen.queryByText("CMS125v14")).toBeNull();
+  });
+
+  it("an authored measure keeps its catalog version and shows no executed-logic line", async () => {
+    mockApi({ executed: false });
+    render(<ProgramDetailPage />);
+    expect(await screen.findByText(/^Version v1\.0/)).toBeInTheDocument();
+    expect(screen.queryByTestId("executed-logic")).toBeNull();
+  });
+
+  it("says beside the rates that they are WorkWell's estimate, on the patient deployment", async () => {
+    mockApi();
+    render(<ProgramDetailPage />);
+    await screen.findByTestId("executed-logic");
+    const notes = screen.getAllByText(ESTIMATE);
+    expect(notes).toHaveLength(2); // the headline rate and the CMS measure rate panel
+    expect(screen.getByText("Compliance 70.0%")).toHaveAttribute("aria-describedby", expect.stringContaining("rate-estimate-note"));
+  });
+
+  it("shows no estimate caveat on the occupational deployment, where the measures are WorkWell's own", async () => {
+    setSubject("employee");
+    mockApi();
+    render(<ProgramDetailPage />);
+    await screen.findByTestId("executed-logic");
+    expect(screen.queryByText(ESTIMATE)).toBeNull();
+  });
+
+  it("says when the year was scored with the previous year's logic", async () => {
+    mockApi({
+      summary: program({
+        logicVintage: { artifactYears: "2026", measurementYear: 2027, note: "Scored with the 2026 FHIR logic; 2027 logic not yet available" },
+      }),
+    });
+    render(<ProgramDetailPage />);
+    expect(await screen.findByTestId("logic-vintage")).toHaveTextContent("Scored with the 2026 FHIR logic; 2027 logic not yet available.");
+  });
+
+  it("says nothing about vintage when the run's year is covered", async () => {
+    mockApi();
+    render(<ProgramDetailPage />);
+    await screen.findByTestId("executed-logic");
+    expect(screen.queryByTestId("logic-vintage")).toBeNull();
+  });
+});

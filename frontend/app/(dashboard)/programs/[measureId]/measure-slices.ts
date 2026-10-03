@@ -58,6 +58,8 @@ export type ProgramSummary = {
   /** The year the latest run scored and the day it describes (#637). */
   measurementYear?: number | null;
   asOf?: string | null;
+  /** Set when the latest run scored a year its official artifact was not written for (2027 with 2026 logic). */
+  logicVintage?: { artifactYears: string; measurementYear: number; note: string } | null;
 };
 
 export type TopDrivers = {

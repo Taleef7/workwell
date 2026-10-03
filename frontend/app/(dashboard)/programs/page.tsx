@@ -30,6 +30,7 @@ import { displayRate, formatRate, isSmallNumbers, type NotationSource } from "@/
 import { chartablePoints, trendMeta, type TrendPoint } from "./trend-meta";
 import { yearLineFor } from "./year-line";
 import { RunFreshnessBanner } from "./run-freshness-banner";
+import { RateEstimateNote, showsRateEstimateNote } from "@/components/rate-estimate-note";
 
 type ProgramSummary = {
   measureId: string;
@@ -268,6 +269,8 @@ export default function ProgramsPage() {
           className="col-span-2 md:col-span-1"
         />
       </div>
+      {/* One note for every rate on the page: the overall KPI and each card's rate point at it. */}
+      <RateEstimateNote id="rate-estimate-note" />
 
       {tenant === "mhn" ? (
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
@@ -307,7 +310,11 @@ export default function ProgramsPage() {
           const programRate = displayRate(program, notation);
           const noteId = `lower-note-${program.measureId}`;
           const countedId = `counted-${program.measureId}`;
-          const describedBy = [programRate.lowerIsBetter ? noteId : null, programRate.value === null ? countedId : null].filter(Boolean).join(" ") || undefined;
+          const describedBy = [
+            programRate.lowerIsBetter ? noteId : null,
+            programRate.value === null ? countedId : null,
+            showsRateEstimateNote() ? "rate-estimate-note" : null,
+          ].filter(Boolean).join(" ") || undefined;
           const label = measureLabelFor(program.measureId, program.measureName);
           const nothingYet = CARD_CHIPS.every(([, , field]) => program[field] === 0);
           return (

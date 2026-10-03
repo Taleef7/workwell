@@ -26,6 +26,7 @@ import { SkeletonRow } from "@/components/skeleton-loader";
 import { ScrollRegion } from "@/components/scroll-region";
 import { useSubjectLists, type SubjectListRow } from "@/features/subject-list/use-subject-lists";
 import { useMeasureIdentities } from "@/lib/measure-identity";
+import { RateEstimateNote } from "@/components/rate-estimate-note";
 
 type Resolution = "MATCHED" | "NOT_FOUND" | "AMBIGUOUS";
 
@@ -528,6 +529,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
             beside the rates and never subtracted from a denominator — a smaller run must not produce a
             higher score. The score divides by denominator minus exclusions minus exceptions.
           </p>
+          <RateEstimateNote />
         </>
       ) : null}
     </section>

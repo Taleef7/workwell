@@ -111,26 +111,37 @@ export default function MeasuresPage() {
       { field: "tags", header: "Tags" },
       { field: "id", header: "ID", visible: false },
       { field: "rawStatus", header: "Raw Status", visible: false },
+      { field: "executedId", header: "Executed Logic", visible: false },
+      { field: "derivedFrom", header: "Derived From", visible: false },
     ],
     [],
   );
 
   const gridRows = useMemo(
     () =>
-      items.map((item) => ({
-        name: item.name,
-        identity: formatMeasureIdentity(item.identity) || "—",
-        policyRef: item.policyRef,
-        routing: item.routing,
-        version: item.version,
-        status: labelFor(MEASURE_STATUS_LABELS, item.status),
-        rawStatus: item.status,
-        statusUpdated: `${new Date(item.statusUpdatedAt).toLocaleString()} by ${item.statusUpdatedBy || "-"}`,
-        owner: item.owner,
-        lastUpdated: new Date(item.lastUpdated).toLocaleString(),
-        tags: item.tags && item.tags.length > 0 ? item.tags.join(", ") : "—",
-        id: item.id,
-      })),
+      items.map((item) => {
+        // An officially routed measure runs CMS's FHIR artifact, so its Version is the artifact's
+        // ("1.0.000") and its Policy Ref names that artifact; the QDM id the catalog row is named after
+        // ("CMS125v14") is shown only as what it was derived from (locked decision §4.3). The catalog's
+        // own version ("v1.0") stays in the data: it is part of the version ids Studio acts on.
+        const executed = item.routing === "official" ? item.identity?.executed : undefined;
+        return {
+          name: item.name,
+          identity: formatMeasureIdentity(item.identity) || "—",
+          policyRef: executed ? `${executed.ecqmId}${executed.derivedFrom ? ` (derived from ${executed.derivedFrom})` : ""}` : item.policyRef,
+          executedId: executed?.ecqmId ?? "",
+          derivedFrom: executed?.derivedFrom ?? "",
+          routing: item.routing,
+          version: executed ? executed.version : item.version,
+          status: labelFor(MEASURE_STATUS_LABELS, item.status),
+          rawStatus: item.status,
+          statusUpdated: `${new Date(item.statusUpdatedAt).toLocaleString()} by ${item.statusUpdatedBy || "-"}`,
+          owner: item.owner,
+          lastUpdated: new Date(item.lastUpdated).toLocaleString(),
+          tags: item.tags && item.tags.length > 0 ? item.tags.join(", ") : "—",
+          id: item.id,
+        };
+      }),
     [items],
   );
 
@@ -153,6 +164,18 @@ export default function MeasuresPage() {
         );
       }
       if (column.field === "policyRef") {
+        const executedId = String(row.executedId ?? "");
+        if (executedId) {
+          const derivedFrom = String(row.derivedFrom ?? "");
+          return (
+            <span className="inline-flex flex-wrap items-center gap-1">
+              <span className="inline-flex items-center rounded bg-blue-50 px-2 py-0.5 font-mono text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:ring-blue-900">
+                {executedId}
+              </span>
+              {derivedFrom ? <span className="text-xs text-neutral-500 dark:text-neutral-400">derived from {derivedFrom}</span> : null}
+            </span>
+          );
+        }
         const ref = String(value ?? "");
         if (ref && /^CMS\d+/.test(ref)) {
           return (
