@@ -21,6 +21,7 @@
     "outcomes:compact": "tsx src/run/cli/outcomes-compact-bin.ts",
     "resolve-valuesets": "tsx src/run/cli/resolve-valuesets-bin.ts",
     "test:official-cases": "tsx src/run/cli/official-cases-bin.ts",
+    "test:compiled-cases": "tsx src/run/cli/compiled-cases-bin.ts",
     "cql-tests": "tsx scripts/cql-tests/bin.ts",
     "cql-tests:fetch": "pwsh -NoProfile -File scripts/fetch-cql-tests.ps1",
     "flip-snapshot": "tsx src/run/cli/official-flip-snapshot-bin.ts",

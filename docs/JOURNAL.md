@@ -7,6 +7,16 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-03
 
+- **WorkWell can compile CMS's QI-Core CQL, with results identical to CMS's own ELM.** The 2027
+  translations need a compile path, and the docs said CMS's QI-Core CQL was uncompilable under our pinned
+  translator (a 2026-07-05 spike). It compiles: the same `@cqframework/cql@4.0.0-beta.1` needs only
+  cqframework's QICore 6.0.0 model info (Apache-2.0, now in `measures/derived/_modelinfo/`, hash-checked)
+  and CMS's recorded options. `pnpm test:compiled-cases` compiles the six pilot measures from CMS's CQL
+  and runs CMS's MADiE decks on our ELM and on CMS's: 334/334 cases agree on every rate and stratifier,
+  and 0 of 14,880 define values differ (each non-function define, per patient, by value). Two broken
+  copies prove the check looks: one moves 40 cases, one changes 94 values. It is a CI step in the
+  official-cases job and needs no VSAC credential. No dependency changed, and no runtime behaviour
+  changed. Every place that repeated the "uncompilable" claim is corrected.
 - **The docs say what WorkWell is: it assists WebChart, and Maui and TWH are two instances of one
   product.** The README opened as "an occupational-health compliance platform", and the guide described
   only TWH. Across the README, the one-page explainer, the guide, the landing copy and the OpenAPI

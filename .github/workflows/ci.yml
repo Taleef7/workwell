@@ -458,6 +458,12 @@ jobs:
             echo "::notice::No VSAC credential here — measures whose upstream bundle omits a value set are SKIPPED rather than failed. The credentialed run on merge covers them."
             pnpm test:official-cases --allow-missing-terminology
           fi
+      # The QI-Core compile path: compile the six pilot measures FROM CMS's CQL with our translator and
+      # require CMS's decks to give identical results (cases, rates, stratifiers, every define's value) on our
+      # ELM and on CMS's. It compares on upstream's own ValueSets, so it needs no VSAC credential and runs
+      # the same on Dependabot's pushes. A 2027 translation compiles through this path.
+      - name: Compiled-ELM calibration gate
+        run: pnpm test:compiled-cases
       # The committed report is evidence, so its RESULTS must match what the harness just produced.
       # The comparison deliberately ignores the "**Generated:**" line: the harness stamps today's date,
       # so a naive `git diff --quiet` would go red the day after every regeneration and train people to

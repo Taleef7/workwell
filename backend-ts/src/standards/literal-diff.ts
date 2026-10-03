@@ -3,8 +3,8 @@
  *
  * Runs the **literal, multi-library QICore eCQM** — the exact official MADiE FHIR artifact
  * (`using QICore '6.0.0'`) — via MITRE's `fqm-execution` over the PRE-COMPILED ELM pre-shipped in the
- * vendored bundle's `Library.content` (`application/elm+json`). No translation happens (which is what
- * ADR-024 found intractable under the pinned JS translator); fqm-execution executes the committed ELM on
+ * vendored bundle's `Library.content` (`application/elm+json`). No translation happens (CMS's own ELM
+ * runs; `standards/qicore-compile.ts` is the separate compile path); fqm-execution executes the committed ELM on
  * the same `cql-execution` + `cql-exec-fhir` runtime this repo already uses.
  *
  * The fqm machinery lives in `@work-well/official-executor` (extraction PR-4): the PACKAGE BOUNDARY is

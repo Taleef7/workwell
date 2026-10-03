@@ -5,7 +5,7 @@ include FHIRHelpers version '4.0.1' called FHIRHelpers
 // Official CMS122v14 VSAC value sets, referenced by bare OID. These resolve at runtime from the
 // imported `value_sets` rows (source='VSAC') via StoreValueSetResolver (bare-OID match). This is a
 // FAITHFUL-BUT-SIMPLIFIED transcription of the official measure's population logic — NOT the literal
-// multi-library QICore artifact (spike-proven un-compilable under @cqframework/cql 4.0.0-beta.1).
+// multi-library QICore artifact, which runs from its own vendored ELM (measures/official/cms122).
 // Descriptive only (ADR-008): never decides a stored compliance outcome.
 valueset "Diabetes": '2.16.840.1.113883.3.464.1003.103.12.1001'
 valueset "HbA1c Laboratory Test": '2.16.840.1.113883.3.464.1003.198.12.1013'

@@ -722,6 +722,12 @@ export interface RunOfficialMeasureOptions {
    * could quietly substitute ours for theirs destroys the thing being measured.
    */
   supplementalValueSets?: unknown[];
+  /**
+   * Sees fqm's raw output for the batch that produced the cases (after the profile retry, if one ran).
+   * The compiled-ELM calibration gate compares per-statement results through it — a hook rather than a
+   * second door to the executor package, so `run/cli` still reaches fqm only through this module.
+   */
+  onOutput?: (output: Awaited<ReturnType<FqmCalculate>>) => void;
 }
 
 /**
@@ -826,6 +832,7 @@ export async function runOfficialMeasureCases(
     };
   }
 
+  options.onOutput?.(output);
   const byPatient = new Map((output.results ?? []).map((result) => [result.patientId, result]));
   const cases: OfficialCaseResult[] = loaded.cases.map((item) => {
     if (item.loadError || !item.patientId || !item.expected) return { ...item };

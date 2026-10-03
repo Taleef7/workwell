@@ -3,8 +3,8 @@
  *
  * Runs a measure exactly as its steward published it: the MADiE/eCQI QICore FHIR bundle, executed from
  * the **pre-compiled ELM** shipped inside `Library.content` (`application/elm+json`) via MITRE's
- * `fqm-execution`. Nothing is translated — which is what ADR-024 found intractable under the pinned JS
- * translator — and fqm-execution runs that ELM on the same `cql-execution` + `cql-exec-fhir` runtime the
+ * `fqm-execution`. Nothing is translated here (the CQL does compile, given the QICore model info —
+ * `src/standards/qicore-compile.ts` — but this package runs CMS's own ELM), and fqm-execution runs that ELM on the same `cql-execution` + `cql-exec-fhir` runtime the
  * rest of this repo already depends on.
  *
  * ## Why this is a package
@@ -39,7 +39,7 @@ export interface FqmPopulationResult {
 export interface FqmStatementResult {
   statementName?: string;
   libraryName?: string;
-  /** fqm's rendered value — "TRUE"/"FALSE"/"NA"/"UNHIT", or a formatted value for non-boolean defines. */
+  /** fqm's label — "TRUE"/"FALSE"/"NA"/"UNHIT" from relevance and truthiness, never the value itself. */
   final?: unknown;
 }
 
