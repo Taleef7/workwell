@@ -1107,6 +1107,8 @@ test("the old descriptions led with the QDM id; today's catalog names it only as
     assert.doesNotMatch(catalogSpec(id).description, /published/, `${id} catalog wording`);
     assert.match(catalogSpec(id).description, /FHIR \(QI-Core\) draft of this measure, posted for public comment in January–February 2026/);
   }
+  // CMS122FHIR and the authored cms122.cql both read HbA1c OR GMI, and both count a missing result.
+  assert.match(catalogSpec("cms122").description, /glycemic status assessment .*\(HbA1c or glucose management indicator, GMI\) is > 9\.0%, or who have none/);
 });
 
 test("the old descriptions are the exact text the seed stored (provenance digests taken from the catalog before the change, not from this constant)", () => {
