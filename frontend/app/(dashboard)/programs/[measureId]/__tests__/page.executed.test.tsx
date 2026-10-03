@@ -103,6 +103,18 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     expect(screen.getByText("CMS125FHIR")).toBeInTheDocument();
   });
 
+  it("a run with no official evidence is not labelled with today's FHIR artifact", async () => {
+    // Routed now (executed present), but the winning run was scored by authored CQL (no measureRate).
+    mockApi({ summary: program({ measureRate: null }) });
+    render(<ProgramDetailPage />);
+    await screen.findByTestId("executed-logic"); // the present-tense routing line may stay
+    expect(screen.getByText(/^Version v1\.0/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Version 1\.0\.000/)).toBeNull();
+    expect(screen.queryByText("CMS125FHIR")).toBeNull();
+    // The outcome-by-version row carries the same version as the header.
+    expect(screen.getByRole("cell", { name: "v1.0" })).toBeInTheDocument();
+  });
+
   it("an authored measure keeps its catalog version and shows no executed-logic line", async () => {
     mockApi({ executed: false });
     render(<ProgramDetailPage />);

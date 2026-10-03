@@ -180,11 +180,14 @@ export default function ProgramDetailPage() {
   const yearLine = program ? yearLineFor([program], isPatientTerm) : null;
   // The FHIR artifact an officially routed measure runs today (from /api/measures), for the "Runs …"
   // line. The artifact and version beside the NUMBERS are the ones the run's evidence names; today's
-  // routing stands in only when the run recorded none. Never the catalog's QDM id or "v1.0" (§4.3).
+  // routing stands in only when the run carried official evidence but recorded no artifact. A run with
+  // no official evidence (`measureRate` null: authored CQL scored it) gets the catalog's own version and
+  // no FHIR artifact. Never the catalog's QDM id or "v1.0" over official counts (§4.3).
   const executed = identities[measureId]?.executed;
+  const ranOfficial = program?.measureRate != null;
   const ran = program?.measureRate?.official;
-  const shownEcqmId = ran?.ecqmId ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`) : executed?.ecqmId;
-  const shownVersion = ran?.version ?? executed?.version ?? program?.version;
+  const shownEcqmId = !ranOfficial ? undefined : ran?.ecqmId ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`) : executed?.ecqmId;
+  const shownVersion = ranOfficial ? (ran?.version ?? executed?.version ?? program?.version) : program?.version;
   const rateDescribedBy = [rate.value === null ? "counted-yet-note" : null, showsRateEstimateNote() ? "rate-estimate-note" : null].filter(Boolean).join(" ") || undefined;
 
   const outcomeBreakdown = program
