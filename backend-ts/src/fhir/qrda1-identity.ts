@@ -102,6 +102,17 @@ function group(identifiersPerDocument: string[][]): number[][] {
   return [...groups.values()];
 }
 
+/** A copy of `value` with every `reference` string found in `renamed` replaced by its new name. */
+function withReferencesRenamed(value: unknown, renamed: ReadonlyMap<string, string>): unknown {
+  if (Array.isArray(value)) return value.map((v) => withReferencesRenamed(v, renamed));
+  if (value === null || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = key === "reference" && typeof v === "string" && renamed.has(v) ? renamed.get(v) : withReferencesRenamed(v, renamed);
+  }
+  return out;
+}
+
 /**
  * Merge a group's documents into one bundle.
  *
@@ -158,10 +169,20 @@ function merge(
 
   const entry: Array<{ resource: unknown }> = chosen ? [{ resource: patient }] : [];
   for (const m of members) {
+    // A document's resources reference each other (an Encounter names its diagnosis Conditions), so a
+    // renamed id must be renamed in those references too: CQMCommon matches a reference to its target by
+    // exact id, and a stale one silently matches nothing.
+    const renamed = new Map<string, string>();
+    for (const e of m.imported.bundle.entry) {
+      const resource = e.resource as { resourceType?: string; id?: string };
+      if (resource?.resourceType === "Patient" || resource?.id === undefined) continue;
+      renamed.set(`${resource.resourceType}/${resource.id}`, `${resource.resourceType}/${m.index}-${resource.id}`);
+    }
     for (const e of m.imported.bundle.entry) {
       const resource = e.resource as { resourceType?: string; id?: string };
       if (resource?.resourceType === "Patient") continue;
-      entry.push({ resource: { ...resource, id: `${m.index}-${resource?.id ?? entry.length}` } });
+      const rewritten = withReferencesRenamed(resource, renamed) as Record<string, unknown>;
+      entry.push({ resource: { ...rewritten, id: `${m.index}-${resource?.id ?? entry.length}` } });
     }
   }
 

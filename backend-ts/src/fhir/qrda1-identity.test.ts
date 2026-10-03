@@ -23,6 +23,8 @@ const doc = (opts: {
   birth?: string;
   encounterCode?: string;
   encounterId?: string;
+  /** A SNOMED code carried as the encounter's QDM Encounter Diagnosis. */
+  diagnosis?: string;
 }) => `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3">
   <recordTarget><patientRole>
@@ -42,6 +44,11 @@ const doc = (opts: {
       <code code="${opts.encounterCode ?? "99213"}" codeSystem="2.16.840.1.113883.6.12"/>
       <statusCode code="completed"/>
       <effectiveTime><low value='20240331080000'/><high value='20240331081500'/></effectiveTime>
+      ${opts.diagnosis ? `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.168"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <value code="${opts.diagnosis}" codeSystem="2.16.840.1.113883.6.96" xsi:type="CD"/>
+      </observation></entryRelationship>` : ""}
     </encounter></entry>
   </section></component></structuredBody></component>
 </ClinicalDocument>`;
@@ -144,6 +151,38 @@ test("merged resources are namespaced per document, so identical ids do not coll
     .map((e) => (e.resource as { id?: string }).id)
     .filter((id): id is string => id !== undefined);
   assert.equal(new Set(ids).size, ids.length, "no two resources in the merged bundle share an id");
+});
+
+test("a renamed resource is renamed in the references to it too, or the link silently matches nothing", () => {
+  // An Encounter names its diagnosis Conditions by reference, and CQMCommon resolves a reference by exact
+  // id. Namespacing the ids without the references left CMS137's encounter-diagnosis history pointing at
+  // Conditions that no longer exist under that name, on this route only.
+  for (const documents of [
+    [doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" })],
+    [
+      doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "same-id", diagnosis: "75544000" }),
+      doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "same-id", diagnosis: "5602001" }),
+    ],
+  ]) {
+    const resources = resolveQrda1Documents(documents).subjects[0]!.bundle.entry.map((e) => e.resource as Record<string, any>);
+    const ids = new Set(resources.map((r) => `${r.resourceType}/${r.id}`));
+    const encounters = resources.filter((r) => r.resourceType === "Encounter");
+    assert.equal(encounters.length, documents.length);
+    for (const encounter of encounters) {
+      const references = [
+        ...(encounter.reasonReference ?? []).map((r: { reference: string }) => r.reference),
+        ...(encounter.diagnosis ?? []).map((d: { condition: { reference: string } }) => d.condition.reference),
+      ];
+      assert.equal(references.length, 2, "both links are present");
+      for (const reference of references) assert.ok(ids.has(reference), `${reference} resolves inside the merged bundle`);
+    }
+    // And each encounter still points at ITS OWN diagnosis, not the other document's.
+    const codeOf = (reference: string) => resources.find((r) => `${r.resourceType}/${r.id}` === reference)!.code.coding[0].code;
+    assert.deepEqual(
+      encounters.map((e) => codeOf(e.reasonReference[0].reference)).sort(),
+      documents.length === 1 ? ["75544000"] : ["5602001", "75544000"],
+    );
+  }
 });
 
 // ---------------------------------------------------------------- defects found in review of #389
