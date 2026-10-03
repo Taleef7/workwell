@@ -1060,6 +1060,49 @@ test("import: each resource keeps its source identifier, root as the system", ()
   assert.equal(condition.identifier, undefined, "a generated Condition has no source identifier, and none is invented");
 });
 
+test("import: EVERY mapper keeps its entry's source identifier", () => {
+  // Each mapper is listed by the entry it builds, so dropping `identifierOf` from any one of them fails
+  // here: Assessment, Symptom, Intervention Performed and Order, Device Order, Medication Active, an
+  // inpatient Encounter and a Procedure from the exclusion fixture; a Diagnosis from its own entry.
+  const { of } = exclusionResources();
+  const all = ["Observation", "Procedure", "ServiceRequest", "DeviceRequest", "MedicationRequest", "Encounter"].flatMap(of);
+  for (const id of ["assess-1", "symptom-1", "intervention-1", "order-1", "device-1", "med-1", "enc-inpatient", "proc-icd10pcs"]) {
+    assert.deepEqual(all.find((r) => r.id === id)?.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: id }], id);
+  }
+  const diagnosis = importQrda1Document(deckDocument.replace("  </section></component>", `
+    <entry><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.137" extension="2021-08-01"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="dx-standalone"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <effectiveTime><low value='20240101080000'/></effectiveTime>
+        <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/>
+      </observation></entryRelationship>
+    </act></entry>
+  </section></component>`)).bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.id === "dx-standalone");
+  assert.deepEqual(diagnosis?.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: "dx-standalone" }]);
+});
+
+test("import: the identifier's shape follows the CDA id's", () => {
+  const encounterWith = (id: string) =>
+    deckResources(deckDocument.replace('<id extension="enc-dx" root="1.3.6.1.4.1.115"/>', id)).all.find((r) => r.resourceType === "Encounter")!;
+  // A UUID root is a urn:uuid, lower-cased as RFC 4122 compares it.
+  assert.deepEqual(encounterWith('<id root="BC01A5D1-3A34-4286-82CC-43EB04C972A7" extension="v1"/>').identifier, [
+    { system: "urn:uuid:bc01a5d1-3a34-4286-82cc-43eb04c972a7", value: "v1" },
+  ]);
+  // A URI root is its own system; a "root" with a space in it is not a URI and gives no identifier.
+  assert.deepEqual(encounterWith('<id root="urn:example:visits" extension="v1"/>').identifier, [{ system: "urn:example:visits", value: "v1" }]);
+  assert.equal(encounterWith('<id root="my system: x" extension="v1"/>').identifier, undefined);
+  // A root alone is a complete identifier (HL7 V3 II): carried as a URI value.
+  assert.deepEqual(encounterWith('<id root="3f2504e0-4f89-11d3-9a0c-0305e82c3301"/>').identifier, [
+    { system: "urn:ietf:rfc:3986", value: "urn:uuid:3f2504e0-4f89-11d3-9a0c-0305e82c3301" },
+  ]);
+  // A null-flavored id is the sender saying there is none.
+  assert.equal(encounterWith('<id root="1.3.6.1.4.1.115" extension="v1" nullFlavor="UNK"/>').identifier, undefined);
+  assert.equal(encounterWith('<id nullFlavor="NI"/>').identifier, undefined);
+});
+
 test("import: a TEXT result is kept as valueString — CMS130 asks only that the stool test has a result", () => {
   const fobt = deckResources().byId("fobt-1");
   assert.ok(fobt);

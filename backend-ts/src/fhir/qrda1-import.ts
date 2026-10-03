@@ -240,22 +240,31 @@ function idOf(node: CdaNode, fallback: string): string {
  * The CDA `<id>` as a FHIR identifier: the root names the assigning authority, the extension the id
  * within it. The FHIR `id` is deliberately root-agnostic (`idOf`), so this is what keeps two authorities'
  * entry "1" apart, and the batch merge compares it when deciding whether two documents repeat one entry.
- * A root that is an OID or a UUID gets its URN; any other URI root is used as it is; anything else is
- * left out rather than turned into a system it is not.
+ * A root that is an OID or a UUID gets its URN (a UUID lower-cased, as RFC 4122 compares it); any other
+ * root that is a URI is used as it is; anything else is left out rather than turned into a system it is
+ * not. A root with no extension is a complete identifier on its own (HL7 V3 II), carried as the URI value
+ * of an `urn:ietf:rfc:3986` identifier. A null-flavored id is the sender saying it has none.
  */
 function identifierOf(node: CdaNode): { identifier?: Array<{ system: string; value: string }> } {
-  const own = childrenNamed(node, "id").find((n) => n.attrs.extension);
-  const root = own?.attrs.root;
-  // A null-flavored id is the sender saying it has no identifier for this entry.
-  if (!own || !root || own.attrs.nullFlavor) return {};
-  const system = /^\d+(\.\d+)+$/.test(root)
-    ? `urn:oid:${root}`
-    : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(root)
-      ? `urn:uuid:${root}`
-      : root.includes(":")
-        ? root
-        : undefined;
-  return system ? { identifier: [{ system, value: own.attrs.extension! }] } : {};
+  const asUri = (root: string): string | undefined =>
+    /^\d+(\.\d+)+$/.test(root)
+      ? `urn:oid:${root}`
+      : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(root)
+        ? `urn:uuid:${root.toLowerCase()}`
+        : /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(root)
+          ? root
+          : undefined;
+  const ids = childrenNamed(node, "id");
+  // The same element `idOf` names the resource by: the first id with an extension.
+  const withExtension = ids.find((n) => n.attrs.extension);
+  if (withExtension) {
+    const root = withExtension.attrs.root;
+    const system = root && !withExtension.attrs.nullFlavor ? asUri(root) : undefined;
+    return system ? { identifier: [{ system, value: withExtension.attrs.extension! }] } : {};
+  }
+  const rootOnly = ids.find((n) => n.attrs.root && !n.attrs.nullFlavor);
+  const value = rootOnly ? asUri(rootOnly.attrs.root!) : undefined;
+  return value ? { identifier: [{ system: "urn:ietf:rfc:3986", value }] } : {};
 }
 
 /**
