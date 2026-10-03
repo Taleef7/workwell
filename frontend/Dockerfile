@@ -14,8 +14,9 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
 ARG NEXT_PUBLIC_API_URL=https://twh-api-ts.os.mieweb.org
 ARG NEXT_PUBLIC_APP_NAME="WorkWell Measure Studio"
-ARG NEXT_PUBLIC_APP_TAGLINE="occupational-health compliance."
-ARG NEXT_PUBLIC_APP_DESCRIPTION="Four measures, complete case management, and a full audit trail — one reviewable dashboard."
+# Empty falls back to the home page's own default copy for NEXT_PUBLIC_SUBJECT_TERM.
+ARG NEXT_PUBLIC_APP_TAGLINE=""
+ARG NEXT_PUBLIC_APP_DESCRIPTION=""
 ARG NEXT_PUBLIC_CODIFY_INDEX_URL=""
 # Deployment-level subject noun: "employee" (default) or "patient" (the Maui pilot).
 ARG NEXT_PUBLIC_SUBJECT_TERM=employee
