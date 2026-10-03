@@ -1131,8 +1131,66 @@ test("import: an Encounter Diagnosis becomes an encounter-diagnosis Condition th
   assert.equal(condition!.code.coding[0].code, "75544000");
   assert.equal(condition!.category[0].coding[0].code, "encounter-diagnosis");
   assert.equal(condition!.onsetDateTime, undefined, "an Encounter Diagnosis has no onset of its own, so none is given");
-  // CQMCommon.encounterDiagnosis (CMS137's history) follows reasonReference; PrincipalDiagnosis reads
-  // diagnosis and its rank. Both carry the same link.
+  assert.equal(condition!.verificationStatus, undefined, "nor a verification status: none is minted");
+  // CQMCommon.encounterDiagnosis (CMS137's history) follows reasonReference; `diagnosis` keeps the rank.
   assert.deepEqual(encounter!.reasonReference, [{ reference: "Condition/enc-dx-dx-1" }]);
   assert.deepEqual(encounter!.diagnosis, [{ condition: { reference: "Condition/enc-dx-dx-1" }, rank: 1 }]);
+});
+
+test("import: a REPEATED encounter id still gives every diagnosis its own Condition id", () => {
+  // The library resolves each reference with `singleton from`, which throws on two matches, so two
+  // Conditions sharing an id would turn the subject into an evaluation error.
+  const encounterEntry = deckDocument.slice(deckDocument.indexOf("    <entry><encounter"), deckDocument.indexOf("</encounter></entry>") + "</encounter></entry>".length);
+  const repeated = deckDocument.replace(encounterEntry, `${encounterEntry}\n${encounterEntry.replace('code="75544000"', 'code="5602001"')}`);
+  assert.notEqual(repeated, deckDocument);
+  const { all } = deckResources(repeated);
+  const conditions = all.filter((r) => r.resourceType === "Condition");
+  assert.equal(conditions.length, 2);
+  assert.equal(new Set(conditions.map((c) => c.id)).size, 2, "two diagnoses, two ids");
+  const encounters = all.filter((r) => r.resourceType === "Encounter");
+  const codeOf = (reference: string) => conditions.find((c) => `Condition/${c.id}` === reference)!.code.coding[0].code;
+  assert.deepEqual(encounters.map((e) => codeOf(e.reasonReference[0].reference)), ["75544000", "5602001"], "each encounter keeps its own");
+});
+
+test("import: an encounter id that is not a valid FHIR id still yields a resolvable Condition id", () => {
+  const odd = deckDocument.replace('extension="enc-dx"', 'extension="visit/2024/11/28"');
+  assert.notEqual(odd, deckDocument);
+  const { all } = deckResources(odd);
+  const condition = all.find((r) => r.resourceType === "Condition")!;
+  assert.match(condition.id, /^[A-Za-z0-9.-]{1,64}$/);
+  const encounter = all.find((r) => r.resourceType === "Encounter")!;
+  assert.equal(encounter.reasonReference[0].reference, `Condition/${condition.id}`);
+});
+
+test("import: blood pressures pair by INSTANT, whatever the order or the time-zone spelling", () => {
+  // Two readings on one day: the second is diastolic-first and written with an offset that names the
+  // same instant as its systolic in UTC. Each pair must become its own panel with its own values.
+  const second = `
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="dia-2"/>
+      <code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>
+      <effectiveTime value='20251210130000-0500'/>
+      <value xsi:type="PQ" value="85" unit="mm[Hg]"/>
+    </observation></entry>
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="sys-2"/>
+      <code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>
+      <effectiveTime value='20251210180000'/>
+      <value xsi:type="PQ" value="145" unit="mm[Hg]"/>
+    </observation></entry>`;
+  const twoPairs = deckDocument.replace("    <entry><substanceAdministration", `${second}\n    <entry><substanceAdministration`);
+  assert.notEqual(twoPairs, deckDocument);
+  const { all, byId } = deckResources(twoPairs);
+  const panels = all.filter((r) => r.code?.coding?.[0]?.code === "85354-9");
+  assert.equal(panels.length, 2);
+  const values = (p: any) => p.component.map((c: any) => [c.code.coding[0].code, c.valueQuantity.value]);
+  assert.deepEqual(values(byId("sys-1")), [["8480-6", 130], ["8462-4", 60]]);
+  assert.deepEqual(values(byId("sys-2")), [["8480-6", 145], ["8462-4", 85]], "systolic first in the panel, from its own pair");
+  assert.equal(byId("sys-2")!.effectiveDateTime, "2025-12-10T18:00:00Z");
+  assert.equal(byId("dia-1"), undefined);
+  assert.equal(byId("dia-2"), undefined);
+  // Nothing else in the document was lost or duplicated by the splice.
+  for (const id of ["fobt-1", "sys-lone", "medorder-1", "noscreen-1", "enc-dx", "enc-dx-dx-1"]) assert.ok(byId(id), id);
 });

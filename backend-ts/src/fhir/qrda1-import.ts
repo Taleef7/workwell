@@ -244,9 +244,13 @@ function idOf(node: CdaNode, fallback: string): string {
  * (`CQMCommon.encounterDiagnosis`). Dropped, a patient whose history is an
  * encounter diagnosis looks like a new episode and enters the population (Cypress 2027 deck: 3 of 3
  * over-counts). The Condition carries what the entry says, the code and the rank, and nothing it does
- * not: an Encounter Diagnosis has no onset of its own, so none is given.
+ * not: an Encounter Diagnosis has no onset or verification status of its own, so neither is given.
+ *
+ * Condition ids are unique within the document even when a sender repeats an encounter id: the library
+ * resolves each reference with `singleton from`, which throws on two matches. `conditionIds` is the
+ * document's running set.
  */
-function encounterFrom(node: CdaNode, i: string): unknown[] {
+function encounterFrom(node: CdaNode, i: string, conditionIds: Set<string>): unknown[] {
   const id = idOf(node, `qrda1-encounter-${i}`);
   const diagnoses = descendants(node, "observation")
     .filter((n) => hasTemplate(n, T.encounterDiagnosis))
@@ -258,17 +262,25 @@ function encounterFrom(node: CdaNode, i: string): unknown[] {
       return { code, ...(Number.isInteger(rank) && rank > 0 ? { rank } : {}) };
     })
     .filter((d): d is { code: NonNullable<ReturnType<typeof concept>>; rank?: number } => d !== undefined);
-  const conditions = diagnoses.map((d, k) => ({
-    resourceType: "Condition",
-    id: `${id}-dx-${k + 1}`,
-    category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "encounter-diagnosis" }] }],
-    verificationStatus: { coding: [{ code: "confirmed" }] },
-    code: d.code,
-  }));
+  const conditions = diagnoses.map((d, k) => {
+    // A FHIR id is `[A-Za-z0-9.-]{1,64}`, and a `/` in it would also break the reference match. The
+    // fallback is built from the candidate key, which is unique within the document.
+    const preferred = `${id}-dx-${k + 1}`;
+    const conditionId =
+      /^[A-Za-z0-9.-]{1,64}$/.test(preferred) && !conditionIds.has(preferred) ? preferred : `qrda1-condition-${i}-dx-${k + 1}`;
+    conditionIds.add(conditionId);
+    return {
+      resourceType: "Condition",
+      id: conditionId,
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "encounter-diagnosis" }] }],
+      code: d.code,
+    };
+  });
   const encounter = encounterResource(node, id);
   if (conditions.length > 0) {
-    // Both links, because the libraries read both: `CQMCommon.encounterDiagnosis` (what CMS137 uses)
-    // follows `reasonReference`, while `PrincipalDiagnosis` reads `diagnosis` for its rank.
+    // `reasonReference` is what `CQMCommon.encounterDiagnosis` (CMS137's history) follows.
+    // `diagnosis` is where FHIR records an encounter diagnosis with its rank; no routed measure reads it
+    // today (`PrincipalDiagnosis` would also need a `use` the document does not state).
     encounter.reasonReference = conditions.map((c) => ({ reference: `Condition/${c.id}` }));
     encounter.diagnosis = conditions.map((c, k) => ({
       condition: { reference: `Condition/${c.id}` },
@@ -565,6 +577,8 @@ function deviceRequestFrom(node: CdaNode, i: string): unknown {
  * `isMedicationOrder` admits `active | completed`. An order imported as `active` would read as a
  * medication the patient is TAKING, and CMS125/CMS122's dementia-medication exclusion reads exactly
  * that. `completed` satisfies every order read (CMS2's follow-up, CMS137's treatment) and no active one.
+ * The order's own `<statusCode code="active"/>` is the template's fixed value for any order, not a
+ * statement about the medication, so it is deliberately not carried.
  */
 function medicationRequestFrom(node: CdaNode, i: string, status: "active" | "completed"): unknown {
   const material = descendants(node, "manufacturedMaterial")[0];
@@ -713,6 +727,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
   const { id: patientId, resource: patient } = patientFrom(root);
   const entries: Array<{ resource: unknown }> = [{ resource: patient }];
   const untranslatedTemplates: string[] = [];
+  const conditionIds = new Set<string>();
 
   childrenNamed(patientData, "entry").forEach((entry, i) => {
     // EVERY translatable datatype in the entry, not the first. A Result Organizer carrying two
@@ -750,7 +765,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
         continue;
       }
       const resource: unknown =
-        hasTemplate(candidate, T.encounterPerformed) ? encounterFrom(candidate, key)
+        hasTemplate(candidate, T.encounterPerformed) ? encounterFrom(candidate, key, conditionIds)
         : hasTemplate(candidate, T.diagnosis) ? conditionFrom(candidate, key)
         : hasTemplate(candidate, T.labPerformed) ? observationFrom(candidate, key, "laboratory")
         : hasTemplate(candidate, T.studyPerformed) ? observationFrom(candidate, key, "imaging")
