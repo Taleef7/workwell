@@ -200,6 +200,9 @@ jobs:
       PROD_DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       WORKWELL_AUTH_JWT_SECRET: ${{ secrets.WORKWELL_AUTH_JWT_SECRET_MAUI }}
+      # The pilot accounts' own PBKDF2 hash (auth/demo-users.ts): the demo password is printed in this
+      # public repo, so the pilot stack never uses it. Required; reconcile-maui-mieweb.yml MUST match.
+      WORKWELL_PILOT_PASSWORD_HASH: ${{ secrets.WORKWELL_PILOT_PASSWORD_HASH_MAUI }}
       # Optional (#623): where a failed or partly failed run's alert is POSTed (docs/DEPLOY.md, "Failed-run
       # alerts"). Inert when the secret is unset. The URL is the only credential, so it stays a secret.
       WORKWELL_ALERT_WEBHOOK_URL: ${{ secrets.WORKWELL_ALERT_WEBHOOK_URL }}
@@ -237,6 +240,7 @@ jobs:
           [ -z "$DATABASE_URL" ] && missing+=("DATABASE_URL_MAUI")
           [ -z "$OPENAI_API_KEY" ] && missing+=("OPENAI_API_KEY")
           [ -z "$WORKWELL_AUTH_JWT_SECRET" ] && missing+=("WORKWELL_AUTH_JWT_SECRET_MAUI")
+          [ -z "$WORKWELL_PILOT_PASSWORD_HASH" ] && missing+=("WORKWELL_PILOT_PASSWORD_HASH_MAUI")
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::Missing required secret(s): ${missing[*]}"
             exit 1
@@ -281,6 +285,7 @@ jobs:
               --arg database_url "$db_url" \
               --arg openai_api_key "$OPENAI_API_KEY" \
               --arg jwt_secret "$WORKWELL_AUTH_JWT_SECRET" \
+              --arg pilot_password_hash "$WORKWELL_PILOT_PASSWORD_HASH" \
               --arg frontend_url "$FRONTEND_URL" \
               --arg vsac_api_key "$WORKWELL_VSAC_API_KEY" \
               --arg bucket_name "$WORKWELL_BUCKET_S3_BUCKET" \
@@ -299,6 +304,7 @@ jobs:
                 {key: "WORKWELL_AUTH_COOKIE_SAME_SITE", value: "None"},
                 {key: "WORKWELL_AUTH_COOKIE_SECURE", value: "true"},
                 {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
+                {key: "WORKWELL_PILOT_PASSWORD_HASH", value: $pilot_password_hash},
                 {key: "WORKWELL_INSTANCE", value: "maui"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
