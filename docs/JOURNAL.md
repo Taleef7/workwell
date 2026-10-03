@@ -7,20 +7,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-02
 
-- **The screens say which logic runs, and that the rates are estimates.** The six routed measures run
-  CMS's FHIR drafts (`CMS125FHIR` v1.0.000 and so on, posted for public comment Jan–Feb 2026, derived
-  from the 2026 QDM measures), but the catalog showed `CMS125v14` as the policy chip, `v1.0` as the
-  version, and called the logic "published" (locked decision §4.3).
-  - `identity.executed` on the measure read models names the artifact from its manifest. The measures
-    grid shows `CMS125FHIR` "derived from CMS125v14" and version `1.0.000`; the measure page adds a
-    "Runs CMS125FHIR v1.0.000, a CMS FHIR draft…" line. The "MIPS 112 · CMS125" chip is unchanged.
-  - On the patient profile every rate screen says "WorkWell's estimate from CMS's FHIR logic. WebChart
-    calculates and submits the reported rate." TWH's measures are its own, so it says nothing.
-  - From 2027-01-01 the measure page says "Scored with the 2026 FHIR logic; 2027 logic not yet
-    available" (`logicVintage` on the programs summary), not only the run log.
-  - The four official-only descriptions now give the dated draft wording. The seed rewrites a stored
-    description that is exactly the old text, audited first under `MEASURE_SEED_SPEC_REFRESHED`; an
-    edited one is left alone.
+- **The screens name the logic that runs, and call the rates estimates.** The routed measures show
+  `CMS125FHIR` v1.0.000 (a CMS draft, derived from `CMS125v14`), not `CMS125v14`/`v1.0`/"published"
+  (§4.3). On the patient profile every rate screen says WebChart submits the reported rate, and a run
+  scored with last year's logic says so. Old descriptions are rewritten, audited first.
 - **Ingest no longer invents a visit for CMS125.** On a live WebChart run the enrollment roster stamped a
   CPT 99213 office visit on every listed patient, which put them in CMS125's initial population whether
   or not a visit happened. That was a made-up clinical fact on the live path, so it is gone, and cms125
