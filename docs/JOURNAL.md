@@ -9,8 +9,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 - **The QRDA I importer reads what the Cypress decks carry.** It now takes text results, a blood
   pressure's two halves paired into one panel, Medication Orders (as orders, never active medications),
-  an Assessment Not Performed with its reason, and encounter diagnoses (references survive the batch
-  merge). `scripts/cvu/bundle-agreement.ts` compares per patient against a Cypress bundle's own results.
+  an Assessment Not Performed with its reason, and encounter diagnoses. The batch merge keeps references
+  intact and states once a fact a person's duplicate documents repeat, so a copied visit is not counted
+  twice. `scripts/cvu/bundle-agreement.ts` compares per patient against a Cypress bundle's own results.
   - 2027 deck (bundle 2026.1.0), vendored drafts, as production runs them: CMS122 64/64, CMS125 155/155,
     CMS130 269/269, CMS137 36/36 (both rates), CMS2 375/379.
   - CMS165 is not reachable through the QRDA I route yet: it alone runs with profile tagging required,
