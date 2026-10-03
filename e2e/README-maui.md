@@ -11,7 +11,9 @@ cms2, cms130, cms165 and cms137 — labelled by MIPS Quality ID (for example
 
 ## Accounts
 
-All Maui accounts use the password `Workwell123!`:
+On a local or CI stack all Maui accounts use the demo password `Workwell123!`. The deployed pilot stack
+has its own password (`WORKWELL_PILOT_PASSWORD_HASH_MAUI`); a read-only run against it passes that password
+in `MAUI_E2E_PASSWORD`.
 
 | Email | Role |
 |---|---|

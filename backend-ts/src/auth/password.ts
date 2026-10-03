@@ -25,6 +25,19 @@ async function derive(password: string, salt: Uint8Array, iterations: number): P
   return new Uint8Array(bits);
 }
 
+/**
+ * Is `stored` a hash `verifyPassword` could accept, with at least the OWASP iteration floor? Checks the
+ * same shape `verifyPassword` parses, so a value it would reject is never accepted as configuration.
+ */
+export function isPasswordHash(stored: string): boolean {
+  const parts = stored.split("$");
+  if (parts.length !== 4 || parts[0] !== "pbkdf2") return false;
+  const iterations = Number(parts[1]);
+  if (!Number.isInteger(iterations) || iterations < ITERATIONS || iterations > 10_000_000) return false;
+  const b64 = /^[A-Za-z0-9_-]+$/;
+  return b64.test(parts[2]!) && b64.test(parts[3]!) && fromB64url(parts[2]!).length >= 8 && fromB64url(parts[3]!).length === KEY_LEN;
+}
+
 /** Hash a plaintext password into the portable `pbkdf2$…` storage string. */
 export async function hashPassword(password: string, saltOverride?: Uint8Array): Promise<string> {
   const salt = saltOverride ?? crypto.getRandomValues(new Uint8Array(SALT_LEN));

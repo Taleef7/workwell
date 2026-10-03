@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createAuthHandler, type RefreshTokenRevocation } from "./auth.ts";
 import { createJwt } from "../auth/jwt.ts";
+import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
 
 const SECRET = "auth-route-test-secret";
 const handle = createAuthHandler({ secret: SECRET, cookieSameSite: "None", cookieSecure: true });
@@ -176,6 +177,60 @@ test("an access token presented as a refresh cookie is rejected → 401", async 
   assert.equal(res?.status, 401);
 });
 
+test("a session that began under another password cannot refresh: the credential version must be current", async () => {
+  // A signed, unexpired refresh token whose credential version is stale (the password changed since) or
+  // absent (issued before versions existed, e.g. a pilot session opened with the public demo password)
+  // must not renew itself, with or without a family.
+  const { store, map } = memRevocation();
+  const tracked = createAuthHandler({ secret: SECRET, revocation: store });
+  const refresh = (h: typeof handle, token: string) =>
+    h(new Request("http://x/api/auth/refresh", { method: "POST", headers: { cookie: `refresh_token=${token}` } }));
+  map.set("fam-stale", "jti-1");
+  for (const [h, token, label] of [
+    [handle, jwt.issueRefreshToken("cm@workwell.dev"), "no version, stateless"],
+    [handle, jwt.issueRefreshToken("cm@workwell.dev", { cv: "stale-version-00" }), "stale version, stateless"],
+    [tracked, jwt.issueRefreshToken("cm@workwell.dev", { jti: "jti-1", fam: "fam-stale" }), "no version, live family"],
+    [tracked, jwt.issueRefreshToken("cm@workwell.dev", { jti: "jti-1", fam: "fam-stale", cv: "stale-version-00" }), "stale version, live family"],
+  ] as const) {
+    assert.equal((await refresh(h, token))?.status, 401, label);
+  }
+  assert.equal(map.get("fam-stale"), "jti-1", "refusing is not a store change: the family is left as it was");
+});
+
+test("a login's tokens carry the account's credential version and keep refreshing", async () => {
+  const { store } = memRevocation();
+  const tracked = createAuthHandler({ secret: SECRET, revocation: store });
+  const p = (path: string, cookie?: string) =>
+    tracked(new Request(`http://x${path}`, { method: "POST", headers: cookie ? { cookie: `refresh_token=${cookie}` } : {}, body: path.endsWith("login") ? JSON.stringify({ email: "cm@workwell.dev", password: "Workwell123!" }) : undefined }));
+  let token = cookieOf(await p("/api/auth/login"));
+  const expected = credentialVersion(findDemoUser("cm@workwell.dev")!);
+  for (let i = 0; i < 3; i++) {
+    assert.equal(jwt.readRefreshToken(token)?.cv, expected, `token ${i} carries the current version`);
+    const res = await p("/api/auth/refresh", token);
+    assert.equal(res?.status, 200, `refresh ${i + 1}`);
+    token = cookieOf(res);
+  }
+});
+
+test("a login whose audit write failed still issues a refreshable token, version included", async () => {
+  // The family is not opened when its AUTH_LOGIN event cannot be written; the untracked token issued
+  // instead must still carry the credential version, or the user is signed out at the first refresh.
+  const { store } = memRevocation();
+  const h = createAuthHandler({ secret: SECRET, revocation: store, audit: async () => { throw new Error("ledger down"); } });
+  const original = console.warn;
+  console.warn = () => {};
+  try {
+    const login = await h(new Request("http://x/api/auth/login", { method: "POST", body: JSON.stringify({ email: "cm@workwell.dev", password: "Workwell123!" }) }));
+    const token = cookieOf(login);
+    assert.equal(jwt.readRefreshToken(token)?.fam, undefined, "untracked: no family was opened");
+    assert.equal(jwt.readRefreshToken(token)?.cv, credentialVersion(findDemoUser("cm@workwell.dev")!));
+    const res = await h(new Request("http://x/api/auth/refresh", { method: "POST", headers: { cookie: `refresh_token=${token}` } }));
+    assert.equal(res?.status, 200);
+  } finally {
+    console.warn = original;
+  }
+});
+
 test("logout clears the refresh cookie (Max-Age=0)", async () => {
   const res = await post("/api/auth/logout");
   assert.equal(res?.status, 204);
@@ -184,6 +239,39 @@ test("logout clears the refresh cookie (Max-Age=0)", async () => {
 
 // ---- Deployment-profile rule (#520) --------------------------------------------------------------
 import { runProfileChild } from "../test-support/run-profile-child.ts";
+import { hashPassword } from "../auth/password.ts";
+
+test("credentialVersion follows the stored hash, and only the hash", () => {
+  const user = (email: string, passwordHash: string) => ({ email, role: "ROLE_CASE_MANAGER", passwordHash });
+  const a = "pbkdf2$210000$aaaaaaaaaaaaaaaaaaaaaa$" + "A".repeat(43);
+  const b = "pbkdf2$210000$bbbbbbbbbbbbbbbbbbbbbb$" + "B".repeat(43);
+  assert.notEqual(credentialVersion(user("x@maui.workwell.dev", a)), credentialVersion(user("x@maui.workwell.dev", b)), "a new hash, a new version");
+  assert.equal(credentialVersion(user("x@maui.workwell.dev", a)), credentialVersion(user("y@maui.workwell.dev", a)), "not the email");
+  assert.equal(credentialVersion(user("x@maui.workwell.dev", a)), credentialVersion(user("x@maui.workwell.dev", a)), "deterministic");
+});
+
+test("a rotated pilot password ends a session opened under the old one, across process restarts", async () => {
+  // Process 1 signs in under hash A and hands its refresh cookie on. A restart with the SAME hash still
+  // honours it (the version is a pure function of the hash); a restart with a NEW hash refuses it.
+  const [hashA, hashB] = [await hashPassword("old-pilot-password"), await hashPassword("new-pilot-password")];
+  const handler = `
+    import { createAuthHandler } from "./src/routes/auth.ts";
+    const h = createAuthHandler({ secret: "r".repeat(40) });
+    const post = (path, init) => h(new Request("http://x" + path, { method: "POST", ...init }));
+  `;
+  const login = runProfileChild("maui", `${handler}
+    const res = await post("/api/auth/login", { body: JSON.stringify({ email: "quality-lead@maui.workwell.dev", password: "old-pilot-password" }) });
+    console.log(JSON.stringify({ status: res.status, cookie: (res.headers.get("set-cookie") ?? "").split(";")[0] }));
+  `, { WORKWELL_PILOT_PASSWORD_HASH: hashA }) as { status: number; cookie: string };
+  assert.equal(login.status, 200);
+  const refreshUnder = (hash: string) =>
+    (runProfileChild("maui", `${handler}
+      const res = await post("/api/auth/refresh", { headers: { cookie: ${JSON.stringify(login.cookie)} } });
+      console.log(JSON.stringify({ status: res.status }));
+    `, { WORKWELL_PILOT_PASSWORD_HASH: hash }) as { status: number }).status;
+  assert.equal(refreshUnder(hashA), 200, "same password after a restart: the session continues");
+  assert.equal(refreshUnder(hashB), 401, "password rotated: the old session cannot refresh");
+});
 
 const loginScript = `
   // runProfileChild parses the whole stdout, so swallow the worker boot log (not the JSON result).

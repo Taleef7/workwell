@@ -474,6 +474,18 @@ test("#623: the pilot's failed-run alerts reach the webhook, from a deploy and f
   }
 });
 
+test("the pilot stack's own password hash reaches the container, from a deploy and from a self-heal", () => {
+  // The demo password is printed in this public repo. A container recreated without this key would fail
+  // closed (pilot sign-in disabled), so both Maui files must bind it from the secret and ship it.
+  const key = "WORKWELL_PILOT_PASSWORD_HASH";
+  for (const workflow of ["deploy-maui-mieweb.yml", "reconcile-maui-mieweb.yml"]) {
+    assert.match(jobEnvValue(workflow, key) ?? "", /secrets\.WORKWELL_PILOT_PASSWORD_HASH_MAUI\b/, `${workflow} binds no ${key}`);
+    const argName = shippedFromArg(workflow, key);
+    assert.ok(argName, `${workflow} binds ${key} but never puts it in the container env array`);
+    assert.equal(argDeclaration(workflow, argName!.slice(1)), key, `${workflow} ships ${key} from a jq arg not declared from $${key}`);
+  }
+});
+
 test("#473: the TWH evidence bucket is the R2 one, addressed path-style", () => {
   // The AWS bucket these replaced was on an account that expired 2026-08-24; S3 answers
   // `AllAccessDisabled` for it and every key it ever issued is dead. Naming the live values here

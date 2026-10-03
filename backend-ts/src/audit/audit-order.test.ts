@@ -29,6 +29,7 @@ import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus } fro
 import { attachValueSet, detachValueSet, createTerminologyMapping } from "../measure/value-set-governance.ts";
 import { createAuthHandler } from "../routes/auth.ts";
 import { createJwt } from "../auth/jwt.ts";
+import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
 
 /** A ledger that records what it was asked to append, in order. */
 function ledger() {
@@ -345,7 +346,11 @@ test("auth login families (#688): each event survives a failed store write", asy
 
   // A tracked token whose jti is not the current one is a replay; its revocation fails, the event stays.
   const jwt = createJwt({ secret: "audit-order-auth" });
-  const replayed = jwt.issueRefreshToken("cm@workwell.dev", { jti: "jti-old", fam: "fam-1" });
+  const replayed = jwt.issueRefreshToken("cm@workwell.dev", {
+    jti: "jti-old",
+    fam: "fam-1",
+    cv: credentialVersion(findDemoUser("cm@workwell.dev")!),
+  });
   assert.equal((await post("/api/auth/refresh", replayed))?.status, 401);
   assert.equal((await post("/api/auth/logout", replayed))?.status, 204);
   assert.deepEqual(events, ["AUTH_LOGIN", "AUTH_REFRESH_REUSE_DETECTED", "AUTH_LOGOUT"]);

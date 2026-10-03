@@ -7,6 +7,15 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-02
 
+- **The pilot stack has its own password.** The pilot accounts shared the demo password, which is printed
+  in this public repository. The Maui deploy and self-heal now require `WORKWELL_PILOT_PASSWORD_HASH_MAUI`
+  and pass it to the backend; the pilot accounts sign in only with that password. Local runs and CI keep
+  the demo password. A malformed secret, or a missing one on the deployed stack, disables pilot sign-in
+  rather than falling back to the public password, and a test pins that both workflows ship it.
+  - The public password is refused for any account with its own hash, however that hash was salted.
+  - Refresh tokens carry a credential version (a digest of the account's hash). A password change, and
+    this rollout, ends every older session within one 15-minute access token: a stale or missing
+    version cannot refresh. Every user signs in once after the deploy.
 - **A failed evaluation no longer opens care gaps.** When the engine threw (one subject, or a whole
   official batch), the outcome was stored as MISSING_DATA, and the case logic then treated that as a
   finding: it opened a case for a patient with none, reopened a resolved one, and rolled an old cycle's
