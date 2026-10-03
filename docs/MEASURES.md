@@ -559,11 +559,11 @@ Each outcome evidence payload includes:
   The official measure is a **faithful official-SUBSET** — `measures/cms122_official.cql`,
   `using FHIR '4.0.1'` in the proven value-set-retrieve style, driven by the VSAC OID value sets and
   compiled to committed ELM (`DiabetesHbA1cPoorControlOfficialCQL-1.0.0`) — **not** the literal
-  multi-library QICore artifact. A **compile-feasibility spike (2026-07-05)** proved the literal CMS122v14
-  QICore CQL is un-compilable under the pinned JVM-free translator `@cqframework/cql` 4.0.0-beta.1 (its
-  modelinfo loader can't resolve the cross-model `FHIR.*`/`USCore.*` type refs, so the whole QICore model
-  fails to load) and that the runtime engine links no multi-library include graph; the literal path is to
-  be revisited when the translator ships a stable multi-model release. The diff is **descriptive only
+  multi-library QICore artifact. A compile-feasibility spike (2026-07-05) judged the literal QICore CQL
+  uncompilable under the pinned `@cqframework/cql` 4.0.0-beta.1. **That was wrong (2026-10-03):** given
+  cqframework's QICore 6.0.0 model info, the same translator compiles all six pilot measures, and
+  `pnpm test:compiled-cases` runs CMS's decks on that ELM with results identical to CMS's own (334 cases,
+  0 of 58,908 statement results differ). The literal tier below still runs CMS's vendored ELM. The diff is **descriptive only
   (ADR-008)** — it writes nothing and never sets an `Outcome Status`; WorkWell's cms122 outcomes stay
   byte-identical (the enrichment is harness-local — it appends codings to a copy for the diff harness, it
   is not a change to the live `fhir-bundle-builder`). The **GMI numerator alternative is now modeled**
@@ -579,8 +579,7 @@ Each outcome evidence payload includes:
   clause — ADR-026. Generalized 2026-07-27, ADR-039.)** The fidelity diff has a **three-tier ladder** —
   `literal → subset → estimate` — surfaced by an additive `mode` field in the response. The **literal**
   tier executes the *actual official multi-library QICore artifact* of any vendored measure (MADiE FHIR
-  export, `using QICore '6.0.0'` — the exact CQL ADR-024 proved un-compilable under the pinned JS
-  translator) via MITRE's **`fqm-execution`** over the **pre-compiled ELM** shipped inside the bundle's
+  export, `using QICore '6.0.0'`) via MITRE's **`fqm-execution`** over the **pre-compiled ELM** shipped inside the bundle's
   `Library.content` (`application/elm+json`) — **no translation happens**. Bundles are vendored with
   provenance under `backend-ts/measures/official/<catalogId>/` (cms122 + cms125 today); value sets come
   from **the artifact's own terminology sidecar** (ADR-036) with no fallback to the `resolve-valuesets`

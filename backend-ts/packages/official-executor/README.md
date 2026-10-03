@@ -3,9 +3,11 @@
 Executes **official published eCQM artifacts** — the MADiE/eCQI QICore FHIR bundles CMS ships — from the
 **pre-compiled ELM** inside `Library.content`, via MITRE's [`fqm-execution`](https://github.com/projecttacoma/fqm-execution).
 
-Nothing is translated. ADR-024 established that the literal multi-library QICore CQL is not compilable
-under the pinned JS translator; it does not need to be, because the published bundles already carry
-`application/elm+json`, and fqm-execution runs that ELM on the same `cql-execution` + `cql-exec-fhir`
+Nothing is translated here: the bundles already carry `application/elm+json`, and fqm-execution runs
+that ELM. (ADR-024 judged the QICore CQL uncompilable under the pinned JS translator; given
+cqframework's QICore 6.0.0 model info it compiles, and `pnpm test:compiled-cases` shows our ELM runs
+CMS's decks identically. That compile path is for WorkWell's own translations; this package runs CMS's
+ELM.) fqm-execution runs it on the same `cql-execution` + `cql-exec-fhir`
 runtime this repo already depends on.
 
 > Nicole's correction (2026-07-24): *"if the CQL exists, use it."* For an official CMS measure, running

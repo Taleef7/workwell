@@ -5,6 +5,19 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-03
+
+- **WorkWell can compile CMS's QI-Core CQL, with results identical to CMS's own ELM.** The 2027
+  translations need a compile path, and the docs said CMS's QI-Core CQL was uncompilable under our pinned
+  translator (a 2026-07-05 spike). It compiles: the same `@cqframework/cql@4.0.0-beta.1` needs only
+  cqframework's QICore 6.0.0 model info (Apache-2.0, now in `measures/derived/_modelinfo/`, hash-checked)
+  and CMS's recorded options. `pnpm test:compiled-cases` compiles the six pilot measures from CMS's CQL
+  and runs CMS's MADiE decks on our ELM and on CMS's: 334/334 cases agree on every rate and stratifier,
+  0 of 58,908 per-statement results differ, and a deliberately broken copy moves 40 cases (proof it runs
+  our ELM). It is a CI step in the official-cases job, and it needs no VSAC credential. No dependency
+  changed, and no runtime behaviour changed. The five places that repeated the "uncompilable" claim are
+  corrected.
+
 ## 2026-10-02
 
 - **The measure page's top label is never a QDM version neither engine ran.** Checked live: TWH's cms125

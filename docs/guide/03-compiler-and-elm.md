@@ -208,9 +208,12 @@ first way.
 We use that property directly, and bluntly: **we do not compile CMS's CQL. We take their
 already-compiled representation and throw their source away.** A CMS bundle carries the logic in
 three forms; our vendoring step keeps only the ELM and drops the CQL text
-([chapter 4](04-engine-and-routing.md)). An earlier attempt went the other way — re-running the
-frontend over their source — and it was intractable under the pinned translator (ADR-024). Taking
-the representation instead is the whole point of the representation existing.
+([chapter 4](04-engine-and-routing.md)). Taking the representation is the whole point of the
+representation existing. Compiling their source is possible too: given cqframework's QICore model
+info, the same translator compiles CMS's CQL, and `pnpm test:compiled-cases` shows that ELM gives
+results identical to CMS's on their test decks (an early spike, ADR-024, had judged it intractable).
+That path exists for WorkWell's own translations of logic CMS has not published; CMS's measures
+still run from CMS's ELM.
 
 **What kind of intermediate representation.** The answer constrains what can be done with it. The
 29 node types include `If`, `Query`, `And`, `Or`, `Exists`, `Property` and `Retrieve`. What is

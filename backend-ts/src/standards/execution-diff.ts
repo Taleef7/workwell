@@ -53,7 +53,7 @@ type Row = { subjectId: string; status: string; runId: string; runStartedAt: str
 const DISCLAIMER =
   "Real execution diff: an official-SUBSET CMS122 (faithful-but-simplified transcription, FHIR-model, " +
   "driven by the imported VSAC value sets) evaluated per subject against WorkWell's authored measure. " +
-  "Not the literal multi-library QICore artifact (un-compilable under the pinned JVM-free translator). " +
+  "Not the literal multi-library QICore artifact, which runs from its own vendored ELM. " +
   "Descriptive only — CQL Outcome Status remains the sole compliance authority (ADR-008).";
 
 const def = (evidence: { expressionResults: Array<{ define: string; result: unknown }> }, name: string): unknown =>
