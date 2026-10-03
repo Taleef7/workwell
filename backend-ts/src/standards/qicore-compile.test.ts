@@ -72,6 +72,12 @@ test("a compile whose recorded options are not CMS's is refused", () => {
   assert.throws(() => assertAppliedOptions({ library: {} }, "All", "L"), /not CMS's/);
 });
 
+test("every signature level the type allows compiles, None (ordinal 0) included", () => {
+  for (const signatureLevel of ["None", "Differing", "Overloads", "All"] as const) {
+    assert.equal(compileLibrarySet([{ name: "TinyQICore", version: "0.0.1", cql: TINY }], { modelInfos: models, signatureLevel }).length, 1, signatureLevel);
+  }
+});
+
 test("a library whose CQL declares another identity is refused", () => {
   assert.throws(() => compileLibrarySet([{ name: "TinyQICore", version: "0.0.2", cql: TINY }], { modelInfos: models }), /compiled to TinyQICore 0\.0\.1/);
 });

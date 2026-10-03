@@ -190,7 +190,8 @@ export function compileLibrarySet(sources: readonly LibrarySource[], options: Co
   const modelInfos = options.modelInfos ?? loadQiCoreModelInfos();
   const signatureName = options.signatureLevel ?? CMS_TRANSLATOR_OPTIONS.signatureLevel;
   const signature = LibraryBuilder.SignatureLevel[signatureName];
-  if (!signature) throw new Error(`unknown signature level ${options.signatureLevel}`);
+  // `=== undefined`, not falsiness: None is ordinal 0, and a build that exposed ordinals would make it falsy.
+  if (signature === undefined) throw new Error(`unknown signature level ${options.signatureLevel}`);
   const knownWarnings = options.knownWarnings ?? KNOWN_WARNINGS;
 
   const manager = (): unknown => {
