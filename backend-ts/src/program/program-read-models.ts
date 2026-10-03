@@ -97,6 +97,12 @@ export interface ProgramSummary {
    * run scored by an artifact other than the one vendored now (its declared period is not on hand).
    */
   logicVintage: OfficialLogicVintage | null;
+  /**
+   * True when the counts include the generated scale tenant's, which the AUTHORED engine scored
+   * (`foldScaleCounts`). The numbers are then not one official artifact's, so no screen may label
+   * them with one, whatever `measureRate` (the live run's own evidence) says.
+   */
+  includesAuthoredScaleCounts: boolean;
 }
 
 export interface ProgramFilters {
@@ -526,6 +532,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       measurementYear: null,
       asOf: null,
       logicVintage: null,
+      includesAuthoredScaleCounts: false,
     };
   });
 
@@ -625,6 +632,7 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
     s.totalEvaluated = baseTotal + groups.reduce((a, g) => a + g.count, 0);
     s.denominator = s.totalEvaluated - s.excluded - s.notInPopulation;
     s.complianceRate = complianceRateOf(s);
+    s.includesAuthoredScaleCounts = true;
     if (tenant === SCALE_TENANT_ID) s.latestRunId = runId;
   }
 }

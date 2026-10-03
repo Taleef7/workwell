@@ -62,6 +62,8 @@ export type ProgramSummary = {
   asOf?: string | null;
   /** Set when the latest run scored a year its official artifact was not written for (2027 with 2026 logic). */
   logicVintage?: { artifactYears: string; measurementYear: number; note: string } | null;
+  /** The counts include the generated scale tenant's, scored by the authored engine: label no artifact. */
+  includesAuthoredScaleCounts?: boolean;
 };
 
 export type TopDrivers = {

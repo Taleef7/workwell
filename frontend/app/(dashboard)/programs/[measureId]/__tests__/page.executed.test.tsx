@@ -115,6 +115,15 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     expect(screen.getByRole("cell", { name: "v1.0" })).toBeInTheDocument();
   });
 
+  it("counts that fold in the authored scale tenant's are not labelled with the live run's artifact", async () => {
+    const base = program();
+    mockApi({ summary: program({ includesAuthoredScaleCounts: true, measureRate: { ...base.measureRate, official: { ecqmId: "125FHIR", version: "1.0.000" } } }) });
+    render(<ProgramDetailPage />);
+    await screen.findByTestId("executed-logic");
+    expect(screen.getByText(/^Version v1\.0/)).toBeInTheDocument();
+    expect(screen.queryByText("CMS125FHIR")).toBeNull();
+  });
+
   it("an authored measure keeps its catalog version and shows no executed-logic line", async () => {
     mockApi({ executed: false });
     render(<ProgramDetailPage />);
