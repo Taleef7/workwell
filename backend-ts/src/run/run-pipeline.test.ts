@@ -1122,7 +1122,7 @@ test("an evaluation failure never opens, reopens or updates a case", async () =>
     assert.equal(outcomes.length, 3, "the failures are still recorded");
     const logs = await runStore.listLogs(res.runId, 200);
     assert.ok(
-      logs.some((l) => l.level === "WARN" && /3 evaluation\(s\) failed; their cases were left untouched/.test(l.message)),
+      logs.some((l) => l.level === "WARN" && /3 evaluation attempt\(s\) failed.*3 \(subject, measure\) pair\(s\) with no successful answer/.test(l.message)),
       "the run says how many failures it left alone",
     );
   } finally {

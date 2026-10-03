@@ -1375,13 +1375,18 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     }
   }
 
-  if (failedEvaluations.size > 0 && deps.caseStore) {
+  if (failures > 0 && deps.caseStore) {
+    // Counted per attempt, and "untouched" only for the (subject, measure) pairs with no successful answer:
+    // a duplicate subject (see the de-dupe above) can fail once and succeed once, and the success still
+    // decides that case.
+    const untouched = [...failedEvaluations].filter((key) => !answeredEvaluations.has(key)).length;
     await deps.runStore
       .appendLog(
         runId,
         "WARN",
-        `${failedEvaluations.size} evaluation(s) failed; their cases were left untouched (no case opened, ` +
-          `reopened, updated or rolled over). The failures are recorded as MISSING_DATA with the error.`,
+        `${failures} evaluation attempt(s) failed and are recorded as MISSING_DATA with the error; ` +
+          `${untouched} (subject, measure) pair(s) with no successful answer had their cases left untouched ` +
+          `(no case opened, reopened, updated or rolled over).`,
       )
       .catch(() => {});
   }
