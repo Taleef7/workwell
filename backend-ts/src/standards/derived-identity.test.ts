@@ -121,7 +121,8 @@ test("a library WorkWell changed carries WorkWell identity in every field, not j
   hospice["name"] = "WorkWellHospice2027";
   hospice["version"] = "ww-2027.1";
   const renamed = problems(b, notUnchanged);
-  expect(renamed, new RegExp(`WorkWellHospice2027\\|ww-2027\\.1's ELM is identified as 'Hospice\\|${cmsVersion.replace(/\./g, "\\.")}'`));
+  const sentence = `changed library WorkWellHospice2027|ww-2027.1's ELM is identified as 'Hospice|${cmsVersion}'`;
+  assert.ok(renamed.some((p) => p.includes(sentence)), `expected "${sentence}" in ${JSON.stringify(renamed)}`);
   assert.ok(!renamed.some((p) => /keeps CMS's library name|not a ww- version/.test(p)), JSON.stringify(renamed));
 
   // Identified as itself all the way down: nothing left to refuse about that library.
