@@ -199,7 +199,7 @@ export function mergeDocuments(
       }
     }
   }
-  // The production batch route's merge: namespaced ids, references kept intact, repeated facts once.
+  // The production batch route's merge: namespaced ids, references kept intact, a repeated source entry once.
   const entries: Array<{ resource: unknown }> = mergeMemberResources(
     docs.map((doc, index) => ({
       index,
