@@ -12,6 +12,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   and pass it to the backend; the pilot accounts sign in only with that password. Local runs and CI keep
   the demo password. A malformed secret, or a missing one on the deployed stack, disables pilot sign-in
   rather than falling back to the public password, and a test pins that both workflows ship it.
+  - The public password is refused for any account with its own hash, however that hash was salted.
+  - Refresh tokens carry a credential version (a digest of the account's hash). A password change, and
+    this rollout, ends every older session within one 15-minute access token: a stale or missing
+    version cannot refresh. Every user signs in once after the deploy.
 - **Ingest no longer invents a visit for CMS125.** On a live WebChart run the enrollment roster stamped a
   CPT 99213 office visit on every listed patient, which put them in CMS125's initial population whether
   or not a visit happened. That was a made-up clinical fact on the live path, so it is gone, and cms125
