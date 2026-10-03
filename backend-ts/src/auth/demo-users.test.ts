@@ -112,6 +112,13 @@ test("on the deployed pilot stack every pilot account takes the stack's password
     assert.equal(withHash.out[u.email]?.demo, null, `${u.email} refuses the password printed in this repo`);
   }
 
+  // An operator who hashes the PUBLIC password afresh gets a new salt, so no string comparison with the
+  // demo hash can catch it; the public password is refused at sign-in instead.
+  const publicRehashed = results({ WORKWELL_PILOT_PASSWORD_HASH: await hashPassword("Workwell123!") });
+  for (const u of pilots) {
+    assert.equal(publicRehashed.out[u.email]?.demo, null, `${u.email} refuses the public password even under a fresh salt`);
+  }
+
   const malformed = results({ WORKWELL_PILOT_PASSWORD_HASH: "not-a-hash" });
   for (const u of pilots) assert.deepEqual(malformed.out[u.email], { own: null, demo: null }, `${u.email} with a malformed secret`);
   assert.match(malformed.stderr, /pilot sign-in is disabled/);

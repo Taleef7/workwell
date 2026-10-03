@@ -22,6 +22,7 @@ export interface DemoUser {
 
 // PBKDF2(Workwell123!) — all four demo accounts share the documented demo password,
 // exactly as the Java seed shares one bcrypt hash across the four rows.
+const DEMO_PASSWORD = "Workwell123!";
 const DEMO_PASSWORD_HASH = "pbkdf2$210000$S7uwh-rbSLMcbPEoD7t9xQ$XVjif5zI_6tzoc7-h9MZCCSowCEI34RQOtLzCrtWyB4";
 
 /** A stored value no password verifies against: `verifyPassword` rejects anything not in its format. */
@@ -139,5 +140,9 @@ export function resolveAssignable(email: string, profileId = DEPLOYMENT_PROFILE.
 export async function authenticate(email: string, password: string): Promise<DemoUser | null> {
   const user = findDemoUser(email);
   if (!user) return null;
+  // An account that carries its own hash never accepts the public demo password, however that hash was
+  // produced: a fresh PBKDF2 of `Workwell123!` has its own salt, so no comparison of hash strings can
+  // catch it. (The demo hash pasted verbatim is refused earlier, in `pilotPasswordHash`.)
+  if (user.passwordHash !== DEMO_PASSWORD_HASH && password === DEMO_PASSWORD) return null;
   return (await verifyPassword(password, user.passwordHash)) ? user : null;
 }
