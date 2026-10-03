@@ -95,9 +95,14 @@ const T = {
   interventionOrder: "2.16.840.1.113883.10.20.24.3.31",
   deviceOrder: "2.16.840.1.113883.10.20.24.3.9",
   medicationActive: "2.16.840.1.113883.10.20.24.3.41",
+  medicationOrder: "2.16.840.1.113883.10.20.24.3.47",
   assessmentPerformed: "2.16.840.1.113883.10.20.24.3.144",
+  physicalExamPerformed: "2.16.840.1.113883.10.20.24.3.59",
   symptom: "2.16.840.1.113883.10.20.24.3.136",
   result: "2.16.840.1.113883.10.20.24.3.87",
+  encounterDiagnosis: "2.16.840.1.113883.10.20.24.3.168",
+  rank: "2.16.840.1.113883.10.20.24.3.166",
+  negationRationale: "2.16.840.1.113883.10.20.24.3.88",
   patientDataSection: "2.16.840.1.113883.10.20.24.2.1",
   measureSection: "2.16.840.1.113883.10.20.24.2.2",
   eMeasureReference: "2.16.840.1.113883.10.20.24.3.97",
@@ -113,9 +118,10 @@ const T = {
  */
 const ATTRIBUTE_TEMPLATES = new Set([
   "2.16.840.1.113883.10.20.24.3.155", // Author dateTime
-  "2.16.840.1.113883.10.20.24.3.166", // Rank
+  T.rank,
   "2.16.840.1.113883.10.20.24.3.162", // Participant
-  "2.16.840.1.113883.10.20.24.3.168", // Encounter Diagnosis
+  T.encounterDiagnosis,
+  T.negationRationale,
   "2.16.840.1.113883.10.20.24.3.137", // Diagnosis Concern Act (wrapper)
   "2.16.840.1.113883.10.20.24.3.138", // Symptom Concern Act (wrapper)
   "2.16.840.1.113883.10.20.24.3.130", // Device Order Act (wrapper; the datatype is on the <supply>)
@@ -230,7 +236,49 @@ function idOf(node: CdaNode, fallback: string): string {
   return own?.attrs.extension ?? fallback;
 }
 
-function encounterFrom(node: CdaNode, i: string): unknown {
+/**
+ * An Encounter, Performed → the Encounter, plus one Condition per QDM Encounter Diagnosis it carries.
+ *
+ * QI-Core links an encounter to its diagnoses by reference to `encounter-diagnosis` Conditions, and
+ * that link is how CMS137 finds an earlier substance-use diagnosis made at a visit
+ * (`CQMCommon.encounterDiagnosis`). Dropped, a patient whose history is an
+ * encounter diagnosis looks like a new episode and enters the population (Cypress 2027 deck: 3 of 3
+ * over-counts). The Condition carries what the entry says, the code and the rank, and nothing it does
+ * not: an Encounter Diagnosis has no onset of its own, so none is given.
+ */
+function encounterFrom(node: CdaNode, i: string): unknown[] {
+  const id = idOf(node, `qrda1-encounter-${i}`);
+  const diagnoses = descendants(node, "observation")
+    .filter((n) => hasTemplate(n, T.encounterDiagnosis))
+    .map((n) => {
+      const code = concept(child(n, "value"));
+      if (!code) return undefined;
+      const rankNode = descendants(n, "observation").find((r) => hasTemplate(r, T.rank));
+      const rank = Number(child(rankNode, "value")?.attrs.value);
+      return { code, ...(Number.isInteger(rank) && rank > 0 ? { rank } : {}) };
+    })
+    .filter((d): d is { code: NonNullable<ReturnType<typeof concept>>; rank?: number } => d !== undefined);
+  const conditions = diagnoses.map((d, k) => ({
+    resourceType: "Condition",
+    id: `${id}-dx-${k + 1}`,
+    category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "encounter-diagnosis" }] }],
+    verificationStatus: { coding: [{ code: "confirmed" }] },
+    code: d.code,
+  }));
+  const encounter = encounterResource(node, id);
+  if (conditions.length > 0) {
+    // Both links, because the libraries read both: `CQMCommon.encounterDiagnosis` (what CMS137 uses)
+    // follows `reasonReference`, while `PrincipalDiagnosis` reads `diagnosis` for its rank.
+    encounter.reasonReference = conditions.map((c) => ({ reference: `Condition/${c.id}` }));
+    encounter.diagnosis = conditions.map((c, k) => ({
+      condition: { reference: `Condition/${c.id}` },
+      ...(diagnoses[k]!.rank !== undefined ? { rank: diagnoses[k]!.rank } : {}),
+    }));
+  }
+  return [encounter, ...conditions];
+}
+
+function encounterResource(node: CdaNode, id: string): Record<string, unknown> {
   const t = times(child(node, "effectiveTime"));
   const type = concept(child(node, "code"));
   // QDM's Discharge Disposition, which the Hospice library reads as
@@ -242,7 +290,7 @@ function encounterFrom(node: CdaNode, i: string): unknown {
   const dischargeDisposition = concept(child(node, "dischargeDispositionCode"));
   return {
     resourceType: "Encounter",
-    id: idOf(node, `qrda1-encounter-${i}`),
+    id,
     status: "finished",
     ...(type ? { type: [type] } : {}),
     ...(dischargeDisposition ? { hospitalization: { dischargeDisposition } } : {}),
@@ -310,6 +358,10 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
     ? { value: Number(valueNode.attrs.value), ...(valueNode.attrs.unit ? { unit: valueNode.attrs.unit } : {}) }
     : undefined;
   const coded = valueNode?.attrs["xsi:type"] === "CD" ? concept(valueNode) : undefined;
+  // A result written as text. CMS130 asks only that a stool test HAS a result (`value is not null`), and
+  // Cypress writes those results as `<value xsi:type="ST">Negative</value>`: dropped, 12 of 16 of its
+  // numerator patients read as unscreened.
+  const text = valueNode?.attrs["xsi:type"] === "ST" && valueNode.text ? valueNode.text : undefined;
   // An interval stays an interval. Collapsing `<low>`+`<high>` to a single `effectiveDateTime` drops the
   // end, and a lab or study whose relevant period OVERLAPS a measurement window is exactly the case
   // temporal CQL predicates turn on (Codex, #362).
@@ -330,7 +382,104 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
     ...when,
     ...(quantity && Number.isFinite(quantity.value) ? { valueQuantity: quantity } : {}),
     ...(coded ? { valueCodeableConcept: coded } : {}),
+    ...(text ? { valueString: text } : {}),
   };
+}
+
+const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+const QICORE_NOT_DONE_REASON = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-notDoneReason";
+
+/**
+ * QDM Assessment, Not Performed (an Assessment, Performed with `negationInd="true"` and a Negation
+ * Rationale) → the QI-Core shape for "not done, for this reason": an Observation with `status:
+ * cancelled`, the reason in the `qicore-notDoneReason` extension, and `issued` from the Author dateTime.
+ * That is exactly what CMS2's denominator exception retrieves (`qicore-observationcancelled`), and
+ * every positive screening read in that measure admits only `final | amended | corrected`, so a
+ * cancelled Observation can never count as a screening that happened.
+ *
+ * Imported only when the source names both the assessment and the reason. A negation stated against a
+ * whole value set (`sdtc:valueSet` with no code) or with no reason stays untranslated: there is nothing
+ * concrete to put in `code`, and a reasonless "not done" is not an exception.
+ */
+function assessmentNotDoneFrom(node: CdaNode, i: string): unknown {
+  const code = concept(child(node, "code"));
+  const rationale = descendants(node, "observation").find((n) => hasTemplate(n, T.negationRationale));
+  const reason = concept(child(rationale, "value"));
+  if (!code || !reason) return undefined;
+  const recorded = authoredOn(node);
+  return {
+    resourceType: "Observation",
+    id: idOf(node, `qrda1-observation-${i}`),
+    status: "cancelled",
+    category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "survey" }] }],
+    code,
+    // `issued` is an instant; a date-only author time is left out rather than padded with a time.
+    ...(recorded?.includes("T") ? { issued: recorded } : {}),
+    extension: [{ url: QICORE_NOT_DONE_REASON, valueCodeableConcept: reason }],
+  };
+}
+
+const LOINC = "http://loinc.org";
+const LOINC_SYSTOLIC = "8480-6";
+const LOINC_DIASTOLIC = "8462-4";
+
+/**
+ * QDM records a blood pressure as two Physical Exam, Performed entries (systolic `8480-6` and diastolic
+ * `8462-4`); QI-Core records it as ONE Observation whose components carry the two values, under the US
+ * Core panel code `85354-9`. CMS165 reads the panel and nothing else, so unpaired readings leave every
+ * controlled patient out of its numerator (Cypress 2027 deck: 11 of 11).
+ *
+ * This is the representation change between the two models, not new data: the two values, their codes
+ * and their time all come from the source, and the panel code is the one the US Core profile requires
+ * of any blood pressure. Pairing is deliberately strict: exactly one systolic and one diastolic Physical
+ * Exam at the identical instant. Anything else (a lone reading, two systolics at one time, readings
+ * minutes apart) is left exactly as imported, because choosing which two belong together would be a
+ * guess. The pair's two resources are replaced by the panel, which keeps the systolic's id.
+ */
+function pairBloodPressures(entries: Array<{ resource: unknown }>): void {
+  type Exam = {
+    resourceType?: string;
+    id: string;
+    category?: Array<{ coding?: Array<{ code?: string }> }>;
+    code: { coding: Array<{ system: string; code: string }> };
+    effectiveDateTime?: string;
+    valueQuantity?: unknown;
+  };
+  const groups = new Map<string, { systolic: number[]; diastolic: number[] }>();
+  entries.forEach((entry, index) => {
+    const r = entry.resource as Exam;
+    if (r.resourceType !== "Observation" || r.category?.[0]?.coding?.[0]?.code !== "exam") return;
+    if (!r.effectiveDateTime || r.valueQuantity === undefined) return;
+    const loinc = r.code.coding.filter((c) => c.system === LOINC).map((c) => c.code);
+    const systolic = loinc.includes(LOINC_SYSTOLIC);
+    const diastolic = loinc.includes(LOINC_DIASTOLIC);
+    if (systolic === diastolic) return;
+    const group = groups.get(r.effectiveDateTime) ?? { systolic: [], diastolic: [] };
+    (systolic ? group.systolic : group.diastolic).push(index);
+    groups.set(r.effectiveDateTime, group);
+  });
+  const replaced = new Set<number>();
+  for (const [when, group] of groups) {
+    if (group.systolic.length !== 1 || group.diastolic.length !== 1) continue;
+    const s = entries[group.systolic[0]!]!.resource as Exam;
+    const d = entries[group.diastolic[0]!]!.resource as Exam;
+    entries[group.systolic[0]!] = {
+      resource: {
+        resourceType: "Observation",
+        id: s.id,
+        status: "final",
+        category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }],
+        code: { coding: [{ system: LOINC, code: "85354-9", display: "Blood pressure panel with all children optional" }] },
+        effectiveDateTime: when,
+        component: [
+          { code: s.code, valueQuantity: s.valueQuantity },
+          { code: d.code, valueQuantity: d.valueQuantity },
+        ],
+      },
+    };
+    replaced.add(group.diastolic[0]!);
+  }
+  for (const index of [...replaced].sort((a, b) => b - a)) entries.splice(index, 1);
 }
 
 function procedureFrom(node: CdaNode, i: string): unknown {
@@ -410,8 +559,14 @@ function deviceRequestFrom(node: CdaNode, i: string): unknown {
  * The drug is in `consumable/manufacturedProduct/manufacturedMaterial/code` (RxNorm). Emitted as
  * `medicationCodeableConcept` rather than a contained `Medication` + reference: the retrieve filters the
  * `medication` choice by code, and an inline concept matches it without inventing a second resource.
+ *
+ * QDM Medication, Order uses the same mapper with `status: "completed"`. The two datatypes must stay
+ * distinguishable after import: `Status.isMedicationActive` is an `Equal` on `"active"`, while
+ * `isMedicationOrder` admits `active | completed`. An order imported as `active` would read as a
+ * medication the patient is TAKING, and CMS125/CMS122's dementia-medication exclusion reads exactly
+ * that. `completed` satisfies every order read (CMS2's follow-up, CMS137's treatment) and no active one.
  */
-function medicationRequestFrom(node: CdaNode, i: string): unknown {
+function medicationRequestFrom(node: CdaNode, i: string, status: "active" | "completed"): unknown {
   const material = descendants(node, "manufacturedMaterial")[0];
   const code = concept(child(material, "code"));
   if (!code) return undefined;
@@ -419,7 +574,7 @@ function medicationRequestFrom(node: CdaNode, i: string): unknown {
   return {
     resourceType: "MedicationRequest",
     id: idOf(node, `qrda1-medicationrequest-${i}`),
-    status: "active",
+    status,
     intent: "order",
     medicationCodeableConcept: code,
     ...(authoredOn(node) ? { authoredOn: authoredOn(node) } : {}),
@@ -584,9 +739,17 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // stating the opposite — the worst failure available here, since it is silent and it fabricates
       // compliance-relevant data. Skipped, and the entry therefore reports its datatype as untranslated
       // (the diagnostic does not distinguish "negated" from other drops, which is a known limit).
-      // Cypress's archives carry none, so this is latent rather than measured (review, #388).
-      if (candidate.attrs.negationInd === "true") continue;
-      const resource =
+      // The one exception is an Assessment, Not Performed with a stated reason, which has a faithful
+      // QI-Core form of its own (`assessmentNotDoneFrom`) that no positive read can mistake for the act.
+      if (candidate.attrs.negationInd === "true") {
+        const notDone = hasTemplate(candidate, T.assessmentPerformed) ? assessmentNotDoneFrom(candidate, key) : undefined;
+        if (notDone !== undefined) {
+          entries.push({ resource: notDone });
+          translated++;
+        }
+        continue;
+      }
+      const resource: unknown =
         hasTemplate(candidate, T.encounterPerformed) ? encounterFrom(candidate, key)
         : hasTemplate(candidate, T.diagnosis) ? conditionFrom(candidate, key)
         : hasTemplate(candidate, T.labPerformed) ? observationFrom(candidate, key, "laboratory")
@@ -594,6 +757,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
         // A screening/assessment Observation keeps its own `<code>` (the instrument) and `<value>` (the
         // result) — unlike Symptom below, which inverts them.
         : hasTemplate(candidate, T.assessmentPerformed) ? observationFrom(candidate, key, "survey")
+        // Blood-pressure halves are paired into one panel once the whole document is read.
+        : hasTemplate(candidate, T.physicalExamPerformed) ? observationFrom(candidate, key, "exam")
         : hasTemplate(candidate, T.symptom) ? symptomFrom(candidate, key)
         // Intervention, Performed IS a Procedure to the official artifacts — same retrieve, same
         // `performed` property — so it shares the mapper rather than getting a near-copy.
@@ -601,10 +766,13 @@ export function importQrda1Document(xml: string): Qrda1Import {
           ? procedureFrom(candidate, key)
         : hasTemplate(candidate, T.interventionOrder) ? serviceRequestFrom(candidate, key)
         : hasTemplate(candidate, T.deviceOrder) ? deviceRequestFrom(candidate, key)
-        : hasTemplate(candidate, T.medicationActive) ? medicationRequestFrom(candidate, key)
+        : hasTemplate(candidate, T.medicationActive) ? medicationRequestFrom(candidate, key, "active")
+        : hasTemplate(candidate, T.medicationOrder) ? medicationRequestFrom(candidate, key, "completed")
         : undefined;
-      if (resource !== undefined) {
-        entries.push({ resource });
+      // An Encounter brings its diagnosis Conditions with it.
+      const produced = (Array.isArray(resource) ? resource : [resource]).filter((r) => r !== undefined);
+      if (produced.length > 0) {
+        for (const r of produced) entries.push({ resource: r });
         translated++;
       }
     }
@@ -621,6 +789,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
       untranslatedTemplates.push(datatypes[0] ?? roots[roots.length - 1] ?? "(no templateId)");
     }
   });
+  pairBloodPressures(entries);
 
   // A Patient-only bundle is the failure this whole module exists to avoid, and the section being
   // PRESENT but empty reaches it just as surely as the section being absent (Codex, #362). Our own

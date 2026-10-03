@@ -944,3 +944,195 @@ test("import: other nullFlavor spellings are open intervals too, not just UNK", 
     );
   }
 });
+
+// ---------------------------------------------------------------------------------------------------
+// The datatypes the 2027 Cypress decks carry for CMS2, CMS130, CMS137 and CMS165
+//
+// Shapes copied from `bundle-2026` (Cypress 2026.1.0) patients: a stool test with a text result, a
+// blood pressure as two Physical Exam entries, a Medication Order, an Assessment Not Performed with a
+// reason, and an encounter carrying an Encounter Diagnosis with a Rank.
+// ---------------------------------------------------------------------------------------------------
+
+const deckDocument = `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:sdtc="urn:hl7-org:sdtc">
+  <recordTarget><patientRole><id extension="deck-1" root="1.3.6.1.4.1.115"/>
+    <patient><birthTime value='19731115150000'/></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="fobt-1"/>
+      <code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20250622143000'/>
+      <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
+        <code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>
+        <value xsi:type="ST">Negative</value>
+      </observation></entryRelationship>
+    </observation></entry>
+
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="sys-1"/>
+      <code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20251210170500'/>
+      <value xsi:type="PQ" value="130" unit="mm[Hg]"/>
+    </observation></entry>
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="dia-1"/>
+      <code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20251210170500'/>
+      <value xsi:type="PQ" value="60" unit="mm[Hg]"/>
+    </observation></entry>
+    <entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="sys-lone"/>
+      <code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20250301090000'/>
+      <value xsi:type="PQ" value="150" unit="mm[Hg]"/>
+    </observation></entry>
+
+    <entry><substanceAdministration classCode="SBADM" moodCode="RQO">
+      <templateId root="2.16.840.1.113883.10.20.24.3.47" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="medorder-1"/>
+      <statusCode code="active"/>
+      <effectiveTime xsi:type="IVL_TS"><low value='20250219173000'/><high value='20250219173000'/></effectiveTime>
+      <consumable><manufacturedProduct classCode="MANU"><manufacturedMaterial>
+        <code code="854901" codeSystem="2.16.840.1.113883.6.88"/>
+      </manufacturedMaterial></manufacturedProduct></consumable>
+      <author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value='20250219173000'/></author>
+    </substanceAdministration></entry>
+
+    <entry><observation classCode="OBS" moodCode="EVN" negationInd="true">
+      <templateId root="2.16.840.1.113883.10.20.24.3.144" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="noscreen-1"/>
+      <code code="73832-8" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20250816140000'/>
+      <author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value='20250816140000'/></author>
+      <entryRelationship typeCode="RSON"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.88" extension="2017-08-01"/>
+        <code code="77301-0" codeSystem="2.16.840.1.113883.6.1"/>
+        <value code="183932001" codeSystem="2.16.840.1.113883.6.96" xsi:type="CD"/>
+      </observation></entryRelationship>
+    </observation></entry>
+
+    <entry><encounter classCode="ENC" moodCode="EVN">
+      <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
+      <id extension="enc-dx" root="1.3.6.1.4.1.115"/>
+      <code code="99202" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value='20241128170000'/><high value='20241128173000'/></effectiveTime>
+      <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.168"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <value code="75544000" codeSystem="2.16.840.1.113883.6.96" xsi:type="CD"/>
+        <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+          <templateId root="2.16.840.1.113883.10.20.24.3.166" extension="2019-12-01"/>
+          <code code="263486008" codeSystem="2.16.840.1.113883.6.96"/>
+          <value xsi:type="INT" value="1"/>
+        </observation></entryRelationship>
+      </observation></entryRelationship>
+    </encounter></entry>
+
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+const deckResources = (xml = deckDocument) => {
+  const imported = importQrda1Document(xml);
+  const all = imported.bundle.entry.map((e) => e.resource as Record<string, any>);
+  return { imported, all, byId: (id: string) => all.find((r) => r.id === id) };
+};
+
+test("import: a TEXT result is kept as valueString — CMS130 asks only that the stool test has a result", () => {
+  const fobt = deckResources().byId("fobt-1");
+  assert.ok(fobt);
+  assert.equal(fobt!.valueString, "Negative");
+});
+
+test("import: a systolic and a diastolic Physical Exam at one instant become ONE blood-pressure panel", () => {
+  const { all, byId } = deckResources();
+  const panel = byId("sys-1");
+  assert.ok(panel, "the panel keeps the systolic reading's id");
+  assert.equal(panel!.code.coding[0].code, "85354-9");
+  assert.equal(panel!.category[0].coding[0].code, "vital-signs");
+  assert.equal(panel!.effectiveDateTime, "2025-12-10T17:05:00Z");
+  assert.deepEqual(
+    panel!.component.map((c: any) => [c.code.coding[0].code, c.valueQuantity.value, c.valueQuantity.unit]),
+    [["8480-6", 130, "mm[Hg]"], ["8462-4", 60, "mm[Hg]"]],
+    "both values, with their own codes and units, from the source",
+  );
+  assert.equal(byId("dia-1"), undefined, "the diastolic half is folded into the panel, not left beside it");
+  // A lone reading is not guessed into a pair: it stays the exam it was.
+  const lone = byId("sys-lone");
+  assert.equal(lone!.code.coding[0].code, "8480-6");
+  assert.equal(lone!.category[0].coding[0].code, "exam");
+  assert.equal(lone!.component, undefined);
+  assert.equal(all.filter((r) => r.code?.coding?.[0]?.code === "85354-9").length, 1);
+});
+
+test("import: two systolics at one instant are AMBIGUOUS, so nothing is paired", () => {
+  const ambiguous = deckDocument.replace("<effectiveTime value='20250301090000'/>", "<effectiveTime value='20251210170500'/>");
+  assert.notEqual(ambiguous, deckDocument, "the fixture must actually have been changed");
+  const { all } = deckResources(ambiguous);
+  assert.equal(all.filter((r) => r.code?.coding?.[0]?.code === "85354-9").length, 0, "which systolic belongs is a guess");
+  assert.equal(all.filter((r) => r.category?.[0]?.coding?.[0]?.code === "exam").length, 3, "all three stay as imported");
+});
+
+test("import: a Medication Order is an ORDER, never an active medication", () => {
+  const order = deckResources().byId("medorder-1");
+  assert.ok(order);
+  assert.equal(order!.resourceType, "MedicationRequest");
+  assert.equal(order!.intent, "order");
+  // `isMedicationOrder` admits active|completed; `isMedicationActive` is Equal 'active'. `completed`
+  // keeps an order out of the dementia-medication exclusion, which reads active medications.
+  assert.equal(order!.status, "completed");
+  assert.equal(order!.authoredOn, "2025-02-19T17:30:00Z");
+  assert.equal(order!.medicationCodeableConcept.coding[0].code, "854901");
+});
+
+test("import: an Assessment Not Performed WITH a reason is a cancelled Observation carrying the reason", () => {
+  const { imported, byId } = deckResources();
+  const notDone = byId("noscreen-1");
+  assert.ok(notDone, "CMS2's denominator exception reads it");
+  assert.equal(notDone!.status, "cancelled", "and no positive screening read admits a cancelled one");
+  assert.equal(notDone!.code.coding[0].code, "73832-8");
+  assert.equal(notDone!.issued, "2025-08-16T14:00:00Z");
+  assert.deepEqual(notDone!.extension, [
+    {
+      url: "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-notDoneReason",
+      valueCodeableConcept: { coding: [{ system: "http://snomed.info/sct", code: "183932001" }] },
+    },
+  ]);
+  assert.equal(notDone!.valueCodeableConcept, undefined);
+  assert.deepEqual(imported.untranslatedTemplates, []);
+});
+
+test("import: a negation WITHOUT a reason stays untranslated — a reasonless 'not done' is not an exception", () => {
+  const reasonless = deckDocument.replace(/<entryRelationship typeCode="RSON">[\s\S]*?<\/entryRelationship>/, "");
+  assert.notEqual(reasonless, deckDocument);
+  const { imported, byId } = deckResources(reasonless);
+  assert.equal(byId("noscreen-1"), undefined);
+  assert.ok(imported.untranslatedTemplates.includes("2.16.840.1.113883.10.20.24.3.144"));
+});
+
+test("import: an Encounter Diagnosis becomes an encounter-diagnosis Condition the encounter references", () => {
+  const { byId } = deckResources();
+  const encounter = byId("enc-dx");
+  assert.ok(encounter);
+  const condition = byId("enc-dx-dx-1");
+  assert.ok(condition, "one Condition per diagnosis");
+  assert.equal(condition!.code.coding[0].code, "75544000");
+  assert.equal(condition!.category[0].coding[0].code, "encounter-diagnosis");
+  assert.equal(condition!.onsetDateTime, undefined, "an Encounter Diagnosis has no onset of its own, so none is given");
+  // CQMCommon.encounterDiagnosis (CMS137's history) follows reasonReference; PrincipalDiagnosis reads
+  // diagnosis and its rank. Both carry the same link.
+  assert.deepEqual(encounter!.reasonReference, [{ reference: "Condition/enc-dx-dx-1" }]);
+  assert.deepEqual(encounter!.diagnosis, [{ condition: { reference: "Condition/enc-dx-dx-1" }, rank: 1 }]);
+});
