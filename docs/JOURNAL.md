@@ -5,19 +5,19 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
-## 2026-10-03
+## 2026-10-02
 
-- **The QRDA I importer reads what the Cypress decks carry for all six measures.** It now takes text
-  results, a blood pressure's two halves paired into one panel, Medication Orders (as orders, never
-  active medications), an Assessment Not Performed with its reason, and encounter diagnoses.
-  `scripts/cvu/bundle-agreement.ts` compares per patient against a Cypress bundle's own results.
-  - 2027 deck (bundle 2026.1.0) against the vendored drafts: CMS122 64/64, CMS125 155/155, CMS130
-    269/269, CMS137 36/36 (both rates), CMS165 42/44, CMS2 375/379.
-  - What remains is logic, not import: CMS165's draft ties a reading to an inpatient stay through
+- **The QRDA I importer reads what the Cypress decks carry.** It now takes text results, a blood
+  pressure's two halves paired into one panel, Medication Orders (as orders, never active medications),
+  an Assessment Not Performed with its reason, and encounter diagnoses (references survive the batch
+  merge). `scripts/cvu/bundle-agreement.ts` compares per patient against a Cypress bundle's own results.
+  - 2027 deck (bundle 2026.1.0), vendored drafts, as production runs them: CMS122 64/64, CMS125 155/155,
+    CMS130 269/269, CMS137 36/36 (both rates), CMS2 375/379.
+  - CMS165 is not reachable through the QRDA I route yet: it alone runs with profile tagging required,
+    and imported resources carry no QI-Core profiles, so the batch errors. With tagging off it is 42/44.
+  - The rest is logic, not import: CMS165's draft ties a reading to an inpatient stay through
     `Observation.encounter`, which QRDA does not carry (2); CMS2's draft lacks the active-medication
     follow-up (2) and the 2027 next-day follow-up (2).
-
-## 2026-10-02
 
 - **Ingest no longer invents a visit for CMS125.** On a live WebChart run the enrollment roster stamped a
   CPT 99213 office visit on every listed patient, which put them in CMS125's initial population whether
