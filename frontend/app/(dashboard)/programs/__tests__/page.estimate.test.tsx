@@ -63,6 +63,8 @@ describe("ProgramsPage estimate caveat", () => {
     expect(screen.getAllByText(ESTIMATE)).toHaveLength(1);
     expect(screen.getByText(ESTIMATE)).toHaveAttribute("id", "rate-estimate-note");
     expect(rate).toHaveAttribute("aria-describedby", expect.stringContaining("rate-estimate-note"));
+    // The overall KPI points at the same note.
+    expect(screen.getByText("Overall compliance").nextSibling).toHaveAttribute("aria-describedby", "rate-estimate-note");
   });
 
   it("says nothing of the kind on the occupational deployment", async () => {
@@ -71,5 +73,6 @@ describe("ProgramsPage estimate caveat", () => {
     const rate = await screen.findByText("Compliance 72.0%");
     expect(screen.queryByText(ESTIMATE)).toBeNull();
     expect(rate.getAttribute("aria-describedby") ?? "").not.toContain("rate-estimate-note");
+    expect(screen.getByText("Overall compliance").nextSibling).not.toHaveAttribute("aria-describedby");
   });
 });

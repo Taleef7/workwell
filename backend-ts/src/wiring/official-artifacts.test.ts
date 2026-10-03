@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { loadOfficialArtifact, loadOfficialManifest, officialArtifactAvailable, officialLogicVintage } from "./official-artifacts.ts";
+import { __clearOfficialArtifactCache, loadOfficialArtifact, loadOfficialManifest, officialArtifactAvailable, officialLogicVintage } from "./official-artifacts.ts";
 
 const ARTIFACT_ROOT = fileURLToPath(new URL("../../measures/official/", import.meta.url));
 const vendored = readdirSync(ARTIFACT_ROOT, { withFileTypes: true })
@@ -99,8 +99,13 @@ test("a traversing catalogId is REJECTED, not merely absent", () => {
   }
 });
 
-test("loadOfficialManifest reads the manifest the artifact loader reads, and nothing for an absent id", () => {
-  assert.deepEqual(loadOfficialManifest("cms165"), loadOfficialArtifact("cms165")!.manifest);
+test("loadOfficialManifest reads the manifest file itself, without the artifact loader's cache, and nothing for an absent id", () => {
+  // The tests above filled the artifact cache, which loadOfficialManifest consults first; clear it so
+  // this exercises the manifest-only read and compares it with the file, not with a cached object.
+  __clearOfficialArtifactCache();
+  const fromFile = JSON.parse(readFileSync(`${ARTIFACT_ROOT}cms165/manifest.json`, "utf8"));
+  assert.deepEqual(loadOfficialManifest("cms165"), fromFile);
+  assert.equal(loadOfficialManifest("cms165"), loadOfficialManifest("cms165"), "cached after the first read");
   assert.equal(loadOfficialManifest("cms999"), null);
 });
 

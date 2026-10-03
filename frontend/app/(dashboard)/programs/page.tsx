@@ -261,7 +261,11 @@ export default function ProgramsPage() {
       <RunFreshnessBanner />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        <KpiCard label="Overall compliance" value={initialLoad ? "—" : formatRate(overallComplianceRate)} />
+        <KpiCard
+          label="Overall compliance"
+          value={initialLoad ? "—" : formatRate(overallComplianceRate)}
+          describedBy={showsRateEstimateNote() ? "rate-estimate-note" : undefined}
+        />
         <KpiCard label="Open cases" value={initialLoad ? "—" : fmtCount(openCases)} />
         <KpiCard
           label="Last run"
@@ -427,11 +431,11 @@ export default function ProgramsPage() {
   );
 }
 
-function KpiCard({ label, value, className }: { label: string; value: string; className?: string }) {
+function KpiCard({ label, value, className, describedBy }: { label: string; value: string; className?: string; describedBy?: string }) {
   return (
     <div className={cn("rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900", className)}>
       <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{label}</p>
-      <p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p>
+      <p aria-describedby={describedBy} className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p>
     </div>
   );
 }
