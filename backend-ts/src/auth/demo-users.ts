@@ -10,7 +10,7 @@
  * own store, consistent with the strangler running alongside the JVM during cutover.
  */
 import { isPasswordHash, verifyPassword } from "./password.ts";
-import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, resolveDeploymentProfile } from "../config/deployment-profile.ts";
 import { isProductionLike, type StartupEnv } from "../config/startup-safety.ts";
 
 export interface DemoUser {
@@ -39,7 +39,10 @@ const NO_LOGIN = "disabled";
 export function pilotPasswordHash(env: Record<string, unknown> = process.env as Record<string, unknown>): string {
   const raw = typeof env.WORKWELL_PILOT_PASSWORD_HASH === "string" ? env.WORKWELL_PILOT_PASSWORD_HASH.trim() : "";
   if (!raw) {
-    if (env.WORKWELL_INSTANCE === "maui" && isProductionLike(env as StartupEnv)) {
+    // Keyed on the RESOLVED profile, which normalizes the value (`Maui`, ` maui `): a raw comparison would
+    // pick the pilot profile and still fall back to the public password.
+    const instance = typeof env.WORKWELL_INSTANCE === "string" ? env.WORKWELL_INSTANCE : undefined;
+    if (resolveDeploymentProfile(instance).id === "maui" && isProductionLike(env as StartupEnv)) {
       console.error("[workwell] WORKWELL_PILOT_PASSWORD_HASH is unset on a production pilot stack; pilot sign-in is disabled.");
       return NO_LOGIN;
     }

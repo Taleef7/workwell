@@ -75,6 +75,14 @@ test("pilotPasswordHash: unset keeps the demo hash, a PBKDF2 string is used, any
     assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: "pbkdf2$0$a$b" }), "disabled", "a hash verifyPassword would reject is not accepted");
     assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: `${own}x$extra` }), "disabled", "trailing junk is not accepted");
     assert.equal(pilotPasswordHash({ WORKWELL_INSTANCE: "maui", WORKWELL_ENVIRONMENT: "production" }), "disabled", "unset on a production pilot stack");
+    // Every spelling the profile resolver accepts as the pilot stack fails closed too.
+    for (const spelling of ["Maui", " maui ", "MAUI"]) {
+      assert.equal(
+        pilotPasswordHash({ WORKWELL_INSTANCE: spelling, WORKWELL_ENVIRONMENT: "production" }),
+        "disabled",
+        `WORKWELL_INSTANCE=${JSON.stringify(spelling)} selects the pilot profile, so it must not fall back to the public password`,
+      );
+    }
   } finally {
     console.error = original;
   }
