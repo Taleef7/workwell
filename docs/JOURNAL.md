@@ -7,6 +7,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-02
 
+- **The measure page's top label is never a QDM version neither engine ran.** Checked live: TWH's cms125
+  page showed "CMS125V14" above totals that fold in the scale tenant's authored counts. The label now
+  shows the executed artifact on an official run, a non-CMS policy reference (an OSHA citation) as before,
+  and otherwise nothing.
 - **The QRDA I importer reads what the Cypress decks carry.** It now takes text results, Physical Exams
   (one Observation per reading), Medication Orders (as orders, never active medications), an Assessment
   Not Performed with its reason, and encounter diagnoses. The batch merge keeps references intact and
