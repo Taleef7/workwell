@@ -140,6 +140,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   const untranslated = new Map<string, number>();
   const importFailures: string[] = [];
   const bundles: unknown[] = [];
+  const importedIds = new Set<string>();
   for (const id of patientIds) {
     const file = fileOf.get(id);
     const full = file ? path.join(dir, "patients", file) : "";
@@ -154,6 +155,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       const patient = b.entry.find((e) => e.resource.resourceType === "Patient");
       if (patient) patient.resource.id = id; // key fqm's result by the bundle's patient id
       bundles.push(preparedForQiCore(b as unknown as PreparableBundle));
+      importedIds.add(id);
     } catch (error) {
       importFailures.push(`${id} (${file}): ${String((error as Error)?.message ?? error)}`);
     }
@@ -176,11 +178,16 @@ export async function main(argv: readonly string[]): Promise<number> {
     valueSetCache = [...onDisk, ...kept];
   }
 
-  const productionTrust = officialMeasureSemantics(args.measure)?.trustMetaProfile ?? false;
+  const semantics = officialMeasureSemantics(args.measure);
+  const productionTrust = semantics?.trustMetaProfile ?? false;
   const trustMetaProfile = args.trustMetaProfile ?? productionTrust;
   const mode =
     `trustMetaProfile ${trustMetaProfile ? "on" : "off"}` +
-    (trustMetaProfile === productionTrust ? " (as production runs this measure)" : ` (OVERRIDDEN: production runs it ${productionTrust ? "on" : "off"})`);
+    (!semantics
+      ? " (production has no recorded semantics for this measure and refuses to run it)"
+      : trustMetaProfile === productionTrust
+        ? " (as production runs this measure)"
+        : ` (OVERRIDDEN: production runs it ${productionTrust ? "on" : "off"})`);
 
   const header = (): string[] => [
     `# Agreement: ${args.measure} vs ${bundleMeasureName} (${bundleMeta.version})`,
@@ -192,27 +199,29 @@ export async function main(argv: readonly string[]): Promise<number> {
     `- engine: ${mode}`,
   ];
 
-  let bySubject: Map<string, OfficialSubjectResult>;
+  const run = async (patientBundles: unknown[]) =>
+    (await calculateOfficialWithSignal({ bundle: artifact.bundle as never, patientBundles, period, valueSetCache, options: { trustMetaProfile } })).bySubject;
+  const bySubject = new Map<string, OfficialSubjectResult>();
+  const engineErrors = new Map<string, number>(); // first line of the message -> patients
   try {
-    ({ bySubject } = await calculateOfficialWithSignal({
-      bundle: artifact.bundle as never,
-      patientBundles: bundles,
-      period,
-      valueSetCache,
-      options: { trustMetaProfile },
-    }));
-  } catch (error) {
-    // The batch failed as a whole, which is what the QRDA I route would answer too: say so rather than crash.
-    const message = String((error as Error)?.message ?? error).split("\n").slice(0, 4).join(" ");
-    console.log([...header(), "", "## Engine error", "", `The run failed for every patient: ${message}`].join("\n"));
-    return 2;
+    for (const [id, result] of await run(bundles)) bySubject.set(id, result);
+  } catch {
+    // One patient that throws rejects fqm's whole batch. The QRDA I route evaluates each subject on its own
+    // and records a failure for that subject only, so retry one patient at a time and do the same.
+    for (const one of bundles) {
+      try {
+        for (const [id, result] of await run([one])) bySubject.set(id, result);
+      } catch (error) {
+        const line = String((error as Error)?.message ?? error).split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3).join(" ");
+        engineErrors.set(line, (engineErrors.get(line) ?? 0) + 1);
+      }
+    }
   }
 
   // Compare. Rates are matched by position: Cypress's `PopulationSet_N` is the measure's Nth group, which
   // is also the order fqm returns them in for every measure here.
   const bySet = new Map<number, { agree: number; total: number; expected: Record<string, number>; reported: Record<string, number> }>();
   const disagreements: string[] = [];
-  let missing = 0;
   for (const e of expected) {
     const result: OfficialSubjectResult | undefined = bySubject.get(e.patientId);
     const tally = bySet.get(e.set) ?? { agree: 0, total: 0, expected: {}, reported: {} };
@@ -222,7 +231,6 @@ export async function main(argv: readonly string[]): Promise<number> {
     // reported column instead of shrinking both.
     for (const [c] of POPULATIONS) tally.expected[c] = (tally.expected[c] ?? 0) + (e.values[c] ? 1 : 0);
     if (!result) {
-      missing++;
       for (const [c] of POPULATIONS) tally.reported[c] = tally.reported[c] ?? 0;
       continue;
     }
@@ -236,7 +244,13 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   const out: string[] = header();
-  out.push(`- patients: ${patientIds.length} (${importFailures.length} not imported, ${missing} with no engine result); strata rows not compared: ${strata}`);
+  // Per patient, not per rate: a patient missing from a two-rate measure is one patient.
+  const noResult = [...importedIds].filter((id) => !bySubject.has(id)).length;
+  out.push(`- patients: ${patientIds.length} (${importFailures.length} not imported, ${noResult} imported with no engine result); strata rows not compared: ${strata}`);
+  if (engineErrors.size) {
+    out.push("", "## Engine errors", "");
+    for (const [line, n] of engineErrors) out.push(`- ${n} patient(s): ${line}`);
+  }
   out.push("", "| set | patients agreeing | " + POPULATIONS.map(([c]) => c).join(" | ") + " |", "|---|---|" + POPULATIONS.map(() => "---|").join(""));
   for (const [set, t] of [...bySet.entries()].sort((a, b) => a[0] - b[0])) {
     const cells = POPULATIONS.map(([c]) => `${t.expected[c]} / ${t.reported[c]}`);
@@ -250,7 +264,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
   if (importFailures.length) out.push("", "## Import failures", "", ...importFailures.slice(0, 20).map((f) => `- ${f}`));
   console.log(out.join("\n"));
-  return 0;
+  return engineErrors.size ? 2 : 0;
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("bundle-agreement.ts")) {
