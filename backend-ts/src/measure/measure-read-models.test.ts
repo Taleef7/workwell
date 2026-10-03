@@ -58,6 +58,30 @@ test("toMeasure carries routing computed by classifyRunnable at call time", () =
   }
 });
 
+test("the list and detail identity carry the executed FHIR artifact only where the measure is routed to it", () => {
+  assert.equal(toMeasure(record("cms125")).identity?.executed, undefined, "authored here: no executed logic");
+  assert.equal(toMeasureDetail(record("cms125")).identity?.executed, undefined);
+
+  const previous = process.env.WORKWELL_OFFICIAL_MEASURES;
+  try {
+    process.env.WORKWELL_OFFICIAL_MEASURES = "cms125";
+    const listed = toMeasure(record("cms125"));
+    assert.equal(listed.routing, "official");
+    assert.deepEqual(listed.identity?.executed, {
+      ecqmId: "CMS125FHIR",
+      version: "1.0.000",
+      status: "draft",
+      statusNote: "posted for public comment Jan–Feb 2026",
+      derivedFrom: "CMS125v14",
+    });
+    assert.equal(listed.version, "v1.0", "the catalog version stays: it is part of the version id");
+    assert.equal(toMeasureDetail(record("cms125")).identity?.executed?.ecqmId, "CMS125FHIR");
+  } finally {
+    if (previous === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = previous;
+  }
+});
+
 test("a measure no engine can run says so, rather than borrowing the authored label", () => {
   assert.equal(toMeasure(record("not-in-any-registry")).routing, "not-runnable");
   // The list must still render it — the field is descriptive, never a filter.

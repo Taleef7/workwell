@@ -19,7 +19,7 @@ import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.t
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import { MEASURE_CATALOG, type MeasureSpec } from "./measure-catalog.ts";
-import { matchesSeedFingerprint, OFFICIAL_ONLY_PRE_CHANGE, pre749Cql, seedMeasureStore } from "./measure-seed.ts";
+import { matchesSeedFingerprint, OFFICIAL_ONLY_PRE_CHANGE, PRE_DRAFT_WORDING_DESCRIPTIONS, pre749Cql, seedMeasureStore } from "./measure-seed.ts";
 import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
 const created: string[] = [];
 
@@ -1073,4 +1073,140 @@ test("seedMeasureStore — a later save of the exact pre-#749 text is rewritten 
   await seedMeasureStore(store, cqlOf, events);
   assert.equal((await store.getLatest("hypertension"))!.cqlText, CURRENT_SORT_CQL);
   assert.equal(await countCqlRefreshedEvents(db), 2, "the second rewrite is not silent");
+});
+
+// The routed measures' descriptions as they were seeded before they named the CMS FHIR draft that runs.
+const PRE_DRAFT_IDS = Object.keys(PRE_DRAFT_WORDING_DESCRIPTIONS) as Array<keyof typeof PRE_DRAFT_WORDING_DESCRIPTIONS>;
+const catalogSpec = (id: string) => MEASURE_CATALOG.find((m) => m.id === id)!.spec;
+/** The newest text the seed wrote before this change (what a stack seeded since the last edit holds). */
+const lastOld = (id: keyof typeof PRE_DRAFT_WORDING_DESCRIPTIONS) => PRE_DRAFT_WORDING_DESCRIPTIONS[id].at(-1)!;
+
+/** A store seeded before the wording change: today's catalog everywhere except the six old descriptions. */
+async function seedPreDraftWordingStore() {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedMeasureStore(store, () => "", events);
+  for (const id of PRE_DRAFT_IDS) await store.updateSpec(id, { ...catalogSpec(id), description: lastOld(id) });
+  return { db, store, events };
+}
+
+const countSpecRefreshed = async (db: Awaited<ReturnType<typeof freshDb>>, versionId?: string) => {
+  const rows = await db
+    .prepare("SELECT entity_id FROM audit_events WHERE event_type = 'MEASURE_SEED_SPEC_REFRESHED'")
+    .all<{ entity_id: string }>();
+  return (rows.results ?? []).filter((r: { entity_id: string }) => !versionId || r.entity_id === versionId).length;
+};
+
+test("the old descriptions led with the QDM id; today's catalog names it only as what the FHIR draft was derived from", () => {
+  for (const id of PRE_DRAFT_IDS) {
+    const qdm = /\((CMS\d+v\d+) \/ MIPS \d+\)/.exec(lastOld(id))?.[1];
+    assert.ok(qdm, `${id}: the old title carried the QDM id`);
+    assert.doesNotMatch(catalogSpec(id).description, /\(CMS\d+v\d+ \//, `${id}: today's title does not`);
+    assert.ok(catalogSpec(id).description.includes(`derived from ${qdm}`), `${id}: the QDM id appears as "derived from"`);
+    assert.doesNotMatch(catalogSpec(id).description, /published/, `${id} catalog wording`);
+    assert.match(catalogSpec(id).description, /FHIR \(QI-Core\) draft of this measure, posted for public comment in January–February 2026/);
+  }
+  // CMS122FHIR and the authored cms122.cql both read HbA1c OR GMI, and both count a missing result.
+  assert.match(catalogSpec("cms122").description, /glycemic status assessment .*\(HbA1c or glucose management indicator, GMI\) is > 9\.0%, or who have none/);
+});
+
+test("the old descriptions are the exact text the seed stored (provenance digests taken from the catalog before the change, not from this constant)", () => {
+  const digests: Record<string, string[]> = {
+    cms2: ["b191424b0954dd42e8a41b57502d29040f1ae0bd64280756f5e500e956e0e1b8"],
+    cms130: ["b5ce91a4e10fea12d2d88be7b6ba9a592098f7bd8a61ac7632a72dccb93a4fb3"],
+    cms165: ["b893bdcd882a4a989a957d8b93770097b94c6a4022bc90014323284f181a2b9b"],
+    cms137: ["fa5faf16322df1e1bd59b4fe04caa801d0d6dde3b61369c6d3387f959e0494af"],
+    cms122: ["a62db4ab86cc59e11f699d5faa2152e1f55ef90972894b149e56bca8cebb8264"],
+    // 50–74 from the catalog at 6e776f19^ (seeded until 2026-07-30), then 42–74.
+    cms125: ["c1f3d6a69a73ae9959c6e9207829857a274dd9c93f2f2f27a59f5ae533f39f11", "d5b3d7d2bd2289e5c0d7c5296138a669e31351ad65bd3112b8cf4143d536f908"],
+  };
+  for (const id of PRE_DRAFT_IDS) {
+    assert.deepEqual(PRE_DRAFT_WORDING_DESCRIPTIONS[id].map((text) => createHash("sha256").update(text, "utf8").digest("hex")), digests[id], id);
+  }
+});
+
+test("seedMeasureStore — a cms125 row still holding the 50–74 text seeded before 2026-07-30 is rewritten, audited first", async () => {
+  const { db, store, events } = await seedPreDraftWordingStore();
+  const old = PRE_DRAFT_WORDING_DESCRIPTIONS.cms125[0]!;
+  assert.match(old, /women 50–74/);
+  await store.updateSpec("cms125", { ...catalogSpec("cms125"), description: old });
+  await seedMeasureStore(store, () => "", events);
+  const row = (await store.getLatest("cms125"))!;
+  assert.deepEqual(row.spec, catalogSpec("cms125"));
+  assert.equal(await countSpecRefreshed(db, row.versionId), 1);
+});
+
+test("seedMeasureStore — a routed measure whose description it cannot rewrite says so; an unrouted one stays quiet", async () => {
+  const warnings: string[] = [];
+  const warn = console.warn;
+  const previous = process.env.WORKWELL_OFFICIAL_MEASURES;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+  try {
+    const unknown = { ...catalogSpec("cms125"), description: "Breast Cancer Screening (CMS125v14 / MIPS 112): an older text nobody recorded." };
+    process.env.WORKWELL_OFFICIAL_MEASURES = "cms125";
+    const routed = await seedPreDraftWordingStore();
+    await routed.store.updateSpec("cms125", unknown);
+    warnings.length = 0;
+    await seedMeasureStore(routed.store, () => "", routed.events);
+    assert.deepEqual((await routed.store.getLatest("cms125"))!.spec, unknown, "not rewritten");
+    assert.ok(warnings.some((w) => w.includes("cms125") && w.includes("not rewritten")), "the miss is named");
+
+    delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    const unrouted = await seedPreDraftWordingStore();
+    await unrouted.store.updateSpec("cms125", unknown);
+    warnings.length = 0;
+    await seedMeasureStore(unrouted.store, () => "", unrouted.events);
+    assert.equal(warnings.some((w) => w.includes("cms125") && w.includes("not rewritten")), false);
+  } finally {
+    console.warn = warn;
+    if (previous === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = previous;
+  }
+});
+
+test("seedMeasureStore — rewrites the old descriptions of all six routed measures, audited before each write, once; a second seed is quiet", async () => {
+  assert.deepEqual([...PRE_DRAFT_IDS].sort(), ["cms122", "cms125", "cms130", "cms137", "cms165", "cms2"]);
+  const { db, store, events } = await seedPreDraftWordingStore();
+  await seedMeasureStore(store, () => "", events);
+  for (const id of PRE_DRAFT_IDS) {
+    const row = (await store.getLatest(id))!;
+    assert.deepEqual(row.spec, catalogSpec(id), `${id} carries today's wording`);
+    assert.equal(await countSpecRefreshed(db, row.versionId), 1, `${id} rewrite is audited`);
+  }
+  await seedMeasureStore(store, () => "", events);
+  assert.equal(await countSpecRefreshed(db), PRE_DRAFT_IDS.length, "nothing left to rewrite, nothing audited");
+});
+
+test("seedMeasureStore — a description someone edited is left alone, with no audit", async () => {
+  const { db, store, events } = await seedPreDraftWordingStore();
+  const edited = { ...catalogSpec("cms2"), description: `${lastOld("cms2")} (edited)` };
+  await store.updateSpec("cms2", edited);
+  await seedMeasureStore(store, () => "", events);
+  const row = (await store.getLatest("cms2"))!;
+  assert.deepEqual(row.spec, edited);
+  assert.equal(await countSpecRefreshed(db, row.versionId), 0);
+});
+
+test("seedMeasureStore — a description rewrite that fails after its audit is completed on retry, audited again", async () => {
+  class FailOnceSpec extends SqliteMeasureStore {
+    failed = false;
+    override async updateSpec(measureId: string, spec: MeasureSpec, policyRef?: string) {
+      if (measureId === "cms2" && spec.description === catalogSpec("cms2").description && !this.failed) {
+        this.failed = true;
+        throw new Error("simulated spec write failure");
+      }
+      return super.updateSpec(measureId, spec, policyRef);
+    }
+  }
+  const { db } = await seedPreDraftWordingStore();
+  const store = new FailOnceSpec(db);
+  const events = new SqliteCaseEventStore(db);
+  const versionId = (await store.getLatest("cms2"))!.versionId;
+  await assert.rejects(seedMeasureStore(store, () => "", events), /simulated spec write failure/);
+  assert.equal(await countSpecRefreshed(db, versionId), 1, "audit-first: the intent is recorded before the write");
+  assert.equal((await store.getLatest("cms2"))!.spec.description, lastOld("cms2"), "the failed write left the row retryable");
+  await seedMeasureStore(store, () => "", events);
+  assert.deepEqual((await store.getLatest("cms2"))!.spec, catalogSpec("cms2"));
+  assert.equal(await countSpecRefreshed(db, versionId), 2, "each attempt is recorded: an over-claim, never a silent change");
 });

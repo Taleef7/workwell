@@ -27,6 +27,7 @@ import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webc
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
+import { loadOfficialManifest, officialLogicVintage, type OfficialLogicVintage } from "../wiring/official-artifacts.ts";
 import { servableSnapshots, snapshotsUnderstateRate } from "../quality/snapshot-basis.ts";
 import { latestPopulationSnapshot, latestPopulationWinners, RunKeyedMemo, type VisibilityContext } from "./latest-population.ts";
 import type { LatestPopulationRun } from "../stores/outcome-store.ts";
@@ -87,6 +88,21 @@ export interface ProgramSummary {
    */
   measurementYear: number | null;
   asOf: string | null;
+  /**
+   * Set when the winning run scored a year its vendored artifact was not written for — from 1 January
+   * 2027, PY2027 scored with the 2026 FHIR logic (ROADMAP MM-1d). The run log has carried this as a WARN
+   * since ADR-072; this puts it beside the numbers it qualifies. Decided from the RUN (it carried
+   * official evidence, so `measureRate` is set; the evidence names its artifact) and the year it scored,
+   * never from today's routing flag. Null for an authored measure, a covered year, no winning run, or a
+   * run scored by an artifact other than the one vendored now (its declared period is not on hand).
+   */
+  logicVintage: OfficialLogicVintage | null;
+  /**
+   * True when the counts include the generated scale tenant's, which the AUTHORED engine scored
+   * (`foldScaleCounts`). The numbers are then not one official artifact's, so no screen may label
+   * them with one, whatever `measureRate` (the live run's own evidence) says.
+   */
+  includesAuthoredScaleCounts: boolean;
 }
 
 export interface ProgramFilters {
@@ -515,6 +531,8 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       measureRate: null,
       measurementYear: null,
       asOf: null,
+      logicVintage: null,
+      includesAuthoredScaleCounts: false,
     };
   });
 
@@ -539,9 +557,33 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
     s.measurementYear = period?.measurementYear ?? null;
     s.asOf = period?.asOf ?? null;
+    // A total that folds in the authored scale tenant's counts was not all scored by the artifact, so
+    // it carries no note about that artifact's year.
+    s.logicVintage = s.includesAuthoredScaleCounts ? null : logicVintageOf(s.measureId, s.measureRate, period?.measurementYear ?? null);
   }
 
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
+}
+
+/**
+ * The vintage note for a measure's winning run: only for a run that carried official evidence (an
+ * authored run has no artifact to be stale against) and scored a year the artifact does not declare.
+ * The run's evidence names the artifact that scored it; today's manifest supplies the declared period
+ * only when it is that same artifact (by digest, else by version), or when the evidence names none.
+ * Exported for its unit test.
+ */
+export function logicVintageOf(
+  measureId: string,
+  rate: Pick<MeasureRate, "official"> | null,
+  measurementYear: number | null,
+  manifestOf: (measureId: string) => (Parameters<typeof officialLogicVintage>[0] & { sha256?: string; version?: string }) | null = loadOfficialManifest,
+): OfficialLogicVintage | null {
+  if (!rate || measurementYear === null) return null;
+  const manifest = manifestOf(measureId);
+  if (!manifest) return null;
+  const ran = rate.official;
+  if (ran?.artifactSha256 ? ran.artifactSha256 !== manifest.sha256 : ran?.version && ran.version !== manifest.version) return null;
+  return officialLogicVintage(manifest, measurementYear);
 }
 
 const SCALE_TENANT_ID = "mhn";
@@ -592,6 +634,7 @@ async function foldScaleCounts(deps: ProgramDeps, summaries: ProgramSummary[], f
     s.totalEvaluated = baseTotal + groups.reduce((a, g) => a + g.count, 0);
     s.denominator = s.totalEvaluated - s.excluded - s.notInPopulation;
     s.complianceRate = complianceRateOf(s);
+    s.includesAuthoredScaleCounts = true;
     if (tenant === SCALE_TENANT_ID) s.latestRunId = runId;
   }
 }

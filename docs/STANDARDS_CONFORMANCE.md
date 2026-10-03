@@ -127,7 +127,7 @@ DEQM `meta.profile`, and the structural/not-validator-verified posture above is 
 ## E14 — standards fidelity (authored measure vs official eCQM spec)
 
 >  **SUPERSEDED IN PART (2026-07-30, PR-9c / ADR-045):** on the **demo/production stack**, neither `cms122` nor `cms125`
->  evaluates hand-authored CQL any more — both run CMS's **published QI-Core artifacts** verbatim
+>  evaluates hand-authored CQL any more — both run CMS's **FHIR (QI-Core) draft artifacts** verbatim (CMS122FHIR and CMS125FHIR v1.0.000, posted for public comment in January–February 2026)
 >  (`WORKWELL_OFFICIAL_MEASURES="cms122,cms125"`). Both still evaluate authored CQL on every other
 >  environment. Their MeasureReport canonical + `improvementNotation` and their QRDA III measure identity
 >  now derive from each outcome's own official evidence (ADR-046), so a routed cms122 report declares

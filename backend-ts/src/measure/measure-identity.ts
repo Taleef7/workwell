@@ -2,11 +2,88 @@
  * Single source of truth for measure identity: MIPS Quality ID and CMS ID crosswalk.
  * Occupational/OSHA measures have no MIPS ID / CMS ID and return null identity.
  */
+import { MEASURE_CATALOG } from "./measure-catalog.ts";
+import { loadOfficialManifest, type OfficialManifest } from "../wiring/official-artifacts.ts";
 
 export interface MeasureIdentity {
   cmsId: string;
   mipsQualityId: string | null;
   improvementNotation: "increase" | "decrease";
+}
+
+/**
+ * The logic a measure routed to an official artifact ACTUALLY executes, as opposed to the QDM measure
+ * the catalog row is named after (locked decision §4.3: no QDM identity over FHIR-executed counts).
+ * `CMS125FHIR v1.0.000`, derived from `CMS125v14`, not `CMS125v14` itself.
+ */
+export interface ExecutedLogic {
+  /** CMS's eCQM id for the FHIR artifact, e.g. "CMS125FHIR" (the manifest's `cmsId` with its prefix). */
+  ecqmId: string;
+  /** The artifact's own version, e.g. "1.0.000" — never the catalog's authoring version ("v1.0"). */
+  version: string;
+  /** CMS's release state for the content the artifact was vendored from; "unknown" for a repo not listed below. */
+  status: "draft" | "unknown";
+  /** A dated phrase for `status`, or null when it is unknown. */
+  statusNote: string | null;
+  /** The QDM measure (with its version) the FHIR artifact was derived from, e.g. "CMS125v14". */
+  derivedFrom: string | null;
+}
+
+export type MeasureIdentityPayload = MeasureIdentity & { executed?: ExecutedLogic };
+
+/**
+ * What CMS released each vendored content repository as. The manifest's own `status` is the FHIR
+ * `Measure.status` the authoring tool stamped ("active"), which says nothing about whether CMS has
+ * finalized the content, so it is not used. The 2025 repository holds the 2026 FHIR versions CMS posted
+ * as drafts for public comment; a re-vendor from any other repository reads "unknown" until it is
+ * listed here deliberately.
+ */
+const CONTENT_RELEASES: Readonly<Record<string, { status: "draft"; note: string }>> = {
+  "cqframework/dqm-content-qicore-2025": { status: "draft", note: "posted for public comment Jan–Feb 2026" },
+};
+
+/** `CMS125v14` from the catalog row, kept only when its number is the artifact's (`CMS125FHIR`). */
+function derivedFromFor(measureId: string, ecqmId: string): string | null {
+  const policyRef = MEASURE_CATALOG.find((m) => m.id === measureId)?.policyRef ?? "";
+  const qdm = /^CMS(\d+)v\d+$/.exec(policyRef);
+  const fhir = /^CMS(\d+)FHIR$/.exec(ecqmId);
+  return qdm && fhir && qdm[1] === fhir[1] ? policyRef : null;
+}
+
+/** Pure over a manifest, so a test can pin the mapping without the filesystem. */
+export function executedLogicFromManifest(
+  measureId: string,
+  manifest: Pick<OfficialManifest, "cmsId" | "version" | "source">,
+): ExecutedLogic | null {
+  if (!manifest.cmsId || !manifest.version) return null;
+  const ecqmId = /^CMS/i.test(manifest.cmsId) ? manifest.cmsId : `CMS${manifest.cmsId}`;
+  const release = CONTENT_RELEASES[manifest.source?.repo ?? ""];
+  return {
+    ecqmId,
+    version: manifest.version,
+    status: release?.status ?? "unknown",
+    statusNote: release?.note ?? null,
+    derivedFrom: derivedFromFor(measureId, ecqmId),
+  };
+}
+
+/** The vendored artifact's executed-logic identity, or null when nothing is vendored under this id. */
+export function executedLogicFor(measureId: string): ExecutedLogic | null {
+  const manifest = loadOfficialManifest(measureId);
+  return manifest ? executedLogicFromManifest(measureId, manifest) : null;
+}
+
+/**
+ * The identity a read model serves: the crosswalk row, plus `executed` when the measure is routed to an
+ * official artifact on this deployment. The caller decides routing (it already classifies the measure),
+ * so this module stays free of deployment configuration. An authored or not-yet-routed measure carries
+ * no `executed` key at all.
+ */
+export function measureIdentityPayloadFor(measureId: string, officialRouted: boolean): MeasureIdentityPayload | null {
+  const identity = measureIdentityFor(measureId);
+  if (!identity) return null;
+  const executed = officialRouted ? executedLogicFor(measureId) : null;
+  return executed ? { ...identity, executed } : identity;
 }
 
 type MeasureIdentityEntry = Omit<MeasureIdentity, "improvementNotation"> & { improvementNotation?: MeasureIdentity["improvementNotation"] };

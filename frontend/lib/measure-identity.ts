@@ -1,10 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 
+/**
+ * The logic an officially routed measure ACTUALLY runs: CMS's FHIR artifact (`CMS125FHIR v1.0.000`),
+ * derived from the QDM measure the catalog is named after (`CMS125v14`). Absent for an authored measure.
+ */
+export interface ExecutedLogic {
+  ecqmId: string;
+  version: string;
+  status: "draft" | "unknown";
+  /** A dated phrase for the status, e.g. "posted for public comment Jan–Feb 2026"; null when unknown. */
+  statusNote: string | null;
+  derivedFrom: string | null;
+}
+
 export interface MeasureIdentity {
   cmsId: string;
   mipsQualityId: string | null;
   improvementNotation?: "increase" | "decrease";
+  executed?: ExecutedLogic;
+}
+
+/**
+ * One sentence naming the executed logic, for where a measure is described in detail:
+ * "Runs CMS125FHIR v1.0.000, a CMS FHIR draft (posted for public comment Jan–Feb 2026), derived from CMS125v14".
+ * The identity chip ("MIPS 112 · CMS125") stays as it is; this line is what says which version runs.
+ */
+export function formatExecutedLogic(executed: ExecutedLogic | null | undefined): string {
+  if (!executed) return "";
+  const parts = [`Runs ${executed.ecqmId} v${executed.version}`];
+  if (executed.status === "draft") {
+    parts.push(executed.statusNote ? `a CMS FHIR draft (${executed.statusNote})` : "a CMS FHIR draft");
+  }
+  if (executed.derivedFrom) parts.push(`derived from ${executed.derivedFrom}`);
+  return parts.join(", ");
 }
 
 export interface MeasureListItem {

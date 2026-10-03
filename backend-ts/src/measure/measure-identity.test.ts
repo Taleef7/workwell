@@ -1,10 +1,74 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MEASURE_CATALOG } from "./measure-catalog.ts";
+import { readFileSync } from "node:fs";
 import {
   MEASURE_IDENTITY,
+  executedLogicFor,
+  executedLogicFromManifest,
   measureIdentityFor,
+  measureIdentityPayloadFor,
 } from "./measure-identity.ts";
+
+const manifestOf = (id: string) =>
+  JSON.parse(readFileSync(new URL(`../../measures/official/${id}/manifest.json`, import.meta.url), "utf8")) as {
+    cmsId: string;
+    version: string;
+    source: { repo: string };
+  };
+
+test("executedLogicFor names the FHIR artifact each Maui measure runs, read from its manifest", () => {
+  const expected: Record<string, string> = {
+    cms122: "CMS122v14",
+    cms125: "CMS125v14",
+    cms2: "CMS2v15",
+    cms130: "CMS130v14",
+    cms165: "CMS165v14",
+    cms137: "CMS137v14",
+  };
+  for (const [id, qdm] of Object.entries(expected)) {
+    const manifest = manifestOf(id);
+    assert.deepEqual(executedLogicFor(id), {
+      ecqmId: `CMS${manifest.cmsId}`,
+      version: manifest.version,
+      status: "draft",
+      statusNote: "posted for public comment Jan–Feb 2026",
+      derivedFrom: qdm,
+    }, id);
+  }
+  // Spelled out once, so a manifest change that moved both sides together still shows up here.
+  assert.deepEqual(executedLogicFor("cms125"), {
+    ecqmId: "CMS125FHIR",
+    version: "1.0.000",
+    status: "draft",
+    statusNote: "posted for public comment Jan–Feb 2026",
+    derivedFrom: "CMS125v14",
+  });
+  assert.equal(executedLogicFor("audiogram"), null, "nothing vendored, nothing executed");
+});
+
+test("executedLogicFromManifest: an unlisted content repo is 'unknown', never assumed draft; a mismatched lineage is dropped", () => {
+  const unlisted = executedLogicFromManifest("cms125", { cmsId: "125FHIR", version: "2.0.000", source: { repo: "cqframework/some-later-repo", ref: "x", path: "y", rawSha256: "z" } });
+  assert.equal(unlisted?.status, "unknown");
+  assert.equal(unlisted?.statusNote, null);
+  assert.equal(unlisted?.version, "2.0.000");
+  // The catalog row says CMS125v14; an artifact for another measure under this id must not borrow it.
+  const mismatched = executedLogicFromManifest("cms125", { cmsId: "130FHIR", version: "1.0.000", source: { repo: "cqframework/dqm-content-qicore-2025", ref: "x", path: "y", rawSha256: "z" } });
+  assert.equal(mismatched?.ecqmId, "CMS130FHIR");
+  assert.equal(mismatched?.derivedFrom, null);
+  assert.equal(executedLogicFromManifest("cms125", { cmsId: null, version: "1.0.000", source: { repo: "r", ref: "x", path: "y", rawSha256: "z" } }), null);
+});
+
+test("measureIdentityPayloadFor adds `executed` only for a routed measure, and leaves the crosswalk untouched", () => {
+  const routed = measureIdentityPayloadFor("cms125", true);
+  assert.equal(routed?.cmsId, "CMS125", "the chip's identity is unchanged");
+  assert.equal(routed?.executed?.ecqmId, "CMS125FHIR");
+  assert.equal(routed?.executed?.version, "1.0.000");
+  // No key at all (not `executed: undefined`), so the authored payload is byte-identical to before.
+  assert.deepEqual(measureIdentityPayloadFor("cms125", false), { cmsId: "CMS125", mipsQualityId: "112", improvementNotation: "increase" });
+  assert.equal(Object.hasOwn(measureIdentityPayloadFor("cms125", false)!, "executed"), false);
+  assert.equal(measureIdentityPayloadFor("audiogram", true), null);
+});
 
 test("measureIdentityFor returns identity for CMS measures and null for non-CMS measures", () => {
   assert.deepEqual(measureIdentityFor("cms125"), {

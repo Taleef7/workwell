@@ -51,8 +51,9 @@ they are neighbours on a stack, not rivals for a slot.
 
 This is the strongest evidence for the claim, because it is a choice we made against our own package:
 
-- **Official CMS eCQMs run on `fqm-execution`, not on our engine.** CMS122 and CMS125 evaluate the
-  published QI-Core artifacts through `@work-well/official-executor` on the demo/production stack
+- **Official CMS eCQMs run on `fqm-execution`, not on our engine.** CMS122 and CMS125 evaluate CMS's
+  FHIR (QI-Core) draft artifacts (v1.0.000, posted for public comment in January–February 2026) through
+  `@work-well/official-executor` on the demo/production stack
   (ADR-045/046). Nicole's correction — *run the official published CQL, never reauthor* — is a standing
   rule, and reimplementing bundle-level calculation to avoid a dependency would break it.
 - **Everything else runs on `@work-well/measure-engine`.** The occupational and surveillance measures
