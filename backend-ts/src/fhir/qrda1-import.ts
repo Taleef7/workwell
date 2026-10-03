@@ -266,8 +266,9 @@ function encounterFrom(node: CdaNode, i: string, conditionIds: Set<string>): unk
     // A FHIR id is `[A-Za-z0-9.-]{1,64}`, and a `/` in it would also break the reference match. The
     // fallback is built from the candidate key, which is unique within the document.
     const preferred = `${id}-dx-${k + 1}`;
-    const conditionId =
+    let conditionId =
       /^[A-Za-z0-9.-]{1,64}$/.test(preferred) && !conditionIds.has(preferred) ? preferred : `qrda1-condition-${i}-dx-${k + 1}`;
+    for (let n = 2; conditionIds.has(conditionId); n++) conditionId = `qrda1-condition-${i}-dx-${k + 1}-${n}`;
     conditionIds.add(conditionId);
     return {
       resourceType: "Condition",
@@ -740,7 +741,14 @@ export function importQrda1Document(xml: string): Qrda1Import {
   const { id: patientId, resource: patient } = patientFrom(root);
   const entries: Array<{ resource: unknown }> = [{ resource: patient }];
   const untranslatedTemplates: string[] = [];
-  const conditionIds = new Set<string>();
+  // Every Diagnosis entry's own id is reserved before any encounter-diagnosis id is generated, whichever
+  // comes first in the document, so a generated id can never shadow a Condition the source named.
+  const conditionIds = new Set<string>(
+    descendants(patientData, "observation")
+      .filter((n) => hasTemplate(n, T.diagnosis))
+      .map((n) => childrenNamed(n, "id").find((own) => own.attrs.extension)?.attrs.extension)
+      .filter((own): own is string => typeof own === "string"),
+  );
 
   childrenNamed(patientData, "entry").forEach((entry, i) => {
     // EVERY translatable datatype in the entry, not the first. A Result Organizer carrying two

@@ -1152,6 +1152,31 @@ test("import: a REPEATED encounter id still gives every diagnosis its own Condit
   assert.deepEqual(encounters.map((e) => codeOf(e.reasonReference[0].reference)), ["75544000", "5602001"], "each encounter keeps its own");
 });
 
+test("import: a generated diagnosis id never shadows a Condition the document itself named", () => {
+  // A standalone Diagnosis whose own id is exactly what the encounter's diagnosis would be called, and
+  // placed AFTER the encounter, so it is not yet known when the encounter is read.
+  const diagnosisEntry = `
+    <entry><act classCode="ACT" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.137" extension="2021-08-01"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="enc-dx-dx-1"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <effectiveTime><low value='20240101080000'/></effectiveTime>
+        <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/>
+      </observation></entryRelationship>
+    </act></entry>`;
+  const shadowed = deckDocument.replace("  </section></component>", `${diagnosisEntry}\n  </section></component>`);
+  assert.notEqual(shadowed, deckDocument);
+  const { all } = deckResources(shadowed);
+  const conditions = all.filter((r) => r.resourceType === "Condition");
+  assert.equal(conditions.length, 2);
+  assert.equal(new Set(conditions.map((c) => c.id)).size, 2, "no two Conditions share an id");
+  const encounter = all.find((r) => r.id === "enc-dx")!;
+  const linked = conditions.find((c) => `Condition/${c.id}` === encounter.reasonReference[0].reference)!;
+  assert.equal(linked.code.coding[0].code, "75544000", "the encounter still points at its own diagnosis");
+});
+
 test("import: an encounter id that is not a valid FHIR id still yields a resolvable Condition id", () => {
   const odd = deckDocument.replace('extension="enc-dx"', 'extension="visit/2024/11/28"');
   assert.notEqual(odd, deckDocument);
