@@ -17,8 +17,13 @@ export function showsRateEstimateNote(): boolean {
   return SUBJECT.singular === "patient";
 }
 
-/** `fhirLogic={false}` drops the engine claim where the rates shown may not come from CMS's FHIR logic. */
-export function RateEstimateNote({ id, className, fhirLogic = true }: { id?: string; className?: string; fhirLogic?: boolean }) {
+/**
+ * The engine claim is OPT-IN: by default the note names no engine, and a caller passes `fhirLogic` only
+ * where the rate shown is known to come from CMS's FHIR logic (a run that carried official evidence). A
+ * page that aggregates many measures, or cannot see a run's provenance, keeps the default, which is true
+ * whatever scored the rate.
+ */
+export function RateEstimateNote({ id, className, fhirLogic = false }: { id?: string; className?: string; fhirLogic?: boolean }) {
   if (!showsRateEstimateNote()) return null;
   return (
     <p id={id} data-testid="rate-estimate-note" className={cn("text-xs text-neutral-500 dark:text-neutral-400", className)}>

@@ -214,7 +214,9 @@ it("on the patient deployment the report says its scores are WorkWell's estimate
   await userEvent.click(screen.getByRole("button", { name: "Open" }));
   await userEvent.click(await screen.findByRole("button", { name: "Compute" }));
   await screen.findByText("50.0%");
-  expect(screen.getByText("WorkWell's estimate from CMS's FHIR logic. WebChart calculates and submits the reported rate.")).toBeInTheDocument();
+  // The report spans measures and names no engine: the claim is only made where a run's evidence shows it.
+  expect(screen.getByText("WorkWell's estimate. WebChart calculates and submits the reported rate.")).toBeInTheDocument();
+  expect(screen.queryByText(/from CMS's FHIR logic/)).not.toBeInTheDocument();
 });
 
 it("a measure whose run aged out is named, with the reason, beside the ones that reported", async () => {

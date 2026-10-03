@@ -279,7 +279,8 @@ export default function ProgramDetailPage() {
               <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
                 Scored the way CMS reports it: the measure&apos;s own numerator over its denominator, less exclusions and exceptions. The rate above is the work list&apos;s view of the same patients, so the two can differ.
               </p>
-              <RateEstimateNote className="mt-1" />
+              {/* This panel renders only for official evidence, so its rate is CMS's FHIR logic by construction. */}
+              <RateEstimateNote className="mt-1" fhirLogic />
               {program.measureRate.rates.length > 1 ? (
                 <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400" data-testid={`measure-rate-cases-${program.measureId}`}>
                   Case work covers every rate: a miss on any rate opens a case for the {SUBJECT.singular} that names the rate missed. A run never reopens a case staff closed; only a person can reopen it.

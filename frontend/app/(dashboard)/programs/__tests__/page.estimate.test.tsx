@@ -44,7 +44,8 @@ const PROGRAM = {
   asOf: "2026-09-30",
 };
 
-const ESTIMATE = "WorkWell's estimate from CMS's FHIR logic. WebChart calculates and submits the reported rate.";
+// The overview spans every measure and cannot see each run's provenance, so it names no engine.
+const ESTIMATE = "WorkWell's estimate. WebChart calculates and submits the reported rate.";
 
 beforeEach(() => {
   get.mockReset().mockImplementation((url: string) => {
