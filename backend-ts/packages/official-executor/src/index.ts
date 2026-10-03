@@ -39,7 +39,7 @@ export interface FqmPopulationResult {
 export interface FqmStatementResult {
   statementName?: string;
   libraryName?: string;
-  /** fqm's rendered value — "TRUE"/"FALSE"/"NA"/"UNHIT", or a formatted value for non-boolean defines. */
+  /** fqm's label — "TRUE"/"FALSE"/"NA"/"UNHIT" from relevance and truthiness, never the value itself. */
   final?: unknown;
 }
 

@@ -1,8 +1,8 @@
 /**
  * The calibration gate for the QI-Core compile path: compile each pilot measure's libraries FROM CMS's
  * CQL with our translator (`standards/qicore-compile.ts`), run CMS's MADiE deck on our ELM and on CMS's
- * own, and require the two to agree on every case, every rate, every stratifier and every per-statement
- * result. A 2027 translation is only as trustworthy as the compiler that builds it; this is what shows
+ * own, and require the two to agree on every case, every rate, every stratifier and every define's value
+ * (not just fqm's TRUE/FALSE/NA label). A 2027 translation is only as trustworthy as the compiler that builds it; this is what shows
  * the compiler reproduces CMS's logic before any of it is changed.
  *
  * DB-less and diagnostic-only. fqm-execution is reached only through `standards/official-cases.ts`.
@@ -39,21 +39,25 @@ export const COMPILED_GATE_MEASURES = ["cms122", "cms125", "cms130", "cms137", "
 export type CompiledGateMeasure = (typeof COMPILED_GATE_MEASURES)[number];
 
 /**
- * Per-statement results each deck must compare (statement × group × patient, from CMS's ELM run). A
- * pinned count, not a floor: if it moves, either the deck or what fqm reports changed, and the zero
- * differences below would no longer mean what they meant.
+ * Define values each deck must compare: one per (non-function define × group × patient) in CMS's ELM
+ * run. A pinned count, not a floor: if it moves, either the deck or what fqm reports changed, and zero
+ * differences would no longer mean what they meant.
  */
 export const PINNED_STATEMENT_RESULTS: Record<CompiledGateMeasure, number> = {
-  cms122: 8250,
-  cms125: 10164,
-  cms130: 9856,
-  cms137: 15390,
-  cms165: 10676,
-  cms2: 4572,
+  cms122: 2090,
+  cms125: 2772,
+  cms130: 2688,
+  cms137: 2970,
+  cms165: 2992,
+  cms2: 1368,
 };
 
-/** The measure whose "Initial Population" the non-vacuity check breaks: multi-rate, so both rates move. */
+/**
+ * The measure the non-vacuity checks break: multi-rate, so its "Initial Population" moves both rates, and
+ * its "SDE Sex" define changes a value without moving any population.
+ */
 export const NON_VACUITY_MEASURE: CompiledGateMeasure = "cms137";
+export const VALUE_PROBE_DEFINE = "SDE Sex";
 
 export const USAGE =
   `Usage: pnpm test:compiled-cases [--measure ${COMPILED_GATE_MEASURES.join("|")}]... [--content-dir <path>]` +
@@ -115,8 +119,13 @@ type FqmOutput = Awaited<ReturnType<FqmCalculate>>;
 interface StatementResult {
   libraryName?: string;
   statementName?: string;
+  /** fqm's four-value label (TRUE/FALSE/UNHIT/NA) — truthiness and relevance, NOT the value. */
   final?: unknown;
   relevance?: unknown;
+  /** The define's actual value (fqm returns it under verboseCalculationResults). */
+  raw?: unknown;
+  /** A function def has no value of its own; its label depends on relevance alone. */
+  isFunction?: boolean;
 }
 interface StratifierResult {
   strataId?: string;
@@ -146,13 +155,38 @@ export function verifyUpstreamBundle(contentDir: string, measure: OfficialMeasur
 const rateVector = (rates: PopulationCounts[] | undefined): string =>
   (rates ?? []).map((rate) => POPULATION_CODES.map((code) => rate[code]).join("")).join("|");
 
-function statementsByPatient(output: FqmOutput | undefined): Map<string, Map<string, string>> {
+/**
+ * A define's value in a form two runs can compare: FHIR objects by their JSON, cql-execution values
+ * (DateTime, Interval, Quantity, Code…) by their type and fields, plain objects with sorted keys. Never
+ * `toString()` — on a cql-execution Code it is "[object Object]", which would make every code equal.
+ */
+export function canonicalValue(value: unknown): string {
+  return JSON.stringify(value ?? null, (_key, node: unknown) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+    if ("_json" in node) return (node as { _json: unknown })._json;
+    const fields = Object.entries(node)
+      .filter(([, v]) => typeof v !== "function")
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const ctor = (node as { constructor?: { name?: string } }).constructor;
+    return ctor && ctor !== Object ? { __type: ctor.name, ...Object.fromEntries(fields) } : Object.fromEntries(fields);
+  });
+}
+
+/**
+ * Per patient: each define's value plus fqm's label and relevance, keyed by group, library and name.
+ * Functions are left out: they have no value, and overloads share a name.
+ */
+export function statementsByPatient(output: FqmOutput | undefined): Map<string, Map<string, string>> {
   const out = new Map<string, Map<string, string>>();
   for (const result of output?.results ?? []) {
     const statements = new Map<string, string>();
     ((result.detailedResults ?? []) as DetailedResult[]).forEach((detail, group) => {
       for (const s of detail.statementResults ?? []) {
-        statements.set(`g${group}|${s.libraryName}.${s.statementName}`, `${JSON.stringify(s.final ?? null)}|${String(s.relevance ?? "")}`);
+        if (s.isFunction) continue;
+        statements.set(
+          `g${group}|${s.libraryName}.${s.statementName}`,
+          `${canonicalValue(s.raw)}|${JSON.stringify(s.final ?? null)}|${String(s.relevance ?? "")}`,
+        );
       }
     });
     out.set(String(result.patientId), statements);
@@ -292,6 +326,8 @@ export interface CompiledCasesDeps {
   run: typeof runOfficialMeasureCases;
   verifyUpstream: (contentDir: string, measure: OfficialMeasureId) => void;
   modelInfos: () => ModelInfoFile[];
+  pinnedStatements: Readonly<Record<string, number>>;
+  requiredCases: Readonly<Record<string, number>>;
   log: (message: string) => void;
   error: (message: string) => void;
 }
@@ -303,6 +339,8 @@ export function defaultCompiledCasesDeps(): CompiledCasesDeps {
     run: runOfficialMeasureCases,
     verifyUpstream: verifyUpstreamBundle,
     modelInfos: () => loadQiCoreModelInfos(),
+    pinnedStatements: PINNED_STATEMENT_RESULTS,
+    requiredCases: REQUIRED_OFFICIAL_CASE_COUNTS,
     log: console.log,
     error: console.error,
   };
@@ -316,15 +354,24 @@ async function runBoth(deps: CompiledCasesDeps, loaded: LoadedOfficialMeasure, c
   return { upstream: { run: upstreamRun, output: upstreamOutput }, compiled: { run: compiledRun, output: compiledOutput } };
 }
 
-/** Break a copy of the main library's "Initial Population" so a run on it MUST disagree with CMS's. */
-export function breakInitialPopulation(compiled: readonly CompiledLibrary[], mainLibrary: string): CompiledLibrary[] {
+/** A copy of the compiled libraries with one main-library define replaced by a literal. */
+export function breakDefine(
+  compiled: readonly CompiledLibrary[],
+  mainLibrary: string,
+  define: string,
+  literal: { valueType: string; value: string },
+): CompiledLibrary[] {
   const copy = JSON.parse(JSON.stringify(compiled)) as CompiledLibrary[];
   const main = copy.find((library) => library.name === mainLibrary);
-  const def = defsOf(main?.elm).find((d) => d.name === "Initial Population") as (ElmDef & { expression?: unknown }) | undefined;
-  if (!def) throw new Error(`${mainLibrary} has no "Initial Population" define to break`);
-  def.expression = { type: "Literal", valueType: "{urn:hl7-org:elm-types:r1}Boolean", value: "false" };
+  const def = defsOf(main?.elm).find((d) => d.name === define) as (ElmDef & { expression?: unknown }) | undefined;
+  if (!def) throw new Error(`${mainLibrary} has no "${define}" define to break`);
+  def.expression = { type: "Literal", ...literal };
   return copy;
 }
+
+/** Break "Initial Population" so a run on the copy MUST disagree with CMS's on populations. */
+export const breakInitialPopulation = (compiled: readonly CompiledLibrary[], mainLibrary: string): CompiledLibrary[] =>
+  breakDefine(compiled, mainLibrary, "Initial Population", { valueType: "{urn:hl7-org:elm-types:r1}Boolean", value: "false" });
 
 export async function main(argv: string[], overrides: Partial<CompiledCasesDeps> = {}): Promise<number> {
   const deps = { ...defaultCompiledCasesDeps(), ...overrides };
@@ -365,7 +412,7 @@ export async function main(argv: string[], overrides: Partial<CompiledCasesDeps>
       }
       const { upstream, compiled: ours } = await runBoth(deps, loaded, withCompiledElm(loaded.measureBundle, compiled));
       const comparison: MeasureComparison = { ...compareRuns(measure, upstream, ours), ...shape, problems };
-      const required = REQUIRED_OFFICIAL_CASE_COUNTS[measure] ?? 0;
+      const required = deps.requiredCases[measure] ?? 0;
       if (comparison.cases < required) problems.push(`deck has ${comparison.cases} cases, at least ${required} required`);
       if (upstream.run.calculationError || ours.run.calculationError) problems.push(`calculation error: ${upstream.run.calculationError ?? ours.run.calculationError}`);
       if (comparison.compiled.errors > 0) problems.push(`${comparison.compiled.errors} case error(s) on our ELM`);
@@ -373,9 +420,9 @@ export async function main(argv: string[], overrides: Partial<CompiledCasesDeps>
       for (const [label, count] of [["status", comparison.statusEqual], ["rates", comparison.ratesEqual], ["stratifiers", comparison.stratifiersEqual]] as const) {
         if (count !== comparison.cases) problems.push(`${label} differ on ${comparison.cases - count} case(s)`);
       }
-      if (comparison.statementsDiffering > 0) problems.push(`${comparison.statementsDiffering} per-statement result(s) differ`);
-      if (comparison.statementsCompared !== PINNED_STATEMENT_RESULTS[measure]) {
-        problems.push(`compared ${comparison.statementsCompared} statement results, ${PINNED_STATEMENT_RESULTS[measure]} pinned`);
+      if (comparison.statementsDiffering > 0) problems.push(`${comparison.statementsDiffering} define value(s) differ`);
+      if (comparison.statementsCompared !== deps.pinnedStatements[measure]) {
+        problems.push(`compared ${comparison.statementsCompared} define values, ${deps.pinnedStatements[measure]} pinned`);
       }
       problems.push(...shape.defCountMismatches);
       r = comparison;
@@ -386,22 +433,32 @@ export async function main(argv: string[], overrides: Partial<CompiledCasesDeps>
     results.push(r);
     deps.log(
       `${measure}: ${r.cases} cases · status ${r.statusEqual} · rates ${r.ratesEqual} · stratifiers ${r.stratifiersEqual} · ` +
-        `statements ${r.statementsCompared - r.statementsDiffering}/${r.statementsCompared} equal · ` +
+        `define values ${r.statementsCompared - r.statementsDiffering}/${r.statementsCompared} equal · ` +
         `defs structurally identical ${r.structurallyIdentical}/${r.defs} (informational) · ` +
         `${r.problems.length === 0 ? "PASS" : `FAIL: ${r.problems.join("; ")}`}`,
     );
     for (const sample of r.samples.slice(0, 5)) deps.log(`  ${sample}`);
     if (r.problems.length > 0) failed = true;
 
-    // Non-vacuity: the same comparison on a deliberately broken copy must FAIL, or the gate is not
-    // looking at our ELM at all (a bundle that quietly fell back to CMS's would pass everything).
+    // Non-vacuity: the same comparison on deliberately broken copies must FAIL, or the gate is not
+    // looking at our ELM at all (a bundle that quietly fell back to CMS's would pass everything). One
+    // break moves populations; the other changes only a define's value, which only the value
+    // comparison can see.
     if (measure === NON_VACUITY_MEASURE && compiled.length > 0) {
-      const broken = withCompiledElm(loaded.measureBundle, breakInitialPopulation(compiled, loaded.measureName));
-      const { upstream, compiled: ours } = await runBoth(deps, loaded, broken);
-      const check = compareRuns(measure, upstream, ours);
-      const moved = check.cases - check.ratesEqual;
-      deps.log(`${measure}: non-vacuity check, "Initial Population" forced false → ${moved} case(s) move ${moved > 0 ? "(the gate runs our ELM)" : "— FAIL: the gate is not running our ELM"}`);
+      const brokenPopulations = await runBoth(deps, loaded, withCompiledElm(loaded.measureBundle, breakInitialPopulation(compiled, loaded.measureName)));
+      const populations = compareRuns(measure, brokenPopulations.upstream, brokenPopulations.compiled);
+      const moved = populations.cases - populations.ratesEqual;
+      deps.log(`${measure}: non-vacuity, "Initial Population" forced false → ${moved} case(s) move ${moved > 0 ? "(the gate runs our ELM)" : "— FAIL: the gate is not running our ELM"}`);
       if (moved === 0) failed = true;
+
+      const valueBreak = breakDefine(compiled, loaded.measureName, VALUE_PROBE_DEFINE, { valueType: "{urn:hl7-org:elm-types:r1}String", value: "not the value" });
+      const brokenValue = await runBoth(deps, loaded, withCompiledElm(loaded.measureBundle, valueBreak));
+      const values = compareRuns(measure, brokenValue.upstream, brokenValue.compiled);
+      deps.log(
+        `${measure}: non-vacuity, "${VALUE_PROBE_DEFINE}" replaced → ${values.statementsDiffering} define value(s) differ ` +
+          `${values.statementsDiffering > 0 ? "(the gate compares values)" : "— FAIL: the gate is not comparing values"}`,
+      );
+      if (values.statementsDiffering === 0) failed = true;
     }
   }
 
@@ -411,7 +468,7 @@ export async function main(argv: string[], overrides: Partial<CompiledCasesDeps>
   );
   deps.log(
     `compiled-ELM calibration (${args.signatureLevel}): ${results.length} measure(s), ${totals.cases} cases, ` +
-      `${totals.differing} of ${totals.statements} statement results differ — ${failed ? "FAIL" : "PASS"}`,
+      `${totals.differing} of ${totals.statements} define values differ — ${failed ? "FAIL" : "PASS"}`,
   );
   return failed ? 1 : 0;
 }

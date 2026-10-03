@@ -12,7 +12,7 @@
  * ships — and the options are exactly the `cqf-cqlOptions` CMS recorded on each Library. The proof is
  * not byte-equal ELM (a different translator build cannot produce that) but equal RESULTS: the
  * calibration gate (`run/cli/compiled-cases.ts`) runs CMS's MADiE decks on our ELM and on CMS's and
- * requires every case, rate, stratifier and per-statement result to agree.
+ * requires every case, rate, stratifier and define value to agree.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -140,6 +140,21 @@ export const KNOWN_WARNINGS: Readonly<Record<string, readonly string[]>> = {
   CQMCommon: ["An operand identifier encounter is hiding another identifier of the same name."],
 };
 
+/**
+ * What the translator says it APPLIED (it records CqlToElmInfo on every library), checked against CMS's
+ * set, so a translator whose defaults moved cannot compile with other options while the metadata check on
+ * CMS's side still passes.
+ */
+export function assertAppliedOptions(elm: { library: Record<string, unknown> }, signatureLevel: SignatureLevel, label: string): void {
+  const info = ((elm.library.annotation ?? []) as { type?: string; translatorOptions?: string; signatureLevel?: string }[]).find(
+    (a) => a.type === "CqlToElmInfo",
+  );
+  const applied = String(info?.translatorOptions ?? "").split(",").filter(Boolean).sort();
+  if (JSON.stringify(applied) !== JSON.stringify([...CMS_TRANSLATOR_OPTIONS.options].sort()) || info?.signatureLevel !== signatureLevel) {
+    throw new Error(`${label}: compiled with options ${JSON.stringify(applied)} at ${info?.signatureLevel}, not CMS's`);
+  }
+}
+
 export interface LibrarySource {
   name: string;
   version: string;
@@ -173,7 +188,8 @@ export interface CompileOptions {
  */
 export function compileLibrarySet(sources: readonly LibrarySource[], options: CompileOptions = {}): CompiledLibrary[] {
   const modelInfos = options.modelInfos ?? loadQiCoreModelInfos();
-  const signature = LibraryBuilder.SignatureLevel[options.signatureLevel ?? CMS_TRANSLATOR_OPTIONS.signatureLevel];
+  const signatureName = options.signatureLevel ?? CMS_TRANSLATOR_OPTIONS.signatureLevel;
+  const signature = LibraryBuilder.SignatureLevel[signatureName];
   if (!signature) throw new Error(`unknown signature level ${options.signatureLevel}`);
   const knownWarnings = options.knownWarnings ?? KNOWN_WARNINGS;
 
@@ -205,6 +221,7 @@ export function compileLibrarySet(sources: readonly LibrarySource[], options: Co
   return sources.map((source) => {
     const translator = CqlTranslator.fromText(source.cql, manager());
     const elm = JSON.parse(translator.toJson()) as CompiledLibrary["elm"];
+    assertAppliedOptions(elm, signatureName, `${source.name} ${source.version}`);
     const annotations = ((elm.library.annotation ?? []) as ElmAnnotation[]).filter((a) => a.errorSeverity);
     const errors = annotations.filter((a) => a.errorSeverity === "error").map((a) => a.message ?? "");
     if (errors.length > 0) {

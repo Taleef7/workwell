@@ -13,9 +13,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   cqframework's QICore 6.0.0 model info (Apache-2.0, now in `measures/derived/_modelinfo/`, hash-checked)
   and CMS's recorded options. `pnpm test:compiled-cases` compiles the six pilot measures from CMS's CQL
   and runs CMS's MADiE decks on our ELM and on CMS's: 334/334 cases agree on every rate and stratifier,
-  0 of 58,908 per-statement results differ, and a deliberately broken copy moves 40 cases (proof it runs
-  our ELM). It is a CI step in the official-cases job, and it needs no VSAC credential. No dependency
-  changed, and no runtime behaviour changed. The five places that repeated the "uncompilable" claim are
+  and 0 of 14,880 define values differ (each non-function define, per patient, by value). Two broken
+  copies prove the check looks: one moves 40 cases, one changes 94 values. It is a CI step in the official-cases job, and it needs no VSAC credential. No dependency
+  changed, and no runtime behaviour changed. Every place that repeated the "uncompilable" claim is
   corrected.
 
 ## 2026-10-02

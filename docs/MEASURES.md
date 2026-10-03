@@ -563,7 +563,7 @@ Each outcome evidence payload includes:
   uncompilable under the pinned `@cqframework/cql` 4.0.0-beta.1. **That was wrong (2026-10-03):** given
   cqframework's QICore 6.0.0 model info, the same translator compiles all six pilot measures, and
   `pnpm test:compiled-cases` runs CMS's decks on that ELM with results identical to CMS's own (334 cases,
-  0 of 58,908 statement results differ). The literal tier below still runs CMS's vendored ELM. The diff is **descriptive only
+  0 of 14,880 define values differ). The literal tier below still runs CMS's vendored ELM. The diff is **descriptive only
   (ADR-008)** — it writes nothing and never sets an `Outcome Status`; WorkWell's cms122 outcomes stay
   byte-identical (the enrichment is harness-local — it appends codings to a copy for the diff harness, it
   is not a change to the live `fhir-bundle-builder`). The **GMI numerator alternative is now modeled**

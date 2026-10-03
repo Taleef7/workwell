@@ -459,7 +459,7 @@ jobs:
             pnpm test:official-cases --allow-missing-terminology
           fi
       # The QI-Core compile path: compile the six pilot measures FROM CMS's CQL with our translator and
-      # require CMS's decks to give identical results (cases, rates, stratifiers, every statement) on our
+      # require CMS's decks to give identical results (cases, rates, stratifiers, every define's value) on our
       # ELM and on CMS's. It compares on upstream's own ValueSets, so it needs no VSAC credential and runs
       # the same on Dependabot's pushes. A 2027 translation compiles through this path.
       - name: Compiled-ELM calibration gate
