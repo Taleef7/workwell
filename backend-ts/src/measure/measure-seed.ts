@@ -9,6 +9,7 @@ import { MEASURE_CATALOG, type CatalogMeasure, type MeasureSpec, type MeasureSta
 import { HYPERTENSION_PRE_CHANGE_CQL } from "./hypertension-pre-change-cql.ts";
 import type { MeasureStore } from "../stores/measure-store.ts";
 import type { AppendAuditInput, CaseEventStore } from "../stores/case-event-store.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
 
 // Newest-first per status (Active recently activated), mirroring Java COALESCE(activated_at, …).
 const TIER: Record<MeasureStatus, string> = {
@@ -271,18 +272,24 @@ async function repairPre749SortCql(
 }
 
 /**
- * The six routed measures' descriptions exactly as the seed wrote them before they said which logic
- * runs. They put the QDM measure (`CMS2v15`) in the title, and the four official-only ones called the
- * artifact "published", over counts produced by CMS's FHIR draft (`CMS2FHIR v1.0.000`), which locked
- * decision §4.3 forbids.
+ * Every description the seed ever wrote for the six routed measures before they said which logic runs.
+ * They put the QDM measure (`CMS2v15`) in the title, and the four official-only ones called the artifact
+ * "published", over counts produced by CMS's FHIR draft (`CMS2FHIR v1.0.000`), which locked decision
+ * §4.3 forbids. Each text is matched together with today's rest of the spec, which was checked field by
+ * field against the catalog the text shipped in.
  */
-export const PRE_DRAFT_WORDING_DESCRIPTIONS: Readonly<Record<"cms2" | "cms130" | "cms165" | "cms137" | "cms122" | "cms125", string>> = {
-  cms2: "Screening for Depression and Follow-Up Plan (CMS2v15 / MIPS 134): patients 12+ screened for depression with an age-appropriate standardized tool during the measurement period and, if positive, with a follow-up plan documented on the date of the positive screen. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
-  cms137: "Initiation and Engagement of Substance Use Disorder Treatment (CMS137v14 / MIPS 305): patients 13+ with a new substance use disorder episode between January 1 and November 14 of the measurement period and no diagnosis or treatment in the 60 days before it. TWO RATES over one denominator (ADR-074): Initiation — treatment (a visit, a psychosocial service, or a medication order) within 14 days of the episode; Engagement — two or more further services within 34 days of initiation, or a long-acting medication. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period; a patient is COMPLIANT only where every rate they are in is met.",
-  cms165: "Controlling High Blood Pressure (CMS165v14 / MIPS 236): adults 18-85 at the end of the measurement period with essential hypertension whose most recent BP reading during the measurement period is adequately controlled. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
-  cms122: "Diabetes: HbA1c Poor Control (CMS122v14 / MIPS 1): patients 18–75 with diabetes whose most recent HbA1c result is > 9% (poor control). OVERDUE indicates intervention is needed.",
-  cms125: "Breast Cancer Screening (CMS125v14 / MIPS 112): women 42–74 who had a mammogram in the measurement period or 26 months prior.",
-  cms130: "Colorectal Cancer Screening (CMS130v14 / MIPS 113): adults 50-75 at the end of the measurement period screened for colorectal cancer by colonoscopy, sigmoidoscopy, CT colonography, sDNA-FIT, or FOBT. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
+export const PRE_DRAFT_WORDING_DESCRIPTIONS: Readonly<Record<"cms2" | "cms130" | "cms165" | "cms137" | "cms122" | "cms125", readonly string[]>> = {
+  cms2: ["Screening for Depression and Follow-Up Plan (CMS2v15 / MIPS 134): patients 12+ screened for depression with an age-appropriate standardized tool during the measurement period and, if positive, with a follow-up plan documented on the date of the positive screen. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period."],
+  cms137: ["Initiation and Engagement of Substance Use Disorder Treatment (CMS137v14 / MIPS 305): patients 13+ with a new substance use disorder episode between January 1 and November 14 of the measurement period and no diagnosis or treatment in the 60 days before it. TWO RATES over one denominator (ADR-074): Initiation — treatment (a visit, a psychosocial service, or a medication order) within 14 days of the episode; Engagement — two or more further services within 34 days of initiation, or a long-acting medication. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period; a patient is COMPLIANT only where every rate they are in is met."],
+  cms165: ["Controlling High Blood Pressure (CMS165v14 / MIPS 236): adults 18-85 at the end of the measurement period with essential hypertension whose most recent BP reading during the measurement period is adequately controlled. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period."],
+  cms122: ["Diabetes: HbA1c Poor Control (CMS122v14 / MIPS 1): patients 18–75 with diabetes whose most recent HbA1c result is > 9% (poor control). OVERDUE indicates intervention is needed."],
+  // Two seeded texts: 50–74 until 2026-07-30 (6e776f19 changed the catalog only, so a stack seeded
+  // before then, TWH among them, still holds it), then 42–74.
+  cms125: [
+    "Breast Cancer Screening (CMS125v14 / MIPS 112): women 50–74 who had a mammogram in the measurement period or 26 months prior.",
+    "Breast Cancer Screening (CMS125v14 / MIPS 112): women 42–74 who had a mammogram in the measurement period or 26 months prior.",
+  ],
+  cms130: ["Colorectal Cancer Screening (CMS130v14 / MIPS 113): adults 50-75 at the end of the measurement period screened for colorectal cancer by colonoscopy, sigmoidoscopy, CT colonography, sDNA-FIT, or FOBT. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period."],
 };
 
 /**
@@ -297,11 +304,19 @@ export const PRE_DRAFT_WORDING_DESCRIPTIONS: Readonly<Record<"cms2" | "cms130" |
  * therefore recorded twice: an over-claim, never a silent change (DATA_MODEL_CONTRACTS §4).
  */
 async function repairPreDraftWordingSpecs(store: MeasureStore, events: CaseEventStore): Promise<void> {
-  for (const [measureId, oldDescription] of Object.entries(PRE_DRAFT_WORDING_DESCRIPTIONS)) {
+  for (const [measureId, oldDescriptions] of Object.entries(PRE_DRAFT_WORDING_DESCRIPTIONS)) {
     const catalog = MEASURE_CATALOG.find((m) => m.id === measureId);
     if (!catalog) continue;
     const row = await store.getLatest(measureId);
-    if (!row || !deepEqual(row.spec, { ...catalog.spec, description: oldDescription })) continue;
+    if (!row) continue;
+    if (!oldDescriptions.some((old) => deepEqual(row.spec, { ...catalog.spec, description: old }))) {
+      // Never a silent miss where it shows: a routed measure whose stored text is neither today's nor a
+      // known seed text (or whose spec was edited around it) keeps saying what it said before.
+      if (row.spec.description !== catalog.spec.description && isOfficialRouted(measureId)) {
+        console.warn(`[measure-seed] ${measureId} spec matches no known seed text; its description was not rewritten to name the FHIR draft that runs`);
+      }
+      continue;
+    }
     const audit: AppendAuditInput = {
       eventType: "MEASURE_SEED_SPEC_REFRESHED",
       entityType: "measure_version",
