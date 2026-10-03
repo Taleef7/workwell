@@ -191,14 +191,21 @@ export default function ProgramDetailPage() {
   // A WorkWell translation scored these numbers: it is named by its own label, and today's CMS artifact
   // never stands in for its missing eCQM id (§4.3).
   const ranTranslation = ranOfficial && ran?.kind === "derived";
-  const shownEcqmId = !ranOfficial || ranTranslation ? undefined : ran?.ecqmId ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`) : executed?.ecqmId;
+  // The logic that scored these numbers, by name: the translation's label, or the CMS artifact the run's
+  // evidence names (today's routing only when the run recorded none). One expression, so no later branch
+  // can put a CMS id over a translated run.
+  const shownLogic = !ranOfficial
+    ? undefined
+    : ranTranslation
+      ? (ran?.label ?? "WorkWell translation")
+      : ran?.ecqmId
+        ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`)
+        : executed?.ecqmId;
   const shownVersion = ranOfficial ? (ran?.version ?? (ranTranslation ? undefined : executed?.version) ?? program?.version) : program?.version;
   // The label above the name names logic only when it is the logic that scored these numbers. A policy
   // reference that is itself a versioned CMS measure id (CMS125v14) is a measure neither engine ran, so it
   // never stands in for the artifact; any other policy reference (an OSHA citation) still shows.
-  const topLabel = ranTranslation
-    ? (ran?.label ?? "WorkWell translation")
-    : (shownEcqmId ?? (/^CMS\d+v\d+$/i.test(program?.policyRef ?? "") ? undefined : program?.policyRef));
+  const topLabel = shownLogic ?? (/^CMS\d+v\d+$/i.test(program?.policyRef ?? "") ? undefined : program?.policyRef);
   const rateDescribedBy = [rate.value === null ? "counted-yet-note" : null, showsRateEstimateNote() ? "rate-estimate-note" : null].filter(Boolean).join(" ") || undefined;
 
   const outcomeBreakdown = program

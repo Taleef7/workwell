@@ -23,7 +23,7 @@ vi.mock("@/features/datavis/NitroGridClient", () => ({
         </thead>
         <tbody>
           {(rows ?? []).map((row, i) => (
-            <tr key={String(row.id ?? i)}>
+            <tr key={String(row.id ?? i)} data-translation={String(row.translation ?? "")}>
               {shown.map((col) => (
                 <td key={col.field} data-field={col.field}>
                   {formatCell ? formatCell(row[col.field], row, col) : (row[col.field] as React.ReactNode)}
@@ -123,6 +123,8 @@ describe("MeasuresPage executed logic", () => {
     render(<MeasuresPage />);
     await screen.findByText("Breast Cancer Screening");
     expect(screen.queryByTestId("measure-translation-badge")).toBeNull();
+    // Not even in the hidden Translation column: a measure not routed here runs neither logic.
+    expect(screen.getByText("Breast Cancer Screening").closest("tr")).toHaveAttribute("data-translation", "");
   });
 
   it("does not trust an `executed` block on a measure that is not routed here", async () => {

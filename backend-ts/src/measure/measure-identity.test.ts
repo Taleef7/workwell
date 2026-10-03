@@ -187,4 +187,11 @@ test("measureIdentityPayloadFor names a translation only when it is routed besid
   assert.deepEqual(measureIdentityPayloadFor("cms137", true, false), measureIdentityPayloadFor("cms137", true));
   assert.deepEqual(Object.keys(measureIdentityPayloadFor("cms137", true)!).sort(), ["cmsId", "executed", "improvementNotation", "mipsQualityId"]);
   assert.deepEqual(Object.keys(measureIdentityPayloadFor("cms137", false, true)!).sort(), ["cmsId", "improvementNotation", "mipsQualityId"], "never without the official routing it rides on");
+
+  // With a committed translation (injected): named only when both routings hold.
+  const committed = { label: "WorkWell translation of CMS137v15", version: "ww-2027.1", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", year: "2027" };
+  const of = () => committed;
+  assert.deepEqual(measureIdentityPayloadFor("cms137", true, true, of)?.translation, committed);
+  assert.equal("translation" in measureIdentityPayloadFor("cms137", false, true, of)!, false, "not official-routed: CMS's artifact is not running, so neither is its translation");
+  assert.equal("translation" in measureIdentityPayloadFor("cms137", true, false, of)!, false, "not allowlisted");
 });

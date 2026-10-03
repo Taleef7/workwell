@@ -116,11 +116,17 @@ export function translationLogicFor(measureId: string): TranslationLogic | null 
  * deployment configuration. An authored or not-yet-routed measure carries neither key; a translation is
  * never named without the official routing it rides on.
  */
-export function measureIdentityPayloadFor(measureId: string, officialRouted: boolean, translationRouted = false): MeasureIdentityPayload | null {
+export function measureIdentityPayloadFor(
+  measureId: string,
+  officialRouted: boolean,
+  translationRouted = false,
+  /** Injectable for tests: no translation is committed yet. */
+  translationOf: (measureId: string) => TranslationLogic | null = translationLogicFor,
+): MeasureIdentityPayload | null {
   const identity = measureIdentityFor(measureId);
   if (!identity) return null;
   const executed = officialRouted ? executedLogicFor(measureId) : null;
-  const translation = officialRouted && translationRouted ? translationLogicFor(measureId) : null;
+  const translation = officialRouted && translationRouted ? translationOf(measureId) : null;
   return { ...identity, ...(executed ? { executed } : {}), ...(translation ? { translation } : {}) };
 }
 

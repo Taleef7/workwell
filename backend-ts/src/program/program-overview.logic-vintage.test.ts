@@ -127,6 +127,9 @@ test("logicVintageOf: a translated run has no vintage gap; CMS's draft over a ye
   const translated = { official: { ecqmId: null, version: "ww-2027.1", artifactSha256: "sha256:t", kind: "derived" as const, label: "WorkWell translation of CMS137v15" } };
   assert.equal(logicVintageOf("cms137", translated, 2027, () => manifest, routed), null);
   assert.equal(logicVintageOf("cms137", translated, 2027, () => manifest, none), null, "even with no translation routed any more");
+  // A translated rate that recorded neither digest nor version: only `kind` says CMS's manifest is not its own.
+  const bare = { official: { ecqmId: null, version: null, kind: "derived" as const, label: "WorkWell translation of CMS137v15" } };
+  assert.equal(logicVintageOf("cms137", bare, 2027, () => manifest, routed), null);
   // CMS's draft scored 2027 with no translation routed: today's note, unchanged.
   const cms = { official: { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: "sha256:a" } };
   assert.equal(logicVintageOf("cms137", cms, 2027, () => manifest, none)?.note, "Scored with the 2026 FHIR logic; 2027 logic not yet available");
