@@ -239,6 +239,39 @@ test("logout clears the refresh cookie (Max-Age=0)", async () => {
 
 // ---- Deployment-profile rule (#520) --------------------------------------------------------------
 import { runProfileChild } from "../test-support/run-profile-child.ts";
+import { hashPassword } from "../auth/password.ts";
+
+test("credentialVersion follows the stored hash, and only the hash", () => {
+  const user = (email: string, passwordHash: string) => ({ email, role: "ROLE_CASE_MANAGER", passwordHash });
+  const a = "pbkdf2$210000$aaaaaaaaaaaaaaaaaaaaaa$" + "A".repeat(43);
+  const b = "pbkdf2$210000$bbbbbbbbbbbbbbbbbbbbbb$" + "B".repeat(43);
+  assert.notEqual(credentialVersion(user("x@maui.workwell.dev", a)), credentialVersion(user("x@maui.workwell.dev", b)), "a new hash, a new version");
+  assert.equal(credentialVersion(user("x@maui.workwell.dev", a)), credentialVersion(user("y@maui.workwell.dev", a)), "not the email");
+  assert.equal(credentialVersion(user("x@maui.workwell.dev", a)), credentialVersion(user("x@maui.workwell.dev", a)), "deterministic");
+});
+
+test("a rotated pilot password ends a session opened under the old one, across process restarts", async () => {
+  // Process 1 signs in under hash A and hands its refresh cookie on. A restart with the SAME hash still
+  // honours it (the version is a pure function of the hash); a restart with a NEW hash refuses it.
+  const [hashA, hashB] = [await hashPassword("old-pilot-password"), await hashPassword("new-pilot-password")];
+  const handler = `
+    import { createAuthHandler } from "./src/routes/auth.ts";
+    const h = createAuthHandler({ secret: "r".repeat(40) });
+    const post = (path, init) => h(new Request("http://x" + path, { method: "POST", ...init }));
+  `;
+  const login = runProfileChild("maui", `${handler}
+    const res = await post("/api/auth/login", { body: JSON.stringify({ email: "quality-lead@maui.workwell.dev", password: "old-pilot-password" }) });
+    console.log(JSON.stringify({ status: res.status, cookie: (res.headers.get("set-cookie") ?? "").split(";")[0] }));
+  `, { WORKWELL_PILOT_PASSWORD_HASH: hashA }) as { status: number; cookie: string };
+  assert.equal(login.status, 200);
+  const refreshUnder = (hash: string) =>
+    (runProfileChild("maui", `${handler}
+      const res = await post("/api/auth/refresh", { headers: { cookie: ${JSON.stringify(login.cookie)} } });
+      console.log(JSON.stringify({ status: res.status }));
+    `, { WORKWELL_PILOT_PASSWORD_HASH: hash }) as { status: number }).status;
+  assert.equal(refreshUnder(hashA), 200, "same password after a restart: the session continues");
+  assert.equal(refreshUnder(hashB), 401, "password rotated: the old session cannot refresh");
+});
 
 const loginScript = `
   // runProfileChild parses the whole stdout, so swallow the worker boot log (not the JSON result).
