@@ -337,8 +337,19 @@ export function openApiDocument(): OpenApiDocument {
               properties: {
                 id: str("WorkWell catalog id.", "cms125"),
                 name: str("Display name."),
-                ecqmId: str("Present only when an official CMS artifact produced this outcome.", "CMS125FHIR"),
-                version: str("The official artifact version, when applicable.", "1.0.000"),
+                ecqmId: str("Present only when an official CMS artifact produced this outcome. Never present for a WorkWell translation.", "CMS125FHIR"),
+                version: str("The executed artifact's version, when applicable: CMS's (`1.0.000`) or a WorkWell translation's (`ww-2027.1`).", "1.0.000"),
+                logic: {
+                  type: "object",
+                  description: "Additive. Present only when a WorkWell translation of a CMS measure produced this outcome (the year CMS has published no FHIR logic for); it names the translation, never a CMS eCQM id.",
+                  required: ["kind", "label", "url", "derivedFrom"],
+                  properties: {
+                    kind: { type: "string", enum: ["workwell-translation"] },
+                    label: { type: ["string", "null"], description: "e.g. `WorkWell translation of CMS137v15`." },
+                    url: { type: ["string", "null"], description: "WorkWell's canonical for the translated Measure." },
+                    derivedFrom: { type: ["string", "null"], description: "The CMS measure it was translated from, for provenance only." },
+                  },
+                },
               },
             },
             period: {
@@ -371,8 +382,8 @@ export function openApiDocument(): OpenApiDocument {
             },
             populationsSource: {
               type: "string",
-              description: "`official-evidence` = the executor's own measured vector. `status-derived` = only the initial population is real; the rest are inferred from `status`. `evaluation-error` = no engine spoke for this subject (the evaluation threw): every boolean is false and the subject is in NO population — not a measured absence (additive, ADR-077 d6). Read this before trusting `populations`.",
-              enum: ["official-evidence", "status-derived", "evaluation-error"],
+              description: "`official-evidence` = the executor's own measured vector over CMS's artifact. `translation-evidence` = the same executor's measured vector over a WorkWell translation of a CMS measure, named in `measure.logic` (additive). `status-derived` = only the initial population is real; the rest are inferred from `status`. `evaluation-error` = no engine spoke for this subject (the evaluation threw): every boolean is false and the subject is in NO population — not a measured absence (additive, ADR-077 d6). Read this before trusting `populations`.",
+              enum: ["official-evidence", "translation-evidence", "status-derived", "evaluation-error"],
             },
             provenance: {
               type: "object",

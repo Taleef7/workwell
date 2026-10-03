@@ -183,6 +183,12 @@ more optional flag threaded through every caller — is the exact shape of bug t
 twice elsewhere. Here the logic identity and the thing that computes the outcome are the same
 object, so they cannot disagree.
 
+Every surface names a translation by its own label ("WorkWell translation of CMS137v15"), read from the
+row's `evidence_json.official.kind`, and never by a CMS eCQM id: the measure page and the measures list,
+the rate notes, the compliance API (`populationsSource: "translation-evidence"` and `measure.logic`), the
+attributed-list CSV's `executedLogic` column, the run reconciliation, MCP's explanation and the case
+wording. QRDA refuses a translated run, and a run scored by two logics has no rate and no export.
+
 ## Getting a CMS measure into the tree
 
 CMS's FHIR draft measures (version 1.0.000, posted for public comment in January–February 2026) are in `cqframework/dqm-content-qicore-2025`, with test cases. One

@@ -92,6 +92,8 @@ type Reconciliation = {
   evaluationErrors: number | null;
   official: {
     measureId: string;
+    /** Present only when a WorkWell translation, not CMS's artifact, scored the rates. */
+    logic?: { kind: "workwell-translation"; label: string | null };
     rates: Array<{ label: string | null; ipp: number; denom: number; denex: number; denexcep: number; numer: number; effectiveDenominator: number; score: number | null }>;
     outOfPopulation: number;
     unmeasured: number;
@@ -244,6 +246,8 @@ export default function RunsPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(urlRunId);
   const [selectedRun, setSelectedRun] = useState<RunSummary | null>(null);
   const [reconciliation, setReconciliation] = useState<Reconciliation | null>(null);
+  // The selected run's rates came from a WorkWell translation, not CMS's artifact.
+  const translatedRun = reconciliation?.official?.logic?.kind === "workwell-translation";
   const [runLogs, setRunLogs] = useState<RunLogEntry[]>([]);
   const [runOutcomes, setRunOutcomes] = useState<RunOutcomeRow[]>([]);
   // The run's full outcome count (X-Total-Count): the grid holds at most the first 5,000 (#668).
@@ -1145,7 +1149,7 @@ export default function RunsPage() {
               {/* Covers this rate and the CMS measure rate in the reconciliation below. This page lists
                   runs from before and after the routing flip, so it names CMS's FHIR logic only for a
                   run whose reconciliation shows official evidence. */}
-              <RateEstimateNote fhirLogic={Boolean(reconciliation?.official)} />
+              <RateEstimateNote fhirLogic={Boolean(reconciliation?.official)} translation={translatedRun} />
               <p className="text-xs text-neutral-600 dark:text-neutral-400">
                 Data Freshness: {selectedRun.dataFreshnessMinutes >= 0 ? `${selectedRun.dataFreshnessMinutes} min old` : "unknown"}
               </p>
@@ -1181,6 +1185,9 @@ export default function RunsPage() {
                     <li>Evaluation errors (in no population): {reconciliation.evaluationErrors ?? "not recorded"}</li>
                     {reconciliation.official ? (
                       <>
+                        {translatedRun ? (
+                          <li data-testid="run-translation-logic">Scored by: {reconciliation.official.logic?.label ?? "a WorkWell translation"}, not a CMS measure</li>
+                        ) : null}
                         <li>Evaluated, not in population: {reconciliation.official.outOfPopulation}</li>
                         {reconciliation.official.unmeasured > reconciliation.official.evaluationErrors ? (
                           <li>Counted in no rate (could not supply every rate): {reconciliation.official.unmeasured - reconciliation.official.evaluationErrors}</li>
@@ -1188,7 +1195,7 @@ export default function RunsPage() {
                         {reconciliation.official.rates.map((rate, index) => (
                           <li key={rate.label ?? index}>
                             {rate.label ?? "Rate"}: initial population {rate.ipp}, denominator {rate.denom}, removed {rate.denex + rate.denexcep}, numerator {rate.numer}
-                            {rate.score === null ? "" : `, CMS measure rate ${(rate.score * 100).toFixed(1)}% of the measure's population`}
+                            {rate.score === null ? "" : `, ${translatedRun ? "measure rate" : "CMS measure rate"} ${(rate.score * 100).toFixed(1)}% of the measure's population`}
                           </li>
                         ))}
                       </>
@@ -1228,13 +1235,21 @@ export default function RunsPage() {
                   >
                     MeasureReport (FHIR)
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void downloadFile(`/api/runs/${selectedRunId}/qrda?format=xml`, `qrda-${selectedRunId}.xml`)}
-                  >
-                    QRDA III (XML)
-                  </Button>
+                  {/* QRDA III carries CMS's eMeasure identity, which a WorkWell translation does not have;
+                      the backend refuses it (422 derived_logic_not_reportable), so it is not offered. */}
+                  {translatedRun ? (
+                    <p className="self-center text-xs text-neutral-500 dark:text-neutral-400" data-testid="qrda-not-offered">
+                      QRDA III is not offered: a WorkWell translation has no CMS measure identity to report under.
+                    </p>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void downloadFile(`/api/runs/${selectedRunId}/qrda?format=xml`, `qrda-${selectedRunId}.xml`)}
+                    >
+                      QRDA III (XML)
+                    </Button>
+                  )}
                 </div>
               ) : null}
             </>

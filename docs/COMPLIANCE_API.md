@@ -51,7 +51,7 @@ GET /api/v1/compliance/{subjectId}/{measureId}?start=YYYY-MM-DD&end=YYYY-MM-DD&m
     "denominatorException": false,
     "numerator":            false
   },
-  "populationsSource": "official-evidence",   // or "status-derived" — READ THIS
+  "populationsSource": "official-evidence",   // or "translation-evidence", "status-derived" — READ THIS
 
   "provenance": {
     "mode": "latest",
@@ -103,12 +103,13 @@ They are separate fields precisely so neither can be mistaken for the other.
 | value | what the population booleans are |
 |---|---|
 | `official-evidence` | The measure ran CMS's FHIR draft artifact and these are **the CQM IG membership derivation (ADR-069) of the executor's persisted population vector**. Measured — the persisted `evidence_json` stays the executor's verbatim output, but the served booleans apply the IG's per-subject interaction formulas (a DENEX'd subject's `numerator` reads `false`; an exception co-true with the numerator reads `false`), so they may differ from the raw vector on flag combinations the formulas fold. |
+| `translation-evidence` | The same executor and the same derivation as `official-evidence`, but over **WorkWell's translation of a CMS measure**, for a year CMS has published no FHIR logic for. `measure.logic` names it (`{ "kind": "workwell-translation", "label", "url", "derivedFrom" }`) and `measure.ecqmId` is absent: the translation is not CMS's measure. Additive (2026-10); no deployment routes one yet. |
 | `status-derived` | The measure ran WorkWell-authored logic. **None of the five is measured population membership** — `initialPopulation` and `denominator` are constants, and the rest are inferred from `status`. For an *inverse* authored measure, `numerator` is inverted relative to eCQM convention. Treat the whole block as advisory. |
 | `evaluation-error` | No engine spoke for this subject: the evaluation threw and the persisted evidence is `{ evaluationError, message }`. **Every boolean is `false` — the subject is in no population** — and this label is why; it is not a measured "not in the initial population". Added 2026-09-08 (ADR-077 d6), additively: the other two values are unchanged. |
 
 This field exists because the two cases are indistinguishable from the numbers alone, and treating the
 second as measured eCQM membership would be wrong. If your integration depends on true population
-membership, require `populationsSource == "official-evidence"`.
+membership computed by CMS's own logic, require `populationsSource == "official-evidence"`.
 
 > **Why the ADR-069 derivation is not a v1 break** (Codex review, #484): the meaning of
 > `populationsSource` is unchanged — `official-evidence` still means *measured by the official

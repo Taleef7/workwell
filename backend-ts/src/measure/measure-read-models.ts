@@ -9,6 +9,7 @@ import type { MeasureSpec, MeasureStatus } from "./measure-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { measureIdentityPayloadFor, type MeasureIdentityPayload } from "./measure-identity.ts";
 import { classifyRunnable } from "../config/deployment-profile.ts";
+import { derivedMeasureIds } from "../wiring/official-routing.ts";
 
 export interface Measure {
   id: string;
@@ -43,7 +44,7 @@ export function toMeasure(r: MeasureRecord): Measure {
     tags: r.tags,
     statusUpdatedAt: ts,
     statusUpdatedBy: r.approvedBy ?? r.owner ?? "system",
-    identity: measureIdentityPayloadFor(r.measureId, routing === "official"),
+    identity: measureIdentityPayloadFor(r.measureId, routing === "official", derivedMeasureIds(process.env).has(r.measureId)),
     routing,
   };
 }
@@ -143,7 +144,11 @@ export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): Me
     rule: r.spec.rule,
     ruleBindings: r.spec.ruleBindings,
     jurisdiction: MEASURES[r.measureId]?.jurisdiction ?? "US",
-    identity: measureIdentityPayloadFor(r.measureId, classifyRunnable(r.measureId, process.env).kind === "official"),
+    identity: measureIdentityPayloadFor(
+      r.measureId,
+      classifyRunnable(r.measureId, process.env).kind === "official",
+      derivedMeasureIds(process.env).has(r.measureId),
+    ),
   };
 }
 

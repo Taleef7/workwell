@@ -704,6 +704,9 @@ test("a run scored by a WorkWell translation: QRDA refuses it (no CMS identity t
   assert.equal(report.measure, "urn:workwell:measure:cms137:translation-2027", "reported under the translation's own canonical, not a fallback");
   assert.equal((await get(`/api/runs/${runId}/measure-report?type=bundle`))!.status, 200, "a bundle of one logic is still exported");
   assert.doesNotMatch(JSON.stringify(report), /madie\.cms\.gov|:official:|137FHIR/, "and nothing in it claims CMS's measure");
+  // The reconciliation ladder says which logic its rates came from.
+  const recon = (await (await get(`/api/runs/${runId}/reconciliation`))!.json()) as { official: { logic?: unknown; rates: unknown[] } | null };
+  assert.deepEqual(recon.official?.logic, { kind: "workwell-translation", label: "WorkWell translation of CMS137v15" });
 });
 
 test("a run whose rows were scored for two different years is refused rather than labelled with the first row", async () => {
@@ -715,6 +718,12 @@ test("a run whose rows were scored for two different years is refused rather tha
   }
   const same = await runWithEvidence([officialEvidence({ start: "2027-01-01", end: "2027-12-31" }), officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
   assert.equal((await get(`/api/runs/${same}/qrda?format=xml`))!.status, 200, "one logic, one period: exported as before");
+  // No rate over two logics either; CMS's single-logic rate carries no `logic` key.
+  const mixed = (await (await get(`/api/runs/${runId}/reconciliation`))!.json()) as { official: unknown };
+  assert.equal(mixed.official, null);
+  const one = (await (await get(`/api/runs/${same}/reconciliation`))!.json()) as { official: Record<string, unknown> | null };
+  assert.ok(one.official);
+  assert.equal("logic" in one.official, false);
 });
 
 test("Codex P2: a non-string triggeredBy is coerced to 'manual', never a 500", async () => {

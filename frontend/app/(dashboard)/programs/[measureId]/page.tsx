@@ -24,7 +24,7 @@ import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { ScrollRegion } from "@/components/scroll-region";
-import { formatExecutedLogic, useMeasureIdentities } from "@/lib/measure-identity";
+import { formatExecutedLogic, formatTranslationLogic, useMeasureIdentities } from "@/lib/measure-identity";
 import { RateEstimateNote, showsRateEstimateNote } from "@/components/rate-estimate-note";
 import { displayRate, formatRate, isSmallNumbers, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
 import { chartablePoints } from "../trend-meta";
@@ -185,14 +185,20 @@ export default function ProgramDetailPage() {
   // no FHIR artifact, and so do counts that fold in the authored scale tenant's. Never the catalog's
   // QDM id or "v1.0" over official counts (§4.3).
   const executed = identities[measureId]?.executed;
+  const translation = identities[measureId]?.translation;
   const ranOfficial = program?.measureRate != null && !program.includesAuthoredScaleCounts;
   const ran = program?.measureRate?.official;
-  const shownEcqmId = !ranOfficial ? undefined : ran?.ecqmId ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`) : executed?.ecqmId;
-  const shownVersion = ranOfficial ? (ran?.version ?? executed?.version ?? program?.version) : program?.version;
+  // A WorkWell translation scored these numbers: it is named by its own label, and today's CMS artifact
+  // never stands in for its missing eCQM id (§4.3).
+  const ranTranslation = ranOfficial && ran?.kind === "derived";
+  const shownEcqmId = !ranOfficial || ranTranslation ? undefined : ran?.ecqmId ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`) : executed?.ecqmId;
+  const shownVersion = ranOfficial ? (ran?.version ?? (ranTranslation ? undefined : executed?.version) ?? program?.version) : program?.version;
   // The label above the name names logic only when it is the logic that scored these numbers. A policy
   // reference that is itself a versioned CMS measure id (CMS125v14) is a measure neither engine ran, so it
   // never stands in for the artifact; any other policy reference (an OSHA citation) still shows.
-  const topLabel = shownEcqmId ?? (/^CMS\d+v\d+$/i.test(program?.policyRef ?? "") ? undefined : program?.policyRef);
+  const topLabel = ranTranslation
+    ? (ran?.label ?? "WorkWell translation")
+    : (shownEcqmId ?? (/^CMS\d+v\d+$/i.test(program?.policyRef ?? "") ? undefined : program?.policyRef));
   const rateDescribedBy = [rate.value === null ? "counted-yet-note" : null, showsRateEstimateNote() ? "rate-estimate-note" : null].filter(Boolean).join(" ") || undefined;
 
   const outcomeBreakdown = program
@@ -226,6 +232,11 @@ export default function ProgramDetailPage() {
                 {formatExecutedLogic(executed)}.
               </p>
             ) : null}
+            {executed && translation ? (
+              <p data-testid="translation-logic" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                {formatTranslationLogic(translation)}.
+              </p>
+            ) : null}
             {program.logicVintage?.note ? (
               <p data-testid="logic-vintage" role="note" className="mt-1 inline-block rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                 {program.logicVintage.note}.
@@ -245,7 +256,7 @@ export default function ProgramDetailPage() {
                     Based on {fmtCount(rate.denominator)} {rate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
                   </p>
                 ) : null}
-                <RateEstimateNote id="rate-estimate-note" className="mt-1" fhirLogic={ranOfficial} />
+                <RateEstimateNote id="rate-estimate-note" className="mt-1" fhirLogic={ranOfficial} translation={ranTranslation} />
               </div>
               {delta !== null ? (
                 <p
@@ -273,7 +284,9 @@ export default function ProgramDetailPage() {
               from the programs card, which shows one rate (#637). */}
           {program.measureRate && Array.isArray(program.measureRate.rates) ? (
             <div className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900" data-testid={`measure-rate-${program.measureId}`}>
-              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">CMS measure rate</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">
+                {program.measureRate.official?.kind === "derived" ? "Measure rate · WorkWell translation" : "CMS measure rate"}
+              </p>
               {program.measureRate.rates.map((r, index) => (
                 <p key={r.label ?? index} className="mt-1 text-sm text-neutral-900 dark:text-neutral-100">
                   {r.label ?? "Rate"}: {r.score === null ? "—" : `${(r.score * 100).toFixed(1)}%`}
@@ -285,8 +298,9 @@ export default function ProgramDetailPage() {
               <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
                 Scored the way CMS reports it: the measure&apos;s own numerator over its denominator, less exclusions and exceptions. The rate above is the work list&apos;s view of the same patients, so the two can differ.
               </p>
-              {/* This panel renders only for official evidence, so its rate is CMS's FHIR logic by construction. */}
-              <RateEstimateNote className="mt-1" fhirLogic />
+              {/* This panel renders only for evidence the FHIR executor wrote: CMS's FHIR logic, or a WorkWell
+                  translation of it, which the run's evidence names. */}
+              <RateEstimateNote className="mt-1" fhirLogic translation={program.measureRate.official?.kind === "derived"} />
               {program.measureRate.rates.length > 1 ? (
                 <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400" data-testid={`measure-rate-cases-${program.measureId}`}>
                   Case work covers every rate: a miss on any rate opens a case for the {SUBJECT.singular} that names the rate missed. A run never reopens a case staff closed; only a person can reopen it.

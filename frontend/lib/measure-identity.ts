@@ -14,11 +14,25 @@ export interface ExecutedLogic {
   derivedFrom: string | null;
 }
 
+/**
+ * A WorkWell translation of a CMS measure, routed for the one year it covers (CMS published no FHIR
+ * logic for it). Named by its own label, never by a CMS eCQM id; CMS's artifact (`executed`) still
+ * scores every other year. Absent unless the deployment routes one.
+ */
+export interface TranslationLogic {
+  label: string;
+  version: string;
+  url: string;
+  derivedFrom: string;
+  year: string;
+}
+
 export interface MeasureIdentity {
   cmsId: string;
   mipsQualityId: string | null;
   improvementNotation?: "increase" | "decrease";
   executed?: ExecutedLogic;
+  translation?: TranslationLogic;
 }
 
 /**
@@ -34,6 +48,15 @@ export function formatExecutedLogic(executed: ExecutedLogic | null | undefined):
   }
   if (executed.derivedFrom) parts.push(`derived from ${executed.derivedFrom}`);
   return parts.join(", ");
+}
+
+/**
+ * The year a translation scores, beside the "Runs …" line:
+ * "For 2027: WorkWell translation of CMS137v15 (ww-2027.1), not a CMS measure".
+ */
+export function formatTranslationLogic(translation: TranslationLogic | null | undefined): string {
+  if (!translation) return "";
+  return `For ${translation.year}: ${translation.label} (${translation.version}), not a CMS measure`;
 }
 
 export interface MeasureListItem {

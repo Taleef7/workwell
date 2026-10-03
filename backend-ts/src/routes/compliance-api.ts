@@ -105,12 +105,25 @@ export function rateBlock(
  * field exists to prevent — the honesty field, lying. Deriving both from one call makes them incapable
  * of disagreeing.
  */
-export function populationsSource(evidence: unknown): "official-evidence" | "status-derived" | "evaluation-error" {
+export function populationsSource(evidence: unknown): "official-evidence" | "translation-evidence" | "status-derived" | "evaluation-error" {
   // ADDITIVE (ADR-061 stability; ADR-077 d6): a subject no engine spoke for. The booleans beside it are
   // all false — in NO population — and this label says why, so an integrator never reads "not in the
   // initial population" as a measured fact about a record the engine did not evaluate.
   if (isEvaluationErrorEvidence(evidence)) return "evaluation-error";
-  return officialMembership(evidence) !== null ? "official-evidence" : "status-derived";
+  if (officialMembership(evidence) === null) return "status-derived";
+  // ADDITIVE (decision 3, 2026-10-02): measured by the same executor, but over WorkWell's translation of a
+  // CMS measure, not CMS's artifact. An integrator that requires `official-evidence` drops the row,
+  // which is the safe direction for logic CMS did not publish.
+  return officialReportIdentity(evidence)?.kind === "derived" ? "translation-evidence" : "official-evidence";
+}
+
+/**
+ * ADDITIVE: names a WorkWell translation, never by a CMS eCQM id (LOCKED §4.3). Absent on every row CMS's
+ * artifact or authored logic scored, so those responses are byte-identical.
+ */
+function logicBlock(identity: ReturnType<typeof officialReportIdentity>): { logic?: Record<string, string | null> } {
+  if (identity?.kind !== "derived") return {};
+  return { logic: { kind: "workwell-translation", label: identity.label ?? null, url: identity.url ?? null, derivedFrom: identity.derivedFrom ?? null } };
 }
 
 function body(
@@ -134,6 +147,7 @@ function body(
       name,
       ...(identity?.ecqmId ? { ecqmId: identity.ecqmId } : {}),
       ...(identity?.version ? { version: identity.version } : {}),
+      ...logicBlock(identity),
     },
     // The MEASUREMENT period of the answer — not an echo of the request filter, which is what a first cut
     // returned (review, #399). `filter` carries the caller's own bounds separately so the two can never be

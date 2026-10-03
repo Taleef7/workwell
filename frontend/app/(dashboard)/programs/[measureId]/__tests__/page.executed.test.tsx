@@ -59,11 +59,19 @@ const program = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function mockApi({ executed = true, summary = program() }: { executed?: boolean; summary?: ReturnType<typeof program> } = {}) {
+const TRANSLATION = {
+  label: "WorkWell translation of CMS125v15",
+  version: "ww-2027.1",
+  url: "urn:workwell:measure:cms125:translation",
+  derivedFrom: "CMS125v15",
+  year: "2027",
+};
+
+function mockApi({ executed = true, translation = false, summary = program() }: { executed?: boolean; translation?: boolean; summary?: ReturnType<typeof program> } = {}) {
   get.mockReset().mockImplementation((url: string) => {
     if (url === "/api/measures") {
       return Promise.resolve([
-        { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112", ...(executed ? { executed: EXECUTED } : {}) } },
+        { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112", ...(executed ? { executed: EXECUTED } : {}), ...(translation ? { translation: TRANSLATION } : {}) } },
       ]);
     }
     if (url === "/api/programs") return Promise.resolve([summary]);
@@ -182,5 +190,42 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     render(<ProgramDetailPage />);
     await screen.findByTestId("executed-logic");
     expect(screen.queryByTestId("logic-vintage")).toBeNull();
+  });
+
+  it("a run a WorkWell translation scored is labelled with the translation, never with today's CMS artifact", async () => {
+    const base = program();
+    mockApi({
+      translation: true,
+      summary: program({
+        measureRate: {
+          ...base.measureRate,
+          source: "translation-evidence",
+          official: { ecqmId: null, version: "ww-2027.1", kind: "derived", label: "WorkWell translation of CMS125v15", derivedFrom: "CMS125v15" },
+        },
+      }),
+    });
+    render(<ProgramDetailPage />);
+    expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("WorkWell translation of CMS125v15");
+    expect(screen.getByText(/^Version ww-2027\.1/)).toBeInTheDocument();
+    // The run's evidence carries no eCQM id; today's CMS artifact must not fill the gap.
+    expect(screen.queryByText("CMS125FHIR")).toBeNull();
+    // Both logics, each with what it scores.
+    expect(screen.getByTestId("executed-logic")).toHaveTextContent(/^Runs CMS125FHIR v1\.0\.000/);
+    expect(screen.getByTestId("translation-logic")).toHaveTextContent("For 2027: WorkWell translation of CMS125v15 (ww-2027.1), not a CMS measure.");
+    // The rate panel and the estimate notes credit the translation, not CMS.
+    expect(screen.getByText("Measure rate · WorkWell translation")).toBeInTheDocument();
+    expect(screen.queryByText("CMS measure rate")).toBeNull();
+    expect(screen.getAllByText("WorkWell's estimate from its own translation of CMS's logic. WebChart calculates and submits the reported rate.")).toHaveLength(2);
+    expect(screen.queryByText(ESTIMATE)).toBeNull();
+  });
+
+  it("a translation routed for next year changes nothing on a run CMS's draft scored, but the translation line", async () => {
+    const base = program();
+    mockApi({ translation: true, summary: program({ measureRate: { ...base.measureRate, official: { ecqmId: "125FHIR", version: "1.0.000" } } }) });
+    render(<ProgramDetailPage />);
+    expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("CMS125FHIR");
+    expect(screen.getByTestId("translation-logic")).toHaveTextContent(/^For 2027: WorkWell translation of CMS125v15/);
+    expect(screen.getByText("CMS measure rate")).toBeInTheDocument();
+    expect(screen.getAllByText(ESTIMATE)).toHaveLength(2);
   });
 });

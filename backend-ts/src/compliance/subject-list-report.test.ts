@@ -9,7 +9,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { subjectListReport, type SubjectListReportDeps } from "./subject-list-report.ts";
+import { executedLogicOf, subjectListReport, type SubjectListReportDeps } from "./subject-list-report.ts";
 import { subjectListReportCsv, reportCsvHeaders } from "./subject-list-report-csv.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { SubjectList, SubjectListMember } from "../stores/subject-list-store.ts";
@@ -549,7 +549,7 @@ test("the CSV header is pinned exactly — the ACO's tooling reads it by name", 
     "resolution", "rowStatus", "measureId", "ecqmId", "measureVersion", "runId",
     "measurementPeriodStart", "measurementPeriodEnd", "evaluatedAt", "rate",
     "initialPopulation", "denominator", "denominatorExclusion", "denominatorException", "numerator",
-    "status", "outOfPopulation", "evaluationError", "providerId", "payer",
+    "status", "outOfPopulation", "evaluationError", "providerId", "payer", "executedLogic",
   ]);
   // The subject columns follow the deployment's own term, exactly as §6.2/§6.3 do.
   assert.equal(reportCsvHeaders("employee")[4], "employeeExternalId");
@@ -606,4 +606,38 @@ test("an identifier that looks like a formula is neutralised before it reaches a
   const csv = subjectListReportCsv(report, profile, "patient");
   assert.match(csv, /'=SUM\(A1:A9\)/, "prefixed with an apostrophe");
   assert.doesNotMatch(csv, /,=SUM/, "and never left bare at the start of a cell");
+});
+
+test("executedLogic names the logic behind each measure's rows: CMS's artifact by id, a translation by its label", async () => {
+  assert.equal(executedLogicOf({ ecqmId: "122FHIR", version: "1.0.000" }), "CMS122FHIR v1.0.000", "spelled as the measure page spells it");
+  assert.equal(executedLogicOf({ ecqmId: "CMS122FHIR", version: "1.0.000" }), "CMS122FHIR v1.0.000");
+  assert.equal(executedLogicOf({ kind: "derived", label: "WorkWell translation of CMS122v15", ecqmId: "122FHIR", version: "ww-2027.1" }), "WorkWell translation of CMS122v15", "never a CMS id, even one a row wrongly carried");
+  assert.equal(executedLogicOf({ version: "1.0.000" }), null);
+  assert.equal(executedLogicOf(null), null);
+
+  const translated = (numer: boolean) => ({
+    official: {
+      kind: "derived", label: "WorkWell translation of CMS122v15", ecqmId: null, version: "ww-2027.1",
+      populationResults: { ipp: true, denom: true, numer, denex: false, denexcep: false },
+      measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+    },
+  });
+  const result = await runReport({
+    members: [
+      { rawIdentifier: "pat-001", subjectId: "pat-001", resolution: "MATCHED" },
+      { rawIdentifier: "pat-003", subjectId: "pat-003", resolution: "MATCHED" },
+      { rawIdentifier: "MRN-77", subjectId: null, resolution: "NOT_FOUND" },
+    ],
+    rows: [row("pat-001", translated(true))],
+  });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  assert.equal(report.measures[0]!.executedLogic, "WorkWell translation of CMS122v15");
+  assert.equal(report.measures[0]!.ecqmId, null);
+  const headers = reportCsvHeaders("patient");
+  const lines = subjectListReportCsv(report, profile, "patient").split("\r\n").slice(1).map((l) => l.split(","));
+  const cell = (status: string, column: string) => lines.find((l) => l[headers.indexOf("rowStatus")] === status)![headers.indexOf(column)];
+  assert.equal(cell("EVALUATED", "executedLogic"), "WorkWell translation of CMS122v15");
+  assert.equal(cell("EVALUATED", "ecqmId"), "");
+  assert.equal(cell("MISSING_FROM_RUN", "executedLogic"), "WorkWell translation of CMS122v15", "filled wherever the measure columns are");
+  assert.equal(cell("NOT_MATCHED", "executedLogic"), "");
 });

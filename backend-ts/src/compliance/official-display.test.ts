@@ -40,3 +40,17 @@ test("cms137 OVERDUE names BOTH rates, and its next action is treatment follow-u
 test("EXCLUDED is a denominator exclusion or exception, never an 'exemption on file'", () => {
   for (const id of IDS) assert.match(officialDisplayFor(id, "EXCLUDED")!.method, /excluded by measure logic/i);
 });
+
+test("a WorkWell translation's exclusion is never credited to official logic; CMS's wording is untouched", () => {
+  const translated = { official: { kind: "derived", label: "WorkWell translation of CMS137v15" } };
+  const cms = officialDisplayFor("cms137", "EXCLUDED", { official: { ecqmId: "137FHIR" } })!;
+  assert.match(cms.whyFlagged, /by official measure logic/);
+  const derived = officialDisplayFor("cms137", "EXCLUDED", translated)!;
+  assert.doesNotMatch(derived.whyFlagged, /official/i);
+  assert.equal(derived.whyFlagged, cms.whyFlagged.replace("by official measure logic", "by the measure logic"));
+  assert.equal(derived.method, cms.method);
+  assert.equal(derived.nextAction, cms.nextAction);
+  for (const id of ["cms122", "cms125", "cms2", "cms130", "cms165"]) {
+    assert.doesNotMatch(officialDisplayFor(id, "EXCLUDED", translated)!.whyFlagged, /official/i, id);
+  }
+});

@@ -47,7 +47,7 @@ import type { OutcomeStore, OutcomeRecord } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { SubjectListStore, SubjectList } from "../stores/subject-list-store.ts";
-import { createRateAggregator, membershipRatesFor, officialReportIdentity, reportingPeriod } from "../fhir/measure-report.ts";
+import { createRateAggregator, membershipRatesFor, officialReportIdentity, reportingPeriod, type OfficialReportIdentity } from "../fhir/measure-report.ts";
 import { isEvaluationErrorEvidence } from "../fhir/measure-report.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { isPopulationRun } from "../program/rollup-shared.ts";
@@ -102,6 +102,11 @@ export interface MeasureReportEntry {
   measureId: string;
   ecqmId: string | null;
   version: string | null;
+  /**
+   * The logic that produced the numbers, by name: `CMS137FHIR v1.0.000` for CMS's artifact, or a WorkWell
+   * translation's label (`WorkWell translation of CMS137v15`), whose `ecqmId` is null (LOCKED §4.3).
+   */
+  executedLogic: string | null;
   runId: string | null;
   runStartedAt: string | null;
   measurementPeriod: { start: string; end: string } | null;
@@ -234,6 +239,7 @@ export async function subjectListReport(
       measureId,
       ecqmId: read.identity?.ecqmId ?? null,
       version: read.identity?.version ?? null,
+      executedLogic: executedLogicOf(read.identity ?? null),
       runId: winner.runId,
       runStartedAt: winner.startedAt,
       measurementPeriod: reportingPeriod(winner, read.identity ?? null),
@@ -315,6 +321,18 @@ export async function subjectListReport(
 const maxIso = (a: string | null, b: string): string =>
   a === null || Date.parse(b) > Date.parse(a) ? b : a;
 
+/**
+ * A translation by its label; CMS's artifact by its eCQM id and version, spelled as the measure page
+ * spells it (`CMS125FHIR v1.0.000`: the evidence stores the manifest's bare `125FHIR`); null when
+ * neither is known.
+ */
+export function executedLogicOf(identity: OfficialReportIdentity | null): string | null {
+  if (!identity) return null;
+  if (identity.kind === "derived") return identity.label ?? null;
+  if (!identity.ecqmId || !identity.version) return null;
+  return `${/^CMS/i.test(identity.ecqmId) ? identity.ecqmId : `CMS${identity.ecqmId}`} v${identity.version}`;
+}
+
 const emptyEntry = (
   measureId: string,
   matchedSubjects: number,
@@ -324,6 +342,7 @@ const emptyEntry = (
   measureId,
   ecqmId: null,
   version: null,
+  executedLogic: null,
   runId: null,
   runStartedAt: null,
   measurementPeriod: null,

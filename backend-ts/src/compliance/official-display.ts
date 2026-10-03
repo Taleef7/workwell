@@ -263,6 +263,11 @@ export function multiRateExclusionActive(evidence: unknown, numeratorMeansCompli
  * multi-rate measure's OVERDUE it selects the missed rate's wording; for everything else it is ignored.
  */
 export function officialDisplayFor(measureId: string, status: string, evidence?: unknown): OfficialDisplay | null {
+  const display = displayFor(measureId, status, evidence);
+  return display && translated(evidence) ? withoutOfficialClaim(display) : display;
+}
+
+function displayFor(measureId: string, status: string, evidence?: unknown): OfficialDisplay | null {
   if (status === "OVERDUE" && evidence !== undefined) {
     const byRate = OVERDUE_BY_RATE[measureId];
     if (byRate) {
@@ -272,3 +277,18 @@ export function officialDisplayFor(measureId: string, status: string, evidence?:
   }
   return OFFICIAL_DISPLAY[measureId]?.[status] ?? null;
 }
+
+/** A WorkWell translation scored the outcome (`evidence_json.official.kind`, DATA_MODEL §5). */
+const translated = (evidence: unknown): boolean =>
+  (evidence as { official?: { kind?: unknown } } | null | undefined)?.official?.kind === "derived";
+
+/**
+ * The same clinical sentence without "official": a translation applies the exclusion by WorkWell's
+ * translation of the measure, not by logic CMS published (LOCKED §4.3). Nothing else in a row names the
+ * logic's author, so nothing else changes.
+ */
+const withoutOfficialClaim = (display: OfficialDisplay): OfficialDisplay => ({
+  method: display.method,
+  whyFlagged: display.whyFlagged.replace("by official measure logic", "by the measure logic"),
+  nextAction: display.nextAction,
+});

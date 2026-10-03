@@ -8,6 +8,8 @@ import {
   executedLogicFromManifest,
   measureIdentityFor,
   measureIdentityPayloadFor,
+  translationLogicFromManifest,
+  translationLogicFor,
 } from "./measure-identity.ts";
 
 const manifestOf = (id: string) =>
@@ -164,4 +166,25 @@ test("one source of inverse — improvementNotation 'decrease' iff numeratorMean
       `Measure ${id} failed inverse consistency check: improvementNotation='${identity.improvementNotation}', numeratorMeansCompliant=${semantics.numeratorMeansCompliant}`,
     );
   }
+});
+
+test("translationLogicFromManifest names a translation by its own label and canonical, for the one year it covers", () => {
+  const derived = { label: "WorkWell translation of CMS137v15", derivedFrom: { ecqm: "CMS137v15", packageSha256: "sha256:p" } } as never;
+  assert.deepEqual(
+    translationLogicFromManifest({ version: "ww-2027.1", url: "urn:workwell:measure:cms137:translation", effectivePeriod: { start: "2027-01-01", end: "2027-12-31" }, derived }),
+    { label: "WorkWell translation of CMS137v15", version: "ww-2027.1", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", year: "2027" },
+  );
+  assert.equal(translationLogicFromManifest({ version: "1.0.000", url: "https://madie.cms.gov/Measure/CMS137FHIR", effectivePeriod: { start: "2026-01-01", end: "2026-12-31" } }), null, "CMS's manifest is not a translation");
+  assert.equal(translationLogicFromManifest({ version: "ww-x", url: "u", effectivePeriod: { start: "2027-01-01", end: "2028-12-31" }, derived }), null, "never a span of years");
+  assert.equal(translationLogicFromManifest({ version: "ww-x", url: "u", effectivePeriod: null, derived }), null, "never an undeclared year");
+});
+
+test("measureIdentityPayloadFor names a translation only when it is routed beside CMS's artifact; none is committed yet", () => {
+  // C2 commits no translation, so even a routed cms137 carries no `translation` key...
+  assert.equal(translationLogicFor("cms137"), null);
+  assert.equal("translation" in measureIdentityPayloadFor("cms137", true, true)!, false);
+  // ...and the payload a deployment with nothing allowlisted serves is exactly today's.
+  assert.deepEqual(measureIdentityPayloadFor("cms137", true, false), measureIdentityPayloadFor("cms137", true));
+  assert.deepEqual(Object.keys(measureIdentityPayloadFor("cms137", true)!).sort(), ["cmsId", "executed", "improvementNotation", "mipsQualityId"]);
+  assert.deepEqual(Object.keys(measureIdentityPayloadFor("cms137", false, true)!).sort(), ["cmsId", "improvementNotation", "mipsQualityId"], "never without the official routing it rides on");
 });

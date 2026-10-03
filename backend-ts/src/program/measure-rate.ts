@@ -25,10 +25,21 @@ export interface MeasureRateGroup {
 }
 
 export interface MeasureRate {
-  source: "official-evidence";
+  /** `translation-evidence` when a WorkWell translation scored the run — the compliance API's word for it. */
+  source: "official-evidence" | "translation-evidence";
   runId: string;
-  /** The artifact the evidence names, when a row carried it. */
-  official: { ecqmId: string | null; version: string | null; artifactSha256?: string | null } | null;
+  /**
+   * The artifact the evidence names, when a row carried it. `kind: "derived"` with its `label` when a
+   * WorkWell translation scored the run; its `ecqmId` is then always null (LOCKED §4.3).
+   */
+  official: {
+    ecqmId: string | null;
+    version: string | null;
+    artifactSha256?: string | null;
+    kind?: "derived";
+    label?: string | null;
+    derivedFrom?: string | null;
+  } | null;
   rates: MeasureRateGroup[];
   /** Subjects counted in no rate (ADR-074 d5). */
   unmeasured: number;
@@ -85,12 +96,23 @@ export async function officialMeasureRate(
   // small occupational rosters, while the official case is the 20,000-patient one that was timing out.
   const aggregate = await aggregateOfficialRun(os, runId, measureId);
   if (!aggregate.producedOfficialEvidence) return remember(null);
+  // Rows scored by two different logics (an ad-hoc evaluation spanning a year boundary) have no one
+  // rate: summing CMS's 2026 counts with a translation's 2027 counts names neither. The exporters refuse
+  // the same run (`mixed_logic`).
+  if (aggregate.identityConflict) return remember(null);
   const labels = officialMeasureSemantics(measureId)?.rateLabels;
   const rate: MeasureRate = {
-    source: "official-evidence",
+    source: aggregate.official?.kind === "derived" ? "translation-evidence" : "official-evidence",
     runId,
     official: aggregate.official
-      ? { ecqmId: aggregate.official.ecqmId ?? null, version: aggregate.official.version ?? null, artifactSha256: aggregate.official.artifactSha256 ?? null }
+      ? {
+          ecqmId: aggregate.official.ecqmId ?? null,
+          version: aggregate.official.version ?? null,
+          artifactSha256: aggregate.official.artifactSha256 ?? null,
+          ...(aggregate.official.kind === "derived"
+            ? { kind: "derived" as const, label: aggregate.official.label ?? null, derivedFrom: aggregate.official.derivedFrom ?? null }
+            : {}),
+        }
       : null,
     rates: aggregate.rates.map((c, index) => {
       const effectiveDenominator = c.denom - c.denex - c.denexcep;

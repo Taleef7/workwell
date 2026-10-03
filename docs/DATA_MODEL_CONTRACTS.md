@@ -203,7 +203,7 @@ Columns (pinned by a test; subject pair per `subjectHeaders`, TWH `employeeExter
 `listId, listRevision, generatedAt, rawIdentifier, patientExternalId, patientName, resolution,
 rowStatus, measureId, ecqmId, measureVersion, runId, measurementPeriodStart, measurementPeriodEnd,
 evaluatedAt, rate, initialPopulation, denominator, denominatorExclusion, denominatorException,
-numerator, status, outOfPopulation, evaluationError, providerId, payer`
+numerator, status, outOfPopulation, evaluationError, providerId, payer, executedLogic`
 
 - `measurementYear` is REQUIRED. Per measure: the newest reportable population run whose own measurement
 period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date.
@@ -223,6 +223,8 @@ the CORS-exposed `X-WorkWell-Compacted-Measures`; **409 `run_compacted`** only w
 never a truncated 200.
 - `rawIdentifier`, subject name and rate label pass through `csvTextCell` (defuses a leading `=`, `+`,
 `-`, `@`, tab, CR).
+- `executedLogic` was appended, never inserted: `CMS137FHIR v1.0.000` for CMS's artifact, a WorkWell
+translation's label (its `ecqmId` empty) otherwise; filled wherever the measure columns are.
 
 ### 6.7 `?listId=` on the filtered surfaces (ADR-082)
 Restricts the roster, cases route, work list, §6.2/§6.3 CSVs and MCP `list_noncompliant` to a list's
