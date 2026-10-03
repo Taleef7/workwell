@@ -9,6 +9,7 @@
  * The Java/Neon `demo_users` rows (bcrypt) are untouched; this is the TS backend's
  * own store, consistent with the strangler running alongside the JVM during cutover.
  */
+import { createHash } from "node:crypto";
 import { isPasswordHash, verifyPassword } from "./password.ts";
 import { DEPLOYMENT_PROFILE, resolveDeploymentProfile } from "../config/deployment-profile.ts";
 import { isProductionLike, type StartupEnv } from "../config/startup-safety.ts";
@@ -134,6 +135,17 @@ export function resolveAssignable(email: string, profileId = DEPLOYMENT_PROFILE.
   const needle = email.trim().toLowerCase();
   if (!needle) return null;
   return assignableUsers(profileId).find((user) => user.email.toLowerCase() === needle)?.email ?? null;
+}
+
+/**
+ * The account's credential version: a short digest of its stored password hash, so it changes exactly
+ * when the password does. A refresh token records the version its session began under, and the refresh
+ * route refuses a token whose version is stale; without that, a session opened with an old password
+ * (the public demo one, before the pilot stack got its own) renews itself for as long as it keeps
+ * refreshing. Truncated SHA-256 of a salted PBKDF2 string reveals nothing usable about the password.
+ */
+export function credentialVersion(user: DemoUser): string {
+  return createHash("sha256").update(user.passwordHash).digest("base64url").slice(0, 16);
 }
 
 /** Validate credentials; returns the user on success, else null. */
