@@ -444,9 +444,10 @@ const LOINC_DIASTOLIC = "8462-4";
  * This is the representation change between the two models, not new data: the two values, their codes
  * and their time all come from the source, and the panel code is the one the US Core profile requires
  * of any blood pressure. Pairing is deliberately strict: exactly one systolic and one diastolic Physical
- * Exam at the identical instant. Anything else (a lone reading, two systolics at one time, readings
- * minutes apart) is left exactly as imported, because choosing which two belong together would be a
- * guess. The pair's two resources are replaced by the panel, which keeps the systolic's id.
+ * Exam with identical timing (the same instant, or the same start and end) that carries a time of day.
+ * Anything else (a lone reading, two systolics at one time, readings minutes apart, a date with no time)
+ * is left exactly as imported, because choosing which two belong together would be a guess. The pair's
+ * two resources are replaced by the panel, which keeps the systolic's id and timing.
  */
 function pairBloodPressures(entries: Array<{ resource: unknown }>): void {
   type Exam = {
@@ -455,23 +456,35 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>): void {
     category?: Array<{ coding?: Array<{ code?: string }> }>;
     code: { coding: Array<{ system: string; code: string }> };
     effectiveDateTime?: string;
+    effectivePeriod?: { start?: string; end?: string };
     valueQuantity?: unknown;
+  };
+  // The timing both halves must share EXACTLY: one instant, or one period with the same start and end.
+  // A date-only time (a document that gave no time of day, or only the hour, which the parser cannot
+  // keep) is not a pairing key: two readings hours apart would look identical.
+  const timingKey = (r: Exam): string | undefined => {
+    const hasTime = (v: string | undefined): v is string => typeof v === "string" && v.includes("T");
+    if (hasTime(r.effectiveDateTime)) return `at|${r.effectiveDateTime}`;
+    const p = r.effectivePeriod;
+    if (!r.effectiveDateTime && p && hasTime(p.start) && hasTime(p.end)) return `period|${p.start}|${p.end}`;
+    return undefined;
   };
   const groups = new Map<string, { systolic: number[]; diastolic: number[] }>();
   entries.forEach((entry, index) => {
     const r = entry.resource as Exam;
     if (r.resourceType !== "Observation" || r.category?.[0]?.coding?.[0]?.code !== "exam") return;
-    if (!r.effectiveDateTime || r.valueQuantity === undefined) return;
+    const key = timingKey(r);
+    if (key === undefined || r.valueQuantity === undefined) return;
     const loinc = r.code.coding.filter((c) => c.system === LOINC).map((c) => c.code);
     const systolic = loinc.includes(LOINC_SYSTOLIC);
     const diastolic = loinc.includes(LOINC_DIASTOLIC);
     if (systolic === diastolic) return;
-    const group = groups.get(r.effectiveDateTime) ?? { systolic: [], diastolic: [] };
+    const group = groups.get(key) ?? { systolic: [], diastolic: [] };
     (systolic ? group.systolic : group.diastolic).push(index);
-    groups.set(r.effectiveDateTime, group);
+    groups.set(key, group);
   });
   const replaced = new Set<number>();
-  for (const [when, group] of groups) {
+  for (const group of groups.values()) {
     if (group.systolic.length !== 1 || group.diastolic.length !== 1) continue;
     const s = entries[group.systolic[0]!]!.resource as Exam;
     const d = entries[group.diastolic[0]!]!.resource as Exam;
@@ -482,7 +495,7 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>): void {
         status: "final",
         category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }],
         code: { coding: [{ system: LOINC, code: "85354-9", display: "Blood pressure panel with all children optional" }] },
-        effectiveDateTime: when,
+        ...(s.effectiveDateTime ? { effectiveDateTime: s.effectiveDateTime } : { effectivePeriod: s.effectivePeriod }),
         component: [
           { code: s.code, valueQuantity: s.valueQuantity },
           { code: d.code, valueQuantity: d.valueQuantity },

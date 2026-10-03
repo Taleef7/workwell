@@ -1162,6 +1162,40 @@ test("import: an encounter id that is not a valid FHIR id still yields a resolva
   assert.equal(encounter.reasonReference[0].reference, `Condition/${condition.id}`);
 });
 
+/** Two Physical Exam halves (systolic 130, diastolic 80) sharing one effectiveTime element. */
+const bpHalves = (effectiveTime: string) => `<?xml version="1.0" encoding="UTF-8"?>
+<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <recordTarget><patientRole><id extension="bp-1" root="1.3.6.1.4.1.115"/><patient><birthTime value='19600101'/></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    ${[["s", "8480-6", "130"], ["d", "8462-4", "80"]].map(([id, code, value]) => `<entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="${id}"/>
+      <code code="${code}" codeSystem="2.16.840.1.113883.6.1"/>
+      ${effectiveTime.replace("ID", id!)}
+      <value xsi:type="PQ" value="${value}" unit="mm[Hg]"/>
+    </observation></entry>`).join("\n")}
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+test("import: two halves with the SAME relevant period pair into a panel that keeps the period", () => {
+  const { all, byId } = deckResources(bpHalves("<effectiveTime><low value='20250427080000'/><high value='20250427081500'/></effectiveTime>"));
+  const panel = byId("s");
+  assert.equal(panel!.code.coding[0].code, "85354-9");
+  assert.deepEqual(panel!.effectivePeriod, { start: "2025-04-27T08:00:00Z", end: "2025-04-27T08:15:00Z" });
+  assert.equal(panel!.effectiveDateTime, undefined);
+  assert.equal(byId("d"), undefined);
+  assert.equal(all.filter((r) => r.resourceType === "Observation").length, 1);
+});
+
+test("import: halves whose times carry no time of day are NOT paired, since hours apart would look identical", () => {
+  // `YYYYMMDDHH` is a valid HL7 time; the parser keeps only the date, so 08:00 and 14:00 read the same.
+  const hours = bpHalves("<effectiveTime value='20250427ID'/>").replace("20250427s", "2025042708").replace("20250427d", "2025042714");
+  const { all } = deckResources(hours);
+  assert.equal(all.filter((r) => r.code?.coding?.[0]?.code === "85354-9").length, 0);
+  assert.equal(all.filter((r) => r.category?.[0]?.coding?.[0]?.code === "exam").length, 2);
+});
+
 test("import: blood pressures pair by INSTANT, whatever the order or the time-zone spelling", () => {
   // Two readings on one day: the second is diastolic-first and written with an offset that names the
   // same instant as its systolic in UTC. Each pair must become its own panel with its own values.
