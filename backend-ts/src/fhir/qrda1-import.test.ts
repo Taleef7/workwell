@@ -1050,6 +1050,16 @@ const deckResources = (xml = deckDocument) => {
   return { imported, all, byId: (id: string) => all.find((r) => r.id === id) };
 };
 
+test("import: each resource keeps its source identifier, root as the system", () => {
+  // The FHIR id is root-agnostic; the identifier keeps the assigning authority, as an OID URN.
+  const { byId } = deckResources();
+  for (const id of ["fobt-1", "sys-1", "medorder-1", "noscreen-1", "enc-dx"]) {
+    assert.deepEqual(byId(id)!.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: id }], id);
+  }
+  const condition = byId("enc-dx-dx-1")!;
+  assert.equal(condition.identifier, undefined, "a generated Condition has no source identifier, and none is invented");
+});
+
 test("import: a TEXT result is kept as valueString — CMS130 asks only that the stool test has a result", () => {
   const fobt = deckResources().byId("fobt-1");
   assert.ok(fobt);

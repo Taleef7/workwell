@@ -237,6 +237,27 @@ function idOf(node: CdaNode, fallback: string): string {
 }
 
 /**
+ * The CDA `<id>` as a FHIR identifier: the root names the assigning authority, the extension the id
+ * within it. The FHIR `id` is deliberately root-agnostic (`idOf`), so this is what keeps two authorities'
+ * entry "1" apart, and the batch merge compares it when deciding whether two documents repeat one entry.
+ * A root that is an OID or a UUID gets its URN; any other URI root is used as it is; anything else is
+ * left out rather than turned into a system it is not.
+ */
+function identifierOf(node: CdaNode): { identifier?: Array<{ system: string; value: string }> } {
+  const own = childrenNamed(node, "id").find((n) => n.attrs.extension);
+  const root = own?.attrs.root;
+  if (!own || !root) return {};
+  const system = /^\d+(\.\d+)+$/.test(root)
+    ? `urn:oid:${root}`
+    : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(root)
+      ? `urn:uuid:${root}`
+      : root.includes(":")
+        ? root
+        : undefined;
+  return system ? { identifier: [{ system, value: own.attrs.extension! }] } : {};
+}
+
+/**
  * An Encounter, Performed → the Encounter, plus one Condition per QDM Encounter Diagnosis it carries.
  *
  * QI-Core links an encounter to its diagnoses by reference to `encounter-diagnosis` Conditions, and
@@ -304,6 +325,7 @@ function encounterResource(node: CdaNode, id: string): Record<string, unknown> {
   return {
     resourceType: "Encounter",
     id,
+    ...identifierOf(node),
     status: "finished",
     ...(type ? { type: [type] } : {}),
     ...(dischargeDisposition ? { hospitalization: { dischargeDisposition } } : {}),
@@ -351,6 +373,7 @@ function conditionFrom(node: CdaNode, i: string): unknown {
   return {
     resourceType: "Condition",
     id: idOf(node, `qrda1-condition-${i}`),
+    ...identifierOf(node),
     verificationStatus: { coding: [{ code: "confirmed" }] },
     ...(clinicalStatus ? { clinicalStatus } : {}),
     code,
@@ -389,6 +412,7 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
   return {
     resourceType: "Observation",
     id: idOf(node, `qrda1-observation-${i}`),
+    ...identifierOf(node),
     status: "final",
     category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: category }] }],
     code,
@@ -423,6 +447,7 @@ function assessmentNotDoneFrom(node: CdaNode, i: string): unknown {
   return {
     resourceType: "Observation",
     id: idOf(node, `qrda1-observation-${i}`),
+    ...identifierOf(node),
     status: "cancelled",
     category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "survey" }] }],
     code,
@@ -439,6 +464,7 @@ function procedureFrom(node: CdaNode, i: string): unknown {
   return {
     resourceType: "Procedure",
     id: idOf(node, `qrda1-procedure-${i}`),
+    ...identifierOf(node),
     status: "completed",
     code,
     ...(t.point ? { performedDateTime: t.point } : {}),
@@ -469,6 +495,7 @@ function serviceRequestFrom(node: CdaNode, i: string): unknown {
   return {
     resourceType: "ServiceRequest",
     id: idOf(node, `qrda1-servicerequest-${i}`),
+    ...identifierOf(node),
     // Both are READ: `Status.isInterventionOrder` requires `intent = 'order'` and an active-ish status.
     status: "active",
     intent: "order",
@@ -496,6 +523,7 @@ function deviceRequestFrom(node: CdaNode, i: string): unknown {
   return {
     resourceType: "DeviceRequest",
     id: idOf(node, `qrda1-devicerequest-${i}`),
+    ...identifierOf(node),
     status: "active",
     intent: "order",
     codeCodeableConcept: code,
@@ -526,6 +554,7 @@ function medicationRequestFrom(node: CdaNode, i: string, status: "active" | "com
   return {
     resourceType: "MedicationRequest",
     id: idOf(node, `qrda1-medicationrequest-${i}`),
+    ...identifierOf(node),
     status,
     intent: "order",
     medicationCodeableConcept: code,
@@ -559,6 +588,7 @@ function symptomFrom(node: CdaNode, i: string): unknown {
   return {
     resourceType: "Observation",
     id: idOf(node, `qrda1-symptom-${i}`),
+    ...identifierOf(node),
     status: "final",
     code,
     ...(t.start && t.end

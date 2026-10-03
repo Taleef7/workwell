@@ -23,6 +23,8 @@ const doc = (opts: {
   birth?: string;
   encounterCode?: string;
   encounterId?: string;
+  /** The assigning authority (CDA `id/@root`) of the encounter's id. */
+  encounterRoot?: string;
   /** A SNOMED code carried as the encounter's QDM Encounter Diagnosis. */
   diagnosis?: string;
 }) => `<?xml version="1.0" encoding="UTF-8"?>
@@ -40,7 +42,7 @@ const doc = (opts: {
     <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
     <entry><encounter classCode="ENC" moodCode="EVN">
       <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
-      <id extension="${opts.encounterId ?? "enc-1"}" root="${MRN_ROOT}"/>
+      <id extension="${opts.encounterId ?? "enc-1"}" root="${opts.encounterRoot ?? MRN_ROOT}"/>
       <code code="${opts.encounterCode ?? "99213"}" codeSystem="2.16.840.1.113883.6.12"/>
       <statusCode code="completed"/>
       <effectiveTime><low value='20240331080000'/><high value='20240331081500'/></effectiveTime>
@@ -204,6 +206,17 @@ test("identical content under DIFFERENT entry ids is two events, not a duplicate
     doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "visit-b" }),
   ]);
   assert.equal(encounters.length, 2);
+});
+
+test("the same entry id under two ASSIGNING AUTHORITIES is two entries, not a duplicate", () => {
+  // Entry "1" from one sender's system and entry "1" from another's are different events; the FHIR id is
+  // root-agnostic, so the CDA root (carried as the identifier's system) is what tells them apart.
+  const { encounters } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "1", encounterRoot: "2.16.840.1.113883.19.5.1" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "1", encounterRoot: "2.16.840.1.113883.19.5.2" }),
+  ]);
+  assert.equal(encounters.length, 2);
+  assert.deepEqual(encounters.map((e) => e.identifier[0].system).sort(), ["urn:oid:2.16.840.1.113883.19.5.1", "urn:oid:2.16.840.1.113883.19.5.2"]);
 });
 
 test("a repeat WITHIN one document is kept: the document itself stated it twice", () => {
