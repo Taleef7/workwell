@@ -271,19 +271,22 @@ async function repairPre749SortCql(
 }
 
 /**
- * The four official-only measures' descriptions exactly as the seed wrote them before they said which
- * logic runs. They called the artifact "published" and put the QDM measure (`CMS2v15`) in the title, over
- * counts produced by CMS's FHIR draft (`CMS2FHIR v1.0.000`), which locked decision §4.3 forbids.
+ * The six routed measures' descriptions exactly as the seed wrote them before they said which logic
+ * runs. They put the QDM measure (`CMS2v15`) in the title, and the four official-only ones called the
+ * artifact "published", over counts produced by CMS's FHIR draft (`CMS2FHIR v1.0.000`), which locked
+ * decision §4.3 forbids.
  */
-export const PRE_DRAFT_WORDING_DESCRIPTIONS: Readonly<Record<"cms2" | "cms130" | "cms165" | "cms137", string>> = {
+export const PRE_DRAFT_WORDING_DESCRIPTIONS: Readonly<Record<"cms2" | "cms130" | "cms165" | "cms137" | "cms122" | "cms125", string>> = {
   cms2: "Screening for Depression and Follow-Up Plan (CMS2v15 / MIPS 134): patients 12+ screened for depression with an age-appropriate standardized tool during the measurement period and, if positive, with a follow-up plan documented on the date of the positive screen. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
   cms137: "Initiation and Engagement of Substance Use Disorder Treatment (CMS137v14 / MIPS 305): patients 13+ with a new substance use disorder episode between January 1 and November 14 of the measurement period and no diagnosis or treatment in the 60 days before it. TWO RATES over one denominator (ADR-074): Initiation — treatment (a visit, a psychosocial service, or a medication order) within 14 days of the episode; Engagement — two or more further services within 34 days of initiation, or a long-acting medication. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period; a patient is COMPLIANT only where every rate they are in is met.",
   cms165: "Controlling High Blood Pressure (CMS165v14 / MIPS 236): adults 18-85 at the end of the measurement period with essential hypertension whose most recent BP reading during the measurement period is adequately controlled. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
+  cms122: "Diabetes: HbA1c Poor Control (CMS122v14 / MIPS 1): patients 18–75 with diabetes whose most recent HbA1c result is > 9% (poor control). OVERDUE indicates intervention is needed.",
+  cms125: "Breast Cancer Screening (CMS125v14 / MIPS 112): women 42–74 who had a mammogram in the measurement period or 26 months prior.",
   cms130: "Colorectal Cancer Screening (CMS130v14 / MIPS 113): adults 50-75 at the end of the measurement period screened for colorectal cancer by colonoscopy, sigmoidoscopy, CT colonography, sDNA-FIT, or FOBT. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
 };
 
 /**
- * Rewrites an official-only row's spec to today's catalog wording only where the stored spec is exactly
+ * Rewrites a routed measure's spec to today's catalog wording only where the stored spec is exactly
  * the catalog spec with the old description, so every live stack stops calling a draft "published"
  * while a spec anyone edited is left alone. `seedMeasureStore` never overwrites an existing row, so
  * without this only a fresh database would read the new wording.

@@ -1096,15 +1096,33 @@ const countSpecRefreshed = async (db: Awaited<ReturnType<typeof freshDb>>, versi
   return (rows.results ?? []).filter((r: { entity_id: string }) => !versionId || r.entity_id === versionId).length;
 };
 
-test("the old official-only descriptions are exactly the catalog spec with the 'published' wording, and today's catalog no longer says it", () => {
+test("the old descriptions led with the QDM id; today's catalog names it only as what the FHIR draft was derived from", () => {
   for (const id of PRE_DRAFT_IDS) {
-    assert.match(PRE_DRAFT_WORDING_DESCRIPTIONS[id], /CMS's published QI-Core artifact/);
+    const qdm = /\((CMS\d+v\d+) \/ MIPS \d+\)/.exec(PRE_DRAFT_WORDING_DESCRIPTIONS[id])?.[1];
+    assert.ok(qdm, `${id}: the old title carried the QDM id`);
+    assert.doesNotMatch(catalogSpec(id).description, /\(CMS\d+v\d+ \//, `${id}: today's title does not`);
+    assert.ok(catalogSpec(id).description.includes(`derived from ${qdm}`), `${id}: the QDM id appears as "derived from"`);
     assert.doesNotMatch(catalogSpec(id).description, /published/, `${id} catalog wording`);
     assert.match(catalogSpec(id).description, /FHIR \(QI-Core\) draft of this measure, posted for public comment in January–February 2026/);
   }
 });
 
-test("seedMeasureStore — rewrites the old 'published' descriptions, audited before each write, once; a second seed is quiet", async () => {
+test("the old descriptions are the exact text the seed stored (provenance digests taken from the catalog before the change, not from this constant)", () => {
+  const digests: Record<string, string> = {
+    cms2: "b191424b0954dd42e8a41b57502d29040f1ae0bd64280756f5e500e956e0e1b8",
+    cms130: "b5ce91a4e10fea12d2d88be7b6ba9a592098f7bd8a61ac7632a72dccb93a4fb3",
+    cms165: "b893bdcd882a4a989a957d8b93770097b94c6a4022bc90014323284f181a2b9b",
+    cms137: "fa5faf16322df1e1bd59b4fe04caa801d0d6dde3b61369c6d3387f959e0494af",
+    cms122: "a62db4ab86cc59e11f699d5faa2152e1f55ef90972894b149e56bca8cebb8264",
+    cms125: "d5b3d7d2bd2289e5c0d7c5296138a669e31351ad65bd3112b8cf4143d536f908",
+  };
+  for (const id of PRE_DRAFT_IDS) {
+    assert.equal(createHash("sha256").update(PRE_DRAFT_WORDING_DESCRIPTIONS[id], "utf8").digest("hex"), digests[id], id);
+  }
+});
+
+test("seedMeasureStore — rewrites the old descriptions of all six routed measures, audited before each write, once; a second seed is quiet", async () => {
+  assert.deepEqual([...PRE_DRAFT_IDS].sort(), ["cms122", "cms125", "cms130", "cms137", "cms165", "cms2"]);
   const { db, store, events } = await seedPreDraftWordingStore();
   await seedMeasureStore(store, () => "", events);
   for (const id of PRE_DRAFT_IDS) {
