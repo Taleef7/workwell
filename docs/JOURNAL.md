@@ -14,9 +14,21 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   and CMS's recorded options. `pnpm test:compiled-cases` compiles the six pilot measures from CMS's CQL
   and runs CMS's MADiE decks on our ELM and on CMS's: 334/334 cases agree on every rate and stratifier,
   and 0 of 14,880 define values differ (each non-function define, per patient, by value). Two broken
-  copies prove the check looks: one moves 40 cases, one changes 94 values. It is a CI step in the official-cases job, and it needs no VSAC credential. No dependency
-  changed, and no runtime behaviour changed. Every place that repeated the "uncompilable" claim is
-  corrected.
+  copies prove the check looks: one moves 40 cases, one changes 94 values. It is a CI step in the
+  official-cases job and needs no VSAC credential. No dependency changed, and no runtime behaviour
+  changed. Every place that repeated the "uncompilable" claim is corrected.
+- **The docs say what WorkWell is: it assists WebChart, and Maui and TWH are two instances of one
+  product.** The README opened as "an occupational-health compliance platform", and the guide described
+  only TWH. Across the README, the one-page explainer, the guide, the landing copy and the OpenAPI
+  description:
+  - WebChart calculates and submits the reported rates. Where it does, WorkWell's rate is an estimate.
+  - CMS's FHIR artifacts are drafts, not "published".
+  - Every measure count now names its instance.
+  - WebChart has no CDS Hooks client (checked 2026-10-02).
+  - The compliance API is a kept surface, not the integration contract (§4A.4).
+  - The CY2027 PFS rule sought comment on FHIR reporting.
+  - The audit rule has open exceptions (#598).
+  - CMS138 is refused by the router, like CMS68.
 
 ## 2026-10-02
 

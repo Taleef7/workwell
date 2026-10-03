@@ -110,7 +110,8 @@ export function openApiDocument(): OpenApiDocument {
       version: "1.0.0",
       summary: "Given a patient and a measure, are they compliant?",
       description: [
-        "The versioned contract an integrator builds against, plus the CDS Hooks service.",
+        "WorkWell's CDS Hooks service and its versioned compliance API. The cards are how WorkWell is meant to",
+        "reach an EHR; the compliance API is a kept, versioned surface that answers for one subject and one measure.",
         "",
         "**Scope.** This document covers `/api/v1/**`, the CDS Hooks surface, and health/version. The rest of",
         "`/api/**` is an internal contract that moves with the frontend and carries no stability promise, so it",

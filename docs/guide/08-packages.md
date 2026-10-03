@@ -66,8 +66,8 @@ it end to end, producing a MeasureReport. `@work-well/measure-engine` sits one l
 ELM plus a patient bundle in, per-rule values out. No Measure resource, no bundle unpacking, no
 MeasureReport. Both sit on the same `cql-execution` core.
 
-The strongest evidence for that framing is a choice made against our own package: official CMS
-measures run on `fqm-execution` in our production, not on our engine. We compose it; we do not
+The strongest evidence for that framing is a choice made against our own package: CMS's FHIR draft
+measures run on `fqm-execution` on our deployed stacks, not on our engine. We compose it; we do not
 compete with it. No performance or conformance comparison against it has been run, so none is
 claimed.
 

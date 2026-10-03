@@ -243,7 +243,7 @@ absent is more informative: no basic blocks, no labels, no branches, no assignme
    eliminated. An optimiser would delete exactly the thing we sell.
 3. The many-to-many axis is data models, not hardware. The second dimension is the shape of the
    clinical data underneath — FHIR through one adapter, the older QDM model through another. That
-   is why [chapter 5](05-fhir.md) has to talk about two published versions of every CMS measure.
+   is why [chapter 5](05-fhir.md) has to talk about two versions of each CMS measure: a QDM one, and a FHIR draft.
 
 ## Where to see it in the app
 
