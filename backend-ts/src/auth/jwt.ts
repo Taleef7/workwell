@@ -33,12 +33,14 @@ export interface RefreshClaims {
   jti?: string;
   /** Per-login-session family id (stable across rotations) — the revocation key. */
   fam?: string;
+  /** The account's credential version when the session began; a password change makes it stale. */
+  cv?: string;
 }
 
 export interface JwtService {
   issueAccessToken(email: string, role: string): string;
   /** Issue a refresh token; optional `jti`/`fam` claims support server-side rotation tracking (M5). */
-  issueRefreshToken(email: string, extra?: { jti?: string; fam?: string }): string;
+  issueRefreshToken(email: string, extra?: { jti?: string; fam?: string; cv?: string }): string;
   /** Returns the principal for a valid, non-expired, non-refresh access token, else null. */
   verifyAccessToken(token: string): JwtPrincipal | null;
   /** Returns the subject email for a valid, non-expired refresh token, else null. */
@@ -102,6 +104,7 @@ export function createJwt(config: JwtConfig): JwtService {
       const claims: Record<string, unknown> = { sub: email, refresh: true };
       if (extra?.jti) claims.jti = extra.jti;
       if (extra?.fam) claims.fam = extra.fam;
+      if (extra?.cv) claims.cv = extra.cv;
       return issue(claims, refreshTtl);
     },
 
@@ -130,6 +133,7 @@ export function createJwt(config: JwtConfig): JwtService {
         email,
         jti: typeof claims.jti === "string" ? claims.jti : undefined,
         fam: typeof claims.fam === "string" ? claims.fam : undefined,
+        cv: typeof claims.cv === "string" ? claims.cv : undefined,
       };
     },
   };

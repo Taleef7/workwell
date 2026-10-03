@@ -12,7 +12,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { createJwt, type JwtService } from "../auth/jwt.ts";
-import { assignableUsers, authenticate, findDemoUser } from "../auth/demo-users.ts";
+import { assignableUsers, authenticate, credentialVersion, findDemoUser } from "../auth/demo-users.ts";
 
 const REFRESH_COOKIE = "refresh_token";
 const COOKIE_PATH = "/api/auth";
@@ -111,15 +111,17 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
   // revoke the family — the opposite of the intended stateless degradation. An untracked token skips
   // the revocation check entirely (the JWT alone still gates on signature + exp) and is upgraded into a
   // family on the next successful rotation.
-  const issueRotatedRefresh = async (email: string, family: string): Promise<string> => {
-    if (!revocation) return jwt.issueRefreshToken(email, { jti: randomUUID(), fam: family });
+  // Every token carries the account's credential version (`cv`), the untracked fallback included, so the
+  // refresh route can refuse a session that began under a password the account no longer has.
+  const issueRotatedRefresh = async (email: string, family: string, cv: string): Promise<string> => {
+    if (!revocation) return jwt.issueRefreshToken(email, { jti: randomUUID(), fam: family, cv });
     const jti = randomUUID();
     try {
       await revocation.rotate(family, jti, jwt.refreshTtlSeconds);
     } catch {
-      return jwt.issueRefreshToken(email); // untracked legacy-shaped token → stateless degrade
+      return jwt.issueRefreshToken(email, { cv }); // untracked legacy-shaped token → stateless degrade
     }
-    return jwt.issueRefreshToken(email, { jti, fam: family });
+    return jwt.issueRefreshToken(email, { jti, fam: family, cv });
   };
 
   // Audit-first (CLAUDE.md, #598): the event is written before the store change. Returns false when the
@@ -138,12 +140,12 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
   // Open a new family, audited first. If the event cannot be written, no family is recorded either: the
   // token is issued untracked, which is the same stateless degradation a store outage already produces,
   // so the ledger never misses a family the store holds.
-  const openFamily = async (email: string, via: NonNullable<AuthAuditEvent["via"]>): Promise<string> => {
+  const openFamily = async (email: string, via: NonNullable<AuthAuditEvent["via"]>, cv: string): Promise<string> => {
     const family = randomUUID();
     if (revocation && !(await audited({ type: "AUTH_LOGIN", actor: email, family, via }))) {
-      return jwt.issueRefreshToken(email);
+      return jwt.issueRefreshToken(email, { cv });
     }
-    return issueRotatedRefresh(email, family);
+    return issueRotatedRefresh(email, family, cv);
   };
 
   const json = (data: unknown, status = 200, headers: Record<string, string> = {}): Response =>
@@ -172,7 +174,7 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
       const user = await authenticate(email, password);
       if (!user) return json({ error: "invalid_credentials" }, 401);
       // A fresh login opens a new token family.
-      const refresh = await openFamily(user.email, "login");
+      const refresh = await openFamily(user.email, "login", credentialVersion(user));
       return json(
         { token: jwt.issueAccessToken(user.email, user.role), email: user.email, role: user.role },
         200,
@@ -185,6 +187,13 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
       const claims = cookie ? jwt.readRefreshToken(cookie) : null;
       const user = claims ? findDemoUser(claims.email) : null;
       if (!claims || !user) return json({ error: "invalid_refresh_token" }, 401);
+      // A session that began under a password the account no longer has ends here: the token's
+      // credential version must be the account's current one. A token from before versions existed
+      // carries none and is refused too, so a password change (or this check's rollout) signs every older
+      // session out once its access token, at most 15 minutes, runs out. Nothing is revoked or written:
+      // the family simply can never mint another token.
+      const cv = credentialVersion(user);
+      if (claims.cv !== cv) return json({ error: "invalid_refresh_token" }, 401);
 
       // Rotation / reuse check (M5). Only enforced when we have a working store AND the token
       // carries a family (legacy tokens have none — accept once, then upgrade into a family).
@@ -218,8 +227,8 @@ export function createAuthHandler(config: AuthConfig): AuthHandler {
       // Rotate within the family; a legacy (family-less) token is upgraded into a NEW family, which is an
       // opening like a login and is audited as one.
       const refresh = claims.fam
-        ? await issueRotatedRefresh(user.email, claims.fam)
-        : await openFamily(user.email, "untracked-token-upgrade");
+        ? await issueRotatedRefresh(user.email, claims.fam, cv)
+        : await openFamily(user.email, "untracked-token-upgrade", cv);
       return json(
         { token: jwt.issueAccessToken(user.email, user.role), email: user.email, role: user.role },
         200,

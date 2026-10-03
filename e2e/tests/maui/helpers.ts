@@ -5,7 +5,9 @@ import { BASE_URL, isLocalStack } from "../../base-url";
 
 export const API_BASE = process.env.PLAYWRIGHT_API_BASE_URL ?? "http://localhost:8080";
 export { BASE_URL };
-export const MAUI_PASSWORD = "Workwell123!";
+// A local stack keeps the demo password; the deployed pilot stack has its own (WORKWELL_PILOT_PASSWORD_HASH),
+// so a read-only run against it passes that password in MAUI_E2E_PASSWORD.
+export const MAUI_PASSWORD = process.env.MAUI_E2E_PASSWORD ?? "Workwell123!";
 
 /**
  * Whether this run may MUTATE the stack it is pointed at — DEFAULT DENY.
