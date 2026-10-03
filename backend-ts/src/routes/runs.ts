@@ -60,7 +60,7 @@ import {
 } from "../run/run-pipeline.ts";
 import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
 import { isVsacConfigured } from "@work-well/measure-engine";
-import { rerunToVerify, UnsupportedCaseRerunError } from "../case/case-rerun.ts";
+import { rerunToVerify, UnsupportedCaseRerunError, CaseRerunFailedError } from "../case/case-rerun.ts";
 import type { PopulationCounts, StratumCounts } from "../fhir/measure-report.ts";
 import {
   buildMeasureReportBundle,
@@ -610,6 +610,7 @@ export async function handleRuns(
         return json(caseRerunResponse(detail), 201);
       } catch (err) {
         if (err instanceof UnsupportedCaseRerunError) return json({ error: err.code, message: err.message }, 409);
+        if (err instanceof CaseRerunFailedError) return json({ error: err.code, message: err.message, runId: err.runId }, 500);
         throw err;
       }
     }
