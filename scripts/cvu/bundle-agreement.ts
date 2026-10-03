@@ -18,6 +18,11 @@
  * `--valuesets-dir` swaps the artifact's vendored terminology for FHIR ValueSet expansions on disk (one
  * JSON per value set), so a value-set vintage difference can be told apart from a logic difference.
  *
+ * Each measure runs the way production runs it: `trustMetaProfile` comes from the measure's semantics
+ * (`official-measure-semantics.ts`), and the mode is printed. `--trust-meta-profile on|off` overrides it
+ * for diagnosis only, and the output says so; a number from an overridden run is not what the QRDA I
+ * route would produce.
+ *
  * Descriptive only: it writes nothing and authors no compliance status.
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
@@ -28,6 +33,7 @@ import { loadOfficialArtifact } from "../../backend-ts/src/wiring/official-artif
 import { officialTerminologyExpander } from "../../backend-ts/src/wiring/official-terminology.ts";
 import { expandArtifactTerminology } from "../../backend-ts/src/wiring/official-executor-adapter.ts";
 import { preparedForQiCore, type PreparableBundle } from "../../backend-ts/src/wiring/qicore-preparation.ts";
+import { officialMeasureSemantics } from "../../backend-ts/src/wiring/official-measure-semantics.ts";
 import {
   calculateOfficialWithSignal,
   type OfficialSubjectResult,
@@ -47,6 +53,7 @@ interface Args {
   bundleDir: string;
   measure: string;
   valuesetsDir?: string;
+  trustMetaProfile?: boolean;
   limit: number;
 }
 
@@ -57,8 +64,18 @@ function parseArgs(argv: readonly string[]): Args {
   };
   const bundleDir = get("--bundle-dir");
   const measure = get("--measure");
-  if (!bundleDir || !measure) throw new Error("usage: --bundle-dir <extracted bundle> --measure <cms id> [--valuesets-dir <dir>] [--limit 40]");
-  return { bundleDir, measure, valuesetsDir: get("--valuesets-dir"), limit: Number(get("--limit") ?? 40) };
+  if (!bundleDir || !measure) {
+    throw new Error("usage: --bundle-dir <extracted bundle> --measure <cms id> [--valuesets-dir <dir>] [--trust-meta-profile on|off] [--limit 40]");
+  }
+  const trust = get("--trust-meta-profile");
+  if (trust !== undefined && trust !== "on" && trust !== "off") throw new Error("--trust-meta-profile takes on or off");
+  return {
+    bundleDir,
+    measure,
+    valuesetsDir: get("--valuesets-dir"),
+    ...(trust ? { trustMetaProfile: trust === "on" } : {}),
+    limit: Number(get("--limit") ?? 40),
+  };
 }
 
 const csvRows = (file: string): string[][] =>
@@ -159,9 +176,40 @@ export async function main(argv: readonly string[]): Promise<number> {
     valueSetCache = [...onDisk, ...kept];
   }
 
-  const { bySubject } = await calculateOfficialWithSignal({ bundle: artifact.bundle as never, patientBundles: bundles, period, valueSetCache });
+  const productionTrust = officialMeasureSemantics(args.measure)?.trustMetaProfile ?? false;
+  const trustMetaProfile = args.trustMetaProfile ?? productionTrust;
+  const mode =
+    `trustMetaProfile ${trustMetaProfile ? "on" : "off"}` +
+    (trustMetaProfile === productionTrust ? " (as production runs this measure)" : ` (OVERRIDDEN: production runs it ${productionTrust ? "on" : "off"})`);
 
-  // Compare.
+  const header = (): string[] => [
+    `# Agreement: ${args.measure} vs ${bundleMeasureName} (${bundleMeta.version})`,
+    "",
+    `- bundle: ${bundleMeta.title}`,
+    `- measurement period: ${period.start} … ${period.end}`,
+    `- artifact: vendored official ${args.measure}; terminology: ${args.valuesetsDir ? `on disk (${args.valuesetsDir}), ${fellBack.length} value set(s) not on disk kept vendored` : "vendored sidecar"}`,
+    ...fellBack.map((url) => `  - vendored: \`${url}\``),
+    `- engine: ${mode}`,
+  ];
+
+  let bySubject: Map<string, OfficialSubjectResult>;
+  try {
+    ({ bySubject } = await calculateOfficialWithSignal({
+      bundle: artifact.bundle as never,
+      patientBundles: bundles,
+      period,
+      valueSetCache,
+      options: { trustMetaProfile },
+    }));
+  } catch (error) {
+    // The batch failed as a whole, which is what the QRDA I route would answer too: say so rather than crash.
+    const message = String((error as Error)?.message ?? error).split("\n").slice(0, 4).join(" ");
+    console.log([...header(), "", "## Engine error", "", `The run failed for every patient: ${message}`].join("\n"));
+    return 2;
+  }
+
+  // Compare. Rates are matched by position: Cypress's `PopulationSet_N` is the measure's Nth group, which
+  // is also the order fqm returns them in for every measure here.
   const bySet = new Map<number, { agree: number; total: number; expected: Record<string, number>; reported: Record<string, number> }>();
   const disagreements: string[] = [];
   let missing = 0;
@@ -170,28 +218,24 @@ export async function main(argv: readonly string[]): Promise<number> {
     const tally = bySet.get(e.set) ?? { agree: 0, total: 0, expected: {}, reported: {} };
     bySet.set(e.set, tally);
     tally.total++;
+    // Expected counts include every patient, so a missing engine result shows as a shortfall in the
+    // reported column instead of shrinking both.
+    for (const [c] of POPULATIONS) tally.expected[c] = (tally.expected[c] ?? 0) + (e.values[c] ? 1 : 0);
     if (!result) {
       missing++;
+      for (const [c] of POPULATIONS) tally.reported[c] = tally.reported[c] ?? 0;
       continue;
     }
     const rate = result.rates[e.set] ?? [];
     const got: Record<string, number> = {};
     for (const [cypress, fqm] of POPULATIONS) got[cypress] = rate.some((p) => p.populationType === fqm && p.result) ? 1 : 0;
     const diffs = POPULATIONS.filter(([c]) => (e.values[c] ? 1 : 0) !== got[c]).map(([c]) => `${c} ${e.values[c] ? 1 : 0}→${got[c]}`);
-    for (const [c] of POPULATIONS) {
-      tally.expected[c] = (tally.expected[c] ?? 0) + (e.values[c] ? 1 : 0);
-      tally.reported[c] = (tally.reported[c] ?? 0) + got[c]!;
-    }
+    for (const [c] of POPULATIONS) tally.reported[c] = (tally.reported[c] ?? 0) + got[c]!;
     if (diffs.length === 0) tally.agree++;
     else if (disagreements.length < args.limit) disagreements.push(`- set ${e.set + 1} \`${fileOf.get(e.patientId)}\`: ${diffs.join(", ")}`);
   }
 
-  const out: string[] = [];
-  out.push(`# Agreement: ${args.measure} vs ${bundleMeasureName} (${bundleMeta.version})`, "");
-  out.push(`- bundle: ${bundleMeta.title}`);
-  out.push(`- measurement period: ${period.start} … ${period.end}`);
-  out.push(`- artifact: vendored official ${args.measure}; terminology: ${args.valuesetsDir ? `on disk (${args.valuesetsDir}), ${fellBack.length} value set(s) not on disk kept vendored` : "vendored sidecar"}`);
-  for (const url of fellBack) out.push(`  - vendored: \`${url}\``);
+  const out: string[] = header();
   out.push(`- patients: ${patientIds.length} (${importFailures.length} not imported, ${missing} with no engine result); strata rows not compared: ${strata}`);
   out.push("", "| set | patients agreeing | " + POPULATIONS.map(([c]) => c).join(" | ") + " |", "|---|---|" + POPULATIONS.map(() => "---|").join(""));
   for (const [set, t] of [...bySet.entries()].sort((a, b) => a[0] - b[0])) {
