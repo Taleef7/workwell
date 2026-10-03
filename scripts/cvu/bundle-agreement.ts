@@ -67,6 +67,7 @@ function parseArgs(argv: readonly string[]): Args {
   if (!bundleDir || !measure) {
     throw new Error("usage: --bundle-dir <extracted bundle> --measure <cms id> [--valuesets-dir <dir>] [--trust-meta-profile on|off] [--limit 40]");
   }
+  if (!/^cms\d+$/i.test(measure)) throw new Error(`--measure takes a catalog id such as cms125, not ${JSON.stringify(measure)}`);
   const trust = get("--trust-meta-profile");
   if (trust !== undefined && trust !== "on" && trust !== "off") throw new Error("--trust-meta-profile takes on or off");
   return {
@@ -104,7 +105,9 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   // The bundle's measure for our id, e.g. cms125 → CMS125v15.
   const measureRows = csvRows(path.join(dir, "calculations", "measure-id-mapping.csv"));
-  const wanted = measureRows.filter(([, cms]) => new RegExp(`^${cmsPrefix(args.measure)}v\\d+$`).test(cms ?? ""));
+  // `CMS125` + `v` + digits, matched as text: no pattern is built from the command line.
+  const prefix = `${cmsPrefix(args.measure)}v`;
+  const wanted = measureRows.filter(([, cms]) => typeof cms === "string" && cms.startsWith(prefix) && /^\d+$/.test(cms.slice(prefix.length)));
   if (wanted.length !== 1) throw new Error(`${args.measure}: expected one bundle measure, found ${wanted.map((r) => r[1]).join(", ") || "none"}`);
   const [bundleMeasureId, bundleMeasureName] = wanted[0]!;
 
