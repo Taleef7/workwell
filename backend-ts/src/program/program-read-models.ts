@@ -92,8 +92,9 @@ export interface ProgramSummary {
    * Set when the winning run scored a year its vendored artifact was not written for — from 1 January
    * 2027, PY2027 scored with the 2026 FHIR logic (ROADMAP MM-1d). The run log has carried this as a WARN
    * since ADR-072; this puts it beside the numbers it qualifies. Decided from the RUN (it carried
-   * official evidence, so `measureRate` is set) and the year it scored, never from today's routing flag.
-   * Null for an authored measure, a covered year, or no winning run.
+   * official evidence, so `measureRate` is set; the evidence names its artifact) and the year it scored,
+   * never from today's routing flag. Null for an authored measure, a covered year, no winning run, or a
+   * run scored by an artifact other than the one vendored now (its declared period is not on hand).
    */
   logicVintage: OfficialLogicVintage | null;
 }
@@ -549,7 +550,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
     const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
     s.measurementYear = period?.measurementYear ?? null;
     s.asOf = period?.asOf ?? null;
-    s.logicVintage = logicVintageOf(s.measureId, s.measureRate !== null, period?.measurementYear ?? null);
+    s.logicVintage = logicVintageOf(s.measureId, s.measureRate, period?.measurementYear ?? null);
   }
 
   return summaries.sort((a, b) => a.measureName.localeCompare(b.measureName));
@@ -558,17 +559,22 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
 /**
  * The vintage note for a measure's winning run: only for a run that carried official evidence (an
  * authored run has no artifact to be stale against) and scored a year the artifact does not declare.
+ * The run's evidence names the artifact that scored it; today's manifest supplies the declared period
+ * only when it is that same artifact (by digest, else by version), or when the evidence names none.
  * Exported for its unit test.
  */
 export function logicVintageOf(
   measureId: string,
-  ranOfficial: boolean,
+  rate: Pick<MeasureRate, "official"> | null,
   measurementYear: number | null,
-  manifestOf: (measureId: string) => Parameters<typeof officialLogicVintage>[0] | null = loadOfficialManifest,
+  manifestOf: (measureId: string) => (Parameters<typeof officialLogicVintage>[0] & { sha256?: string; version?: string }) | null = loadOfficialManifest,
 ): OfficialLogicVintage | null {
-  if (!ranOfficial || measurementYear === null) return null;
+  if (!rate || measurementYear === null) return null;
   const manifest = manifestOf(measureId);
-  return manifest ? officialLogicVintage(manifest, measurementYear) : null;
+  if (!manifest) return null;
+  const ran = rate.official;
+  if (ran?.artifactSha256 ? ran.artifactSha256 !== manifest.sha256 : ran?.version && ran.version !== manifest.version) return null;
+  return officialLogicVintage(manifest, measurementYear);
 }
 
 const SCALE_TENANT_ID = "mhn";

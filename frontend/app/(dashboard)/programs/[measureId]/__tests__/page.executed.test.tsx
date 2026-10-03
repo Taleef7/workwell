@@ -92,6 +92,17 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     expect(screen.queryByText("CMS125v14")).toBeNull();
   });
 
+  it("labels the numbers with the artifact the run's evidence names, even when today's routing differs", async () => {
+    const base = program();
+    mockApi({ summary: program({ measureRate: { ...base.measureRate, official: { ecqmId: "125FHIR", version: "0.9.000" } } }) });
+    render(<ProgramDetailPage />);
+    // The present-tense line describes today's routing; the version beside the numbers is the run's.
+    expect(await screen.findByTestId("executed-logic")).toHaveTextContent(/^Runs CMS125FHIR v1\.0\.000/);
+    expect(screen.getByText(/^Version 0\.9\.000/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Version 1\.0\.000/)).toBeNull();
+    expect(screen.getByText("CMS125FHIR")).toBeInTheDocument();
+  });
+
   it("an authored measure keeps its catalog version and shows no executed-logic line", async () => {
     mockApi({ executed: false });
     render(<ProgramDetailPage />);

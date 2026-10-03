@@ -13,6 +13,7 @@ import type { RunStore } from "../stores/run-store.ts";
 import type { CaseStore } from "../stores/case-store.ts";
 import { logicVintageOf, programOverview, __overviewMemo, __chartMemos } from "./program-read-models.ts";
 import { resetMeasureRateMemo } from "./measure-rate.ts";
+import { loadOfficialManifest } from "../wiring/official-artifacts.ts";
 import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 
 const MEASURE = "cms122";
@@ -28,10 +29,11 @@ const row = (runId: string, startedAt: string): OutcomeWithRun => ({
   status: "COMPLIANT",
 });
 
-const OFFICIAL = { official: { populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } } };
+const POPULATIONS = { ipp: true, denom: true, numer: false, denex: false, denexcep: false };
+const OFFICIAL = { official: { populationResults: POPULATIONS } };
 
-/** One winning run for cms122, scoring `year`, whose rows carry official evidence or not. */
-const overviewFor = async (runId: string, year: number, official: boolean) => {
+/** One winning run for cms122, scoring `year`, whose rows carry official evidence (optionally naming its artifact) or not. */
+const overviewFor = async (runId: string, year: number, official: boolean, artifact: Record<string, string> = {}) => {
   __overviewMemo.clear();
   for (const memo of Object.values(__chartMemos)) memo.clear();
   resetMeasureRateMemo();
@@ -43,7 +45,9 @@ const overviewFor = async (runId: string, year: number, official: boolean) => {
       listLatestPopulationRuns: latestRunsFromRows(rows),
       listOutcomes: async () => [],
       listOutcomeMembershipsForRun: async (_runId: string, measureId: string) =>
-        measureId === MEASURE ? [{ status: "COMPLIANT", evidence: official ? OFFICIAL : { expressionResults: [] } }] : [],
+        measureId === MEASURE
+          ? [{ status: "COMPLIANT", evidence: official ? { official: { ...artifact, populationResults: POPULATIONS } } : { expressionResults: [] } }]
+          : [],
       aggregateScaleRun: async () => [],
     } as unknown as OutcomeStore,
     runStore: {
@@ -81,10 +85,24 @@ test("an authored run has no artifact to be stale against, whatever year it scor
   assert.equal(summary.logicVintage, null);
 });
 
-test("logicVintageOf needs an official run, a scored year and a manifest", () => {
-  const manifest = { effectivePeriod: { start: "2026-01-01", end: "2026-12-31" } };
-  assert.equal(logicVintageOf("cms125", true, 2027, () => manifest)?.measurementYear, 2027);
-  assert.equal(logicVintageOf("cms125", false, 2027, () => manifest), null);
-  assert.equal(logicVintageOf("cms125", true, null, () => manifest), null);
-  assert.equal(logicVintageOf("cms125", true, 2027, () => null), null);
+test("the run's evidence decides which artifact scored it: today's manifest speaks only for that artifact", async () => {
+  const sha256 = loadOfficialManifest(MEASURE)!.sha256;
+  const same = await overviewFor("run-vintage-same-artifact", 2027, true, { ecqmId: "122FHIR", version: "1.0.000", artifactSha256: sha256 });
+  assert.equal(same.logicVintage?.note, "Scored with the 2026 FHIR logic; 2027 logic not yet available");
+  // Scored by other bytes under the same version (re-vendored since): today's declared period says
+  // nothing about it. The digest has to travel from the evidence for this to be caught.
+  const other = await overviewFor("run-vintage-other-artifact", 2027, true, { ecqmId: "122FHIR", version: "1.0.000", artifactSha256: "sha256:another" });
+  assert.equal(other.logicVintage, null);
+});
+
+test("logicVintageOf needs an official run, a scored year and a manifest describing the run's artifact", () => {
+  const manifest = { effectivePeriod: { start: "2026-01-01", end: "2026-12-31" }, sha256: "sha256:a", version: "1.0.000" };
+  const ran = (official: { ecqmId: string | null; version: string | null; artifactSha256?: string | null } | null) => ({ official });
+  assert.equal(logicVintageOf("cms125", ran(null), 2027, () => manifest)?.measurementYear, 2027, "no identity recorded: the manifest is the fallback");
+  assert.equal(logicVintageOf("cms125", null, 2027, () => manifest), null, "no official evidence");
+  assert.equal(logicVintageOf("cms125", ran(null), null, () => manifest), null);
+  assert.equal(logicVintageOf("cms125", ran(null), 2027, () => null), null);
+  assert.equal(logicVintageOf("cms125", ran({ ecqmId: "125FHIR", version: "1.0.000", artifactSha256: "sha256:a" }), 2027, () => manifest)?.measurementYear, 2027);
+  assert.equal(logicVintageOf("cms125", ran({ ecqmId: "125FHIR", version: "1.0.000", artifactSha256: "sha256:b" }), 2027, () => manifest), null, "same version, other bytes");
+  assert.equal(logicVintageOf("cms125", ran({ ecqmId: "125FHIR", version: "0.5.000" }), 2027, () => manifest), null, "no digest: the version decides");
 });

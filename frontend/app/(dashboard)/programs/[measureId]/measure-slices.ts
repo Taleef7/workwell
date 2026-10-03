@@ -51,6 +51,8 @@ export type ProgramSummary = {
   /** The measure's own rate — the MeasureReport's reduction of the run's evidence — or null when the
    *  run carries no official evidence. Shown apart from the workflow rate (ADR-077 d5). */
   measureRate?: {
+    /** The artifact the run's evidence names (`ecqmId` as recorded, e.g. "125FHIR"). */
+    official?: { ecqmId: string | null; version: string | null } | null;
     rates: Array<{ label: string | null; ipp: number; denom: number; denex: number; denexcep: number; numer: number; effectiveDenominator: number; score: number | null }>;
     unmeasured: number;
     evaluationErrors: number;

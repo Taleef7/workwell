@@ -178,10 +178,13 @@ export default function ProgramDetailPage() {
   const prevRate = prevCounts ? displayRate(prevCounts, identity) : null;
   const delta = program && prevRate && rate.value !== null && prevRate.value !== null ? rate.value - prevRate.value : null;
   const yearLine = program ? yearLineFor([program], isPatientTerm) : null;
-  // The FHIR artifact an officially routed measure runs (from /api/measures). When it is known, the
-  // header names it and its version, never the catalog's QDM id and authoring version (§4.3).
+  // The FHIR artifact an officially routed measure runs today (from /api/measures), for the "Runs …"
+  // line. The artifact and version beside the NUMBERS are the ones the run's evidence names; today's
+  // routing stands in only when the run recorded none. Never the catalog's QDM id or "v1.0" (§4.3).
   const executed = identities[measureId]?.executed;
-  const shownVersion = executed?.version ?? program?.version;
+  const ran = program?.measureRate?.official;
+  const shownEcqmId = ran?.ecqmId ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`) : executed?.ecqmId;
+  const shownVersion = ran?.version ?? executed?.version ?? program?.version;
   const rateDescribedBy = [rate.value === null ? "counted-yet-note" : null, showsRateEstimateNote() ? "rate-estimate-note" : null].filter(Boolean).join(" ") || undefined;
 
   const outcomeBreakdown = program
@@ -205,7 +208,7 @@ export default function ProgramDetailPage() {
       {program ? (
         <>
           <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4">
-            <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{executed?.ecqmId ?? program.policyRef}</p>
+            <p className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{shownEcqmId ?? program.policyRef}</p>
             <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(measureId, program.measureName)}</h2>
             <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {shownVersion}{yearLine ? ` · ${yearLine}` : ""}</p>
             {executed ? (
