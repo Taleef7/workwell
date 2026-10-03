@@ -25,6 +25,8 @@ const doc = (opts: {
   encounterId?: string;
   /** The assigning authority (CDA `id/@root`) of the encounter's id. */
   encounterRoot?: string;
+  /** `"none"` writes no `<id>` at all; `"null-flavored"` writes one the sender marks as unknown. */
+  encounterIdShape?: "none" | "null-flavored";
   /** A SNOMED code carried as the encounter's QDM Encounter Diagnosis. */
   diagnosis?: string;
 }) => `<?xml version="1.0" encoding="UTF-8"?>
@@ -42,7 +44,7 @@ const doc = (opts: {
     <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
     <entry><encounter classCode="ENC" moodCode="EVN">
       <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.23"/>
-      <id extension="${opts.encounterId ?? "enc-1"}" root="${opts.encounterRoot ?? MRN_ROOT}"/>
+      ${opts.encounterIdShape === "none" ? "" : `<id extension="${opts.encounterId ?? "enc-1"}" root="${opts.encounterRoot ?? MRN_ROOT}"${opts.encounterIdShape === "null-flavored" ? ' nullFlavor="UNK"' : ""}/>`}
       <code code="${opts.encounterCode ?? "99213"}" codeSystem="2.16.840.1.113883.6.12"/>
       <statusCode code="completed"/>
       <effectiveTime><low value='20240331080000'/><high value='20240331081500'/></effectiveTime>
@@ -217,6 +219,32 @@ test("the same entry id under two ASSIGNING AUTHORITIES is two entries, not a du
   ]);
   assert.equal(encounters.length, 2);
   assert.deepEqual(encounters.map((e) => e.identifier[0].system).sort(), ["urn:oid:2.16.840.1.113883.19.5.1", "urn:oid:2.16.840.1.113883.19.5.2"]);
+});
+
+test("an entry the source did not identify is never merged across documents", () => {
+  // With no `<id>`, or a null-flavored one, the importer's id comes from the entry's position, which says
+  // nothing about which event it is; two such identical visits are two visits.
+  for (const shape of ["none", "null-flavored"] as const) {
+    const { encounters } = encountersOf([
+      doc({ mrn: "mrn-a", mbi: "MBI-1", encounterIdShape: shape }),
+      doc({ mrn: "mrn-b", mbi: "MBI-1", encounterIdShape: shape }),
+    ]);
+    assert.equal(encounters.length, 2, shape);
+    assert.equal(encounters.every((e) => e.identifier === undefined), true, `${shape}: no identifier is asserted`);
+  }
+});
+
+test("a diagnosis goes with its own encounter: two distinct visits never share one", () => {
+  // Same entry id under two authorities = two visits; each one's diagnosis Condition has no identity of
+  // its own and the same content, and must stay with its own visit rather than merge into the other's.
+  const { encounters, conditions } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "1", encounterRoot: "2.16.840.1.113883.19.5.1", diagnosis: "75544000" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "1", encounterRoot: "2.16.840.1.113883.19.5.2", diagnosis: "75544000" }),
+  ]);
+  assert.equal(encounters.length, 2);
+  assert.equal(conditions.length, 2);
+  const targets = encounters.map((e) => e.reasonReference[0].reference);
+  assert.equal(new Set(targets).size, 2, "each visit names its own diagnosis");
 });
 
 test("a repeat WITHIN one document is kept: the document itself stated it twice", () => {

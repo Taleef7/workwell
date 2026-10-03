@@ -246,7 +246,8 @@ function idOf(node: CdaNode, fallback: string): string {
 function identifierOf(node: CdaNode): { identifier?: Array<{ system: string; value: string }> } {
   const own = childrenNamed(node, "id").find((n) => n.attrs.extension);
   const root = own?.attrs.root;
-  if (!own || !root) return {};
+  // A null-flavored id is the sender saying it has no identifier for this entry.
+  if (!own || !root || own.attrs.nullFlavor) return {};
   const system = /^\d+(\.\d+)+$/.test(root)
     ? `urn:oid:${root}`
     : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(root)
