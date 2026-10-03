@@ -7,18 +7,19 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-02
 
-- **The QRDA I importer reads what the Cypress decks carry.** It now takes text results, a blood
-  pressure's two halves paired into one panel, Medication Orders (as orders, never active medications),
-  an Assessment Not Performed with its reason, and encounter diagnoses. The batch merge keeps references
-  intact and states once a fact a person's duplicate documents repeat, so a copied visit is not counted
-  twice. `scripts/cvu/bundle-agreement.ts` compares per patient against a Cypress bundle's own results.
+- **The QRDA I importer reads what the Cypress decks carry.** It now takes text results, Physical Exams
+  (one Observation per reading), Medication Orders (as orders, never active medications), an Assessment
+  Not Performed with its reason, and encounter diagnoses. The batch merge keeps references intact and
+  merges a repeat of the same source entry across a person's duplicate documents, so a copied visit is
+  not counted twice. `scripts/cvu/bundle-agreement.ts` compares per patient against a Cypress bundle.
   - 2027 deck (bundle 2026.1.0), vendored drafts, as production runs them: CMS122 64/64, CMS125 155/155,
     CMS130 269/269, CMS137 36/36 (both rates), CMS2 375/379.
   - CMS165 is not reachable through the QRDA I route yet: it alone runs with profile tagging required,
-    and imported resources carry no QI-Core profiles, so the batch errors. With tagging off it is 42/44.
-  - The rest is logic, not import: CMS165's draft ties a reading to an inpatient stay through
-    `Observation.encounter`, which QRDA does not carry (2); CMS2's draft lacks the active-medication
-    follow-up (2) and the 2027 next-day follow-up (2).
+    and imported resources carry no QI-Core profiles. Its draft also reads a blood pressure only as a US
+    Core panel, and pairing the two QDM readings into one would supply a code the document never states,
+    so they stay two readings; the question returns with profile stamping.
+  - The rest is logic, not import: CMS2's draft lacks the active-medication follow-up (2) and the 2027
+    next-day follow-up (2).
 - **A failed evaluation no longer opens care gaps.** When the engine threw (one subject, or a whole
   official batch), the outcome was stored as MISSING_DATA, and the case logic then treated that as a
   finding: it opened a case for a patient with none, reopened a resolved one, and rolled an old cycle's
