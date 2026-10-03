@@ -127,12 +127,13 @@ function canonicalJson(value: unknown): string {
  * - Ids are namespaced per document (`<document index>-<id>`): two documents can reuse a generated id.
  * - References inside a document are renamed with the ids they point at, since the libraries match a
  *   reference to its target by exact id.
- * - A resource that states exactly the same fact as one an EARLIER document of this person already gave
- *   (same content apart from its id, with references compared by what they point at) is dropped, and
- *   references to it point at the kept copy. A sender's duplicate documents repeat their clinical
- *   entries (Cypress's augmented duplicates do), and two copies of one visit are two visits to a
- *   measure that counts engagements, as CMS137 does. Repeats within ONE document are kept: the document
- *   itself stated them twice.
+ * - A resource an EARLIER document of this person already gave, the same source entry (same entry id)
+ *   with the same content and references that point at the same facts, is dropped, and references to it
+ *   point at the kept copy. A sender's duplicate documents repeat their clinical entries, and two copies
+ *   of one visit are two visits to a measure that counts engagements, as CMS137 does. The entry id is
+ *   part of the match on purpose: two distinct events can map to identical content (two date-only visits
+ *   of one type), and only the source's own identifier says they are one. Repeats within ONE document
+ *   are kept: the document itself stated them twice.
  */
 export function mergeMemberResources(members: ReadonlyArray<{ index: number; resources: readonly unknown[] }>): unknown[] {
   const out: unknown[] = [];
@@ -141,8 +142,8 @@ export function mergeMemberResources(members: ReadonlyArray<{ index: number; res
     const resources = m.resources as Array<{ resourceType?: string; id?: string }>;
     const byRef = new Map<string, { resourceType?: string; id?: string }>();
     for (const r of resources) if (r?.id !== undefined) byRef.set(`${r.resourceType}/${r.id}`, r);
-    // A resource's fact: its content without the id, with each in-document reference replaced by the
-    // fact of what it points at (references run Encounter -> Condition, so this terminates).
+    // A resource's fact: its whole content, source id included, with each in-document reference replaced
+    // by the fact of what it points at (references run Encounter -> Condition, so this terminates).
     const facts = new Map<unknown, string>();
     const factOf = (r: { resourceType?: string; id?: string }, depth = 0): string => {
       const known = facts.get(r);
@@ -157,8 +158,7 @@ export function mergeMemberResources(members: ReadonlyArray<{ index: number; res
         }
         return o;
       };
-      const { id: _id, ...content } = r;
-      const fact = canonicalJson(resolve(content));
+      const fact = canonicalJson(resolve(r));
       facts.set(r, fact);
       return fact;
     };

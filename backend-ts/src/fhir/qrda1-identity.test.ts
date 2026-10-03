@@ -196,6 +196,16 @@ test("the same visit with a DIFFERENT diagnosis is not a duplicate: a fact inclu
   assert.equal(conditions.length, 2);
 });
 
+test("identical content under DIFFERENT entry ids is two events, not a duplicate", () => {
+  // Two visits of one type at the same time from two documents map to identical resources; only the
+  // source's entry id says whether they are one event or two, so different ids keep both.
+  const { encounters } = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "visit-a" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "visit-b" }),
+  ]);
+  assert.equal(encounters.length, 2);
+});
+
 test("a repeat WITHIN one document is kept: the document itself stated it twice", () => {
   const twice = withAnotherEncounter(doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1" }), "e1", "99213");
   const { encounters } = encountersOf([twice]);
