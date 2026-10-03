@@ -25,16 +25,18 @@ reconciliation point, the encounter hook as the moment of action.
 
 - **WorkWell** — drawn as a single lane in both diagrams, because these scenarios are about the
   boundary between two systems. Behind the lane: the run pipeline, the two engines (our compiled
-  CQL, and CMS's own published artifacts for the measures routed to them —
+  CQL, and CMS's FHIR draft artifacts for the measures routed to them —
   [chapter 4](04-engine-and-routing.md)), and the database that holds runs, outcomes, cases and
   the audit trail ([chapter 6](06-data-and-databases.md)).
-- **WebChart** — the EHR: MIE's WebChart, exposing patient data as FHIR resources, read via
-  SMART Backend Services auth ([chapter 5](05-fhir.md)).
+- **WebChart** — the EHR and system of record: MIE's WebChart. It calculates and submits the
+  practice's reported quality results; WorkWell assists it. It exposes patient data as FHIR
+  resources, read via SMART Backend Services auth ([chapter 5](05-fhir.md)).
 - **Quality manager** — looks across a population, never mid-visit. Reads WorkWell directly.
 - **Nurse practitioner** — mid-visit, needs one patient's answer now. Should never have to leave
   the chart. Different question from the manager's, so deliberately a different surface.
 - **Another MIE system** — anything that wants the answer machine-readably: the versioned
-  [Compliance API](../COMPLIANCE_API.md) (`GET /api/v1/compliance/{subject}/{measure}`).
+  [Compliance API](../COMPLIANCE_API.md) (`GET /api/v1/compliance/{subject}/{measure}`). It is a kept,
+  served surface, not the integration contract; that is the card surface (S7) plus the Maui deployment.
 
 ## The batch loop — quality on a schedule (built today)
 
@@ -55,7 +57,7 @@ sequenceDiagram
     WC-->>WW: Patient, Observations, Procedures, …
     WW->>WW: evaluate — CMS's own artifacts where routed
   end
-  WW->>WW: persist outcome + evidence, open or resolve cases, audit everything
+  WW->>WW: persist outcome + evidence, open or resolve cases, write audit events
   MGR->>WW: dashboards, worklist, exports — already computed
   MIE->>WW: ask for one patient's answer, one measure
   WW-->>MIE: the answer + its provenance — or 404, never a guessed yes
@@ -71,14 +73,16 @@ What happens, in order:
    patient's resources. Where WebChart's raw FHIR doesn't carry a field the official CMS logic
    reads, the value is *derived from WebChart's own real data*, tagged as derived, and suppressed
    the moment the server supplies its own — adapting shape, never inventing facts (ADR-057).
-3. **Evaluation is routed per measure.** Most measures run WorkWell's own compiled CQL; measures
-   flipped to official routing run **CMS's own published artifact**, unmodified, through a
-   quarantined executor — so for those, the numbers are the reference logic's numbers, not our
-   reimplementation of them ([chapter 4](04-engine-and-routing.md)).
+3. **Evaluation is routed per measure, per instance.** On TWH most measures run WorkWell's own
+   compiled CQL, and CMS122 and CMS125 are routed; on Maui all six measures are routed. A routed
+   measure runs **CMS's FHIR draft artifact**, unmodified, through a quarantined executor, so its
+   numbers come from CMS's logic, not our reimplementation of it ([chapter 4](04-engine-and-routing.md)).
+   On Maui they are still WorkWell's estimate; WebChart calculates and submits the reported rate.
 4. **The batch produces work, not just numbers.** Every evaluation persists the verdict *and the
    value of every rule that led to it*; a non-compliant result opens (or refreshes — idempotently,
    never duplicates) a case in a worklist, and a now-compliant result resolves it. Every state
-   change writes an audit event, no exceptions.
+   change should write an audit event; that is not yet true everywhere (#598, open; see
+   [`DATA_MODEL_CONTRACTS.md`](../DATA_MODEL_CONTRACTS.md) §4).
 5. **Results surface through WorkWell's interface today.** A quality manager reads dashboards,
    pass rates and trends; a coordinator works the case list — either **by gap** (`/cases`, one row
    per patient-measure) or **by patient** (`/worklist`, one row per person with every open gap on
@@ -96,10 +100,10 @@ What happens, in order:
    say what CQL says *today* (still counted, verified compliant/excluded, or not evaluable), and the
    measure page carries a "Closed by staff, still counted" figure that reconciles its Overdue count
    with its open-case link. It is display only: no outcome is mutated, and a closure is never an
-   exception — for the six official measures only a chart-documented exclusion counts, which is the
+   exception — for an officially routed measure (six on Maui) only a chart-documented exclusion counts, which is the
    write path MIE owes. CSV exports feed anything
-   spreadsheet-shaped; and other MIE systems read the same answer machine-readably from the
-   versioned compliance API — which answers **404 when no run has covered a patient**, never an
+   spreadsheet-shaped; and the versioned compliance API, a kept surface rather than the integration
+   contract, serves the same answer machine-readably. It answers **404 when no run has covered a patient**, never an
    empty success, because "not yet evaluated" and "compliant" must not be confusable.
 6. **Cadence is configuration, not code.** Nightly is the shipped default
    (`WORKWELL_SCHEDULER_ENABLED`); weekly or monthly is the same pipeline on a different tick,
@@ -113,8 +117,8 @@ WebChart side of the conversation.
 
 One honesty note: this is the mechanism end to end, and each half runs today — but no deployed
 stack currently pairs the *live WebChart ingress* with *official measure routing* in one
-environment. The demo/production stack routes official measures over its synthetic roster; the
-WebChart-configured stack evaluates authored logic. Pairing them is a configuration change, not a
+environment. The TWH and Maui stacks route official measures over synthetic rosters; the
+staging stack, which reads the teatea WebChart trial, evaluates authored logic. Pairing them is a configuration change, not a
 build.
 
 ## Reporting against somebody else's population (built 2026-09-16)
@@ -185,8 +189,9 @@ sequenceDiagram
   MGR->>WW: population dashboards, already accumulated
 ```
 
-Solid arrows are built; the dashed one at the bottom is step 2, the piece that would make a card
-reflect *this* visit rather than the last completed run.
+Solid arrows are built on WorkWell's side only: WebChart has no CDS Hooks client (checked
+2026-10-02), so nothing fires the hook today. The dashed one at the bottom is step 2, the piece that
+would make a card reflect *this* visit rather than the last completed run.
 
 What happens, in order:
 
@@ -240,7 +245,7 @@ problem — there are a great many of them, and building one more would be the l
 thing this engine could do. Three things here are not that: the finding arrives **inside the
 workflow, mid-encounter**, while the clinician can still change what happens; the follow-up
 becomes **real work in the EHR** rather than a list somebody is supposed to check; and the
-answer is **traceable to a published measure** run on a reference engine, which
+answer is **traceable to the measure's logic** (CMS's FHIR draft, where routed), run on a reference engine, which
 [chapter 1](01-big-picture.md) covers.
 
 ### What exists today
@@ -255,7 +260,7 @@ answer is **traceable to a published measure** run on a reference engine, which
 | **Follow-up offered as an order the clinician accepts** | **Built** — a card `suggestion` carrying a draft `ServiceRequest`, so nothing is written by WorkWell. Only for order codes with an APPROVED terminology mapping, which today excludes cms122/cms125 |
 | **Did anyone act on the finding** | **Built** — the CDS Hooks feedback endpoint, audited |
 | Evaluating data supplied on the request | Not built — this is step 2, and `prefetch` is where it would go. WorkWell declares none, because it evaluates none |
-| WebChart pushing an encounter as it happens | Not built — and no public evidence either way that WebChart acts as a CDS Hooks client |
+| WebChart pushing an encounter as it happens | Not built — WebChart has no CDS Hooks client (checked 2026-10-02); how it could call the cards is an ask to MIE |
 | Quality rendered inside WebChart's own UI | Not built — cards are structured for a client to draw; nothing draws them today |
 | Tasks and documents written back into WebChart | Not built — a suggestion proposes an order; there is no task or document write path |
 | Send/receive reconciliation of encounters | Not built — card feedback answers "was it acted on", not "did every encounter arrive" |
@@ -279,7 +284,8 @@ on the worker that already existed. Its `suggestion` mechanism also solves the h
 for free, since a proposed order travels as data the EHR performs rather than as a write WorkWell
 would need credentials for.
 
-What the standard does **not** settle: whether WebChart acts as a CDS Hooks client, and how it would
-authenticate. CDS Hooks defines its own signed-JWT profile which forbids symmetric algorithms, so
+What the standard does **not** settle: how WebChart would call the service, and how it would
+authenticate. WebChart has no CDS Hooks client (checked 2026-10-02), so a client in its new UI
+or a chart-tab app launch is an ask to MIE. CDS Hooks defines its own signed-JWT profile which forbids symmetric algorithms, so
 WorkWell's bearer token is not it — the gap is named in [`CDS_HOOKS.md`](../CDS_HOOKS.md) rather than
 papered over, and it reduces to two things to ask for: an issuer and a JWKS URL.

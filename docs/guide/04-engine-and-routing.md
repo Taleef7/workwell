@@ -24,8 +24,8 @@ flowchart TB
   P5 --> P6["6. Build one FHIR record per person"]
   P6 --> P7["7. Decide which compliance period this counts as"]
   P7 --> P8{"8. Whose logic for this measure?"}
-  P8 -->|"12 of 14"| E1["9a. Our engine walks our compiled tree"]
-  P8 -->|"2 of 14"| E2["9b. The reference calculator runs CMS's file"]
+  P8 -->|"TWH: 12 of 14"| E1["9a. Our engine walks our compiled tree"]
+  P8 -->|"TWH 2 of 14, Maui all 6"| E2["9b. The reference calculator runs CMS's draft"]
   E1 --> R1["10a. Every rule, with its value"]
   E2 --> R2["10b. Membership of each population"]
   R1 --> S1["11. Save the outcome and its evidence"]
@@ -44,7 +44,8 @@ gives back answers.
 
 1. **A run starts.** Somebody presses the button or the overnight scheduler fires. Four scopes: one
    measure across everybody, everything for one person, everything for one site, or everything for
-   everybody — the last is 14 measures across 150 people on the demo stack.
+   everybody — the last is 14 measures across 150 people on TWH, and 6 measures across 20,000
+   patients on Maui.
 2. **The scope becomes a flat list of person-and-measure pairs.** For a site run, the seeded
    distribution is still computed over the whole population and filtered down, so a person's result
    is identical whichever scope evaluated them. Without that, the same person could land in a
@@ -52,7 +53,7 @@ gives back answers.
 3. **The run row is written immediately**, marked running, with its first log line. The measurement
    window is recorded here rather than inferred later, so a rerun tomorrow reuses the same window
    and updates the same cases.
-4. **Answer now or later.** A full run takes about a minute — too long to hold a request open — so
+4. **Answer now or later.** A full run takes about a minute on TWH and far longer on Maui, too long to hold a request open, so
    wide scopes return a running status and finish in the background while the page polls. One
    consequence worth knowing: the warning in step 17 is returned on the synchronous answer only,
    so for background runs it lives in the log timeline, not the run list. Fixing that needs a new
@@ -106,7 +107,7 @@ gives back answers.
 ## The router
 
 `WORKWELL_OFFICIAL_MEASURES` is a comma-separated allowlist in the deployment configuration, never
-`all`. When it is unset — which is every environment except demo/production — the router returns the
+`all`. When it is unset, which is every deployment except the TWH and Maui stacks, the router returns the
 authored engine by identity: no wrapper, no dispatch, nothing to reason about, and a test asserts
 the identity. When a measure is named in it, nine checks have to pass before the router will even
 construct itself.
@@ -119,11 +120,11 @@ flowchart TB
   Q1 -->|yes| Q2{"Caller passed an explicit library to run?"}
   Q2 -->|"yes - fidelity lab, Rule Builder preview"| AUTH
   Q2 -->|no| OFF["Official path"]
-  subgraph A["AUTHORED - our own CQL, 12 of 14 runnable measures"]
+  subgraph A["AUTHORED - our own CQL, 12 of 14 runnable measures on TWH"]
     AUTH --> A2["cql-execution walks our committed ELM - about 68 ms per subject"]
     A2 --> A3["A value for every define. One is the verdict."]
   end
-  subgraph O["OFFICIAL - CMS's published artifact, 6 routed measures on the pilot stack"]
+  subgraph O["OFFICIAL - CMS's FHIR draft artifact, 6 routed on Maui, 2 on TWH"]
     OFF --> O2["Prepare a QI-Core copy of the bundle - statuses, onset dates, encounter classes"]
     O2 --> O3["Value sets from the artifact's own pinned terminology, never our VSAC import"]
     O3 --> O4["fqm-execution calculates population membership: in scope, denominator, excluded, exception, numerator"]
@@ -182,7 +183,7 @@ object, so they cannot disagree.
 
 ## Getting a CMS measure into the tree
 
-CMS's FHIR measures are published in `cqframework/dqm-content-qicore-2025`, with test cases. One
+CMS's FHIR draft measures (version 1.0.000, posted for public comment in January–February 2026) are in `cqframework/dqm-content-qicore-2025`, with test cases. One
 command vendors one:
 
 ```bash
@@ -219,7 +220,7 @@ The steps that need a sentence more than the diagram gives them:
   pinned even though they are not stored, so a public repo still holds a reproducible measure. A
   regenerated sidecar either hashes identically or fails loudly at load.
 - **Step 7 exists because upstream ships incomplete lists.** The content repo caps every published
-  expansion at 1,000 entries (full ones need an NLM licence). One list both routed measures use is
+  expansion at 1,000 entries (full ones need an NLM licence). One list that CMS122, CMS125, CMS130 and CMS165 all use is
   1,000 of 1,997 codes, and it feeds an exclusion — a short exclusion list silently scores people
   who should have been excused. Those lists are re-expanded from VSAC at vendor time, pinned to the
   release the content repo itself names. If the credential is missing, nothing is written and
@@ -257,8 +258,8 @@ log that official measures are on, keep the health endpoint green, and 500 every
 |---|---|---|
 | Vendored — artifact in the tree | 9 of 9 | Each with complete code lists and nothing truncated; CMS137 is the first multi-rate one |
 | MADiE-gated — authors' own deck passes | 9 of 9 | 455 of 455, every rate compared |
-| Runnable — a deployment may route it | 9 | authored (cms122/cms125) or official-only and listed by the profile (ADR-072) |
-| Routed — evaluating real people | 6 on Maui, 2 on TWH | The Maui pilot sandbox routes the ACO's whole computable set — cms122, cms125, cms2, cms130, cms165, cms137 (ADR-078, owner decision); TWH stays on cms122 and cms125 |
+| Runnable — a deployment may route it | 6 | authored (cms122/cms125), or official-only (cms2, cms130, cms165, cms137) and listed by the Maui profile (ADR-072) |
+| Routed — a stack runs it, on synthetic data | 6 on Maui, 2 on TWH | The Maui pilot sandbox routes the ACO's whole computable set — cms122, cms125, cms2, cms130, cms165, cms137 (ADR-078, owner decision); TWH stays on cms122 and cms125 |
 
 A measure with an authored counterpart is judged by `pnpm flip-snapshot`, step 11 — both engines over
 the same people. The official-only four (cms2, cms130, cms165, cms137) have no BEFORE for that diff, so
@@ -271,13 +272,13 @@ is prose and the flip stays a reviewed workflow edit.
 
 **One measure reads its data by profile, and that is now a per-measure setting.** The executor ignores
 `meta.profile` when it retrieves, because trusting profiles empties cms122's and cms125's populations
-and those are the two that run on real people. CMS165 is the exception, and the exception is forced:
+and those two are routed on both stacks. CMS165 is the exception, and the exception is forced:
 its decisive retrieve is `[Observation: us-core-blood-pressure]` with no code filter, so with profiles
 ignored *any* final observation is a candidate blood pressure and whichever is newest is read as the
 patient's latest reading — a hemoglobin standing in for a systolic. Since 2026-09-07 the setting is
 per measure and cms165 is the only one that turns it on (ADR-076 d1). That works because the corpus
 stamps the profile each retrieve names, which it has done since the corpus was built, for this. It does
-**not** make cms165 routable: data that carries no profiles retrieves nothing under it, so real blood
+**not** clear cms165 for real data (the sandbox routes it on the corpus): data that carries no profiles retrieves nothing under it, so real blood
 pressures from WebChart must be stamped at ingest first. The difference is that failing that way is
 loud where it counts: a nightly run over a roster refuses outright when nothing retrieves. A one-subject
 evaluation still cannot refuse — for one person, retrieving nothing is a legitimate answer — so the
@@ -302,7 +303,7 @@ guarantee.
   For an official-routed measure the "defines" are population membership (`official:numerator`, or
   `official:Initiation:numerator` / `official:Engagement:numerator` on a multi-rate measure), and the
   block leads with a plain-English "Why flagged" line that names the rate the patient missed (ADR-074).
-- The routing state is configuration: `WORKWELL_OFFICIAL_MEASURES` in `deploy-twh-mieweb.yml`.
+- The routing state is configuration: `WORKWELL_OFFICIAL_MEASURES` in `deploy-twh-mieweb.yml` (TWH) and `deploy-maui-mieweb.yml` (Maui).
 
 ## Reproduce it yourself
 

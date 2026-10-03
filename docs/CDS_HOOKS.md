@@ -115,9 +115,10 @@ suggestion with no code change.
 | `hazwoper` | internal `hazwoper-exam` | no — mapping is `REVIEWED`, and the code is not a public standard |
 | **`cms122`, `cms125`** | CPT 83036 / 77067 | **no — no mapping exists at all** |
 
-> **The consequence is intended, not an oversight.** The two officially-routed CMS measures carry
-> information and a link rather than an order. Offering a demo-grade CPT for creation in a certified EHR is
-> the harm the rule exists to prevent; giving them a suggestion is a terminology review, not a code change.
+> **The consequence is intended, not an oversight.** The officially-routed CMS measures carry information
+> and a link rather than an order. Offering a demo-grade CPT for creation in a certified EHR is the harm the
+> rule exists to prevent. For CMS122 and CMS125 a suggestion is a terminology review, not a code change; the
+> four more that Maui routes (CMS2, CMS130, CMS165, CMS137) have no order code at all.
 
 Two measures sharing one order code (`diabetes_hba1c` and `cms122` both map to CPT 83036) collapse to a
 single suggestion, because one order is the correct clinical action.
@@ -219,8 +220,9 @@ eligible for a suggestion — the last of these moves when a terminology mapping
 - **CORS is an exact-origin allowlist and is not relaxed.** A browser-based CDS client (including the public
   sandbox at `sandbox.cds-hooks.org`) needs its origin added to `WORKWELL_CORS_ALLOWED_ORIGINS`. The
   specification requires CORS support but explicitly declines to specify an allowlist rule.
-- **Nothing in WebChart fires this hook today.** Whether WebChart acts as a CDS Hooks client is an open
-  question with MIE, and there is no public evidence either way.
+- **Nothing in WebChart fires this hook today.** WebChart has no CDS Hooks client (checked 2026-10-02 on the
+  teatea trial, in WebChart's docs and in MIE's dev database). How WebChart could call this service, through
+  a client in its new UI or an app launched from a chart tab, is an ask to MIE (`OPEN_QUESTIONS.md` §4.1).
 - **Conformance is self-graded.** No external CDS Hooks conformance suite exists — the community validator is
   JSON Schemas last touched in 2018, the sandbox is ungraded, and Inferno has no CDS Hooks kit. See
   `docs/STANDARDS_CONFORMANCE.md`.

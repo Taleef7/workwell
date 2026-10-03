@@ -1,6 +1,6 @@
 # WorkWell Measure Catalog
 
-WorkWell Measure Studio implements the **Total Worker Health (TWH)** model: OSHA occupational safety compliance and clinical quality / wellness measures managed in a single platform. The TWH instance seeds all three categories on startup.
+WorkWell is one product with several instances. The TWH instance (employees) runs the OSHA, wellness and immunization measures, plus CMS122 and CMS125 on CMS's FHIR drafts. The Maui sandbox (patients) runs six CMS measures on those drafts. The catalog below is seeded on startup, and each instance runs its own subset of it.
 
 ## Catalog summary
 
@@ -10,7 +10,7 @@ WorkWell Measure Studio implements the **Total Worker Health (TWH)** model: OSHA
 | OSHA occupational safety — catalog only | 2 | Draft / Deprecated | Partial or no CQL |
 | HEDIS wellness — fully evaluated | 5 | Active | Full CQL, runnable |
 | Permanent immunization panel — fully evaluated | 3 | Active | Full CQL, runnable (series-completion; MMR, Varicella, Hep B) |
-| CMS eCQM — fully evaluated | 2 | Active | Full CQL, runnable (CMS125v14, CMS122v14) |
+| CMS eCQM — authored CQL kept beside the official artifact | 2 | Active | WorkWell's own CQL for CMS125 and CMS122; TWH and Maui both run CMS's FHIR drafts for these |
 | CMS eCQM — official-only (no authored CQL) | 4 | Active | CMS2, CMS130, CMS165, CMS137 — the vendored artifact IS the logic (ADR-072) |
 | CMS eCQM catalog (2026 performance period) | 43 | Draft | Catalog entry only — CQL authoring pending |
 | **Total** | **63** | | |

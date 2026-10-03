@@ -30,4 +30,4 @@ sequenceDiagram
     QR-->>NP: Show the status and the evidence behind it
 ```
 
-The EHR provides the clinical records, normalization prepares them for evaluation, and the clinical measure engine determines the quality result.
+The EHR provides the clinical records, normalization prepares them for evaluation, and the clinical measure engine determines WorkWell's result: who has an open gap and why. Where WebChart calculates and submits the reported rate, as for the Maui pilot, WorkWell's rate is an estimate of it.
