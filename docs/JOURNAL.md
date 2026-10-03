@@ -11,6 +11,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   `CMS125FHIR` v1.0.000 (a CMS draft, derived from `CMS125v14`), not `CMS125v14`/`v1.0`/"published"
   (§4.3). On the patient profile every rate screen says WebChart submits the reported rate, and a run
   scored with last year's logic says so. Old descriptions are rewritten, audited first.
+- **A failed evaluation no longer opens care gaps.** When the engine threw (one subject, or a whole
+  official batch), the outcome was stored as MISSING_DATA, and the case logic then treated that as a
+  finding: it opened a case for a patient with none, reopened a resolved one, and rolled an old cycle's
+  case over as if the patient had been evaluated. Now the failure is still recorded, the run is still
+  PARTIAL_FAILURE, and the patient's cases are left exactly as they were. A failed rerun-to-verify
+  now does the same: it records the attempt (`CASE_RERUN_FAILED`) instead of reopening a closed case.
 - **Ingest no longer invents a visit for CMS125.** On a live WebChart run the enrollment roster stamped a
   CPT 99213 office visit on every listed patient, which put them in CMS125's initial population whether
   or not a visit happened. That was a made-up clinical fact on the live path, so it is gone, and cms125

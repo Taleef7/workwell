@@ -46,6 +46,21 @@ export class UnsupportedCaseRerunError extends Error {
   }
 }
 
+/**
+ * The verification ran and the engine threw. The attempt is already recorded (outcome, audit, a
+ * PARTIAL_FAILURE run) and the case is unchanged; callers must report a failure, never a completed rerun.
+ */
+export class CaseRerunFailedError extends Error {
+  readonly code = "verification_failed";
+  constructor(
+    readonly runId: string,
+    message = "Verification failed: the CQL engine returned no answer. The case was left unchanged.",
+  ) {
+    super(message);
+    this.name = "CaseRerunFailedError";
+  }
+}
+
 const verificationCaseStatus = (current: string, verified: string): string =>
   verified === "COMPLIANT"
     ? "RESOLVED"
@@ -138,6 +153,37 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     // back by the per-subject history surfaces.
     outOfPopulation,
   });
+
+  // A verification that threw is not a verdict. Before this branch its MISSING_DATA reopened a closed
+  // case and overwrote an open one's outcome. The attempt is recorded (audit first, as everywhere) and
+  // the run is PARTIAL_FAILURE, but the case is left exactly as it was.
+  if (hasEvaluationError) {
+    const failedPayload = {
+      priorOutcomeStatus: existing.currentOutcomeStatus,
+      verifiedStatus,
+      runId: run.id,
+      subjectId: existing.employeeId,
+      evaluationPeriod: existing.evaluationPeriod,
+      status: existing.status,
+      caseUnchanged: true,
+    };
+    await deps.events.recordCaseEvent({
+      action: { caseId, actionType: "RERUN_TO_VERIFY", actor, payload: failedPayload },
+      audit: {
+        eventType: "CASE_RERUN_FAILED",
+        entityType: "case",
+        entityId: caseId,
+        actor,
+        refRunId: run.id,
+        refCaseId: caseId,
+        refMeasureVersionId: existing.measureId,
+        payload: failedPayload,
+      },
+    });
+    await deps.runStore.appendLog(run.id, "WARN", "Verification failed; the case was left unchanged.");
+    await deps.runStore.finalizeRun(run.id, "PARTIAL_FAILURE");
+    throw new CaseRerunFailedError(run.id);
+  }
 
   const updatedCaseStatus = outOfPopulation ? "RESOLVED" : verificationCaseStatus(existing.status, verifiedStatus);
   const nextAction = outOfPopulation
@@ -234,7 +280,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     });
   }
 
-  await deps.runStore.finalizeRun(run.id, hasEvaluationError ? "PARTIAL_FAILURE" : "COMPLETED");
+  await deps.runStore.finalizeRun(run.id, "COMPLETED");
   return buildDetail(deps, caseId);
 }
 

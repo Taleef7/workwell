@@ -29,7 +29,7 @@ import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
-import { rerunToVerify, UnsupportedCaseRerunError, type RerunDeps } from "../case/case-rerun.ts";
+import { rerunToVerify, UnsupportedCaseRerunError, CaseRerunFailedError, type RerunDeps } from "../case/case-rerun.ts";
 import { resolveChannel, isChannelType, type ChannelType, type OutreachChannel } from "../case/outreach-channel.ts";
 import {
   uploadEvidence,
@@ -187,6 +187,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
         return detail ? json(detail) : json({ error: "not_found", id: rerunId }, 404);
       } catch (err) {
         if (err instanceof UnsupportedCaseRerunError) return json({ error: err.code, message: err.message }, 409);
+        if (err instanceof CaseRerunFailedError) return json({ error: err.code, message: err.message, runId: err.runId }, 500);
         throw err;
       }
     }
