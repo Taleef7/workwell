@@ -207,7 +207,73 @@ export function officialArtifactAvailable(catalogId: string): boolean {
   return loadOfficialArtifact(catalogId) !== null;
 }
 
+const manifestCache = new Map<string, OfficialManifest | null>();
+
+/**
+ * The manifest alone, for read models that only label a measure (which logic runs, which year it was
+ * written for). It never parses the multi-megabyte bundle, so `/api/measures` and `/api/programs` do not
+ * pay for it. An absent file is cached as `null`; a failed read is not, for the reason
+ * `loadOfficialArtifact` gives.
+ */
+export function loadOfficialManifest(catalogId: string): OfficialManifest | null {
+  const fromArtifact = cache.get(catalogId);
+  if (fromArtifact) return fromArtifact.manifest;
+  const cached = manifestCache.get(catalogId);
+  if (cached !== undefined) return cached;
+  if (!VALID_CATALOG_ID.test(catalogId)) return null;
+  try {
+    const manifest = JSON.parse(readFileSync(new URL(`${catalogId}/manifest.json`, ARTIFACT_ROOT), "utf8")) as OfficialManifest;
+    manifestCache.set(catalogId, manifest);
+    return manifest;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") manifestCache.set(catalogId, null);
+    return null;
+  }
+}
+
+/**
+ * Whether an artifact's declared effectivePeriod covers a measurement period, or `null` when the
+ * artifact declares none (absent means unknown, not stale). The one definition the run log's warning
+ * (`effectivePeriodWarning`) and the measure page's vintage note (`officialLogicVintage`) share.
+ */
+export function effectivePeriodCovers(
+  manifest: Pick<OfficialManifest, "effectivePeriod">,
+  period: { start: string; end: string },
+): boolean | null {
+  const ep = manifest.effectivePeriod;
+  if (!ep?.start || !ep?.end) return null;
+  return ep.start.slice(0, 10) <= period.start.slice(0, 10) && ep.end.slice(0, 10) >= period.end.slice(0, 10);
+}
+
+/**
+ * A year scored with logic written for another year. Every vendored artifact declares 2026 only, so from
+ * 1 January 2027 the routed measures score PY2027 with 2026 logic until CMS publishes newer FHIR content
+ * and it is re-vendored (ROADMAP MM-1d). The run log already says so; this is the same fact for a screen.
+ */
+export interface OfficialLogicVintage {
+  /** The year (or `start–end` years) the artifact declares it was written for. */
+  artifactYears: string;
+  measurementYear: number;
+  note: string;
+}
+
+export function officialLogicVintage(
+  manifest: Pick<OfficialManifest, "effectivePeriod">,
+  measurementYear: number,
+): OfficialLogicVintage | null {
+  const covered = effectivePeriodCovers(manifest, { start: `${measurementYear}-01-01`, end: `${measurementYear}-12-31` });
+  if (covered !== false) return null;
+  const startYear = manifest.effectivePeriod!.start!.slice(0, 4);
+  const endYear = manifest.effectivePeriod!.end!.slice(0, 4);
+  const artifactYears = startYear === endYear ? startYear : `${startYear}–${endYear}`;
+  const note = measurementYear > Number(endYear)
+    ? `Scored with the ${artifactYears} FHIR logic; ${measurementYear} logic not yet available`
+    : `Scored with the ${artifactYears} FHIR logic, not the ${measurementYear} logic`;
+  return { artifactYears, measurementYear, note };
+}
+
 /** @internal test hook */
 export function __clearOfficialArtifactCache(): void {
   cache.clear();
+  manifestCache.clear();
 }

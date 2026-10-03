@@ -7,7 +7,7 @@
 import type { MeasureRecord } from "../stores/measure-store.ts";
 import type { MeasureSpec, MeasureStatus } from "./measure-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { measureIdentityFor, type MeasureIdentity } from "./measure-identity.ts";
+import { measureIdentityPayloadFor, type MeasureIdentityPayload } from "./measure-identity.ts";
 import { classifyRunnable } from "../config/deployment-profile.ts";
 
 export interface Measure {
@@ -21,7 +21,8 @@ export interface Measure {
   tags: string[];
   statusUpdatedAt: string;
   statusUpdatedBy: string;
-  identity: MeasureIdentity | null;
+  /** The crosswalk identity; `identity.executed` names the FHIR artifact when the measure is routed to one. */
+  identity: MeasureIdentityPayload | null;
   routing: "authored" | "official" | "official-pending" | "not-runnable";
 }
 
@@ -30,6 +31,7 @@ const lastUpdatedOf = (r: MeasureRecord): string => r.activatedAt ?? r.createdAt
 
 export function toMeasure(r: MeasureRecord): Measure {
   const ts = lastUpdatedOf(r);
+  const routing = mapRoutingKind(classifyRunnable(r.measureId, process.env).kind);
   return {
     id: r.measureId,
     name: r.name,
@@ -41,8 +43,8 @@ export function toMeasure(r: MeasureRecord): Measure {
     tags: r.tags,
     statusUpdatedAt: ts,
     statusUpdatedBy: r.approvedBy ?? r.owner ?? "system",
-    identity: measureIdentityFor(r.measureId),
-    routing: mapRoutingKind(classifyRunnable(r.measureId, process.env).kind),
+    identity: measureIdentityPayloadFor(r.measureId, routing === "official"),
+    routing,
   };
 }
 
@@ -103,7 +105,7 @@ export interface MeasureDetail {
   rule?: MeasureSpec["rule"];
   ruleBindings?: MeasureSpec["ruleBindings"];
   jurisdiction: string;
-  identity: MeasureIdentity | null;
+  identity: MeasureIdentityPayload | null;
 }
 
 export interface VersionHistoryItem {
@@ -141,7 +143,7 @@ export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): Me
     rule: r.spec.rule,
     ruleBindings: r.spec.ruleBindings,
     jurisdiction: MEASURES[r.measureId]?.jurisdiction ?? "US",
-    identity: measureIdentityFor(r.measureId),
+    identity: measureIdentityPayloadFor(r.measureId, classifyRunnable(r.measureId, process.env).kind === "official"),
   };
 }
 

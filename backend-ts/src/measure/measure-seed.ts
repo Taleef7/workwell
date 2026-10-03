@@ -270,6 +270,50 @@ async function repairPre749SortCql(
   }
 }
 
+/**
+ * The four official-only measures' descriptions exactly as the seed wrote them before they said which
+ * logic runs. They called the artifact "published" and put the QDM measure (`CMS2v15`) in the title, over
+ * counts produced by CMS's FHIR draft (`CMS2FHIR v1.0.000`), which locked decision §4.3 forbids.
+ */
+export const PRE_DRAFT_WORDING_DESCRIPTIONS: Readonly<Record<"cms2" | "cms130" | "cms165" | "cms137", string>> = {
+  cms2: "Screening for Depression and Follow-Up Plan (CMS2v15 / MIPS 134): patients 12+ screened for depression with an age-appropriate standardized tool during the measurement period and, if positive, with a follow-up plan documented on the date of the positive screen. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
+  cms137: "Initiation and Engagement of Substance Use Disorder Treatment (CMS137v14 / MIPS 305): patients 13+ with a new substance use disorder episode between January 1 and November 14 of the measurement period and no diagnosis or treatment in the 60 days before it. TWO RATES over one denominator (ADR-074): Initiation — treatment (a visit, a psychosocial service, or a medication order) within 14 days of the episode; Engagement — two or more further services within 34 days of initiation, or a long-acting medication. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period; a patient is COMPLIANT only where every rate they are in is met.",
+  cms165: "Controlling High Blood Pressure (CMS165v14 / MIPS 236): adults 18-85 at the end of the measurement period with essential hypertension whose most recent BP reading during the measurement period is adequately controlled. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
+  cms130: "Colorectal Cancer Screening (CMS130v14 / MIPS 113): adults 50-75 at the end of the measurement period screened for colorectal cancer by colonoscopy, sigmoidoscopy, CT colonography, sDNA-FIT, or FOBT. Evaluated by CMS's published QI-Core artifact (2026 FHIR content) over the calendar measurement period.",
+};
+
+/**
+ * Rewrites an official-only row's spec to today's catalog wording only where the stored spec is exactly
+ * the catalog spec with the old description, so every live stack stops calling a draft "published"
+ * while a spec anyone edited is left alone. `seedMeasureStore` never overwrites an existing row, so
+ * without this only a fresh database would read the new wording.
+ *
+ * The same shape as `repairPre749SortCql`, for the same reasons: audit-first, under its own event type,
+ * on EVERY rewrite with no `hasAuditEvent` guard (a guard keyed on event and version cannot tell a
+ * retried write from a later rewrite, and would make the second one silent). A retried write is
+ * therefore recorded twice: an over-claim, never a silent change (DATA_MODEL_CONTRACTS §4).
+ */
+async function repairPreDraftWordingSpecs(store: MeasureStore, events: CaseEventStore): Promise<void> {
+  for (const [measureId, oldDescription] of Object.entries(PRE_DRAFT_WORDING_DESCRIPTIONS)) {
+    const catalog = MEASURE_CATALOG.find((m) => m.id === measureId);
+    if (!catalog) continue;
+    const row = await store.getLatest(measureId);
+    if (!row || !deepEqual(row.spec, { ...catalog.spec, description: oldDescription })) continue;
+    const audit: AppendAuditInput = {
+      eventType: "MEASURE_SEED_SPEC_REFRESHED",
+      entityType: "measure_version",
+      entityId: row.versionId,
+      actor: "system",
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: row.versionId,
+      payload: { measureId, fields: ["spec.description"], reason: "names the CMS FHIR draft that runs, not a published artifact" },
+    };
+    await events.appendAudit(audit);
+    await store.updateSpec(measureId, catalog.spec);
+  }
+}
+
 async function repairHypertensionSeedRow(
   store: MeasureStore,
   cqlOf: (measureId: string) => string,
@@ -365,6 +409,9 @@ export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: s
 
   await deprecateLegacyOfficialRows(store, events);
   await promoteOfficialOnlyRows(store, events);
+  // After promotion: a row promoted on this boot already carries today's wording, so this touches only
+  // rows seeded or promoted while the description still called the artifact "published".
+  await repairPreDraftWordingSpecs(store, events);
 
   // Idempotent promotion backfill (E10.6): `hepatitis_b_vaccination_series` existed as an Approved,
   // catalog-only row before it became a runnable Active measure. seedMeasure() above skips existing
