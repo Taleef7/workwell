@@ -5,7 +5,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEMO_USERS, findDemoUser, authenticate } from "./demo-users.ts";
+import { DEMO_USERS, findDemoUser, authenticate, pilotPasswordHash } from "./demo-users.ts";
+import { hashPassword } from "./password.ts";
+import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 test("seeds the four Java demo roles plus the read-only viewer (public sandbox)", () => {
   assert.deepEqual(
@@ -47,7 +49,7 @@ test("Maui sandbox accounts authenticate with the documented demo password on th
       results[u.email] = res?.role ?? null;
     }
     console.log(JSON.stringify(results));
-  `);
+  `, { WORKWELL_PILOT_PASSWORD_HASH: undefined });
   const mauiAccounts = DEMO_USERS.filter((u) => u.email.endsWith("@maui.workwell.dev"));
   for (const u of DEMO_USERS) {
     if (mauiAccounts.includes(u)) continue;
@@ -57,6 +59,39 @@ test("Maui sandbox accounts authenticate with the documented demo password on th
   assert.equal(output["quality-staff@maui.workwell.dev"], "ROLE_CASE_MANAGER");
   assert.equal(output["clinician@maui.workwell.dev"], "ROLE_VIEWER");
   assert.equal(output["admin@maui.workwell.dev"], "ROLE_ADMIN");
+});
+
+test("pilotPasswordHash: unset keeps the demo hash, a PBKDF2 string is used, anything else disables sign-in", async () => {
+  const demo = pilotPasswordHash({});
+  assert.match(demo, /^pbkdf2\$/);
+  assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: "   " }), demo, "blank counts as unset");
+  const own = await hashPassword("pilot-only-test-password");
+  assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: ` ${own} ` }), own);
+  const original = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(pilotPasswordHash({ WORKWELL_PILOT_PASSWORD_HASH: "Workwell123!" }), "disabled", "a plaintext value is never used");
+  } finally {
+    console.error = original;
+  }
+});
+
+test("on the deployed pilot stack the pilot accounts take the stack's password and refuse the public one", async () => {
+  const own = await hashPassword("pilot-only-test-password");
+  const script = `
+    import { authenticate } from "./src/auth/demo-users.ts";
+    const out = {};
+    for (const pw of ["pilot-only-test-password", "Workwell123!"]) {
+      out[pw] = (await authenticate("quality-lead@maui.workwell.dev", pw))?.role ?? null;
+    }
+    console.log(JSON.stringify(out));
+  `;
+  const withHash = runProfileChild("maui", script, { WORKWELL_PILOT_PASSWORD_HASH: own });
+  assert.equal(withHash["pilot-only-test-password"], "ROLE_CASE_MANAGER");
+  assert.equal(withHash["Workwell123!"], null, "the password printed in this repo no longer opens the pilot stack");
+  const malformed = runProfileChild("maui", script, { WORKWELL_PILOT_PASSWORD_HASH: "not-a-hash" });
+  assert.equal(malformed["pilot-only-test-password"], null);
+  assert.equal(malformed["Workwell123!"], null, "a malformed secret never falls back to the public password");
 });
 
 test("findDemoUser is case-insensitive and trims", () => {
@@ -74,25 +109,6 @@ test("findDemoUser scopes by profileId in-process without child process", () => 
   assert.equal(findDemoUser("admin@workwell.dev", "default")?.role, "ROLE_ADMIN");
   assert.equal(findDemoUser("quality-lead@maui.workwell.dev", "default"), null);
 });
-
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-
-const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-
-function runProfileChild(instance: string | undefined, source: string): Record<string, unknown> {
-  const env = { ...process.env };
-  if (instance === undefined) delete env.WORKWELL_INSTANCE;
-  else env.WORKWELL_INSTANCE = instance;
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", "--input-type=module", "-e", source],
-    { cwd: backendRoot, env, encoding: "utf8" },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout.trim()) as Record<string, unknown>;
-}
 
 test("authenticate accepts the demo password and rejects a wrong one / unknown user", async () => {
   assert.equal((await authenticate("admin@workwell.dev", "Workwell123!"))?.role, "ROLE_ADMIN");

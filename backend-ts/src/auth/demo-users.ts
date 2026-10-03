@@ -1,9 +1,10 @@
 /**
  * Hardcoded demo-user directory (#105) — TS analogue of the Java `demo_users` seed
  * (migration V003). Accounts are hardcoded by design (no SSO / real directory —
- * CLAUDE hard rule). The four roles mirror the Java seed; the shared password is
+ * CLAUDE hard rule). The four roles mirror the Java seed; the demo accounts share
  * the documented demo credential `Workwell123!`, re-hashed with PBKDF2 (see
- * password.ts) instead of bcrypt so the TS backend needs no new dependency.
+ * password.ts) instead of bcrypt so the TS backend needs no new dependency. The
+ * pilot accounts take their own hash on the deployed pilot stack (`pilotPasswordHash`).
  *
  * The Java/Neon `demo_users` rows (bcrypt) are untouched; this is the TS backend's
  * own store, consistent with the strangler running alongside the JVM during cutover.
@@ -22,6 +23,26 @@ export interface DemoUser {
 // exactly as the Java seed shares one bcrypt hash across the four rows.
 const DEMO_PASSWORD_HASH = "pbkdf2$210000$S7uwh-rbSLMcbPEoD7t9xQ$XVjif5zI_6tzoc7-h9MZCCSowCEI34RQOtLzCrtWyB4";
 
+/** A stored value no password verifies against: `verifyPassword` rejects anything not in its format. */
+const NO_LOGIN = "disabled";
+
+/**
+ * The pilot accounts' password hash. The demo password is printed in this public repository, so the
+ * deployed pilot stack sets its own PBKDF2 hash in `WORKWELL_PILOT_PASSWORD_HASH` (the deploy refuses to
+ * run without it). Unset — local runs, CI and its end-to-end tests — the pilot accounts keep the demo
+ * password. Set but not a PBKDF2 string, the pilot accounts cannot sign in at all, rather than silently
+ * falling back to the public password.
+ */
+export function pilotPasswordHash(env: Record<string, unknown> = process.env as Record<string, unknown>): string {
+  const raw = typeof env.WORKWELL_PILOT_PASSWORD_HASH === "string" ? env.WORKWELL_PILOT_PASSWORD_HASH.trim() : "";
+  if (!raw) return DEMO_PASSWORD_HASH;
+  if (/^pbkdf2\$\d+\$[\w-]+\$[\w-]+$/.test(raw)) return raw;
+  console.error("[workwell] WORKWELL_PILOT_PASSWORD_HASH is not a PBKDF2 hash; pilot sign-in is disabled.");
+  return NO_LOGIN;
+}
+
+const PILOT_PASSWORD_HASH = pilotPasswordHash();
+
 export const DEMO_USERS: readonly DemoUser[] = [
   { email: "author@workwell.dev", role: "ROLE_AUTHOR", passwordHash: DEMO_PASSWORD_HASH },
   { email: "approver@workwell.dev", role: "ROLE_APPROVER", passwordHash: DEMO_PASSWORD_HASH },
@@ -34,10 +55,10 @@ export const DEMO_USERS: readonly DemoUser[] = [
   // Sandbox logins for the Maui pilot deployment (pseudonymous by policy). DEMO_USERS is shared
   // across deployments, so these rows exist on every instance — but `isDemoAccountRefusedOnProfile`
   // refuses them everywhere except the maui profile, and refuses every other account there (#520).
-  { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: DEMO_PASSWORD_HASH },
-  { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: DEMO_PASSWORD_HASH },
-  { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER", passwordHash: DEMO_PASSWORD_HASH },
-  { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN", passwordHash: DEMO_PASSWORD_HASH },
+  { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: PILOT_PASSWORD_HASH },
+  { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: PILOT_PASSWORD_HASH },
+  { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER", passwordHash: PILOT_PASSWORD_HASH },
+  { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN", passwordHash: PILOT_PASSWORD_HASH },
 ];
 
 /** Case-insensitive lookup, matching the Java `LOWER(email) = LOWER(?)` query. */
