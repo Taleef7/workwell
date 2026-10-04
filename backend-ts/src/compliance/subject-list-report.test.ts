@@ -305,6 +305,22 @@ test("a row whose evidence names a DIFFERENT measurement period refuses the repo
   assert.equal((result as unknown as { body: { error: string } }).body.error, "period_mismatch");
 });
 
+test("rows of one year scored by two logics refuse the report; an errored row is no second logic", async () => {
+  const year = { start: "2027-01-01", end: "2027-12-31" };
+  const cms = official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }, year);
+  const translated = { official: { ...cms.official, kind: "derived", label: "WorkWell translation of CMS122v15", ecqmId: null } };
+  const mixed = await runReport({ rows: [row("pat-001", cms), row("pat-002", translated)] });
+  assert.equal(mixed.ok, false);
+  assert.equal((mixed as { status: number }).status, 409);
+  assert.equal((mixed as unknown as { body: { error: string } }).body.error, "mixed_logic");
+  // Authored rows beside CMS's are a mix too.
+  const authored = await runReport({ rows: [row("pat-001", cms), row("pat-002", { expressionResults: [] })] });
+  assert.equal((authored as unknown as { body: { error: string } }).body.error, "mixed_logic");
+  // One logic plus an errored row reports as before.
+  const errored = await runReport({ rows: [row("pat-001", translated), row("pat-002", { evaluationError: "CQL engine failure", message: "boom" })] });
+  assert.equal(errored.ok, true);
+});
+
 test("two rows for one subject collapse to the NEWEST, whatever order the store returned them", async () => {
   // A run can hold more than one row for a subject. "Whichever came back first" would make the
   // report depend on page ordering, so the same request could answer differently twice.

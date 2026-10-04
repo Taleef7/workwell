@@ -225,7 +225,9 @@ never a truncated 200.
 - `rawIdentifier`, subject name and rate label pass through `csvTextCell` (defuses a leading `=`, `+`,
 `-`, `@`, tab, CR).
 - `executedLogic` was appended, never inserted: `CMS137FHIR v1.0.000` for CMS's artifact, a WorkWell
-translation's label (its `ecqmId` empty) otherwise; filled wherever the measure columns are.
+translation's label (its `ecqmId` empty) otherwise; filled wherever the measure columns are. A selected
+run whose counted rows were scored by more than one logic answers **409 `mixed_logic`**, as a run mixing
+periods answers 409 `period_mismatch`.
 
 ### 6.7 `?listId=` on the filtered surfaces (ADR-082)
 Restricts the roster, cases route, work list, §6.2/§6.3 CSVs and MCP `list_noncompliant` to a list's

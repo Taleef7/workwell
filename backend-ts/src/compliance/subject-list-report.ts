@@ -49,6 +49,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { SubjectListStore, SubjectList } from "../stores/subject-list-store.ts";
 import { createRateAggregator, membershipRatesFor, officialReportIdentity, reportingPeriod, type OfficialReportIdentity } from "../fhir/measure-report.ts";
 import { isEvaluationErrorEvidence } from "../fhir/measure-report.ts";
+import { scoringIdentityKey } from "../fhir/run-aggregate.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { isPopulationRun } from "../program/rollup-shared.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
@@ -221,6 +222,22 @@ export async function subjectListReport(
           runId: winner.runId,
           measurementYear,
           message: "the selected run carries outcomes from a different measurement period",
+        },
+      };
+    }
+    if (read.mixedLogic) {
+      // Rows of one year scored by two logics (CMS's draft and a WorkWell translation, or authored CQL):
+      // their sum names neither, and `executedLogic` could only name one. Refused as QRDA and the
+      // MeasureReport refuse the same run (422 there; 409 here, beside `period_mismatch`).
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: "mixed_logic",
+          measureId,
+          runId: winner.runId,
+          measurementYear,
+          message: "the selected run's outcomes for this measure were scored by more than one logic",
         },
       };
     }
@@ -421,6 +438,8 @@ interface MeasureRead {
   buckets: { scored: number; unmeasured: number; evaluationErrors: number; outOfPopulation: number };
   duplicateRowsCollapsed: number;
   periodMismatch: boolean;
+  /** The counted rows were scored by more than one logic (`scoringIdentityKey`), e.g. CMS's draft and a translation. */
+  mixedLogic: boolean;
 }
 
 /** Page a run's outcomes for one measure, keeping only the list's members. */
@@ -475,10 +494,14 @@ async function readMeasure(
   const aggregator = createRateAggregator(measureId);
   const kept: { row: OutcomeRecord; errored: boolean; memberships: ReturnType<typeof membershipRatesFor> }[] = [];
   let identity: ReturnType<typeof officialReportIdentity> = null;
+  // Every counted row's logic, compared: an import-driven run evaluated before and after a routing change
+  // for the SAME year can hold CMS's draft and a translation, and one `executedLogic` cannot name both.
+  const logics = new Set<string>();
   for (const row of newest.values()) {
     aggregator.add(row);
     identity ??= officialReportIdentity(row.evidence);
     const errored = isEvaluationErrorEvidence(row.evidence);
+    if (!errored) logics.add(scoringIdentityKey(officialReportIdentity(row.evidence)));
     // Memberships are read ONCE per row and reused for the row's flags and its bucket. The first cut
     // built a whole `createRateAggregator` per row for the flags alone — 300,000 stateful aggregators
     // at the 50,000-member cap across six measures, each re-parsing the evidence.
@@ -527,6 +550,7 @@ async function readMeasure(
     buckets,
     duplicateRowsCollapsed,
     periodMismatch,
+    mixedLogic: logics.size > 1,
   };
 }
 

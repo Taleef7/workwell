@@ -5,7 +5,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { routedTranslationFor } from "./translation-routing.ts";
+import { routedTranslationFor, routedTranslationYear } from "./translation-routing.ts";
 import { selectArtifactForPeriod, type OfficialArtifact, type OfficialManifest } from "./official-artifacts.ts";
 
 const manifest = (start: string, end: string, derived = false): OfficialManifest =>
@@ -38,6 +38,14 @@ test("names the translation for the year it covers, by the executor's own rule",
     }
   }
   assert.equal(routedTranslationFor("cms137", 2027, ROUTED, files(CMS_2026, TRANSLATION_2027))?.derived?.label, "WorkWell translation of CMS137v15");
+});
+
+test("routedTranslationYear names the translation's year only while the executor would select it", () => {
+  assert.equal(routedTranslationYear("cms137", ROUTED, files(CMS_2026, TRANSLATION_2027)), 2027);
+  assert.equal(routedTranslationYear("cms137", ROUTED, files(manifest("2027-01-01", "2027-12-31"), TRANSLATION_2027)), null, "CMS's artifact now covers 2027: CMS wins, the translation never runs");
+  assert.equal(routedTranslationYear("cms137", { WORKWELL_OFFICIAL_MEASURES: "cms137" }, files(CMS_2026, TRANSLATION_2027)), null, "not allowlisted");
+  assert.equal(routedTranslationYear("cms137", ROUTED, files(CMS_2026, null)), null, "none committed");
+  assert.equal(routedTranslationYear("cms137", ROUTED, files(CMS_2026, manifest("2027-01-01", "2028-12-31", true))), null, "never a span of years");
 });
 
 test("reads the real deployment by default: nothing is allowlisted and no translation is committed", () => {
