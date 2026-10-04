@@ -412,7 +412,7 @@ export default function ProgramDetailPage() {
                 parts; the per-site CURRENT rate is real and stays. */}
             {!forecastable ? (
               <p data-testid="outlook-not-forecastable" className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
-                No 90-day forecast for this measure. The CMS measure logic scores the measurement year, counting
+                No 90-day forecast for this measure. {ranTranslation ? "The measure logic (WorkWell's translation)" : "The CMS measure logic"} scores the measurement year, counting
                 some tests from earlier years, and its result records whether a patient met the measure but not
                 when the qualifying test was done, so there is no date to count forward from. Today&apos;s gaps are
                 on the <Link href={canManageCases(user?.role) ? worklistHref({ measureId, wholePractice: true }) : casesHref({ measureId })} className="underline">work list</Link>.

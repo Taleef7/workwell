@@ -74,6 +74,23 @@ describe("CqlEvidence", () => {
     expect(screen.getByText("not in")).toBeInTheDocument();
   });
 
+  it("names a WorkWell translation's populations by the translation, never as official; CMS's keep their label", () => {
+    setSubject("patient");
+    const expressionResults = [
+      { define: "official:Initiation:numerator", result: true },
+      { define: "official:Engagement:numerator", result: false },
+    ];
+    const translated = render(<CqlEvidence evidence={{ expressionResults, official: { kind: "derived", label: "WorkWell translation of CMS137v15" } }} />);
+    expect(screen.getAllByText("population · WorkWell translation of CMS137v15")).toHaveLength(2);
+    expect(screen.queryByText(/official/i)).toBeNull();
+    translated.unmount();
+    const unlabelled = render(<CqlEvidence evidence={{ expressionResults, official: { kind: "derived" } }} />);
+    expect(screen.getAllByText("population · WorkWell translation")).toHaveLength(2);
+    unlabelled.unmount();
+    render(<CqlEvidence evidence={{ expressionResults, official: { kind: undefined } }} />);
+    expect(screen.getAllByText("official population")).toHaveLength(2);
+  });
+
   it("renders the official why-flagged summary when the backend derived one", () => {
     setSubject("patient");
     render(<CqlEvidence evidence={{ why_flagged: {

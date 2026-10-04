@@ -16,8 +16,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
     fills its missing id, and a routed translation adds a "For 2027: …" line. The vintage note says the
     translation applies from the next run instead of "2027 logic not yet available".
   - Runs page names it in the reconciliation and offers no QRDA III; the measures list badges it.
-  - The attributed-list CSV appends `executedLogic`; MCP's explanation and the EXCLUDED wording drop
-    "official" for a translation. A run mixing two logics now has no measure rate.
+  - The attributed-list CSV appends `executedLogic`; the case screen's population rows, MCP's and the AI
+    fallback's explanations and the EXCLUDED wording drop "official" for a translation. A run mixing two
+    logics now has no measure rate.
   - Next: C3a, the CMS137 v15 translation. Its catalog description still names the 2026 draft only.
 
 - **A WorkWell translation can score the year it covers, and nothing else (C2a).** The engine now

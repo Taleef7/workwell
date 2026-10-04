@@ -59,6 +59,10 @@ const program = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+// The official outcome has no forecast (#617): the outlook's note is where the page names the logic again.
+let riskOutlook: unknown = null;
+const NOT_FORECASTABLE = { forecastable: false, upcomingNonCompliantCount: 0, upcomingExpirations: [], repeatNonCompliers: [], siteComplianceRates: [] };
+
 const TRANSLATION = {
   label: "WorkWell translation of CMS125v15",
   version: "ww-2027.1",
@@ -76,7 +80,7 @@ function mockApi({ executed = true, translation = false, summary = program() }: 
     }
     if (url === "/api/programs") return Promise.resolve([summary]);
     if (url.includes("/top-drivers")) return Promise.resolve({ bySite: [], byRole: [], byOutcomeReason: [] });
-    if (url.includes("/risk-outlook")) return Promise.resolve(null);
+    if (url.includes("/risk-outlook")) return Promise.resolve(riskOutlook);
     return Promise.resolve([]);
   });
 }
@@ -193,6 +197,7 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
   });
 
   it("a run a WorkWell translation scored is labelled with the translation, never with today's CMS artifact", async () => {
+    riskOutlook = NOT_FORECASTABLE;
     const base = program();
     mockApi({
       translation: true,
@@ -217,6 +222,10 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     expect(screen.queryByText("CMS measure rate")).toBeNull();
     expect(screen.getAllByText("WorkWell's estimate from its own translation of CMS's logic. WebChart calculates and submits the reported rate.")).toHaveLength(2);
     expect(screen.queryByText(ESTIMATE)).toBeNull();
+    // Nothing else on the page credits CMS's logic with these numbers.
+    expect(screen.queryByText(/CMS measure logic|CMS's FHIR logic/)).toBeNull();
+    expect(await screen.findByTestId("outlook-not-forecastable")).toHaveTextContent("The measure logic (WorkWell's translation) scores the measurement year");
+    riskOutlook = null;
   });
 
   it("a translation routed for next year changes nothing on a run CMS's draft scored, but the translation line", async () => {

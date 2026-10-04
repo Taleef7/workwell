@@ -1,8 +1,15 @@
 import React from "react";
 import { SUBJECT } from "@/lib/terminology";
 
+/** Which logic scored the outcome: `kind: "derived"` with its label for a WorkWell translation. */
+export interface OfficialLogic {
+  kind?: string;
+  label?: string | null;
+}
+
 export interface EvidenceJson {
   expressionResults?: Array<Record<string, unknown>>;
+  official?: OfficialLogic | null;
   evaluatedResource?: Record<string, unknown>;
   why_flagged?: {
     last_exam_date: string | null;
@@ -83,9 +90,12 @@ function WhyFlaggedRow({ label, value }: { label: string; value: string }) {
 }
 
 /** The non-internal CQL define results as define→result chips. Single source for case detail and
- *  the profile compliance card. Display-only; never affects compliance (ADR-008). */
-export function CqlExpressionResults({ results }: { results?: Array<Record<string, unknown>> }) {
+ *  the profile compliance card. Display-only; never affects compliance (ADR-008). `official` is the
+ *  outcome's `evidence_json.official`: a WorkWell translation's population rows carry the same
+ *  `official:` names, but are named by the translation, never as CMS's official populations (§4.3). */
+export function CqlExpressionResults({ results, official }: { results?: Array<Record<string, unknown>>; official?: OfficialLogic | null }) {
   const rows = (results ?? []).filter((row) => !isInternalDefine(String(row.define ?? "")));
+  const populationNote = official?.kind === "derived" ? `population · ${official.label || "WorkWell translation"}` : "official population";
   if (rows.length === 0) {
     return <p className="text-xs italic text-neutral-500 dark:text-neutral-400">No evidence recorded.</p>;
   }
@@ -105,7 +115,7 @@ export function CqlExpressionResults({ results }: { results?: Array<Record<strin
               <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
                 {populationLabel(defineStr)}
                 <span className="ml-2 text-xs font-normal text-neutral-500 dark:text-neutral-400">
-                  official population
+                  {populationNote}
                 </span>
               </p>
               <span
@@ -199,7 +209,7 @@ export function CqlWhyFlagged({ whyFlagged }: { whyFlagged?: EvidenceJson["why_f
 export function CqlEvidence({ evidence }: { evidence: EvidenceJson | null | undefined }) {
   return (
     <div className="space-y-3">
-      <CqlExpressionResults results={evidence?.expressionResults} />
+      <CqlExpressionResults results={evidence?.expressionResults} official={evidence?.official} />
       <CqlWhyFlagged whyFlagged={evidence?.why_flagged} />
     </div>
   );

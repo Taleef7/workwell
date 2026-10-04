@@ -73,6 +73,8 @@ type CaseDetail = {
   waiverExpired: boolean;
   evidenceJson: {
     expressionResults?: Array<Record<string, unknown>>;
+    /** `kind: "derived"` with its label when a WorkWell translation scored the outcome. */
+    official?: { kind?: string; label?: string | null } | null;
     evaluatedResource?: Record<string, unknown>;
     why_flagged?: {
       last_exam_date: string | null;
@@ -897,7 +899,7 @@ export default function CaseDetailPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Why Flagged</p>
               <h4 className="mt-2 text-xl font-semibold">What the measure found</h4>
               <div className="mt-4">
-                <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} />
+                <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} official={caseDetail.evidenceJson.official} />
               </div>
 
               {/* Raw value-set OIDs, the raw evidence and the evaluated resource are engineering detail: a

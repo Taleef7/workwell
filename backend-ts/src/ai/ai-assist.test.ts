@@ -216,6 +216,17 @@ test("explainCase deterministic fallback shows EVERY rate of a multi-rate offici
   assert.equal(res.provider, "fallback-rules");
   assert.match(res.explanation, /official:Engagement:numerator=false/);
   assert.match(res.explanation, /official:Initiation:numerator=true/);
+
+  // The same membership scored by a WorkWell translation: named by the translation, never "official".
+  const translated = await explainCase(
+    r.deps(async () => { throw new Error("no key"); }),
+    { caseId: "c137t", measureName: "SUD Treatment", measureVersion: "v1", currentOutcomeStatus: "OVERDUE", lastRunId: "run1", employeeName: "Pat One", evidenceJson: { ...evidence, official: { kind: "derived", label: "WorkWell translation of CMS137v15" } } },
+    "cm@x",
+  );
+  assert.equal(translated.provider, "fallback-rules");
+  assert.match(translated.explanation, /Engagement · numerator=false/);
+  assert.match(translated.explanation, /\(population membership under WorkWell translation of CMS137v15\)\./);
+  assert.doesNotMatch(translated.explanation, /official/i);
 });
 
 const profileAiSurfaceScript = `

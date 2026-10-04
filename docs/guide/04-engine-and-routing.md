@@ -186,8 +186,8 @@ object, so they cannot disagree.
 Every surface names a translation by its own label ("WorkWell translation of CMS137v15"), read from the
 row's `evidence_json.official.kind`, and never by a CMS eCQM id: the measure page and the measures list,
 the rate notes, the compliance API (`populationsSource: "translation-evidence"` and `measure.logic`), the
-attributed-list CSV's `executedLogic` column, the run reconciliation, MCP's explanation and the case
-wording. QRDA refuses a translated run, and a run scored by two logics has no rate and no export.
+attributed-list CSV's `executedLogic` column, the run reconciliation, the case screen's population rows,
+MCP's and the AI fallback's explanations, and the case wording. QRDA refuses a translated run, and a run scored by two logics has no rate and no export.
 
 ## Getting a CMS measure into the tree
 

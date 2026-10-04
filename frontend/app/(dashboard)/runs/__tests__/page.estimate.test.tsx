@@ -67,6 +67,15 @@ describe("RunsPage estimate caveat", () => {
     expect(screen.getByText(ESTIMATE)).toBeInTheDocument();
   });
 
+  it("credits WorkWell's translation, not CMS's logic, for a run a translation scored", async () => {
+    setSubject("patient");
+    mockRun({ ...OFFICIAL, logic: { kind: "workwell-translation", label: "WorkWell translation of CMS125v15" } });
+    render(<RunsPage />);
+    await screen.findByTestId("run-reconciliation");
+    expect(screen.getByText("WorkWell's estimate from its own translation of CMS's logic. WebChart calculates and submits the reported rate.")).toBeInTheDocument();
+    expect(screen.queryByText(ESTIMATE)).toBeNull();
+  });
+
   it("claims no engine for an authored run (no official evidence), and still calls the rate an estimate", async () => {
     setSubject("patient");
     render(<RunsPage />);
