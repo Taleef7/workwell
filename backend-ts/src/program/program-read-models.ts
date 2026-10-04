@@ -28,6 +28,7 @@ import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { loadOfficialManifest, officialLogicVintage, type OfficialLogicVintage } from "../wiring/official-artifacts.ts";
+import { routedTranslationFor } from "../wiring/translation-routing.ts";
 import { servableSnapshots, snapshotsUnderstateRate } from "../quality/snapshot-basis.ts";
 import { latestPopulationSnapshot, latestPopulationWinners, RunKeyedMemo, type VisibilityContext } from "./latest-population.ts";
 import type { LatestPopulationRun } from "../stores/outcome-store.ts";
@@ -577,13 +578,25 @@ export function logicVintageOf(
   rate: Pick<MeasureRate, "official"> | null,
   measurementYear: number | null,
   manifestOf: (measureId: string) => (Parameters<typeof officialLogicVintage>[0] & { sha256?: string; version?: string }) | null = loadOfficialManifest,
+  /** The translation this deployment would score the year with, if any (`routedTranslationFor`). */
+  translationFor: (measureId: string, year: number) => { derived?: { label: string } } | null = routedTranslationFor,
 ): OfficialLogicVintage | null {
   if (!rate || measurementYear === null) return null;
+  const ran = rate.official;
+  // A translation scored the run for the year it covers: there is no vintage gap to report, and the
+  // translation's own label names the logic (`measureRate.official.label`).
+  if (ran?.kind === "derived") return null;
   const manifest = manifestOf(measureId);
   if (!manifest) return null;
-  const ran = rate.official;
   if (ran?.artifactSha256 ? ran.artifactSha256 !== manifest.sha256 : ran?.version && ran.version !== manifest.version) return null;
-  return officialLogicVintage(manifest, measurementYear);
+  const vintage = officialLogicVintage(manifest, measurementYear);
+  if (!vintage) return null;
+  // CMS's draft scored a year a routed translation covers (a run from before the translation was turned
+  // on): "not yet available" would be false, so say what the next run will use.
+  const translation = translationFor(measureId, measurementYear)?.derived?.label;
+  return translation
+    ? { ...vintage, note: `Scored with the ${vintage.artifactYears} FHIR logic; ${translation} applies from the next run` }
+    : vintage;
 }
 
 const SCALE_TENANT_ID = "mhn";

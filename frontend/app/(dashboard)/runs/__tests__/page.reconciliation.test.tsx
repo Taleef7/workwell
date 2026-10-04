@@ -57,5 +57,26 @@ describe("RunsPage reconciliation", () => {
     expect(within(block).getByText("Evaluated, not in population: 1")).toBeInTheDocument();
     expect(within(block).getByText(/CMS measure rate 50\.0% of the measure's population/)).toBeInTheDocument();
     expect(within(block).getByText("Cases citing this run: 1")).toBeInTheDocument();
+    expect(within(block).queryByTestId("run-translation-logic")).toBeNull();
+    expect(screen.getByRole("button", { name: "QRDA III (XML)" })).toBeInTheDocument();
+  });
+
+  it("a run a WorkWell translation scored names it, credits no CMS rate, and offers no QRDA III", async () => {
+    get.mockImplementation((url: string) => {
+      if (url === "/api/runs?limit=20") return Promise.resolve([run]);
+      if (url === "/api/runs/run-1") return Promise.resolve(summary);
+      if (url === "/api/runs/run-1/reconciliation") {
+        return Promise.resolve({ ...reconciliation, official: { ...reconciliation.official, logic: { kind: "workwell-translation", label: "WorkWell translation of CMS122v15" } } });
+      }
+      return Promise.resolve([]);
+    });
+    render(<RunsPage />);
+    const block = await screen.findByTestId("run-reconciliation");
+    expect(within(block).getByTestId("run-translation-logic")).toHaveTextContent("Scored by: WorkWell translation of CMS122v15, not a CMS measure");
+    expect(within(block).getByText(/, measure rate 50\.0% of the measure's population/)).toBeInTheDocument();
+    expect(within(block).queryByText(/CMS measure rate/)).toBeNull();
+    expect(screen.getByTestId("qrda-not-offered")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "QRDA III (XML)" })).toBeNull();
+    expect(screen.getByRole("button", { name: "MeasureReport (FHIR)" })).toBeInTheDocument();
   });
 });

@@ -360,3 +360,31 @@ test("ADR-074: a multi-rate outcome carries an ADDITIVE `rates` block, and a sin
   // ADR-061 stability: nothing is added to a response that has no second rate.
   assert.deepEqual(rateBlock({ status: "COMPLIANT", evidence: { official: { populationResults: rate(true) } } } as never, "cms125"), {});
 });
+
+test("a WorkWell translation's outcome: translation-evidence, measure.logic names it, and no CMS eCQM id", async () => {
+  const translated = {
+    official: {
+      kind: "derived", label: "WorkWell translation of CMS125v15", url: "urn:workwell:measure:cms125:translation", derivedFrom: "CMS125v15",
+      ecqmId: null, version: "ww-2027.1", engine: "fqm-execution", artifactSha256: "sha256:t",
+      populationResults: OFFICIAL_EVIDENCE.official.populationResults,
+    },
+    expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }],
+  };
+  assert.equal(populationsSource(translated), "translation-evidence");
+  // Measured all the same: the booleans are the executor's, exactly as for CMS's artifact.
+  assert.deepEqual(membershipFor({ status: "OVERDUE", evidence: translated } as never, "cms125"), membershipFor({ status: "OVERDUE", evidence: OFFICIAL_EVIDENCE } as never, "cms125"));
+
+  const outcomes = new SqliteOutcomeStore(env.DB as never);
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-008", measureId: "cms125", status: "OVERDUE", evaluationPeriod: "2027-03-01", evidence: translated });
+  const res = (await call("/api/v1/compliance/emp-008/cms125"))!;
+  assert.equal(res.status, 200);
+  const b = (await res.json()) as { measure: Record<string, unknown>; populationsSource: string };
+  assert.equal(b.populationsSource, "translation-evidence");
+  assert.equal("ecqmId" in b.measure, false, "the translation is not CMS's measure");
+  assert.equal(b.measure["version"], "ww-2027.1");
+  assert.deepEqual(b.measure["logic"], { kind: "workwell-translation", label: "WorkWell translation of CMS125v15", url: "urn:workwell:measure:cms125:translation", derivedFrom: "CMS125v15" });
+
+  // CMS's row carries no `logic` key at all: every existing response is byte-identical.
+  const cms = (await (await call("/api/v1/compliance/emp-006/cms125"))!.json()) as { measure: Record<string, unknown> };
+  assert.equal("logic" in cms.measure, false);
+});

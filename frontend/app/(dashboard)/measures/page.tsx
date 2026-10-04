@@ -113,6 +113,7 @@ export default function MeasuresPage() {
       { field: "rawStatus", header: "Raw Status", visible: false },
       { field: "executedId", header: "Executed Logic", visible: false },
       { field: "derivedFrom", header: "Derived From", visible: false },
+      { field: "translation", header: "Translation", visible: false },
     ],
     [],
   );
@@ -125,12 +126,16 @@ export default function MeasuresPage() {
         // ("CMS125v14") is shown only as what it was derived from (locked decision §4.3). The catalog's
         // own version ("v1.0") stays in the data: it is part of the version ids Studio acts on.
         const executed = item.routing === "official" ? item.identity?.executed : undefined;
+        // A WorkWell translation routed beside CMS's artifact, for the one year it scores: named by its
+        // own label, never as a CMS measure.
+        const translation = executed ? item.identity?.translation : undefined;
         return {
           name: item.name,
           identity: formatMeasureIdentity(item.identity) || "—",
           policyRef: executed ? `${executed.ecqmId}${executed.derivedFrom ? ` (derived from ${executed.derivedFrom})` : ""}` : item.policyRef,
           executedId: executed?.ecqmId ?? "",
           derivedFrom: executed?.derivedFrom ?? "",
+          translation: translation ? `${translation.year}: ${translation.label}` : "",
           routing: item.routing,
           version: executed ? executed.version : item.version,
           status: labelFor(MEASURE_STATUS_LABELS, item.status),
@@ -173,6 +178,11 @@ export default function MeasuresPage() {
                 {executedId}
               </span>
               {derivedFrom ? <span className="text-xs text-neutral-500 dark:text-neutral-400">derived from {derivedFrom}</span> : null}
+              {row.translation ? (
+                <span data-testid="measure-translation-badge" className="inline-flex items-center rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-900">
+                  {String(row.translation)}
+                </span>
+              ) : null}
             </span>
           );
         }

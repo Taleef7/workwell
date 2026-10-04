@@ -9,6 +9,7 @@ import type { MeasureSpec, MeasureStatus } from "./measure-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { measureIdentityPayloadFor, type MeasureIdentityPayload } from "./measure-identity.ts";
 import { classifyRunnable } from "../config/deployment-profile.ts";
+import { routedTranslationYear } from "../wiring/translation-routing.ts";
 
 export interface Measure {
   id: string;
@@ -43,7 +44,9 @@ export function toMeasure(r: MeasureRecord): Measure {
     tags: r.tags,
     statusUpdatedAt: ts,
     statusUpdatedBy: r.approvedBy ?? r.owner ?? "system",
-    identity: measureIdentityPayloadFor(r.measureId, routing === "official"),
+    // A translation is named only where the executor would select it for its year (allowlisted, and CMS's
+    // artifact does not cover that year), never merely because it is allowlisted.
+    identity: measureIdentityPayloadFor(r.measureId, routing === "official", routedTranslationYear(r.measureId) !== null),
     routing,
   };
 }
@@ -143,7 +146,11 @@ export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): Me
     rule: r.spec.rule,
     ruleBindings: r.spec.ruleBindings,
     jurisdiction: MEASURES[r.measureId]?.jurisdiction ?? "US",
-    identity: measureIdentityPayloadFor(r.measureId, classifyRunnable(r.measureId, process.env).kind === "official"),
+    identity: measureIdentityPayloadFor(
+      r.measureId,
+      classifyRunnable(r.measureId, process.env).kind === "official",
+      routedTranslationYear(r.measureId) !== null,
+    ),
   };
 }
 

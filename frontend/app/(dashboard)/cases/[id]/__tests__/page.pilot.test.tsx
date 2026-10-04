@@ -171,6 +171,25 @@ describe("CaseDetailPage pilot mode controls", () => {
     expect(screen.queryAllByText("Evaluated resource").length > 0).toBe(shown);
   });
 
+  it("names a WorkWell translation's population rows by the translation, never as official", async () => {
+    const membership = { expressionResults: [{ define: "official:numerator", result: false }] };
+    get.mockImplementation((url: string) => {
+      if (url === "/api/cases/case-001") {
+        return Promise.resolve({ ...caseData, evidenceJson: { ...membership, official: { kind: "derived", label: "WorkWell translation of CMS125v15" } } });
+      }
+      return Promise.resolve([]);
+    });
+    const view = render(<CaseDetailPage />);
+    expect(await screen.findByText("population · WorkWell translation of CMS125v15")).toBeInTheDocument();
+    expect(screen.queryByText("official population")).toBeNull();
+    view.unmount();
+
+    // CMS's artifact scored it: the label is unchanged.
+    get.mockImplementation((url: string) => (url === "/api/cases/case-001" ? Promise.resolve({ ...caseData, evidenceJson: membership }) : Promise.resolve([])));
+    render(<CaseDetailPage />);
+    expect(await screen.findByText("official population")).toBeInTheDocument();
+  });
+
   it("gives a read-only viewer none of the case actions", async () => {
     setPublicDemo(false);
     currentRole = "ROLE_VIEWER";

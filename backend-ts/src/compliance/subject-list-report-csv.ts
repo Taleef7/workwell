@@ -51,6 +51,8 @@ export const reportCsvHeaders = (term: "employee" | "patient" = DEPLOYMENT_PROFI
   "evaluationError",
   "providerId",
   "payer",
+  // APPENDED, never inserted (§6.6): which logic produced the row's numbers.
+  "executedLogic",
 ];
 
 export function subjectListReportCsv(
@@ -100,6 +102,8 @@ function rowCells(
   const tail = [
     csvTextCell(row.rowStatus === "NOT_MATCHED" ? "" : (profile?.providerId ?? "")),
     csvTextCell(row.rowStatus === "NOT_MATCHED" ? "" : (profile?.payer ?? "")),
+    // Measure-level provenance like `ecqmId`: filled wherever the measure columns are.
+    csvTextCell(row.rowStatus === "NOT_MATCHED" ? "" : (measure?.executedLogic ?? "")),
   ];
   // evaluatedAt, rate, the five populations, status, outOfPopulation, evaluationError.
   const EVALUATION_COLUMNS = 10;

@@ -312,6 +312,30 @@ export function loadOfficialManifest(catalogId: string): OfficialManifest | null
   }
 }
 
+const derivedManifestCache = new Map<string, OfficialManifest | null>();
+
+/**
+ * A translation's manifest alone, for read models that only NAME the logic (a screen saying which year a
+ * translation covers). Null when there is none, or when the manifest under measures/derived/ is not a
+ * translation's — the same kind rule the full loader applies.
+ */
+export function loadDerivedManifest(catalogId: string): OfficialManifest | null {
+  const fromArtifact = derivedCache.get(catalogId);
+  if (fromArtifact) return fromArtifact.manifest;
+  const cached = derivedManifestCache.get(catalogId);
+  if (cached !== undefined) return cached;
+  if (!VALID_CATALOG_ID.test(catalogId)) return null;
+  try {
+    const manifest = JSON.parse(readFileSync(new URL(`${catalogId}/manifest.json`, DERIVED_ROOT), "utf8")) as OfficialManifest;
+    const usable = manifest.derived !== undefined ? manifest : null;
+    derivedManifestCache.set(catalogId, usable);
+    return usable;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") derivedManifestCache.set(catalogId, null);
+    return null;
+  }
+}
+
 /**
  * Whether an artifact's declared effectivePeriod covers a measurement period, or `null` when the
  * artifact declares none (absent means unknown, not stale). The one definition the run log's warning
@@ -380,4 +404,5 @@ export function __clearOfficialArtifactCache(): void {
   cache.clear();
   derivedCache.clear();
   manifestCache.clear();
+  derivedManifestCache.clear();
 }

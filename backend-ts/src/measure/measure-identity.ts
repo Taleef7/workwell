@@ -3,7 +3,7 @@
  * Occupational/OSHA measures have no MIPS ID / CMS ID and return null identity.
  */
 import { MEASURE_CATALOG } from "./measure-catalog.ts";
-import { loadOfficialManifest, type OfficialManifest } from "../wiring/official-artifacts.ts";
+import { loadDerivedManifest, loadOfficialManifest, type OfficialManifest } from "../wiring/official-artifacts.ts";
 
 export interface MeasureIdentity {
   cmsId: string;
@@ -29,7 +29,26 @@ export interface ExecutedLogic {
   derivedFrom: string | null;
 }
 
-export type MeasureIdentityPayload = MeasureIdentity & { executed?: ExecutedLogic };
+/**
+ * A WorkWell translation this deployment routes for the year it covers (decision 3, 2026-10-02). It is
+ * named by its own label and canonical, never by a CMS eCQM id (LOCKED §4.3); `derivedFrom` is the CMS
+ * measure it was translated from, for provenance only. CMS's artifact (`executed`) still scores every
+ * other year.
+ */
+export interface TranslationLogic {
+  /** e.g. "WorkWell translation of CMS137v15". */
+  label: string;
+  /** WorkWell's own version, e.g. "ww-2027.1". */
+  version: string;
+  /** WorkWell's canonical, e.g. "urn:workwell:measure:cms137:translation". */
+  url: string;
+  /** The CMS measure it was translated from, e.g. "CMS137v15". */
+  derivedFrom: string;
+  /** The one calendar year it scores, e.g. "2027". */
+  year: string;
+}
+
+export type MeasureIdentityPayload = MeasureIdentity & { executed?: ExecutedLogic; translation?: TranslationLogic };
 
 /**
  * What CMS released each vendored content repository as. The manifest's own `status` is the FHIR
@@ -73,17 +92,42 @@ export function executedLogicFor(measureId: string): ExecutedLogic | null {
   return manifest ? executedLogicFromManifest(measureId, manifest) : null;
 }
 
+/** Pure over a translation's manifest; null unless it is one, covering exactly one calendar year. */
+export function translationLogicFromManifest(
+  manifest: Pick<OfficialManifest, "version" | "url" | "effectivePeriod" | "derived">,
+): TranslationLogic | null {
+  const derived = manifest.derived;
+  const start = manifest.effectivePeriod?.start?.slice(0, 10);
+  const end = manifest.effectivePeriod?.end?.slice(0, 10);
+  if (!derived || !start || !end || start.slice(0, 4) !== end.slice(0, 4)) return null;
+  return { label: derived.label, version: manifest.version, url: manifest.url, derivedFrom: derived.derivedFrom.ecqm, year: start.slice(0, 4) };
+}
+
+/** The committed translation's identity, or null when none is committed under this id. */
+export function translationLogicFor(measureId: string): TranslationLogic | null {
+  const manifest = loadDerivedManifest(measureId);
+  return manifest ? translationLogicFromManifest(manifest) : null;
+}
+
 /**
  * The identity a read model serves: the crosswalk row, plus `executed` when the measure is routed to an
- * official artifact on this deployment. The caller decides routing (it already classifies the measure),
- * so this module stays free of deployment configuration. An authored or not-yet-routed measure carries
- * no `executed` key at all.
+ * official artifact on this deployment, plus `translation` when a WorkWell translation is routed beside
+ * it. The caller decides routing (it already classifies the measure), so this module stays free of
+ * deployment configuration. An authored or not-yet-routed measure carries neither key; a translation is
+ * never named without the official routing it rides on.
  */
-export function measureIdentityPayloadFor(measureId: string, officialRouted: boolean): MeasureIdentityPayload | null {
+export function measureIdentityPayloadFor(
+  measureId: string,
+  officialRouted: boolean,
+  translationRouted = false,
+  /** Injectable for tests: no translation is committed yet. */
+  translationOf: (measureId: string) => TranslationLogic | null = translationLogicFor,
+): MeasureIdentityPayload | null {
   const identity = measureIdentityFor(measureId);
   if (!identity) return null;
   const executed = officialRouted ? executedLogicFor(measureId) : null;
-  return executed ? { ...identity, executed } : identity;
+  const translation = officialRouted && translationRouted ? translationOf(measureId) : null;
+  return { ...identity, ...(executed ? { executed } : {}), ...(translation ? { translation } : {}) };
 }
 
 type MeasureIdentityEntry = Omit<MeasureIdentity, "improvementNotation"> & { improvementNotation?: MeasureIdentity["improvementNotation"] };

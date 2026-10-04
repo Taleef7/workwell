@@ -568,10 +568,19 @@ function buildDeterministicExplanation(input: CaseExplanationInput, subjectTerm:
   // defines keep the three-row snippet.
   const isOfficialRow = (row: ExprResult): boolean => String(row.define ?? "").startsWith("official:");
   const shown = expressionResults.length > 0 && expressionResults.every(isOfficialRow) ? expressionResults : expressionResults.slice(0, 3);
+  // A WorkWell translation writes the same `official:` names, but its membership is not CMS's logic
+  // (LOCKED §4.3): strip the prefix and name the translation, as MCP's explanation does. CMS-scored
+  // text is unchanged.
+  const official = safeMap(input.evidenceJson.official);
+  const translation = official.kind === "derived" ? (typeof official.label === "string" && official.label ? official.label : "a WorkWell translation") : null;
+  const defineName = (row: ExprResult): string => {
+    const define = asString(row.define, "define");
+    return translation && define.startsWith("official:") ? define.slice("official:".length).replace(/^([^:]+):([^:]+)$/, "$1 · $2") : define;
+  };
   const defineSnippet =
-    shown
-      .map((row) => `${asString(row.define, "define")}=${asString(row.result, "unknown")}`)
-      .join(", ") || "no define-level results available";
+    (shown
+      .map((row) => `${defineName(row)}=${asString(row.result, "unknown")}`)
+      .join(", ") || "no define-level results available") + (translation && shown.some(isOfficialRow) ? ` (population membership under ${translation})` : "");
   // The employee wording is the original, byte-identical text; the patient wording drops the
   // occupational vocabulary (exam/vaccine, waiver) a clinic reader would trip over.
   // #650: an official outcome carries no window, result date or days overdue (why_flagged sets the

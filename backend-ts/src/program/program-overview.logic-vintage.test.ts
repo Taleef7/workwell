@@ -118,3 +118,27 @@ test("logicVintageOf needs an official run, a scored year and a manifest describ
   assert.equal(logicVintageOf("cms125", ran({ ecqmId: "125FHIR", version: "1.0.000", artifactSha256: "sha256:b" }), 2027, () => manifest), null, "same version, other bytes");
   assert.equal(logicVintageOf("cms125", ran({ ecqmId: "125FHIR", version: "0.5.000" }), 2027, () => manifest), null, "no digest: the version decides");
 });
+
+test("logicVintageOf: a translated run has no vintage gap; CMS's draft over a year a routed translation covers says what the next run uses", () => {
+  const manifest = { effectivePeriod: { start: "2026-01-01", end: "2026-12-31" }, sha256: "sha256:a", version: "1.0.000" };
+  const none = () => null;
+  const routed = () => ({ derived: { label: "WorkWell translation of CMS137v15" } });
+  // The translation scored 2027: nothing is out of date, whatever CMS's manifest says.
+  const translated = { official: { ecqmId: null, version: "ww-2027.1", artifactSha256: "sha256:t", kind: "derived" as const, label: "WorkWell translation of CMS137v15" } };
+  assert.equal(logicVintageOf("cms137", translated, 2027, () => manifest, routed), null);
+  assert.equal(logicVintageOf("cms137", translated, 2027, () => manifest, none), null, "even with no translation routed any more");
+  // A translated rate that recorded neither digest nor version: only `kind` says CMS's manifest is not its own.
+  const bare = { official: { ecqmId: null, version: null, kind: "derived" as const, label: "WorkWell translation of CMS137v15" } };
+  assert.equal(logicVintageOf("cms137", bare, 2027, () => manifest, routed), null);
+  // CMS's draft scored 2027 with no translation routed: today's note, unchanged.
+  const cms = { official: { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: "sha256:a" } };
+  assert.equal(logicVintageOf("cms137", cms, 2027, () => manifest, none)?.note, "Scored with the 2026 FHIR logic; 2027 logic not yet available");
+  // CMS's draft scored 2027 before the translation was routed: "not yet available" would be false.
+  const note = logicVintageOf("cms137", cms, 2027, () => manifest, routed);
+  assert.equal(note?.note, "Scored with the 2026 FHIR logic; WorkWell translation of CMS137v15 applies from the next run");
+  assert.equal(note?.artifactYears, "2026");
+  // A year CMS's artifact covers carries no note either way.
+  assert.equal(logicVintageOf("cms137", cms, 2026, () => manifest, routed), null);
+  // The default reads the deployment: with no translation allowlisted it is today's note.
+  assert.equal(logicVintageOf("cms137", cms, 2027, () => manifest)?.note, "Scored with the 2026 FHIR logic; 2027 logic not yet available");
+});

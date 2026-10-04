@@ -7,6 +7,20 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-03
 
+- **Screens and APIs name a WorkWell translation (C2b).** Wherever a translation scored a row, it is
+  named by its label and never by a CMS eCQM id; CMS-scored responses are unchanged, and nothing routes a
+  translation yet.
+  - Compliance API: an additive `populationsSource: "translation-evidence"` and `measure.logic`; no
+    `ecqmId`. The measure rate's `source` uses the same word.
+  - Measure page: the top label, version and rate panel name the translation, today's CMS artifact never
+    fills its missing id, and a routed translation adds a "For 2027: …" line. The vintage note says the
+    translation applies from the next run instead of "2027 logic not yet available".
+  - Runs page names it in the reconciliation and offers no QRDA III; the measures list badges it.
+  - The attributed-list CSV appends `executedLogic`; the case screen's population rows, MCP's and the AI
+    fallback's explanations and the EXCLUDED wording drop "official" for a translation. A run mixing two
+    logics now has no measure rate.
+  - Next: C3a, the CMS137 v15 translation. Its catalog description still names the 2026 draft only.
+
 - **A WorkWell translation can score the year it covers, and nothing else (C2a).** The engine now
   chooses the artifact after the period: CMS's draft for a year it covers, otherwise a translation under
   `measures/derived/<id>/` named in the new `WORKWELL_DERIVED_MEASURES`, otherwise CMS's draft with the

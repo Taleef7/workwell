@@ -1424,6 +1424,8 @@ export async function handleRuns(
         const inIpp = rate.rates[0]?.ipp ?? 0;
         official = {
           measureId,
+          // Additive: which logic the rates came from, when it was not CMS's artifact.
+          ...(rate.official?.kind === "derived" ? { logic: { kind: "workwell-translation", label: rate.official.label ?? null } } : {}),
           rates: rate.rates,
           outOfPopulation: Math.max(0, rowsPersisted - inIpp - rate.unmeasured),
           unmeasured: rate.unmeasured,

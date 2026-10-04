@@ -344,6 +344,25 @@ test("ADR-074: explain_outcome names each rate of a multi-rate measure readably,
   assert.match(text, /Official population membership: Initiation · numerator=true, Engagement · numerator=false/);
 });
 
+test("explain_outcome never calls a WorkWell translation's membership official; it names the translation", async () => {
+  const { buildOutcomeExplanation } = await import("./tools.ts");
+  const expressionResults = [
+    { define: "official:Initiation:numerator", result: true },
+    { define: "official:Engagement:numerator", result: false },
+  ];
+  const text = buildOutcomeExplanation("Pat One", "OVERDUE", "SUD Treatment", {
+    why_flagged: { role_eligible: true, site_eligible: true, waiver_status: "NONE" },
+    expressionResults,
+    official: { kind: "derived", label: "WorkWell translation of CMS137v15" },
+  });
+  assert.match(text, /Population membership \(WorkWell translation of CMS137v15\): Initiation · numerator=true, Engagement · numerator=false/);
+  assert.doesNotMatch(text, /Official/);
+  const unlabelled = buildOutcomeExplanation("Pat One", "OVERDUE", "SUD Treatment", { expressionResults, official: { kind: "derived" } });
+  assert.match(unlabelled, /Population membership \(a WorkWell translation\):/, "a missing label still never reads as official");
+  const cms = buildOutcomeExplanation("Pat One", "OVERDUE", "SUD Treatment", { expressionResults, official: { ecqmId: "137FHIR" } });
+  assert.match(cms, /Official population membership: Initiation/, "CMS-scored text is unchanged");
+});
+
 test("ADR-046: a recency measure still gets its recency sentence", async () => {
   const { buildOutcomeExplanation } = await import("./tools.ts");
   const authored = buildOutcomeExplanation("Al Smith", "OVERDUE", "Audiogram", {

@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 export const RATE_ESTIMATE_TEXT = "WorkWell's estimate from CMS's FHIR logic. WebChart calculates and submits the reported rate.";
 /** For a rate whose engine is not known to be CMS's FHIR logic (an authored run, or one not yet read). */
 export const RATE_ESTIMATE_TEXT_ANY_ENGINE = "WorkWell's estimate. WebChart calculates and submits the reported rate.";
+/** For a rate a WorkWell translation scored: the logic is WorkWell's reading of CMS's, not CMS's own. */
+export const RATE_ESTIMATE_TEXT_TRANSLATION = "WorkWell's estimate from its own translation of CMS's logic. WebChart calculates and submits the reported rate.";
 
 export function showsRateEstimateNote(): boolean {
   return SUBJECT.singular === "patient";
@@ -23,11 +25,22 @@ export function showsRateEstimateNote(): boolean {
  * page that aggregates many measures, or cannot see a run's provenance, keeps the default, which is true
  * whatever scored the rate.
  */
-export function RateEstimateNote({ id, className, fhirLogic = false }: { id?: string; className?: string; fhirLogic?: boolean }) {
+export function RateEstimateNote({
+  id,
+  className,
+  fhirLogic = false,
+  translation = false,
+}: {
+  id?: string;
+  className?: string;
+  fhirLogic?: boolean;
+  /** The rate came from a WorkWell translation. Wins over `fhirLogic`, which would credit CMS. */
+  translation?: boolean;
+}) {
   if (!showsRateEstimateNote()) return null;
   return (
     <p id={id} data-testid="rate-estimate-note" className={cn("text-xs text-neutral-500 dark:text-neutral-400", className)}>
-      {fhirLogic ? RATE_ESTIMATE_TEXT : RATE_ESTIMATE_TEXT_ANY_ENGINE}
+      {translation ? RATE_ESTIMATE_TEXT_TRANSLATION : fhirLogic ? RATE_ESTIMATE_TEXT : RATE_ESTIMATE_TEXT_ANY_ENGINE}
     </p>
   );
 }

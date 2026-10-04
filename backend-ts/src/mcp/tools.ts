@@ -183,8 +183,12 @@ export function buildOutcomeExplanation(
     (evidence.expressionResults as Array<{ define?: unknown; result?: unknown }> | undefined)?.filter((r) =>
       String(r?.define ?? "").startsWith("official:"),
     ) ?? [];
+  // A WorkWell translation's membership is measured the same way but is not CMS's logic (LOCKED §4.3):
+  // say whose it is rather than calling it official.
+  const official = evidence.official as JsonRecord | undefined;
+  const translation = official?.kind === "derived" ? (typeof official.label === "string" && official.label ? official.label : "a WorkWell translation") : null;
   const membership = populations.length
-    ? `Official population membership: ${populations
+    ? `${translation ? `Population membership (${translation})` : "Official population membership"}: ${populations
         // `official:<population>` stays as is; a multi-rate `official:<Rate>:<population>` (ADR-074)
         // reads as "Rate · population" rather than a colon-joined token.
         .map((r) => `${String(r.define).slice("official:".length).replace(/^([^:]+):([^:]+)$/, "$1 · $2")}=${String(r.result)}`)

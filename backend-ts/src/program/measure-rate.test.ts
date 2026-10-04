@@ -157,3 +157,30 @@ test("a run whose EVERY row errored has no rate, and says so rather than reporti
   assert.equal(await officialMeasureRate(os, "run-all-err", "cms122"), null);
   assert.equal(os.calls, after, "the second ask reads nothing");
 });
+
+test("a run a WorkWell translation scored is labelled as one; a run mixing two logics has no rate at all", async () => {
+  resetMeasureRateMemo();
+  const translated = (numer: boolean, period = { start: "2027-01-01", end: "2027-12-31" }) => ({
+    official: {
+      kind: "derived", label: "WorkWell translation of CMS137v15", derivedFrom: "CMS137v15", url: "urn:workwell:measure:cms137:translation",
+      ecqmId: null, version: "ww-2027.1", artifactSha256: "sha256:t", measurementPeriod: period,
+      populationResults: { ipp: true, denom: true, numer, denex: false, denexcep: false },
+    },
+  });
+  const rate = await officialMeasureRate(membershipStore([rec("COMPLIANT", translated(true), "cms137"), rec("OVERDUE", translated(false), "cms137")]), "run-t", "cms137");
+  assert.ok(rate);
+  assert.equal(rate.source, "translation-evidence", "the compliance API's word for it");
+  assert.deepEqual(rate.official, {
+    ecqmId: null, version: "ww-2027.1", artifactSha256: "sha256:t",
+    kind: "derived", label: "WorkWell translation of CMS137v15", derivedFrom: "CMS137v15",
+  });
+
+  // CMS's 2026 draft and the 2027 translation over one run (an ad-hoc evaluation across the boundary):
+  // a sum of the two names neither logic, so there is no rate to show.
+  const cms = { official: { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: "sha256:c", measurementPeriod: { start: "2026-01-01", end: "2026-12-31" }, populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false } } };
+  assert.equal(await officialMeasureRate(membershipStore([rec("COMPLIANT", cms, "cms137"), rec("OVERDUE", translated(false), "cms137")]), "run-mixed", "cms137"), null);
+  // And CMS's own rows still read exactly as before.
+  const plain = await officialMeasureRate(membershipStore([rec("COMPLIANT", cms, "cms137")]), "run-cms", "cms137");
+  assert.equal(plain?.source, "official-evidence");
+  assert.deepEqual(plain?.official, { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: "sha256:c" }, "no kind, label or derivedFrom key on a CMS-scored rate");
+});
