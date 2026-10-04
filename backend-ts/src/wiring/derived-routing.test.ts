@@ -148,6 +148,8 @@ test("D1–D8: each unfit translation is refused with its own sentence", () => {
   expect(problemsWith(withManifest({ catalogId: "cms130" })), /declares catalogId 'cms130'/);
   expect(problemsWith(withManifest({ url: "https://madie.cms.gov/Measure/CMS137FHIR" })), /manifest url/);
   expect(problemsWith(withManifest({ effectivePeriod: { start: "2027-01-01", end: "2028-12-31" } })), /exactly one calendar year/);
+  // A complete calendar year that is not the year the translated Measure was built for.
+  expect(problemsWith(withManifest({ effectivePeriod: { start: "2028-01-01", end: "2028-12-31" } })), /manifest declares 2028-01-01\.\.2028-12-31 but the translated Measure's effectivePeriod is 2027-01-01\.\.2027-12-31/);
   expect(problemsWith(withManifest({ terminology: { ...derived.manifest.terminology!, completion: undefined } })), /does not name the VSAC release/);
   expect(problemsWith(withManifest({ scoring: "cohort" })), /scoring 'cohort' differs/);
   expect(problemsWith(withManifest({ populations: ["initial-population"] })), /declares populations/);

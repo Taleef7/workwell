@@ -424,6 +424,15 @@ function derivedRoutingProblems(
     if (!ep?.start || !ep?.end || ep.start.slice(0, 10) !== `${year}-01-01` || ep.end.slice(0, 10) !== `${year}-12-31`) {
       problems.push(`${id}: a translation must cover exactly one calendar year; it declares ${ep?.start ?? "?"}..${ep?.end ?? "?"}`);
     }
+    // The selector trusts the MANIFEST's period, so it must be the period the translated Measure was built
+    // and checked for: a manifest edited to another year would otherwise run 2027 logic in that year.
+    const measurePeriod = (entries.find((e) => e.resource?.resourceType === "Measure")?.resource as { effectivePeriod?: { start?: string; end?: string } } | undefined)?.effectivePeriod;
+    if (measurePeriod?.start?.slice(0, 10) !== ep?.start?.slice(0, 10) || measurePeriod?.end?.slice(0, 10) !== ep?.end?.slice(0, 10)) {
+      problems.push(
+        `${id}: the manifest declares ${ep?.start ?? "?"}..${ep?.end ?? "?"} but the translated Measure's effectivePeriod is ` +
+          `${measurePeriod?.start ?? "?"}..${measurePeriod?.end ?? "?"}; a translation is chosen only for the year it was built for`,
+      );
+    }
     if (!manifest.terminology?.completion?.manifest) {
       problems.push(`${id}: the translation's terminology does not name the VSAC release it was expanded from`);
     }

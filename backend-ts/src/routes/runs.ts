@@ -41,7 +41,7 @@ import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRun
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
-import { aggregateOfficialRun, runProducedOfficialEvidence, scoringIdentityKey } from "../fhir/run-aggregate.ts";
+import { aggregateOfficialRun, scoringIdentityKey } from "../fhir/run-aggregate.ts";
 import { officialMeasureRate } from "../program/measure-rate.ts";
 import { resolveAlertChannels } from "../run/alert-channel.ts";
 import {
@@ -266,11 +266,12 @@ function measureIdentityFor(measureId: string): Set<string> {
  * version of this comment claimed the subject cap covered these two, which it never did.
  */
 /**
- * "Did THIS run's outcomes come from the official executor?" is answered by `runProducedOfficialEvidence`
- * (`fhir/run-aggregate.ts`, shared with the programs overview since ADR-077): the first row that was
- * actually EVALUATED settles it, and an errored row — which carries no engine's evidence — is skipped
- * rather than read as "not official" (GLM review, H1: one errored subject sorting first once sent a
- * whole official run down the status-histogram path, inverting cms122's numerator).
+ * "Did THIS run's outcomes come from the official executor?" is answered by the rows themselves
+ * (`aggregateOfficialRun`, shared with the programs overview since ADR-077): ANY evaluated row carrying
+ * official evidence sends the run down the official path, where a run that ALSO holds authored rows is
+ * refused (`identityConflict`). An errored row carries no engine's evidence and is skipped (GLM review,
+ * H1). It used to be the FIRST evaluated row that decided, which let an authored row sorting first send
+ * a mixed run down the status histogram unrefused, folding the official rows' workflow status into it.
  */
 async function aggregateCountsForRun(
   os: Awaited<ReturnType<typeof outcomes>>,
@@ -288,27 +289,24 @@ async function aggregateCountsForRun(
   // numerator is poor control, and the workflow status inverts it). An export of a past run must not
   // change meaning because of a config change made after it.
   //
-  // The env flag is still consulted first, as a cheap way to skip a read for the overwhelmingly common
-  // case; when it is off, the first EVALUATED row settles it (`runProducedOfficialEvidence` — an errored
-  // row carries no engine's evidence and is skipped, never read as "not official").
-  // `runProducedOfficialEvidence` is the ONLY remaining caller of the paged scan, and it is reached
-  // only when the routing flag is off — so the sort that made the dashboard's read expensive is paid
-  // here at most once per export, never per page (review of #610 noted the export still pays it).
+  // The env flag still says a routed measure takes the official path; when it is off, the run's own rows
+  // decide. ONE read of the measure's memberships answers both "was any row official?" and "do the rows
+  // agree?", so an authored run pays that read once per export (as the programs overview already does).
   const routedNow = isOfficialRouted(measureId, env as unknown as Record<string, unknown>);
-  const official = routedNow || (await runProducedOfficialEvidence(os, runId, measureId));
-  if (!official) {
+  // Per RATE (`fhir/run-aggregate.ts`), shared with the programs overview so the dashboard's measure
+  // rate and this export are the same reduction of the same rows (ADR-077 d5). `unmeasured` (ADR-074
+  // d5/d11) and `evaluationErrors` (ADR-077 d6) travel with the counts so the two exports can SAY how
+  // many rows the denominators leave out; a MeasureReport has no standard element for either and QRDA
+  // III none, so both routes carry them as response headers instead of inventing an extension.
+  const aggregate = await aggregateOfficialRun(os, runId, measureId);
+  if (!routedNow && !aggregate.producedOfficialEvidence) {
     // The authored status histogram is single-rate by construction — it reduces workflow buckets, and
     // a measure with no official evidence has one rate. Wrapped so the return type is uniform. A status
     // histogram cannot see evidence, so it cannot count evaluation errors; this branch serves authored
     // runs (including `seed:scale`), whose exports never carried that count either.
     return { counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)], strata: [], unmeasured: 0, evaluationErrors: 0, official: null, identityConflict: false };
   }
-  // PAGED and per RATE (`fhir/run-aggregate.ts`), shared with the programs overview so the dashboard's
-  // measure rate and this export are the same reduction of the same rows (ADR-077 d5). `unmeasured`
-  // (ADR-074 d5/d11) and `evaluationErrors` (ADR-077 d6) travel with the counts so the two exports can
-  // SAY how many rows the denominators leave out; a MeasureReport has no standard element for either
-  // and QRDA III none, so both routes carry them as response headers instead of inventing an extension.
-  const { rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict } = await aggregateOfficialRun(os, runId, measureId);
+  const { rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict } = aggregate;
   return { counts: rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict };
 }
 
