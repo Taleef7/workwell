@@ -220,6 +220,8 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     // The rate panel and the estimate notes credit the translation, not CMS.
     expect(screen.getByText("Measure rate · WorkWell translation")).toBeInTheDocument();
     expect(screen.queryByText("CMS measure rate")).toBeNull();
+    expect(screen.getByText(/^Scored as a quality measure is reported:/)).toBeInTheDocument();
+    expect(screen.queryByText(/Scored the way CMS reports it/)).toBeNull();
     expect(screen.getAllByText("WorkWell's estimate from its own translation of CMS's logic. WebChart calculates and submits the reported rate.")).toHaveLength(2);
     expect(screen.queryByText(ESTIMATE)).toBeNull();
     // Nothing else on the page credits CMS's logic with these numbers.
@@ -235,6 +237,7 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("CMS125FHIR");
     expect(screen.getByTestId("translation-logic")).toHaveTextContent(/^For 2027: WorkWell translation of CMS125v15/);
     expect(screen.getByText("CMS measure rate")).toBeInTheDocument();
+    expect(screen.getByText(/^Scored the way CMS reports it:/)).toBeInTheDocument();
     expect(screen.getAllByText(ESTIMATE)).toHaveLength(2);
   });
 });

@@ -303,7 +303,8 @@ export default function ProgramDetailPage() {
                 </p>
               ))}
               <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-                Scored the way CMS reports it: the measure&apos;s own numerator over its denominator, less exclusions and exceptions. The rate above is the work list&apos;s view of the same patients, so the two can differ.
+                {/* A translation is not CMS's measure, so its panel names no author for the formula. */}
+                {program.measureRate.official?.kind === "derived" ? "Scored as a quality measure is reported" : "Scored the way CMS reports it"}: the measure&apos;s own numerator over its denominator, less exclusions and exceptions. The rate above is the work list&apos;s view of the same patients, so the two can differ.
               </p>
               {/* This panel renders only for evidence the FHIR executor wrote: CMS's FHIR logic, or a WorkWell
                   translation of it, which the run's evidence names. */}
