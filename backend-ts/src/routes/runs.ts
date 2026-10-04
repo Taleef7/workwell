@@ -1236,8 +1236,9 @@ export async function handleRuns(
     const goneIAfter = await compacted(run, env);
     if (goneIAfter) return goneIAfter;
     const scoring = rowScoring(rows);
-    if (scoring.derived) return derivedNotReportable("QRDA I");
+    // Mixed first: it is the deeper fault, and it does not depend on which row was read first.
     if (scoring.mixed) return mixedLogic("QRDA I");
+    if (scoring.derived) return derivedNotReportable("QRDA I");
     const documents = buildQrda1Documents(run, measureId, rows, await qrda1BundleLookup(env, rows.map((r) => r.subjectId)));
     const nonConformant = documents.filter((d) => !d.conformant).length;
     return json({
@@ -1286,8 +1287,9 @@ export async function handleRuns(
     // before a compaction and be reduced after it.)
     const goneIiiAfter = await compacted(run, env);
     if (goneIiiAfter) return goneIiiAfter;
-    if (aggregate.official?.kind === "derived") return derivedNotReportable("QRDA III");
+    // Mixed first: `official` is the first evaluated row's identity, which an unordered read picks.
     if (aggregate.identityConflict) return mixedLogic("QRDA III");
+    if (aggregate.official?.kind === "derived") return derivedNotReportable("QRDA III");
     // Every rate and every stratum (ADR-074). This route refused a multi-rate measure with a 501 until
     // 2026-09-06 rather than emit rate 1 under the measure's identity; the exporter now reports each
     // group under its own criterion names, with its own performance rate and Reporting Strata.
