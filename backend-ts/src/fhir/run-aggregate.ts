@@ -30,20 +30,13 @@ import {
   type RateAggregate,
 } from "./measure-report.ts";
 
-/**
- * Rows per page for {@link runProducedOfficialEvidence}'s scan, which still pages because it stops at
- * the first evaluated row and is not the hot path. `aggregateOfficialRun` no longer pages at all — see
- * its own note.
- */
-export const AGGREGATE_PAGE = 2000;
-
 export interface OfficialRunAggregate extends RateAggregate {
   /** The artifact identity read off the first evaluated row; null when no row carried one. */
   official: OfficialReportIdentity | null;
   /**
-   * Whether the run's rows FOR THIS MEASURE carry official population evidence — the same question
-   * {@link runProducedOfficialEvidence} answers, decided by the same rule (the first EVALUATED row
-   * settles it; an errored row carries no engine's evidence and is skipped).
+   * Whether ANY evaluated row of the run FOR THIS MEASURE carries official population evidence (an
+   * errored row carries no engine's evidence and is skipped). Scoped to the measure because ADR-072
+   * admits a run that mixes engines across measures.
    *
    * It travels with the counts so a caller that is going to aggregate anyway reads the rows ONCE.
    * `officialMeasureRate` asked the probe and then aggregated, which on the pilot was two reads of the
@@ -69,35 +62,6 @@ export interface OfficialRunAggregate extends RateAggregate {
 export function scoringIdentityKey(identity: OfficialReportIdentity | null): string {
   if (!identity) return "authored";
   return JSON.stringify([identity.kind ?? "official", identity.artifactSha256 ?? null, identity.measurementPeriod?.start ?? null, identity.measurementPeriod?.end ?? null]);
-}
-
-/**
- * Whether ANY evaluated row of the run FOR THIS MEASURE carries official population evidence. Scoped
- * to the measure because ADR-072 admits a run that mixes engines: an ALL_PROGRAMS run over a routed
- * cms125 and an authored occupational measure would otherwise answer "official" for both from
- * whichever row the store returned first. An errored row says
- * nothing about which engine the run used, so it is skipped, and the scan continues page by page until
- * a row that was evaluated answers; only a run in which EVERY subject errored reads to the end, and that
- * run has nothing to export either way. First page of one: the overwhelmingly common case (first row
- * evaluated fine) costs a single row.
- */
-export async function runProducedOfficialEvidence(
-  os: Pick<OutcomeStore, "listOutcomes">,
-  runId: string,
-  measureId: string,
-): Promise<boolean> {
-  let limit = 1;
-  let offset = 0;
-  for (;;) {
-    const page = await os.listOutcomes(runId, { limit, offset, measureId });
-    for (const row of page) {
-      if (isEvaluationErrorEvidence(row.evidence)) continue;
-      return officialMembership(row.evidence) !== null;
-    }
-    if (page.length < limit) return false;
-    offset += page.length;
-    limit = AGGREGATE_PAGE;
-  }
 }
 
 export async function aggregateOfficialRun(
@@ -128,9 +92,9 @@ export async function aggregateOfficialRun(
   // wrong twice over, and both halves were caught in review: `listOutcomesWithRun` has a LEAN
   // projection with no `evidence_json` at all, and `for (const row of await …)` awaits the whole
   // parsed array, so nothing is folded as it arrives.
-  // ORDER-INDEPENDENT, and it had to become so (review of #610). `runProducedOfficialEvidence` lets
-  // the FIRST evaluated row settle provenance, which was deterministic under `ORDER BY evaluated_at,
-  // id`; with the sort dropped "first" is whatever the planner returns, and `officialMeasureRate`
+  // ORDER-INDEPENDENT, and it had to become so (review of #610). Letting the FIRST evaluated row settle
+  // provenance was deterministic under `ORDER BY evaluated_at, id`; with the sort dropped "first" is
+  // whatever the planner returns, and `officialMeasureRate`
   // memoizes whichever answer landed — so one `(run, measure)` could yield a rate on one process and
   // `null` on another. `officialMembership` returns null for an unreadable `populationResults` as well
   // as for authored evidence, so a single malformed row arriving first would have made a whole
