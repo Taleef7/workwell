@@ -114,20 +114,21 @@ import type {
   OutcomeStatus,
 } from "@work-well/measure-engine";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { effectivePeriodCovers, loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
+import { artifactKey, artifactKind, effectivePeriodCovers, loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { officialMeasureSemantics } from "./official-measure-semantics.ts";
 import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.ts";
 import type { BatchCalculator } from "./fqm-worker.ts";
 
 /**
- * Expand one value-set OID to its codes, for a named measure.
+ * Expand one value-set OID to its codes, for the artifact being executed.
  *
- * The `catalogId` is not decoration: terminology belongs to the ARTIFACT, and two artifacts pinned at
- * different upstream commits may legitimately disagree about the same OID. An expander keyed only by OID
- * has to pick one of them, silently, for both measures (roadmap §7.3 — one terminology authority, and it
- * is the artifact's own).
+ * The artifact is not decoration: terminology belongs to the ARTIFACT, and two artifacts may legitimately
+ * disagree about the same OID — two measures pinned at different upstream commits, or a WorkWell 2027
+ * translation and the 2026 draft of the SAME measure, which differ in nothing else. An expander keyed by
+ * OID, or by measure id, has to pick one of them silently (roadmap §7.3 — one terminology authority, and
+ * it is the artifact's own).
  */
-export type ExpandValueSet = (oid: string, catalogId: string) => Promise<ExpandedCode[]>;
+export type ExpandValueSet = (oid: string, artifact: OfficialArtifact) => Promise<ExpandedCode[]>;
 
 /**
  * Re-exported so the ROUTER can key its expander by the same rule `buildValueSetCache` looks up by,
@@ -197,6 +198,14 @@ export interface OfficialExecutorDeps {
   calculateBatch?: BatchCalculator;
   /** Injectable for tests; defaults to the vendored-artifact loader. */
   loadArtifact?: (catalogId: string) => OfficialArtifact | null;
+  /**
+   * Which artifact scores a measure FOR A MEASUREMENT PERIOD — CMS's, or a WorkWell translation for a
+   * year CMS's does not cover. Supplied by the router so the logic it reports and the logic executed are
+   * one decision. Absent means CMS's artifact for every period, through `loadArtifact`.
+   */
+  selectArtifact?: (measureId: string, period: { start: string; end: string }) => OfficialArtifact | null;
+  /** Every artifact `selectArtifact` may return for a measure, so preflight can warm each one's terminology. */
+  candidateArtifacts?: (measureId: string) => OfficialArtifact[];
   /**
    * Optional sink for the stale-vintage warning. NOT wired by the run pipeline today — the pipeline
    * derives the same warning itself and appends it as a WARN run-log line once per run
@@ -392,7 +401,7 @@ export async function expandArtifactTerminology(
     // test that throws from the expander and asserts the refusal still fires.
     let codes: ExpandedCode[];
     try {
-      codes = await expand(oid, artifact.manifest.catalogId);
+      codes = await expand(oid, artifact);
     } catch {
       unusable.add(oid);
       return [];
@@ -505,8 +514,14 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
    * of times.
    */
   const terminology = new Map<string, Promise<unknown[]>>();
+  const loadArtifact = deps.loadArtifact ?? loadOfficialArtifact;
+  const selectArtifact = deps.selectArtifact ?? ((measureId: string) => loadArtifact(measureId));
+  const candidateArtifacts =
+    deps.candidateArtifacts ?? ((measureId: string) => [loadArtifact(measureId)].filter((a): a is OfficialArtifact => a !== null));
   const cacheFor = (artifact: OfficialArtifact): Promise<unknown[]> => {
-    const key = artifact.manifest.catalogId;
+    // By ARTIFACT: the router preflights CMS's 2026 artifact first, and a cache keyed by measure id would
+    // then hand a 2027 translation of the same measure the 2026 expansions.
+    const key = artifactKey(artifact);
     let pending = terminology.get(key);
     if (!pending) {
       pending = expandArtifactTerminology(artifact, deps.expand);
@@ -523,7 +538,14 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
     subjects: readonly OfficialBatchSubject[],
     evaluationDate?: string,
   ): Promise<Map<string, MeasureOutcome>> => {
-    const artifact = (deps.loadArtifact ?? loadOfficialArtifact)(measureId);
+    // The PERIOD first, then the artifact: which logic scores a measure depends on the year being scored
+    // (CMS's 2026 draft for 2026, a WorkWell translation for 2027 once one is routed). Choosing the
+    // artifact before the period is known is how the two could describe different years.
+    const asOf = evaluationDate ?? new Date().toISOString().slice(0, 10);
+    // Read from the SAME registry the authored path reads, rather than hardcoding 12, and through the
+    // SAME helper the shadow diff calls — see `officialMeasurementPeriod`.
+    const period = officialMeasurementPeriod(measureId, asOf);
+    const artifact = selectArtifact(measureId, period);
     if (!artifact) {
       throw new Error(`${measureId}: no executable official artifact is vendored`);
     }
@@ -552,11 +574,6 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
     // Refusals first, then this: an empty batch is not an error, but it must not reach fqm — asking a
     // calculator about nobody is how you get an unhelpful failure deep inside someone else's library.
     if (subjects.length === 0) return new Map();
-
-    const asOf = evaluationDate ?? new Date().toISOString().slice(0, 10);
-    // Read from the SAME registry the authored path reads, rather than hardcoding 12, and through the
-    // SAME helper the shadow diff calls — see `officialMeasurementPeriod`.
-    const period = officialMeasurementPeriod(measureId, asOf);
 
     const warning = effectivePeriodWarning(artifact, period);
     if (warning) {
@@ -644,6 +661,29 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       );
     }
 
+    // Who scored this. CMS's artifact keeps exactly the keys, in exactly the order, it always had. A
+    // WorkWell translation names itself and its `ecqmId` is null: putting CMS's measure identity over
+    // counts its logic did not produce is the relabelling LOCKED §4.3 forbids, and every reader that
+    // falls back to a CMS id on a null `ecqmId` has to check `kind` first.
+    const derived = artifactKind(artifact) === "derived" ? artifact.manifest.derived : undefined;
+    const evidenceIdentity = derived
+      ? {
+          kind: "derived" as const,
+          label: derived.label,
+          url: artifact.manifest.url,
+          derivedFrom: derived.derivedFrom.ecqm,
+          ecqmId: null,
+          version: artifact.manifest.version,
+          engine: "fqm-execution",
+          artifactSha256: artifact.manifest.sha256,
+        }
+      : {
+          ecqmId: artifact.manifest.cmsId,
+          version: artifact.manifest.version,
+          engine: "fqm-execution",
+          artifactSha256: artifact.manifest.sha256,
+        };
+
     const outcomes = new Map<string, MeasureOutcome>();
     for (const [patientId, result] of bySubject) {
       // Back to the caller's id. A result fqm returns for a patient nobody asked about cannot be
@@ -676,10 +716,7 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
           // never the workflow bucket above — the bucket cannot express DENEXCEP and inverts for an
           // inverse measure.
           official: {
-            ecqmId: artifact.manifest.cmsId,
-            version: artifact.manifest.version,
-            engine: "fqm-execution",
-            artifactSha256: artifact.manifest.sha256,
+            ...evidenceIdentity,
             populationResults: result.populationResults,
             // Every rate, verbatim, when the measure declares more than one. Rate 1 stays in
             // `populationResults` so nothing that reads it today changes.
@@ -716,9 +753,11 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
      * failed run start, not from a run that quietly reports nobody as eligible.
      */
     async preflight(measureId: string): Promise<void> {
-      const artifact = (deps.loadArtifact ?? loadOfficialArtifact)(measureId);
-      if (!artifact) throw new Error(`${measureId}: no executable official artifact is vendored`);
-      await cacheFor(artifact);
+      // Every artifact this measure may be scored by — CMS's and, when routed, its translation — so a
+      // translation whose terminology will not expand refuses at construction, not on 1 January.
+      const artifacts = candidateArtifacts(measureId);
+      if (artifacts.length === 0) throw new Error(`${measureId}: no executable official artifact is vendored`);
+      for (const artifact of artifacts) await cacheFor(artifact);
     },
 
     /**

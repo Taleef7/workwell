@@ -138,7 +138,7 @@ test("rerun-to-verify closes a case whose subject the OFFICIAL logic finds outsi
     runStore: { createRun: async () => ({ id: "run-rerun-oop" }), markRunning: noop, appendLog: noop, finalizeRun: noop, listRuns: async () => [] },
     engine: {
       evaluate: async () => ({ outcome: "MISSING_DATA", evidence: OUTSIDE, inInitialPopulation: false }),
-      logicVersionFor: () => "official-fqm:1.0.000:artifact:terminology",
+      logicFor: () => ({ version: "official-fqm:1.0.000:artifact:terminology", kind: "official" as const, warning: null }),
     },
   } as unknown as RerunDeps;
 
@@ -154,7 +154,7 @@ test("rerun-to-verify closes a case whose subject the OFFICIAL logic finds outsi
   // The AUTHORED engine's flag does not close anything through this path either.
   patched = null;
   audits.length = 0;
-  const authored = { ...deps, engine: { evaluate: async () => ({ outcome: "MISSING_DATA", evidence: { expressionResults: [] }, inInitialPopulation: false }), logicVersionFor: () => "sha256:authored" } } as unknown as RerunDeps;
+  const authored = { ...deps, engine: { evaluate: async () => ({ outcome: "MISSING_DATA", evidence: { expressionResults: [] }, inInitialPopulation: false }), logicFor: () => undefined } } as unknown as RerunDeps;
   await rerunToVerify(authored, existing.id, "tester");
   assert.equal((patched as Record<string, unknown> | null)?.status, "OPEN", "an authored out-of-population subject keeps the case open, unchanged");
 });

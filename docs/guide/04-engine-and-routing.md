@@ -168,9 +168,11 @@ for all 14 measures and throw 13 sets away.
 
 ### The identity that keeps the cache honest
 
-The engine object itself reports what logic it runs: `logicVersionFor(measureId)` returns
-`official-fqm:<version>:<artifactSha>:<terminologySha>` for a routed measure and nothing for an
-authored one. The incremental evaluation cache (`eval_state`, off by default) includes that string
+The engine object itself reports what logic it runs on a given date: `logicFor(measureId, date)`
+returns `official-fqm:<version>:<artifactSha>:<terminologySha>` for CMS's artifact,
+`derived-fqm:…` for a WorkWell translation covering that year (`WORKWELL_DERIVED_MEASURES`,
+`measures/derived/<id>/`), and nothing for an authored measure. The executor chooses the artifact by
+the same rule, after the period is known, so what runs and what is reported cannot differ. The incremental evaluation cache (`eval_state`, off by default) includes that string
 in its fingerprint. Without it, flipping a measure to the official artifact would leave the cache
 copying forward outcomes the *authored* engine computed — and a re-vendor would not invalidate them
 either. The terminology digest is in there because re-fetching code lists at a different upstream

@@ -92,12 +92,56 @@ export interface OfficialManifest {
     sha256: string;
   };
   sha256: string;
+  /**
+   * Present ONLY on a WorkWell translation under `measures/derived/` (decision 3, 2026-10-02): the block
+   * is what makes the artifact a translation, and each loader refuses the other kind's manifest.
+   */
+  derived?: DerivedManifestBlock;
 }
 
+/**
+ * What a WorkWell translation records about itself. It never carries a CMS measure identity (LOCKED
+ * §4.3): `derivedFrom` names the CMS measure it was translated FROM, for provenance only.
+ */
+export interface DerivedManifestBlock {
+  /** Shown wherever the logic is named, e.g. "WorkWell translation of CMS137v15". */
+  label: string;
+  derivedFrom: { ecqm: string; packageSha256: string };
+  /** The official artifact it was built on, pinned so a re-vendor of the base cannot pass unnoticed. */
+  base: { catalogId: string; manifestSha256: string };
+  build: { translator: string; modelInfoSha256: string; signatureLevel: string; translationSha256: string };
+  /** CMS libraries carried unchanged, each pinned by the hash of its ELM. */
+  unchangedLibraries: Array<{ name: string; version: string; elmSha256: string }>;
+  /** The checks it passed, each naming the exact artifact and terminology it ran against. */
+  oracles: Array<{
+    name: string;
+    inputSha256: string;
+    period: { start: string; end: string };
+    agree: number;
+    total: number;
+    result: "pass" | "fail";
+    ranAgainst: { artifactSha256: string; terminologySha256: string };
+  }>;
+}
+
+export type ArtifactKind = "official" | "derived";
+
 export interface OfficialArtifact {
+  /** Absent means `official`, so every artifact built before translations existed reads unchanged. */
+  kind?: ArtifactKind;
   manifest: OfficialManifest;
   bundle: MeasureBundle;
 }
+
+export const artifactKind = (artifact: Pick<OfficialArtifact, "kind">): ArtifactKind => artifact.kind ?? "official";
+
+/**
+ * What a cache keys an artifact by. Never the measure id alone: a translation and CMS's artifact share
+ * `cms137`, and a cache keyed by id would score 2027 with 2026 value sets, which for a value-sets-only
+ * translation makes it silently identical to the draft it replaces.
+ */
+export const artifactKey = (artifact: Pick<OfficialArtifact, "kind" | "manifest">): string =>
+  `${artifactKind(artifact)}:${artifact.manifest.catalogId}:${artifact.manifest.sha256}`;
 
 
 /**
@@ -145,6 +189,7 @@ export function officialMeasureIdentifiers(artifact: OfficialArtifact): Official
 }
 
 const ARTIFACT_ROOT = new URL("../../measures/official/", import.meta.url);
+const DERIVED_ROOT = new URL("../../measures/derived/", import.meta.url);
 
 /**
  * `new URL()` normalizes `..`, so an unvalidated id escapes the artifact root ("../../etc/passwd"
@@ -155,6 +200,7 @@ const VALID_CATALOG_ID = /^[a-z0-9]+$/;
 
 /** Parsed artifacts are cached: the files are committed and immutable for the life of the process. */
 const cache = new Map<string, OfficialArtifact | null>();
+const derivedCache = new Map<string, OfficialArtifact | null>();
 
 /**
  * Load a vendored artifact, or `null` when it is absent or unusable — a missing artifact is a normal
@@ -163,18 +209,53 @@ const cache = new Map<string, OfficialArtifact | null>();
  * executed without translation, which is the thing this whole path exists to avoid.
  */
 export function loadOfficialArtifact(catalogId: string): OfficialArtifact | null {
-  const cached = cache.get(catalogId);
-  if (cached !== undefined) return cached;
+  return loadArtifactOfKind("official", catalogId);
+}
 
-  if (!VALID_CATALOG_ID.test(catalogId)) return null;
+/**
+ * A WorkWell translation from `measures/derived/<catalogId>/`, or `null` when there is none — the normal
+ * state for every measure until its translation lands. Loaded only for measures named in
+ * `WORKWELL_DERIVED_MEASURES`, and chosen only for a period it covers (`selectArtifactForPeriod`).
+ */
+export function loadDerivedArtifact(catalogId: string): OfficialArtifact | null {
+  return loadArtifactOfKind("derived", catalogId);
+}
+
+function loadArtifactOfKind(kind: ArtifactKind, catalogId: string): OfficialArtifact | null {
+  const kindCache = kind === "official" ? cache : derivedCache;
+  const cached = kindCache.get(catalogId);
+  if (cached !== undefined) return cached;
+  const { artifact, cacheable } = readArtifactDir(kind, catalogId, kind === "official" ? ARTIFACT_ROOT : DERIVED_ROOT);
+  if (cacheable) kindCache.set(catalogId, artifact);
+  return artifact;
+}
+
+/**
+ * Read one artifact directory, uncached. `cacheable: false` marks a read that FAILED (rather than a file
+ * that is absent), which must not be remembered — see the catch below. Exported so the kind refusal can
+ * be tested against a temporary directory rather than files written into `measures/`.
+ */
+export function readArtifactDir(
+  kind: ArtifactKind,
+  catalogId: string,
+  root: URL,
+): { artifact: OfficialArtifact | null; cacheable: boolean } {
+  if (!VALID_CATALOG_ID.test(catalogId)) return { artifact: null, cacheable: true };
 
   let artifact: OfficialArtifact | null = null;
   try {
-    const manifest = JSON.parse(
-      readFileSync(new URL(`${catalogId}/manifest.json`, ARTIFACT_ROOT), "utf8"),
-    ) as OfficialManifest;
-    const bundle = JSON.parse(readFileSync(new URL(`${catalogId}/bundle.json`, ARTIFACT_ROOT), "utf8"));
-    artifact = isExecutableMeasureBundle(bundle) ? { manifest, bundle } : null;
+    const manifest = JSON.parse(readFileSync(new URL(`${catalogId}/manifest.json`, root), "utf8")) as OfficialManifest;
+    // Each loader refuses the other kind's manifest: a translation dropped into measures/official/ would
+    // otherwise run as CMS's artifact for every year, and CMS's under measures/derived/ as a translation.
+    if (kind === "official" ? manifest.derived !== undefined : manifest.derived === undefined) {
+      console.error(
+        `WORKWELL_ALERT ${JSON.stringify({ kind: "OFFICIAL_ARTIFACT_UNUSABLE", catalogId, artifactKind: kind, reason: "manifest is of the other kind" })}`,
+      );
+      return { artifact: null, cacheable: true };
+    }
+    const bundle = JSON.parse(readFileSync(new URL(`${catalogId}/bundle.json`, root), "utf8"));
+    // An official artifact carries no `kind` field at all, so it is byte-for-byte what it was.
+    artifact = isExecutableMeasureBundle(bundle) ? (kind === "official" ? { manifest, bundle } : { kind, manifest, bundle }) : null;
     if (!artifact) {
       console.error(
         `WORKWELL_ALERT ${JSON.stringify({ kind: "OFFICIAL_ARTIFACT_UNUSABLE", catalogId, reason: "bundle has no pre-compiled ELM" })}`,
@@ -191,15 +272,15 @@ export function loadOfficialArtifact(catalogId: string): OfficialArtifact | null
         `WORKWELL_ALERT ${JSON.stringify({
           kind: "OFFICIAL_ARTIFACT_LOAD_FAILED",
           catalogId,
+          artifactKind: kind,
           message: err instanceof Error ? err.message : String(err),
         })}`,
       );
-      return null; // deliberately NOT cached — a retry may succeed.
+      return { artifact: null, cacheable: false }; // deliberately NOT cached — a retry may succeed.
     }
     artifact = null;
   }
-  cache.set(catalogId, artifact);
-  return artifact;
+  return { artifact, cacheable: true };
 }
 
 /** True when this measure has a vendored artifact that can actually be executed. */
@@ -272,8 +353,31 @@ export function officialLogicVintage(
   return { artifactYears, measurementYear, note };
 }
 
+/**
+ * Which artifact scores a measurement period, given CMS's and (when routed) WorkWell's translation:
+ *
+ *   1. CMS's artifact, when it covers the period — CMS's logic always wins where it exists;
+ *   2. otherwise the translation, when it covers the period (`=== true`: a translation that declares no
+ *      period is never chosen, so it can never run outside the year it was checked for);
+ *   3. otherwise CMS's artifact, with the "scored with prior-year logic" warning it carries today.
+ *
+ * Pure, so the year boundary is a table test rather than a property of the file system. `null` only when
+ * there is no CMS artifact at all: a translation is never routed without the measure it translates.
+ */
+export function selectArtifactForPeriod(
+  candidates: { official: OfficialArtifact | null; derived?: OfficialArtifact | null },
+  period: { start: string; end: string },
+): OfficialArtifact | null {
+  const { official, derived } = candidates;
+  if (!official) return null;
+  if (effectivePeriodCovers(official.manifest, period) === true) return official;
+  if (derived && effectivePeriodCovers(derived.manifest, period) === true) return derived;
+  return official;
+}
+
 /** @internal test hook */
 export function __clearOfficialArtifactCache(): void {
   cache.clear();
+  derivedCache.clear();
   manifestCache.clear();
 }

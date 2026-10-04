@@ -60,9 +60,9 @@ import { parseAllowedOrigins, preflightResponse, withCors } from "./config/cors.
 import { formatSeamLogLine } from "./config/seam-inventory.ts";
 import { emitAlert, resolveAlertChannels } from "./run/alert-channel.ts";
 import { probeEvidenceBucket, bucketAlert, partialBucketConfigAlert } from "./case/bucket-health.ts";
-import { officialMeasureIds } from "./wiring/official-routing.ts";
+import { derivedMeasureIds, officialMeasureIds } from "./wiring/official-routing.ts";
 import { officialRoutingProblems } from "./wiring/executor-router.ts";
-import { loadOfficialArtifact } from "./wiring/official-artifacts.ts";
+import { loadDerivedArtifact, loadOfficialArtifact, selectArtifactForPeriod } from "./wiring/official-artifacts.ts";
 import { effectivePeriodWarning, officialMeasurementPeriod } from "./wiring/official-executor-adapter.ts";
 import { RUNNABLE_MEASURE_IDS, classifyRunnable } from "./config/deployment-profile.ts";
 import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
@@ -529,13 +529,19 @@ function logSeamInventoryOnce(env: Env): void {
     });
   // ADR-072: report the runnable classification and a stale vendored effectivePeriod at boot, so an
   // operator sees the vintage gap before the first run reports it.
+  // The artifact chosen by the SAME rule a run uses, so the boot line describes the logic this year's
+  // runs will execute: CMS's draft, or a WorkWell translation covering the year (decision 3).
   const today = new Date().toISOString().slice(0, 10);
+  const derivedIds = derivedMeasureIds(env as unknown as Record<string, unknown>);
   for (const measureId of officialMeasureIds(env as unknown as Record<string, unknown>)) {
-    const artifact = loadOfficialArtifact(measureId);
-    const warning = artifact
-      ? effectivePeriodWarning(artifact, officialMeasurementPeriod(measureId, today))
-      : null;
+    const period = officialMeasurementPeriod(measureId, today);
+    const artifact = selectArtifactForPeriod(
+      { official: loadOfficialArtifact(measureId), derived: derivedIds.has(measureId) ? loadDerivedArtifact(measureId) : null },
+      period,
+    );
+    const warning = artifact ? effectivePeriodWarning(artifact, period) : null;
     if (warning) console.warn(`[workwell] ${warning}`);
+    if (artifact?.kind === "derived") console.log(`[workwell] ${measureId}: ${period.start.slice(0, 4)} is scored with ${artifact.manifest.derived?.label ?? "a WorkWell translation"}`);
   }
   console.log(
     `[workwell] runnable=${RUNNABLE_MEASURE_IDS.map((id) => `${id}:${classifyRunnable(id, env as unknown as Record<string, unknown>).kind}`).join(",")}`,

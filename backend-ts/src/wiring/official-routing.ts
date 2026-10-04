@@ -20,6 +20,12 @@
  */
 export interface OfficialMeasuresEnv {
   WORKWELL_OFFICIAL_MEASURES?: string | undefined;
+  /**
+   * Measures whose WorkWell translation (`measures/derived/<id>/`) may score the year it covers
+   * (decision 3, 2026-10-02). An allowlist like the one above, never "all", and every id must also be
+   * official-routed: a translation stands in for CMS's artifact for one year, never for the measure.
+   */
+  WORKWELL_DERIVED_MEASURES?: string | undefined;
 }
 
 /**
@@ -31,7 +37,15 @@ export function isOfficialRoutingConfigured(env: OfficialMeasuresEnv): boolean {
 }
 
 export function officialMeasureIds(env: Record<string, unknown> = process.env): ReadonlySet<string> {
-  const raw = env["WORKWELL_OFFICIAL_MEASURES"];
+  return idList(env["WORKWELL_OFFICIAL_MEASURES"]);
+}
+
+/** The measures allowed to score a year with their WorkWell translation. Empty everywhere today. */
+export function derivedMeasureIds(env: Record<string, unknown> = process.env): ReadonlySet<string> {
+  return idList(env["WORKWELL_DERIVED_MEASURES"]);
+}
+
+function idList(raw: unknown): ReadonlySet<string> {
   if (typeof raw !== "string") return new Set();
   return new Set(
     raw

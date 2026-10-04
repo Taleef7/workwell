@@ -33,9 +33,11 @@ import { readFileSync } from "node:fs";
 // direct importer is another door to fqm-execution that the boundary test has to keep deliberately
 // open, and this module needs one type.
 import { oidFromValueSetUrl, type ExpandedCode } from "./official-executor-adapter.ts";
-import type { OfficialArtifact } from "./official-artifacts.ts";
+import { artifactKey, artifactKind, type OfficialArtifact } from "./official-artifacts.ts";
 
-const TERMINOLOGY_ROOT = new URL("../../measures/official/", import.meta.url);
+/** Each artifact's sidecar sits beside its own bundle: `measures/official/<id>/` or `measures/derived/<id>/`. */
+const terminologyRoot = (artifact: OfficialArtifact): URL =>
+  new URL(`../../measures/${artifactKind(artifact)}/`, import.meta.url);
 const VALID_CATALOG_ID = /^[a-z0-9]+$/;
 
 /** One value set as the artifact's own bundle expanded it, at the pinned commit. */
@@ -68,14 +70,16 @@ const cache = new Map<string, LoadedTerminology>();
  * the middle of that loop would hide the rest of them.
  */
 export function loadOfficialTerminology(artifact: OfficialArtifact): LoadedTerminology {
-  const catalogId = artifact.manifest.catalogId;
-  const cached = cache.get(catalogId);
+  // By artifact, not by measure: a translation and CMS's artifact share a catalog id and differ in
+  // exactly their value sets, so one cache entry per id would hand one of them the other's codes.
+  const key = artifactKey(artifact);
+  const cached = cache.get(key);
   if (cached) return cached;
 
   const result = readTerminology(artifact);
   // Only successes are cached. A failure is usually "the build step has not run yet", and caching that
   // would keep refusing after it does — the same reasoning `loadOfficialArtifact` applies to read errors.
-  if (result.ok) cache.set(catalogId, result);
+  if (result.ok) cache.set(key, result);
   return result;
 }
 
@@ -97,13 +101,13 @@ function readTerminology(artifact: OfficialArtifact): LoadedTerminology {
 
   let raw: string;
   try {
-    raw = readFileSync(new URL(`${catalogId}/${pin.file}`, TERMINOLOGY_ROOT), "utf8");
+    raw = readFileSync(new URL(`${catalogId}/${pin.file}`, terminologyRoot(artifact)), "utf8");
   } catch (err) {
     const absent = (err as NodeJS.ErrnoException)?.code === "ENOENT";
     return {
       ok: false,
       problem: absent
-        ? `${catalogId}: official terminology is not present (measures/official/${catalogId}/${pin.file}). ` +
+        ? `${catalogId}: official terminology is not present (measures/${artifactKind(artifact)}/${catalogId}/${pin.file}). ` +
           `It is fetched at build, never committed — run 'pnpm vendor:official' for this measure. ` +
           `Note this is NOT what 'pnpm resolve-valuesets' produces: official execution uses the ` +
           `artifact's own expansions, not our VSAC import.`
@@ -159,23 +163,26 @@ export function verifyTerminology(catalogId: string, expectedSha: string, raw: s
 }
 
 /**
- * An expander over the artifacts' own terminology, keyed by catalog id.
+ * An expander over the artifacts' own terminology, keyed by the ARTIFACT being expanded.
  *
- * Keyed by MEASURE and not by a single flat OID map on purpose. CMS122 and CMS125 share 23 of their
- * canonicals today, so a flat map would work — right up until two artifacts are pinned at different
- * upstream commits and disagree about one expansion, at which point whichever loaded first would
- * silently win for both. The sidecar belongs to the artifact; so does the lookup.
+ * Not a single flat OID map, on purpose. CMS122 and CMS125 share 23 of their canonicals today, so a flat
+ * map would work — right up until two artifacts are pinned at different upstream commits and disagree
+ * about one expansion, at which point whichever loaded first would silently win for both. And not keyed
+ * by catalog id either, since a WorkWell translation shares its measure's id: looking the artifact up
+ * by id again would expand a 2027 translation with the 2026 draft's codes. The sidecar belongs to the
+ * artifact; so does the lookup.
+ *
+ * The argument is accepted and ignored so callers that still pass the old artifact lookup keep working
+ * (several scripts outside the typecheck do).
  *
  * Returns `[]` for an unexpandable OID rather than throwing: `expandArtifactTerminology` treats both
  * identically (its refusal fires either way), and a sentence-per-problem beats an exception when the
  * router is trying to report every misconfiguration at once.
  */
 export function officialTerminologyExpander(
-  artifactFor: (catalogId: string) => OfficialArtifact | null,
-): (oid: string, catalogId: string) => Promise<ExpandedCode[]> {
-  return async (oid, catalogId) => {
-    const artifact = artifactFor(catalogId);
-    if (!artifact) return [];
+  _legacyArtifactLookup?: unknown,
+): (oid: string, artifact: OfficialArtifact) => Promise<ExpandedCode[]> {
+  return async (oid, artifact) => {
     const loaded = loadOfficialTerminology(artifact);
     return loaded.ok ? (loaded.codesByOid.get(oid) ?? []) : [];
   };

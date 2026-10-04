@@ -655,6 +655,103 @@ test("GET /api/runs/:id/qrda → well-formed QRDA III XML; 404 unknown run", asy
   assert.equal((await get(`/api/runs/${crypto.randomUUID()}/qrda`))!.status, 404);
 });
 
+/** A COMPLETED single-measure run whose rows carry the given official evidence, one per subject. */
+async function runWithEvidence(evidence: unknown[]): Promise<string> {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms137",
+    triggeredBy: "test",
+    requestedScope: { measureId: "cms137" },
+    measurementPeriodStart: "2027-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2027-12-31T23:59:59.999Z",
+    status: "COMPLETED",
+    startedAt: "2027-03-01T00:00:00.000Z",
+    completedAt: "2027-03-01T00:10:00.000Z",
+  });
+  await outcomeStore.recordOutcomes(
+    // Explicit, increasing evaluatedAt: the store reads rows in (evaluated_at, id) order, so the order a
+    // test lists the evidence in is the order every reader sees it in, never a coin toss on random ids.
+    evidence.map((ev, i) => ({ runId: run.id, subjectId: `derived-${i}-${crypto.randomUUID()}`, measureId: "cms137", evaluationPeriod: "2027-01-01", status: "OVERDUE" as const, evidence: ev, evaluatedAt: new Date(Date.UTC(2027, 2, 1, 0, 0, i)).toISOString() })),
+  );
+  return run.id;
+}
+
+const populations = [
+  { populationType: "initial-population", result: true },
+  { populationType: "denominator", result: true },
+  { populationType: "numerator", result: false },
+];
+const derivedEvidence = (period = { start: "2027-01-01", end: "2027-12-31" }) => ({
+  expressionResults: [],
+  official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation-2027", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1", engine: "fqm-execution", artifactSha256: "sha256:derived", populationResults: populations, measurementPeriod: period },
+});
+const officialEvidence = (period: { start: string; end: string }) => ({
+  expressionResults: [],
+  official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:official", populationResults: populations, measurementPeriod: period },
+});
+
+test("a run scored by a WorkWell translation: QRDA refuses it (no CMS identity to carry), the MeasureReport names the translation", async () => {
+  const runId = await runWithEvidence([derivedEvidence(), derivedEvidence()]);
+  for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`]) {
+    const res = (await get(path))!;
+    assert.equal(res.status, 422, path);
+    assert.equal(((await res.json()) as { error: string }).error, "derived_logic_not_reportable", path);
+  }
+  const mr = (await get(`/api/runs/${runId}/measure-report`))!;
+  assert.equal(mr.status, 200);
+  const report = (await mr.json()) as { measure: string };
+  assert.equal(report.measure, "urn:workwell:measure:cms137:translation-2027", "reported under the translation's own canonical, not a fallback");
+  assert.equal((await get(`/api/runs/${runId}/measure-report?type=bundle`))!.status, 200, "a bundle of one logic is still exported");
+  assert.doesNotMatch(JSON.stringify(report), /madie\.cms\.gov|:official:|137FHIR/, "and nothing in it claims CMS's measure");
+});
+
+test("a run whose rows were scored for two different years is refused rather than labelled with the first row", async () => {
+  const runId = await runWithEvidence([officialEvidence({ start: "2026-01-01", end: "2026-12-31" }), officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
+  for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`, `/api/runs/${runId}/measure-report`, `/api/runs/${runId}/measure-report?type=bundle`, `/api/runs/${runId}/measure-report?type=individual`]) {
+    const res = (await get(path))!;
+    assert.equal(res.status, 422, path);
+    assert.equal(((await res.json()) as { error: string }).error, "mixed_logic", path);
+  }
+  const same = await runWithEvidence([officialEvidence({ start: "2027-01-01", end: "2027-12-31" }), officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
+  assert.equal((await get(`/api/runs/${same}/qrda?format=xml`))!.status, 200, "one logic, one period: exported as before");
+  // A translated row mixed with CMS's: QRDA names the mix, whichever row is read first, not the translation.
+  for (const evidence of [[derivedEvidence(), officialEvidence({ start: "2026-01-01", end: "2026-12-31" })], [officialEvidence({ start: "2026-01-01", end: "2026-12-31" }), derivedEvidence()]]) {
+    const mixed = await runWithEvidence(evidence);
+    for (const path of [`/api/runs/${mixed}/qrda?format=xml`, `/api/runs/${mixed}/qrda1`]) {
+      const res = (await get(path))!;
+      assert.equal(res.status, 422, path);
+      assert.equal(((await res.json()) as { error: string }).error, "mixed_logic", path);
+    }
+  }
+});
+
+test("authored rows and official rows in one run are two logics: refused, not summed under the artifact", async () => {
+  // An open run that took authored rows before a routing flip and official rows after it.
+  const authored = { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] };
+  const official2027 = officialEvidence({ start: "2027-01-01", end: "2027-12-31" });
+  // Both orders: with cms137 not routed here, the run's own rows decide, and an authored row read FIRST
+  // must not send the run down the status histogram unrefused.
+  for (const [order, evidence] of [["authored first", [authored, official2027]], ["official first", [official2027, authored]]] as const) {
+    const runId = await runWithEvidence([...evidence]);
+    for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`, `/api/runs/${runId}/measure-report`, `/api/runs/${runId}/measure-report?type=bundle`, `/api/runs/${runId}/measure-report?type=individual`]) {
+      const res = (await get(path))!;
+      assert.equal(res.status, 422, `${order}: ${path}`);
+      assert.equal(((await res.json()) as { error: string }).error, "mixed_logic", `${order}: ${path}`);
+    }
+  }
+  // An authored-only run still takes the status histogram and exports.
+  const authoredOnly = await runWithEvidence([authored, authored]);
+  assert.equal((await get(`/api/runs/${authoredOnly}/measure-report`))!.status, 200);
+  // An ERRORED row was scored by nothing, so it is not a second logic: the run still exports.
+  const errored = await runWithEvidence([{ evaluationError: "CQL engine failure", message: "boom" }, officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
+  for (const path of [`/api/runs/${errored}/qrda?format=xml`, `/api/runs/${errored}/qrda1`, `/api/runs/${errored}/measure-report`, `/api/runs/${errored}/measure-report?type=individual`]) {
+    assert.equal((await get(path))!.status, 200, path);
+  }
+});
+
 test("Codex P2: a non-string triggeredBy is coerced to 'manual', never a 500", async () => {
   // Untrusted body: `{"triggeredBy":123}` must not throw `raw.trim is not a function`.
   const res = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: 123 });
@@ -1194,10 +1291,9 @@ test("the summary MeasureReport and the QRDA III page through a run larger than 
 });
 
 /**
- * The paged sum's exit condition is `page.length < AGGREGATE_PAGE`. A run of EXACTLY a page multiple
- * exercises the other way that can go wrong — the final full page is followed by an empty one, and a
- * loop that stopped one page early or read the last page twice would be off by a whole page's worth of
- * subjects, invisibly, since every row is well-formed (GLM review, L3). 4,000 = 2 x AGGREGATE_PAGE.
+ * The sum once paged at 2,000 rows (GLM review, L3): a run of EXACTLY a page multiple is where a loop
+ * that stopped one page early or read the last page twice would be off by a whole page of subjects,
+ * invisibly. The read is no longer paged; the case stays as a regression for any future paging.
  */
 test("a run of exactly two aggregation pages sums every subject once", async () => {
   await get("/api/runs");
@@ -1208,7 +1304,7 @@ test("a run of exactly two aggregation pages sums every subject once", async () 
     measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
     status: "COMPLETED", startedAt: "2026-09-06T00:00:00.000Z", completedAt: "2026-09-06T00:10:00.000Z",
   });
-  const N = 4000; // exactly 2 x AGGREGATE_PAGE (runs.ts) — if that constant changes, change this multiple with it
+  const N = 4000; // exactly 2 x the former 2,000-row page
   const rows = Array.from({ length: N }, (_, i) => ({
     runId: run.id, subjectId: `pat-${String(i + 1).padStart(5, "0")}`, measureId: "cms122", evaluationPeriod: "2026-01-01",
     status: i % 4 === 0 ? "OVERDUE" : "COMPLIANT",
@@ -1374,11 +1470,12 @@ test("a compaction pass that starts between the pre-read check and the read is c
     startedAt: "2019-06-01T00:00:00.000Z", completedAt: "2019-06-01T00:00:00.000Z",
   });
   await outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-001", measureId: "audiogram", evaluationPeriod: "2019", status: "COMPLIANT", evidence: {}, evaluatedAt: run.startedAt });
-  // Nothing has compacted yet, so the pre-read check passes; the FIRST row read then behaves as if the
-  // nightly pass wrote its intent at that instant. The cutoff predates every other test's runs.
-  const original = stores.outcomes.listOutcomes.bind(stores.outcomes);
+  // Nothing has compacted yet, so the pre-read check passes; the read of the run's rows (the export's
+  // one membership read) then behaves as if the nightly pass wrote its intent at that instant. The
+  // cutoff predates every other test's runs.
+  const original = stores.outcomes.listOutcomeMembershipsForRun.bind(stores.outcomes);
   let armed = true;
-  stores.outcomes.listOutcomes = async (runId: string, opts?: { limit?: number; offset?: number }) => {
+  stores.outcomes.listOutcomeMembershipsForRun = async (runId: string, measureId: string) => {
     if (armed) {
       armed = false;
       await stores.events.appendAudit({
@@ -1386,14 +1483,15 @@ test("a compaction pass that starts between the pre-read check and the read is c
         refRunId: null, refCaseId: null, refMeasureVersionId: null, payload: { cutoff: "2020-01-01T00:00:00.000Z", retentionDays: 1 },
       });
     }
-    return original(runId, opts);
+    return original(runId, measureId);
   };
   try {
     const res = (await get(`/api/runs/${run.id}/measure-report?type=summary`))!;
+    assert.equal(armed, false, "the stub sits on the read the export actually makes");
     assert.equal(res.status, 409, "the post-read check refuses what the pre-read check let through");
     assert.equal(((await res.json()) as { error: string }).error, "run_compacted");
   } finally {
-    stores.outcomes.listOutcomes = original;
+    stores.outcomes.listOutcomeMembershipsForRun = original;
   }
 });
 

@@ -133,11 +133,14 @@ test("PR-8: the engine declares the ARTIFACT's logic identity for routed measure
     { authored, ...offlineChecks, expand: async () => [{ code: "a", system: "s" }] },
   );
 
-  const declared = routed.logicVersionFor?.("cms122");
+  const declared = routed.logicFor?.("cms122", "2026-06-15");
   assert.ok(declared, "a routed measure must declare an identity — its absence is the silent failure");
-  assert.equal(declared, officialLogicVersion(loadOfficialArtifact("cms122")!), "and it is the artifact's, computed the one way");
-  assert.equal(routed.logicVersionFor?.("audiogram"), undefined, "an unrouted measure declares nothing — it IS authored");
-  assert.equal(routed.logicVersionFor?.("nonexistent"), undefined);
+  assert.equal(declared.version, officialLogicVersion(loadOfficialArtifact("cms122")!), "and it is the artifact's, computed the one way");
+  assert.equal(declared.kind, "official");
+  assert.equal(declared.warning, null, "the 2026 artifact covers 2026");
+  assert.match(routed.logicFor?.("cms122", "2027-01-15")?.warning ?? "", /prior-year vintage/, "and says so for a year it does not cover");
+  assert.equal(routed.logicFor?.("audiogram", "2026-06-15"), undefined, "an unrouted measure declares nothing — it IS authored");
+  assert.equal(routed.logicFor?.("nonexistent", "2026-06-15"), undefined);
 });
 
 test("PR-8: the identity moves with the artifact and can never collide with an authored ELM hash", () => {
@@ -301,8 +304,8 @@ test("the expander is keyed by MEASURE, not by a single flat OID map", async () 
     routedEngineForEnv({ WORKWELL_OFFICIAL_MEASURES: "cms122" } as never, {
       authored: authoredEngine(),
       ...offlineChecks,
-      expand: async (oid, catalogId) => {
-        seen.push([oid, catalogId]);
+      expand: async (oid, artifact) => {
+        seen.push([oid, artifact.manifest.catalogId]);
         return [];
       },
     }),
@@ -343,7 +346,7 @@ test("the scheduler's env allowlist carries the flag — the nightly run must ro
   const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
   const allowlist = server.slice(server.indexOf("const schedulerEnv"), server.indexOf("const schedulerInterval"));
   // WORKWELL_FQM_WORKER since #604: the escape hatch must reach the nightly, the workload it exists for.
-  for (const key of ["WORKWELL_OFFICIAL_MEASURES", "WORKWELL_INCREMENTAL_EVAL", "WORKWELL_VSAC_API_KEY", "WORKWELL_FQM_WORKER", "WORKWELL_FQM_WORKERS"]) {
+  for (const key of ["WORKWELL_OFFICIAL_MEASURES", "WORKWELL_DERIVED_MEASURES", "WORKWELL_INCREMENTAL_EVAL", "WORKWELL_VSAC_API_KEY", "WORKWELL_FQM_WORKER", "WORKWELL_FQM_WORKERS"]) {
     assert.ok(
       allowlist.includes(`${key}: process.env.${key}`),
       `${key} must be threaded to schedulerTick, or the nightly run behaves differently from a manual one`,

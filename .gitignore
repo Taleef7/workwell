@@ -46,6 +46,8 @@ backend/src/test/resources/logback-test.xml
 # each measure's committed manifest.json. NOT committed: these expansions carry thousands of AMA CPT
 # and SNOMED CT codes, which this public repo has no licence to redistribute.
 /backend-ts/measures/official/*/terminology.json
+# The same, for WorkWell's translations (decision 3): their 2027 expansions are just as licensed.
+/backend-ts/measures/derived/*/terminology.json
 
 # Git worktrees (isolated workspaces — project-local)
 .worktrees/

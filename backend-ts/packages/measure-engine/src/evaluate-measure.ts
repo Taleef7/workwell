@@ -45,6 +45,19 @@ export interface ExpressionResult {
  * denominator-exception, and it inverts for a measure whose numerator counts failures (ADR-031, PR-3).
  */
 export interface OfficialEvidence {
+  /**
+   * `"derived"` when a WorkWell translation of the measure scored it, for a year CMS's artifact does not
+   * cover; absent when CMS's artifact did (so every outcome persisted before translations existed reads
+   * unchanged). A derived outcome's `ecqmId` is always `null`: a reader must check `kind` before falling
+   * back to any CMS identity, because naming CMS's measure over a translation's counts is a relabel.
+   */
+  kind?: "derived";
+  /** The translation's own label, e.g. "WorkWell translation of CMS137v15". Derived only. */
+  label?: string;
+  /** The translation's WorkWell canonical. Derived only. */
+  url?: string;
+  /** The CMS measure it was translated from, as provenance text, e.g. `CMS137v15`. Derived only. */
+  derivedFrom?: string;
   ecqmId: string | null;
   version: string;
   engine: string;

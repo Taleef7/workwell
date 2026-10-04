@@ -446,7 +446,7 @@ async function preview(
         persisted: false,
         evaluatedAt: new Date().toISOString(),
         evaluationDate: evalDate,
-        engine: engine.logicVersionFor?.(measureId) ?? "authored",
+        engine: engine.logicFor?.(measureId, evalDate)?.version ?? "authored",
       },
       { start: null, end: evalDate },
       { start: null, end },

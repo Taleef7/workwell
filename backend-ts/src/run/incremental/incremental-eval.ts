@@ -56,8 +56,9 @@ export interface IncrementalDeps {
   valueSetExpansionHashes?: ReadonlyMap<string, string>;
   /**
    * The engine's OWN logic identity for a measure it does not evaluate with WorkWell's authored ELM —
-   * i.e. `RoutedEngine.logicVersionFor`, supplied by the run pipeline from the very engine that will
-   * produce the outcomes. Returning `undefined` (or omitting this) means "authored", and the ELM hash
+   * i.e. `RoutedEngine.logicFor(measureId, evalDate).version`, supplied by the run pipeline from the very
+   * engine that will produce the outcomes, for the date it evaluates (a translation scores another year
+   * than CMS's draft, so the identity is per date). Returning `undefined` (or omitting this) means "authored", and the ELM hash
    * below applies unchanged.
    *
    * Without it the cache is actively WRONG for an official-routed measure rather than merely

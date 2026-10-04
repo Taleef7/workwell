@@ -30,55 +30,38 @@ import {
   type RateAggregate,
 } from "./measure-report.ts";
 
-/**
- * Rows per page for {@link runProducedOfficialEvidence}'s scan, which still pages because it stops at
- * the first evaluated row and is not the hot path. `aggregateOfficialRun` no longer pages at all — see
- * its own note.
- */
-export const AGGREGATE_PAGE = 2000;
-
 export interface OfficialRunAggregate extends RateAggregate {
   /** The artifact identity read off the first evaluated row; null when no row carried one. */
   official: OfficialReportIdentity | null;
   /**
-   * Whether the run's rows FOR THIS MEASURE carry official population evidence — the same question
-   * {@link runProducedOfficialEvidence} answers, decided by the same rule (the first EVALUATED row
-   * settles it; an errored row carries no engine's evidence and is skipped).
+   * Whether ANY evaluated row of the run FOR THIS MEASURE carries official population evidence (an
+   * errored row carries no engine's evidence and is skipped). Scoped to the measure because ADR-072
+   * admits a run that mixes engines across measures.
    *
    * It travels with the counts so a caller that is going to aggregate anyway reads the rows ONCE.
    * `officialMeasureRate` asked the probe and then aggregated, which on the pilot was two reads of the
    * same 20,000 evidence blobs per measure, six measures deep, on the programs overview's cold path.
    */
   producedOfficialEvidence: boolean;
+  /**
+   * True when the run's evaluated rows for this measure were scored by MORE THAN ONE logic — different
+   * artifacts (CMS's draft and a WorkWell translation, or two vendorings) or different measurement
+   * periods. One report cannot honestly name one measure and one period over such rows, so the
+   * exporters refuse it. A run created by `/evaluate` or `/import` resolves the date per call, which is
+   * how one open run can hold more than one year.
+   */
+  identityConflict: boolean;
 }
 
 /**
- * Whether ANY evaluated row of the run FOR THIS MEASURE carries official population evidence. Scoped
- * to the measure because ADR-072 admits a run that mixes engines: an ALL_PROGRAMS run over a routed
- * cms125 and an authored occupational measure would otherwise answer "official" for both from
- * whichever row the store returned first. An errored row says
- * nothing about which engine the run used, so it is skipped, and the scan continues page by page until
- * a row that was evaluated answers; only a run in which EVERY subject errored reads to the end, and that
- * run has nothing to export either way. First page of one: the overwhelmingly common case (first row
- * evaluated fine) costs a single row.
+ * What makes two rows' scoring the same logic: the artifact kind and hash, and the period counted. An
+ * evaluated row with no official evidence was scored by authored CQL, which is a logic of its own: an
+ * open run that took authored rows before a routing flip and official rows after must not have the
+ * authored memberships summed under the official artifact's name.
  */
-export async function runProducedOfficialEvidence(
-  os: Pick<OutcomeStore, "listOutcomes">,
-  runId: string,
-  measureId: string,
-): Promise<boolean> {
-  let limit = 1;
-  let offset = 0;
-  for (;;) {
-    const page = await os.listOutcomes(runId, { limit, offset, measureId });
-    for (const row of page) {
-      if (isEvaluationErrorEvidence(row.evidence)) continue;
-      return officialMembership(row.evidence) !== null;
-    }
-    if (page.length < limit) return false;
-    offset += page.length;
-    limit = AGGREGATE_PAGE;
-  }
+export function scoringIdentityKey(identity: OfficialReportIdentity | null): string {
+  if (!identity) return "authored";
+  return JSON.stringify([identity.kind ?? "official", identity.artifactSha256 ?? null, identity.measurementPeriod?.start ?? null, identity.measurementPeriod?.end ?? null]);
 }
 
 export async function aggregateOfficialRun(
@@ -109,9 +92,9 @@ export async function aggregateOfficialRun(
   // wrong twice over, and both halves were caught in review: `listOutcomesWithRun` has a LEAN
   // projection with no `evidence_json` at all, and `for (const row of await …)` awaits the whole
   // parsed array, so nothing is folded as it arrives.
-  // ORDER-INDEPENDENT, and it had to become so (review of #610). `runProducedOfficialEvidence` lets
-  // the FIRST evaluated row settle provenance, which was deterministic under `ORDER BY evaluated_at,
-  // id`; with the sort dropped "first" is whatever the planner returns, and `officialMeasureRate`
+  // ORDER-INDEPENDENT, and it had to become so (review of #610). Letting the FIRST evaluated row settle
+  // provenance was deterministic under `ORDER BY evaluated_at, id`; with the sort dropped "first" is
+  // whatever the planner returns, and `officialMeasureRate`
   // memoizes whichever answer landed — so one `(run, measure)` could yield a rate on one process and
   // `null` on another. `officialMembership` returns null for an unreadable `populationResults` as well
   // as for authored evidence, so a single malformed row arriving first would have made a whole
@@ -122,11 +105,19 @@ export async function aggregateOfficialRun(
   // `aggregator.add` already calls `officialMembership` on every non-error row (`membershipRatesFor` →
   // `membershipFor`), so every alert was already being emitted.
   let producedOfficialEvidence = false;
+  let identityConflict = false;
+  let firstKey: string | null = null;
   for (const row of await os.listOutcomeMembershipsForRun(runId, measureId)) {
     aggregator.add(row);
     if (isEvaluationErrorEvidence(row.evidence)) continue;
-    if (!identity) identity = officialReportIdentity(row.evidence);
+    const rowIdentity = officialReportIdentity(row.evidence);
+    if (!identity) identity = rowIdentity;
+    // Every evaluated row is compared, not just the first: the first row naming the report is only honest
+    // if every other row was scored the same way. An errored row was scored by nothing and is skipped above.
+    const key = scoringIdentityKey(rowIdentity);
+    if (firstKey === null) firstKey = key;
+    else if (key !== firstKey) identityConflict = true;
     producedOfficialEvidence ||= officialMembership(row.evidence) !== null;
   }
-  return { ...aggregator.finish(), official: identity, producedOfficialEvidence };
+  return { ...aggregator.finish(), official: identity, producedOfficialEvidence, identityConflict };
 }

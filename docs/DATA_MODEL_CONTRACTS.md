@@ -5,7 +5,7 @@
 cited from source; keep them. CSV columns are only APPENDED, never inserted.
 
 ## 4) Idempotency Contract for Case Upsert
-Key `UNIQUE(employee_id, measure_version_id, evaluation_period)`; never a duplicate case. Non-compliant,
+Key `UNIQUE(employee_id, measure_id, evaluation_period)` (no version: a new year's logic opens no new key); never a duplicate case. Non-compliant,
 no row: insert `OPEN` (priority from the outcome); later runs update that row. `COMPLIANT`: `RESOLVED`,
 `closed_at=NOW()`, `closed_reason='AUTO_RESOLVED'`, `closed_by=NULL` (a system closure); a no-op on a
 terminal case.
@@ -114,7 +114,12 @@ no single window (#650), so no screen, card, CSV or AI fallback states one.
 `official:<population>` or multi-rate `official:<Rate label>:<population>`); `official` when
 official-routed (`populationResults`, read by MeasureReport/QRDA; multi-rate adds `rates`, stratified adds
 `strata` of `{ id, code, result, appliesResult }` keyed by `Measure.group.stratifier.id`, both otherwise
-absent); `qrda1Import` on QRDA-I imports (finalize requires it on every outcome).
+absent); `qrda1Import` on QRDA-I imports (finalize requires it on every outcome). An outcome scored by a
+WorkWell translation (decision 3) adds `official.kind: "derived"`, `label`, `url` and `derivedFrom`, and its
+`ecqmId` is `null`: read `kind` before falling back to any CMS identity. QRDA I/III refuse such a run
+(422 `derived_logic_not_reportable`); a run whose evaluated rows were scored by more than one logic (CMS's
+artifact, a translation, authored CQL) or period is refused by QRDA I/III and every MeasureReport type
+(422 `mixed_logic`); an errored row counts as no logic.
 - **Evaluation failure** replaces the evidence with `{ "evaluationError": "CQL engine failure",
 "message": "<error text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`.
 

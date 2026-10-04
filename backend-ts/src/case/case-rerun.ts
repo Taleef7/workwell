@@ -26,7 +26,7 @@ import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { priorityFor, nextActionFor } from "./case-logic.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { caseRerunMeasurementPeriod } from "../run/run-period.ts";
-import { OFFICIAL_LOGIC_VERSION_PREFIX } from "../wiring/executor-router.ts";
+import { isFqmScored, type RoutedEngine } from "../wiring/executor-router.ts";
 import { outcomeForCase } from "./case-outcome.ts";
 
 export interface RerunDeps {
@@ -34,7 +34,8 @@ export interface RerunDeps {
   events: CaseEventStore;
   outcomes: OutcomeStore;
   runStore: RunStore;
-  engine: EvaluateMeasureBinding;
+  /** `logicFor` is optional because the authored engine has none: every unrouted measure reads it as absent. */
+  engine: EvaluateMeasureBinding & Partial<Pick<RoutedEngine, "logicFor">>;
   employees?: readonly EmployeeProfile[];
 }
 
@@ -131,8 +132,9 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     const result = await deps.engine.evaluate({ measureId: existing.measureId, patientBundle: bundle, evaluationDate: evalDate });
     verifiedStatus = result.outcome;
     evidence = result.evidence;
-    const logicVersionFor = (deps.engine as { logicVersionFor?: (measureId: string) => string | undefined }).logicVersionFor;
-    outOfPopulation = (logicVersionFor?.(existing.measureId)?.startsWith(OFFICIAL_LOGIC_VERSION_PREFIX) ?? false)
+    // The date the evaluation used, so the answer describes the logic that just ran (a 2026 case
+    // verified during 2027 is scored by the 2027 logic, as before — the case keeps its own period).
+    outOfPopulation = isFqmScored(deps.engine.logicFor?.(existing.measureId, evalDate))
       ? result.inInitialPopulation === false
       : undefined;
   } catch (err) {

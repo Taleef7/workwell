@@ -432,6 +432,7 @@ jobs:
         run: |
           pnpm exec node --import tsx --test \
             src/wiring/official-terminology.test.ts \
+            src/wiring/derived-routing.test.ts \
             src/wiring/corpus-membership.test.ts \
             src/wiring/official-corpus-outcomes.test.ts \
             src/wiring/corpus-official-population.test.ts \

@@ -72,9 +72,9 @@ test("a manifest with no terminology pin refuses — an artifact vendored before
   assert.match((loaded as { problem: string }).problem, /records no terminology pin/);
 });
 
-test("the expander returns nothing for a measure it has no artifact for", async () => {
-  const expand = officialTerminologyExpander(() => null);
-  assert.deepEqual(await expand("2.16.1", "cms999"), []);
+test("the expander returns nothing for an artifact whose terminology will not load", async () => {
+  const expand = officialTerminologyExpander();
+  assert.deepEqual(await expand("2.16.1", { manifest: { catalogId: "cms999" } } as never), []);
 });
 
 // ---------------------------------------------------------------------------------------------------

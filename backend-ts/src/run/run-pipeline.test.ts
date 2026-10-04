@@ -1269,7 +1269,14 @@ test("Codex P2: an out-of-cohort EXCLUDED outcome CLOSES an EXISTING active case
  * visibly different rather than coincidentally equal.
  */
 const adr040Engine = (logicVersionFor?: (m: string) => string | undefined): RunPipelineDeps["engine"] => ({
-  ...(logicVersionFor ? { logicVersionFor } : {}),
+  ...(logicVersionFor
+    ? {
+        logicFor: (m: string) => {
+          const version = logicVersionFor(m);
+          return version === undefined ? undefined : { version, kind: "official" as const, warning: null };
+        },
+      }
+    : {}),
   async evaluate() {
     return { subjectId: "ignored", measure: "Audiogram", outcome: "OVERDUE", evidence: { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] } };
   },
@@ -1303,7 +1310,7 @@ test("ADR-040: the pipeline records the ENGINE's logic identity, not the authore
   assert.equal(
     row!.logicVersion,
     official,
-    "the pipeline must read logicVersionFor off the engine it evaluated with — otherwise a measure " +
+    "the pipeline must read logicFor off the engine it evaluated with — otherwise a measure " +
       "running official CQL is fingerprinted with the authored ELM and its outcomes are copied forward",
   );
   assert.equal(row!.nextTransitionAt, "2026-06-15", "official ⇒ same-day only (the rolling MP makes nothing terminal)");
@@ -1358,11 +1365,11 @@ function batchProbe(
     batches,
     singles,
     engine: {
-      // Models the real router's identity contract (ADR-040): a routed measure declares
-      // `official-fqm:…`, everything else declares the authored ELM hash. ADR-043's empty-IPP WARN is
-      // gated on this, so a probe that omitted it would silently make every WARN test vacuous.
-      logicVersionFor: (measureId: string) =>
-        batchable.has(measureId) ? "official-fqm:1.0.000:artifact-sha:terminology-sha" : "sha256:authored",
+      // Models the real router's identity contract (ADR-040): a routed measure declares CMS's artifact,
+      // everything else declares nothing (authored). ADR-043's empty-IPP WARN is gated on this, so a
+      // probe that omitted it would silently make every WARN test vacuous.
+      logicFor: (measureId: string) =>
+        batchable.has(measureId) ? { version: "official-fqm:1.0.000:artifact-sha:terminology-sha", kind: "official" as const, warning: null } : undefined,
       async evaluate(input) {
         singles.push(`${input.measureId}`);
         return {
@@ -1689,7 +1696,7 @@ test("ADR-078: a subject the official logic finds OUTSIDE the initial population
           ? { outcome: "MISSING_DATA", evidence: { official: { populationResults: { ipp: false, denom: false, numer: false, denex: false, denexcep: false } } }, inInitialPopulation: false }
           : { outcome: "OVERDUE", evidence: { official: { populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } } }, inInitialPopulation: true };
       },
-      logicVersionFor: () => "official-fqm:1.0.000:artifact:terminology",
+      logicFor: () => ({ version: "official-fqm:1.0.000:artifact:terminology", kind: "official" as const, warning: null }),
     } as unknown as RunPipelineDeps["engine"],
     employees: EMPLOYEES.slice(0, 2),
     actor: "cm@workwell.dev",
@@ -1715,6 +1722,47 @@ test("ADR-078: a subject the official logic finds OUTSIDE the initial population
   assert.equal(captured.filter((e) => e.eventType === "CASE_CREATED").length, 0);
 });
 
+test("ADR-078 holds for a WorkWell translation: a 2027 out-of-population subject opens no case, and the run names the translation", async () => {
+  const db = await createSqliteD1(join(tmpdir(), `workwell-pipeline-derived-${crypto.randomUUID()}.sqlite`));
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const caseStore = new SqliteCaseStore(db);
+  const runStore = new SqliteRunStore(db);
+  const outcomeStore = new SqliteOutcomeStore(db);
+  const outside = EMPLOYEES[1]!.externalId;
+  const dates: string[] = [];
+  const deps: RunPipelineDeps = {
+    runStore,
+    outcomeStore,
+    caseStore,
+    engine: {
+      evaluate: async (input: { measureId: string; patientBundle: unknown }) => {
+        const id = (input.patientBundle as { entry: Array<{ resource: { id: string } }> }).entry[0]!.resource.id;
+        return id === outside
+          ? { outcome: "MISSING_DATA", evidence: { official: { kind: "derived", populationResults: { ipp: false } } }, inInitialPopulation: false }
+          : { outcome: "OVERDUE", evidence: { official: { kind: "derived", populationResults: { ipp: true, denom: true, numer: false } } }, inInitialPopulation: true };
+      },
+      // A translation, not CMS's artifact: a predicate that only recognised `official-fqm:` would treat
+      // this as authored and open a case for every out-of-population patient.
+      logicFor: (_measureId: string, evaluationDate: string) => {
+        dates.push(evaluationDate);
+        return { version: "derived-fqm:ww-2027.1:sha256:e:sha256:d", kind: "derived" as const, label: "WorkWell translation of CMS137v15", warning: null };
+      },
+    } as unknown as RunPipelineDeps["engine"],
+    employees: EMPLOYEES.slice(0, 2),
+    actor: "cm@workwell.dev",
+    events: { async appendAudit() {}, async appendAudits() {}, async recordCaseEvents() {} },
+  };
+  const res = await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2027-03-01", triggeredBy: "test" });
+  const cases = await caseStore.listCases({ limit: 100 });
+  assert.deepEqual(cases.map((c) => c.employeeId), [EMPLOYEES[0]!.externalId], "only the in-population gap opened a case");
+  const rows = await outcomeStore.listOutcomes(res.runId);
+  assert.equal(rows.find((r) => r.subjectId === outside)?.outOfPopulation, true, "the out-of-population flag is recorded for a translation too");
+  assert.ok(dates.length > 0 && dates.every((d) => d === "2027-03-01"), "the engine was asked about the date the run evaluated");
+  const logs = await runStore.listLogs(res.runId, 500);
+  assert.ok(logs.some((l) => l.level === "INFO" && /scored with WorkWell translation of CMS137v15/.test(l.message)), "the run log names the translation that scored it");
+  assert.ok(!logs.some((l) => l.level === "WARN" && /prior-year vintage/.test(l.message)), "and carries no prior-year warning");
+});
+
 test("ADR-078 is gated on official routing: an AUTHORED measure's out-of-population subject still opens a case", async () => {
   // `deriveInInitialPopulation` emits the flag for authored measures too (their CQL has a boolean
   // `Initial Population` define). Not enrolled in a hearing conservation program is a workflow fact whose
@@ -1728,7 +1776,7 @@ test("ADR-078 is gated on official routing: an AUTHORED measure's out-of-populat
     caseStore,
     engine: {
       evaluate: async () => ({ outcome: "MISSING_DATA", evidence: { expressionResults: [{ define: "Initial Population", result: false }] }, inInitialPopulation: false }),
-      logicVersionFor: () => "sha256:authored",
+      logicFor: () => undefined,
     } as unknown as RunPipelineDeps["engine"],
     employees: EMPLOYEES.slice(0, 1),
     actor: "cm@workwell.dev",
@@ -1909,7 +1957,7 @@ test("a chunk's measures are calculated side by side, so a worker pool can take 
   let maxInFlight = 0;
   const measures = new Set<string>();
   const engine: RunPipelineDeps["engine"] = {
-    logicVersionFor: () => "official-fqm:1.0.000:artifact-sha:terminology-sha",
+    logicFor: () => ({ version: "official-fqm:1.0.000:artifact-sha:terminology-sha", kind: "official" as const, warning: null }),
     async evaluate(input) {
       return { subjectId: "ignored", measure: input.measureId, outcome: "COMPLIANT" as const, evidence: { expressionResults: [] } };
     },
