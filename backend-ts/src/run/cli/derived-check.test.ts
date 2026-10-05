@@ -459,7 +459,12 @@ test("a translation whose codes differ from the release fails terminology-equiva
   const { deps, errors, logs } = setup(f);
   const before = readFileSync(f.manifestPath, "utf8");
   assert.equal(await main(deckArgs(f, "--record"), deps), 1);
-  assert.match(errors.join("\n"), new RegExp(`terminology-equivalence: 1 declared value set\\(s\\) differ from the CSV: ${REQUIRED[0]!.replace(/\./g, "\\.")}`));
+  // Matched as a string, not a regex built from data: an OID is data, and escaping it by hand is the
+  // CodeQL "incomplete escaping" shape this repo already retired once (4b727c27).
+  assert.ok(
+    errors.join("\n").includes(`terminology-equivalence: 1 declared value set(s) differ from the CSV: ${REQUIRED[0]}`),
+    `expected the differing set to be named; got:\n${errors.join("\n")}`,
+  );
   assert.match(logs.join("\n"), /missing 1, extra 0\) — DIFFERS/);
   assert.equal(readFileSync(f.manifestPath, "utf8"), before);
 });
@@ -677,7 +682,11 @@ test("--madie refuses a carried shared library that is not upstream's once strip
   const status = String(base.bundle.entry.find((e) => e.resource["name"] === "Status")!.resource["version"]);
   const differs = setup(f, { loadCases: () => loadedCases(undefined, undefined, altered) });
   assert.equal(await main(["--catalog-id", "cms137", "--madie"], differs.deps), 1);
-  assert.match(differs.errors.join("\n"), new RegExp(`shared library Status\\|${status.replace(/\./g, "\\.")} differs from CMS's upstream copy once annotation, locator and localId are stripped`));
+  // A string match, for the same reason as above: the version is data, never regex source.
+  assert.ok(
+    differs.errors.join("\n").includes(`shared library Status|${status} differs from CMS's upstream copy once annotation, locator and localId are stripped`),
+    `expected the altered shared library to be refused by name; got:\n${differs.errors.join("\n")}`,
+  );
   assert.equal(differs.madieCalls.length, 0, "refused before fqm ran at all");
 
   const missing = upstreamWith((_libraries, bundle) => {
