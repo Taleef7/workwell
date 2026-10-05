@@ -29,11 +29,13 @@ carries CMS's identity (`urn:workwell:measure:cms137:translation`).
 - `cypress-deck`: every one of the 36 patients in the 2027 Cypress deck agrees with the steward's expected
   result on both rates and every stratum row. The deck scores 36/36 on either year's value sets, so it is
   evidence about the logic, not the codes.
-- `terminology-equivalence`: all 28 declared value sets equal the steward's own 2027 code list, exactly
-  10 of them differ from CMS's 2026 sidecar (43 codes added, 13 removed), and no other set moved. The ten
-  are pinned in `src/wiring/derived-terminology.test.ts`.
-- MADiE logic equivalence (CI, not recorded): CMS's 227-case deck run through this main library with
-  CMS's shared libraries matches CMS's own run on every case, rate, stratifier and define value.
+- `terminology-equivalence`: all 28 declared value sets equal the Cypress 2027 deck's value-set export
+  of the same release (eCQM Update 2026-05-14, an independent export of VSAC, not a list the measure
+  steward wrote), exactly 10 of them differ from CMS's 2026 sidecar (43 codes added, 13 removed), and no
+  other set moved. The ten are pinned in `src/wiring/derived-terminology.test.ts`.
+- MADiE logic equivalence (CI, not recorded): CMS's 45-case MADiE deck for this measure, run through this
+  main library with CMS's shared libraries, matches CMS's own run on every case, rate, stratifier and all
+  2,970 define values.
 
 ## Commands (from `backend-ts/`)
 

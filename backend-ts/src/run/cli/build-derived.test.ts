@@ -364,32 +364,79 @@ test("--verify passes an exact rebuild, writes nothing, and fails on a single re
   assert.match(h.errors.join("\n"), /bundle\.json: committed sha256:[0-9a-f]{64}, rebuilt sha256:[0-9a-f]{64}/);
   writeFileSync(bundlePath, original);
 
-  // A committed manifest whose build record is not what the inputs rebuild.
+  // A committed manifest whose build record is not what the inputs rebuild: named by path, never by value.
   const manifest = readManifest(h);
-  writeFileSync(join(h.out, "manifest.json"), `${JSON.stringify({ ...manifest, derived: { ...manifest.derived, build: { ...manifest.derived!.build, translationSha256: `sha256:${"0".repeat(64)}` } } }, null, 2)}\n`);
+  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+  const zeros = `sha256:${"0".repeat(64)}`;
+  writeFileSync(join(h.out, "manifest.json"), `${JSON.stringify({ ...manifest, derived: { ...manifest.derived, build: { ...manifest.derived!.build, translationSha256: zeros } } }, null, 2)}\n`);
   h.errors.length = 0;
   assert.equal(await verify(["--skip-terminology"]), 1);
-  assert.match(h.errors.join("\n"), /manifest derived\.build: committed/);
-  writeFileSync(join(h.out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  assert.match(h.errors.join("\n"), /manifest\.json differs from the rebuild at: derived\.build\.translationSha256$/m);
+  assert.ok(!h.errors.join("\n").includes(zeros), "the committed value is not printed");
+  writeFileSync(join(h.out, "manifest.json"), manifestText);
 
   // A package given to --verify must be the one the translation records.
   h.errors.length = 0;
   assert.equal(await main([...argsFor(h, ["--verify", "--skip-terminology"]).filter((_, i, all) => all[i] !== "--package" && all[i - 1] !== "--package"), "--package", h.file("other.zip", "another package")], h.deps), 1);
-  assert.match(h.errors.join("\n"), /manifest derived\.derivedFrom\.packageSha256: committed/);
+  assert.match(h.errors.join("\n"), /manifest\.json differs from the rebuild at: derived\.derivedFrom\.packageSha256$/m);
 
   // A re-expansion that does not reproduce the committed block fails the verify.
   h.errors.length = 0;
+  const emit = h.deps.runTerminologyEmit;
   h.deps.runTerminologyEmit = (request) => {
     writeFileSync(join(request.outputDir, "terminology.json"), SIDECAR_TEXT);
     return JSON.stringify({ ...sidecarBlock(), codes: 999 });
   };
   assert.equal(await verify(), 1);
-  assert.match(h.errors.join("\n"), /manifest terminology: committed/);
+  assert.match(h.errors.join("\n"), /manifest\.json differs from the rebuild at: terminology\.codes$/m);
+  h.deps.runTerminologyEmit = emit;
 
   const empty = harness();
   mkdirSync(empty.out);
   assert.equal(await main(argsFor(empty, ["--verify"]), empty.deps), 1);
   assert.match(empty.errors.join("\n"), /nothing is committed at .+ to verify against/);
+});
+
+test("--verify compares the WHOLE manifest: a hand-edited label, key order or formatting fails it; carried records do not", async () => {
+  const h = harness();
+  assert.equal(await main(argsFor(h), h.deps), 0, h.errors.join("\n"));
+  const manifestPath = join(h.out, "manifest.json");
+  const verify = () => main(argsFor(h, ["--verify", "--skip-terminology"]).filter((_, i, all) => all[i] !== "--package" && all[i - 1] !== "--package"), h.deps);
+  const write = (value: unknown, indent = 2) => writeFileSync(manifestPath, `${JSON.stringify(value, null, indent)}\n`);
+  const built = readManifest(h);
+
+  // Oracle records recorded since the build are carried by the rebuild, so the comparison still holds.
+  const record = { name: "cypress-deck", inputSha256: `sha256:${"c".repeat(64)}`, period: { start: "2025-01-01", end: "2025-12-31" }, agree: 1, total: 1, result: "pass", ranAgainst: { artifactSha256: built.sha256, terminologySha256: built.terminology!.sha256 } };
+  const recorded = { ...built, derived: { ...built.derived!, oracles: [record] } };
+  write(recorded);
+  assert.equal(await verify(), 0, h.errors.join("\n"));
+
+  // The relabel: CMS's measure name as the label every screen shows. No field the old list compared moves.
+  write({ ...recorded, derived: { ...recorded.derived, label: "CMS137v15" } });
+  h.errors.length = 0;
+  assert.equal(await verify(), 1);
+  assert.match(h.errors.join("\n"), /manifest\.json differs from the rebuild at: derived\.label$/m);
+  assert.ok(!h.errors.join("\n").includes("CMS137v15"), "the committed label is not printed");
+
+  // Any other field the rebuild writes, e.g. the period the selector trusts.
+  write({ ...recorded, effectivePeriod: { start: "2028-01-01", end: "2028-12-31" } });
+  h.errors.length = 0;
+  assert.equal(await verify(), 1);
+  assert.match(h.errors.join("\n"), /at: effectivePeriod\.start, effectivePeriod\.end$/m);
+
+  // Equal as data, different as bytes: reordered keys, then another indent.
+  const { catalogId, ...rest } = recorded;
+  write({ ...rest, catalogId });
+  h.errors.length = 0;
+  assert.equal(await verify(), 1);
+  assert.match(h.errors.join("\n"), /manifest\.json differs from the rebuild at: \(top level\) \(key order\)/);
+  write(recorded, 4);
+  h.errors.length = 0;
+  assert.equal(await verify(), 1);
+  assert.match(h.errors.join("\n"), /manifest\.json differs from the rebuild only in its formatting/);
+
+  write(recorded);
+  assert.equal(await verify(), 0, "and restored, it verifies again");
 });
 
 // ---- the real thing -------------------------------------------------------------------------------------
@@ -398,6 +445,10 @@ const BACKEND = fileURLToPath(new URL("../../../", import.meta.url));
 const CONTENT_DIR = join(BACKEND, ".official-content");
 const UPSTREAM = join(CONTENT_DIR, cms137.manifest.source.path);
 
+// A plain skip, not promoted to a failure anywhere, and that is not a coverage hole: CI's official-cases
+// job checks `.official-content` out and runs `pnpm build:derived --verify` on every committed translation
+// ("Translation rebuild is reproducible" in ci.yml) — this same path, CMS's CQL through our translator,
+// byte-compared with the committed files. This test is the local, uncommitted-output version of it.
 test(
   "smoke: CMS's cms137 CQL compiled by our translator builds a translation the router accepts",
   { skip: existsSync(UPSTREAM) ? false : `CMS's upstream content is not checked out at ${UPSTREAM} (licensed, local-only: scripts/fetch-official-cases.ps1)`, timeout: 120_000 },

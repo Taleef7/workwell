@@ -12,7 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import type { DerivedManifestBlock, OfficialArtifact, OfficialManifest } from "../wiring/official-artifacts.ts";
-import { DERIVED_CANONICAL_PREFIX, libraryElmSha256, rewriteDerivedIdentity, type DerivedIdentity } from "./derived-identity.ts";
+import { DERIVED_CANONICAL_PREFIX, DERIVED_LABEL_PREFIX, libraryElmSha256, rewriteDerivedIdentity, type DerivedIdentity } from "./derived-identity.ts";
 
 const sha256 = (data: string | Buffer): string => `sha256:${createHash("sha256").update(data).digest("hex")}`;
 const lf = (text: string): string => text.replace(/\r\n/g, "\n");
@@ -28,7 +28,8 @@ export function translationIdentity(catalogId: string, year: number, derivedFrom
   if (!Number.isInteger(year) || year < 1000 || year > 9999) throw new Error(`year '${year}' must be a four-digit year`);
   if (!Number.isInteger(revision) || revision < 1) throw new Error(`revision '${revision}' must be a positive integer`);
   if (!derivedFrom.trim()) throw new Error("derivedFrom must name the CMS measure (e.g. CMS137v15)");
-  const title = `WorkWell translation of ${derivedFrom}`;
+  // The same prefix the router requires of the label (`derivedIdentityProblems`): one source for both.
+  const title = `${DERIVED_LABEL_PREFIX}${derivedFrom}`;
   return {
     url: `${DERIVED_CANONICAL_PREFIX}${catalogId}:translation`,
     version: `ww-${year}.${revision}`,

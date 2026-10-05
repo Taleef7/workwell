@@ -14,8 +14,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   run today is byte-identical to before; the translation runs on 2027-dated evaluations only.
   - **Proof.** The Cypress 2027 deck agrees on all 36 patients, both rates and now every stratum row (the
     harness used to count them). But the deck scores 36/36 on either year's codes, so the value-set proof
-    is a second oracle: all 28 declared sets equal the steward's own 2027 code list, and exactly ten differ
-    from CMS's 2026 sidecar (43 codes added, 13 removed), pinned in the sidecar test. CI also runs CMS's
+    is a second oracle: all 28 declared sets equal the Cypress 2027 deck's value-set export of the same
+    release (an independent VSAC export, not the steward's own list), and exactly ten differ from CMS's
+    2026 sidecar (43 codes added, 13 removed), pinned in the sidecar test. CI also runs CMS's
     MADiE deck through the translation and CMS's own run on every push: every case, rate, stratifier and
     define value equal.
   - **How it is built.** `pnpm build:derived` reads CMS's CQL from the hash-verified checkout, applies a

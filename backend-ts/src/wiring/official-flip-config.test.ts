@@ -499,24 +499,75 @@ const VENDOR_TRANSLATION = /^\s*node scripts\/vendor-derived-terminology\.mjs --
 /** The image build, as a build-push-action step or a `docker build` / `docker buildx build` command. */
 const IMAGE_BUILD = /^\s*-?\s*uses:\s*docker\/build-push-action@|\bdocker\s+(?:buildx\s+)?build\b/;
 
+const indentOf = (line: string): number => line.length - line.trimStart().length;
+const STEP_KEY = /^\s*(?:-\s+)?([A-Za-z0-9_-]+):\s*(.*?)\s*$/;
+/** `set +e`, `set +xe`, `set +o errexit`: the run block stops failing on a failed command from there on. */
+const ERREXIT_OFF = /\bset\s+(?:\+[A-Za-z]*e[A-Za-z]*|\+o\s+errexit)\b/;
+
+/**
+ * Every way the STEP holding a vendor line can let that line fail and the job go on, as sentences. The
+ * line itself can be strict and still be fail-soft from outside it: `continue-on-error` (anything but
+ * `false`) passes the step's failure over; an `if:` can skip the step entirely; a `shell:` other than the
+ * default `bash` (which runs `bash -e`) need not stop at the failing line, and only the block's LAST
+ * command decides the step; `set +e` in the run block turns that off by hand. The step is the nearest
+ * `- ` item above the line, at a smaller indent; a line with no such step is refused rather than read.
+ */
+function stepFailSoft(lines: string[], index: number): string[] {
+  let start = index;
+  while (start >= 0 && !(/^\s*-\s+\S/.test(lines[start]!) && indentOf(lines[start]!) < indentOf(lines[index]!))) start--;
+  if (start < 0) return ["is in no step this reader can find"];
+  const marker = indentOf(lines[start]!);
+  let end = start + 1;
+  while (end < lines.length && (lines[end]!.trim() === "" || indentOf(lines[end]!) > marker)) end++;
+  // The step's own keys: on the `- ` line itself, and every line at the indent of its first key.
+  const keyIndent = marker + 2;
+  const keys: Array<{ key: string; value: string; at: number }> = [];
+  for (let i = start; i < end; i++) {
+    const line = lines[i]!;
+    if (line.trim() === "" || (i > start && indentOf(line) !== keyIndent)) continue;
+    const match = line.match(STEP_KEY);
+    if (match) keys.push({ key: match[1]!, value: match[2]!, at: i });
+  }
+  const problems: string[] = [];
+  for (const { key, value, at } of keys) {
+    if (key === "continue-on-error" && value !== "false") problems.push(`its step sets continue-on-error: ${value}`);
+    if (key === "if") problems.push(`its step runs only if: ${value}`);
+    if (key === "shell" && value !== "bash") problems.push(`its step runs under shell: ${value}, not the default bash -e`);
+    if (key !== "run") continue;
+    // The run block: the key's own value, or a block scalar's lines (indented past the key, to the next key).
+    const block = [value];
+    for (let i = at + 1; i < end && (lines[i]!.trim() === "" || indentOf(lines[i]!) > keyIndent); i++) block.push(lines[i]!);
+    for (const line of block) {
+      if (!line.trimStart().startsWith("#") && ERREXIT_OFF.test(line)) problems.push(`its run block turns errexit off ('${line.trim()}')`);
+    }
+  }
+  return problems;
+}
+
 /**
  * Which translation sidecars one job vendors, and the line (within the job) where it builds the image.
  * Any other uncommented line that runs the vendor script lands in `unread`: no `--verify-pin`, a trailing
  * `|| true`, an id from a variable. Each is either fail-soft or invisible to this reader, so each must fail
- * the guard rather than be skipped by it.
+ * the guard rather than be skipped by it. `failSoft` holds the same for the STEP around a vendor line
+ * (`stepFailSoft`): a strict line in a step that may fail quietly fails the deploy no more than `|| true`.
  */
 function translationVendoring(yaml: string, job: string) {
   const vendored: Array<{ id: string; line: number }> = [];
   const unread: string[] = [];
+  const failSoft: string[] = [];
   let build = -1;
-  jobLines(yaml, job).forEach((line, index) => {
+  const lines = jobLines(yaml, job);
+  lines.forEach((line, index) => {
     if (line.trimStart().startsWith("#")) return;
     const match = line.match(VENDOR_TRANSLATION);
     if (match) vendored.push({ id: match[1]!, line: index });
     else if (line.includes("vendor-derived-terminology")) unread.push(line.trim());
+    if (match || line.includes("vendor-derived-terminology")) {
+      for (const problem of stepFailSoft(lines, index)) failSoft.push(`${line.trim()}: ${problem}`);
+    }
     if (build < 0 && IMAGE_BUILD.test(line)) build = index;
   });
-  return { vendored, unread, build };
+  return { vendored, unread, failSoft, build };
 }
 
 test(`${DERIVED_KEY}: deploy-maui vendors every shipped translation with --verify-pin, before it builds the image`, () => {
@@ -525,9 +576,10 @@ test(`${DERIVED_KEY}: deploy-maui vendors every shipped translation with --verif
   // that builds the image and BEFORE it does: a failed vendoring then fails the deploy instead of shipping.
   const workflow = "deploy-maui-mieweb.yml";
   const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
-  const { vendored, unread, build } = translationVendoring(readFileSync(path, "utf8"), "build-backend-ts");
+  const { vendored, unread, failSoft, build } = translationVendoring(readFileSync(path, "utf8"), "build-backend-ts");
   assert.ok(build >= 0, `${workflow}: build-backend-ts builds no image that this guard can find, so it is not looking at what it guards`);
   assert.deepEqual(unread, [], `${workflow}: a translation is vendored only as "node scripts/vendor-derived-terminology.mjs --catalog-id <id> --verify-pin"`);
+  assert.deepEqual(failSoft, [], `${workflow}: the step that vendors a translation must fail the job when the vendoring fails`);
   assert.deepEqual(
     vendored.map((v) => v.id).sort(),
     [...(shippedDerived(workflow) ?? [])].sort(),
@@ -565,6 +617,41 @@ test("the vendor reader keeps to one job, refuses a fail-soft line, and finds th
   const cli = read(workflow(run, vendor(), "          docker buildx build ."));
   assert.ok(cli.build > cli.vendored[0]!.line, "a docker build command counts as the build");
   assert.equal(read(workflow(run, vendor())).build, -1, "no build in the job");
+});
+
+test("the vendor reader refuses a fail-soft STEP around a strict line: continue-on-error, if:, a non-errexit shell, set +e", () => {
+  const workflow = (...buildSteps: string[]) => ["jobs:", "  build:", "    steps:", ...buildSteps].join("\n");
+  const vendor = "          node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin";
+  const image = "      - uses: docker/build-push-action@v7";
+  /** A named vendor step with `keys` (each at the step's key indent) and `before` lines in its run block. */
+  const step = (keys: string[], before: string[] = []) => ["      - name: Vendor translations", ...keys.map((k) => `        ${k}`), "        run: |", ...before.map((l) => `          ${l}`), vendor];
+  const failSoftOf = (lines: string[]) => {
+    const read = translationVendoring(workflow(...lines, image), "build");
+    assert.deepEqual(read.vendored.map((v) => v.id), ["cms137"], "the line itself is strict in every case here");
+    return read.failSoft;
+  };
+  const refused = (lines: string[], pattern: RegExp) => {
+    const found = failSoftOf(lines);
+    assert.ok(found.length === 1 && pattern.test(found[0]!), `expected one sentence matching ${pattern}, got ${JSON.stringify(found)}`);
+  };
+
+  // Strict: the deploy workflow's own shape (working-directory, env), and the harmless spellings.
+  assert.deepEqual(failSoftOf(step(["working-directory: backend-ts", "env:", "  WORKWELL_VSAC_API_KEY: x"])), []);
+  assert.deepEqual(failSoftOf(step(["continue-on-error: false", "shell: bash"], ["# set +e would be refused, but this is a comment", "set -e"])), []);
+  assert.deepEqual(failSoftOf(["      - run: |", vendor]), [], "a bare `- run: |` step");
+  // A neighbouring step's keys are its own business, not the vendor step's.
+  assert.deepEqual(failSoftOf([...step([]), "      - name: Something else", "        continue-on-error: true", "        run: echo hi"]), []);
+
+  refused(step(["continue-on-error: true"]), /: its step sets continue-on-error: true$/);
+  refused(step(["continue-on-error: ${{ github.event_name == 'push' }}"]), /continue-on-error: \$\{\{/);
+  refused(step(["if: env.VENDOR == 'yes'"]), /: its step runs only if: env\.VENDOR == 'yes'$/);
+  refused(["      - if: always()", "        run: |", vendor], /its step runs only if: always\(\)/);
+  refused(step(["shell: bash {0}"]), /its step runs under shell: bash \{0\}, not the default bash -e/);
+  refused(step([], ["set +e"]), /its run block turns errexit off \('set \+e'\)/);
+  refused(step([], ["set +xe"]), /turns errexit off/);
+  refused(step([], ["set +o errexit"]), /turns errexit off/);
+  // A vendor line in no step at all cannot be read as strict.
+  assert.deepEqual(translationVendoring(["jobs:", "  build:", vendor].join("\n"), "build").failSoft, [`${vendor.trim()}: is in no step this reader can find`]);
 });
 
 /**

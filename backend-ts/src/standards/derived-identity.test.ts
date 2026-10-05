@@ -184,13 +184,34 @@ test("the rewrite renames both resource ids and drops the contained Library that
   assert.ok(!(measure["contained"] as Res[] | undefined)?.some((r) => r["id"] === "effective-data-requirements"));
   assert.ok(!JSON.stringify(measure["extension"] ?? []).includes("#effective-data-requirements"), "no extension may point at the removed Library");
   assert.equal((measure["extension"] as unknown[]).length, (cmsMeasure["extension"] as unknown[]).length - 1, "only the extension that pointed at it is removed");
-  // Kept: the profiles a reader validates against, and the translator options CMS recorded (no CMS identity).
+  // Kept: the profiles a reader validates against.
   assert.deepEqual(measure["meta"], cmsMeasure["meta"]);
   assert.deepEqual(main["meta"], cmsMain["meta"]);
-  assert.deepEqual(main["contained"], cmsMain["contained"]);
-  const options = JSON.stringify(main["contained"]);
-  assert.ok(options.includes('"id":"options"'), "the translator options Parameters survives");
-  assert.ok(!/madie\.cms\.gov/i.test(options) && !options.includes(String(cmsMeasure["id"])), "and names nothing of CMS's");
+});
+
+test("the rewrite drops what states CMS's publication: the bundle's name, the usage text, the dates, CMS's compile options", () => {
+  const cms = cms137.bundle as unknown as B & { id?: unknown };
+  const cmsMain = mainIn(cms);
+  // Non-vacuous: CMS's bundle carries every one of them.
+  assert.equal(cms.id, `${String(cmsMeasure["id"])}-bundle`);
+  assert.ok(typeof cmsMeasure["usage"] === "string" && typeof cmsMeasure["date"] === "string" && typeof cmsMain["date"] === "string");
+  assert.ok((cmsMain["contained"] as Res[]).some((r) => r.resourceType === "Parameters" && r["id"] === "options"));
+  assert.ok((cmsMain["extension"] as Array<Record<string, unknown>>).some((e) => (e["valueReference"] as { reference?: string } | undefined)?.reference === "#options"));
+
+  const b = clone() as B & { id?: unknown };
+  const measure = measureIn(b);
+  const main = mainIn(b);
+  assert.equal(b.id, "WorkWellCMS137Translation2027-bundle");
+  assert.equal(measure["usage"], undefined, "CMS's usage text names the QDM measure CMS's draft was derived from");
+  assert.equal(measure["date"], undefined);
+  assert.equal(main["date"], undefined);
+  // CMS's compile was translator 3.27.0 with annotations and locators on; this ELM is WorkWell's, stripped.
+  assert.equal(main["contained"], undefined, "the options Parameters was the main library's only contained resource");
+  assert.equal(main["extension"], undefined, "and the cqf-cqlOptions extension pointing at it goes with it");
+  // The six libraries carried unchanged keep CMS's record of CMS's compile: it is true of their ELM.
+  for (const library of b.entry.filter((e) => e.resource.resourceType === "Library" && e.resource !== main)) {
+    assert.deepEqual(library.resource["contained"], libraryIn(cms, String(library.resource["name"]))["contained"]);
+  }
 });
 
 test("CMS's identity anywhere in the Measure or the main library is refused, not only in the named fields", () => {
@@ -234,6 +255,73 @@ test("CMS's canonicals are refused for themselves, not only because they name CM
   mainIn(b)["description"] = "https://example.org/Library/Elsewhere|1.0.000";
   expect(problems(b, fixture.manifest, base), /translated main library still carries CMS's identity in 1 place\(s\): Library\.description/);
   assert.deepEqual(problems(fixture.bundle, fixture.manifest, base), [], "and the fixture names neither");
+});
+
+test("the Bundle's own id and identifier are scanned, and CMS's names are needles read from CMS's manifest", () => {
+  type WithOwn = B & { id?: unknown; identifier?: unknown };
+  const shortName = `CMS${String(cms137.manifest.cmsId)}`;
+  assert.equal(shortName, "CMS137FHIR", "sanity: the short name is CMS's manifest's cmsId");
+  let b = clone() as WithOwn;
+  b.id = `${String(cmsMeasure["id"])}-bundle`;
+  expect(problems(b), new RegExp(`translated Bundle still carries CMS's identity in 1 place\\(s\\): Bundle\\.id '${String(cmsMeasure["id"])}-bundle'`));
+  b = clone() as WithOwn;
+  b.identifier = { system: "urn:ietf:rfc:3986", value: `urn:cms:${cms137.manifest.measureName}` };
+  expect(problems(b), /translated Bundle still carries CMS's identity in 1 place\(s\): Bundle\.identifier\.value/);
+
+  // The short name alone, where no canonical, host or measure id is: in the Measure, and in the main library.
+  b = clone();
+  measureIn(b)["description"] = `Formerly ${shortName}.`;
+  expect(problems(b), /translated Measure still carries CMS's identity in 1 place\(s\): Measure\.description 'Formerly CMS137FHIR\.'/);
+  b = clone();
+  mainIn(b)["purpose"] = `the ${shortName.toLowerCase()} logic`;
+  expect(problems(b), /translated main library still carries CMS's identity in 1 place\(s\): Library\.purpose/);
+
+  // Read from the base manifest, not written into the check: a base naming another measure brings its own
+  // needles, and CMS137's short name alone is then no longer one.
+  const other = { ...cms137, manifest: { ...cms137.manifest, cmsId: "999FHIR", measureName: "ElsewhereScreening" } };
+  b = clone();
+  measureIn(b)["description"] = "Formerly CMS999FHIR.";
+  expect(problems(b, fixture.manifest, other), /translated Measure still carries CMS's identity in 1 place\(s\): Measure\.description 'Formerly CMS999FHIR\.'/);
+  b = clone();
+  measureIn(b)["description"] = "see elsewherescreening";
+  expect(problems(b, fixture.manifest, other), /translated Measure still carries CMS's identity in 1 place\(s\): Measure\.description 'see elsewherescreening'/);
+  b = clone();
+  measureIn(b)["description"] = `Formerly ${shortName}.`;
+  assert.deepEqual(problems(b, fixture.manifest, other), []);
+  assert.deepEqual(problems(fixture.bundle, fixture.manifest, other), [], "and the fixture names neither");
+});
+
+test("the label every screen shows is tied to its own form, the Measure's title and the CMS measure it derives from", () => {
+  const withLabel = (label: string, ecqm = "CMS137v15") => derivedWith({ label, derivedFrom: { ...fixture.manifest.derived!.derivedFrom, ecqm } });
+  // The fixture's verdict is memoized first: a relabelled manifest declaring the same hash must not be served it.
+  assert.deepEqual(problems(fixture.bundle), []);
+  assert.equal(withLabel("CMS137v15").sha256, fixture.manifest.sha256);
+
+  // The relabel §4.3 forbids: CMS's measure name as the label, everything else honest.
+  let list = problems(fixture.bundle, withLabel("CMS137v15"));
+  expect(list, /the translation's label 'CMS137v15' is not 'WorkWell translation of CMS137v15'; the label is what every screen names the logic by/);
+  expect(list, /the translation's label 'CMS137v15' is not the translated Measure's title 'WorkWell translation of CMS137v15'/);
+
+  // Relabelled consistently inside the manifest, it still disagrees with the bundle it describes.
+  list = problems(fixture.bundle, withLabel("WorkWell translation of CMS999v1", "CMS999v1"));
+  expect(list, /label 'WorkWell translation of CMS999v1' is not the translated Measure's title 'WorkWell translation of CMS137v15'/);
+  expect(list, /derived-from link names 'CMS137v15', but the manifest says it is derived from 'CMS999v1'/);
+  assert.ok(!list.some((p) => p.includes("is not 'WorkWell translation of CMS999v1';")), "its own form is right");
+  expect(problems(fixture.bundle, withLabel("", "")), /derivedFrom\.ecqm '' does not name the CMS measure/);
+
+  // The bundle edited instead: the title, or the derived-from link, or a second link naming another source.
+  let b = clone();
+  measureIn(b)["title"] = "CMS137v15";
+  expect(problems(b), /label 'WorkWell translation of CMS137v15' is not the translated Measure's title 'CMS137v15'/);
+  const relink = (map: (links: Array<Record<string, unknown>>) => Array<Record<string, unknown>>) => {
+    const edited = clone();
+    measureIn(edited)["relatedArtifact"] = map(measureIn(edited)["relatedArtifact"] as Array<Record<string, unknown>>);
+    return edited;
+  };
+  b = relink((links) => links.map((r) => (r["type"] === "derived-from" ? { ...r, display: "CMS137v14" } : r)));
+  expect(problems(b), /derived-from link names 'CMS137v14', but the manifest says it is derived from 'CMS137v15'/);
+  b = relink((links) => [...links, { type: "derived-from", display: "CMS137v14" }]);
+  expect(problems(b), /derived-from link names 'CMS137v14'/);
 });
 
 test("a Measure whose library is not in the bundle is refused", () => {

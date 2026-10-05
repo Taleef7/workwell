@@ -39,6 +39,8 @@ const RELEASE_CODES: Codes = new Map(
   }),
 );
 const PACKAGE_BYTES = "synthetic CMS package";
+/** Relative to the fixture root, which is the check's cwd. */
+const PACKAGE_CQL = "package-cql";
 const PATIENTS = [
   { id: "p1", given: "Alpha", family: "Synthetic" },
   { id: "p2", given: "Beta", family: "Synthetic" },
@@ -121,6 +123,9 @@ function fixture(options: { translationCodes?: Codes; stalePins?: boolean; sidec
   };
   const manifestPath = join(dir, "manifest.json");
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  // The package's CQL as `--package-cql-dir` reads it: synthetic declarations of exactly the translation's sets.
+  mkdirSync(join(root, PACKAGE_CQL));
+  writeFileSync(join(root, PACKAGE_CQL, "Main.cql"), REQUIRED.map((oid, i) => `valueset "Set ${i}": 'urn:oid:${oid}'`).join("\n") + "\n");
   const deck = writeDeck(root, options.deckTitle);
   return { root, dir, deck, pkg, manifestPath, bundleSha, terminologySha, csvBytes: readFileSync(join(deck, "value-sets", "value-set-codes.csv")) };
 }
@@ -338,6 +343,8 @@ function setup(f: Fixture, over: Partial<DerivedCheckDeps> = {}) {
 }
 
 const deckArgs = (f: Fixture, ...extra: string[]) => ["--catalog-id", "cms137", "--cypress-bundle", f.deck, "--package", f.pkg, ...extra];
+/** A recording run: every check, the package's value-set declarations included. */
+const recordArgs = (f: Fixture) => deckArgs(f, "--package-cql-dir", PACKAGE_CQL, "--record");
 
 // ---- arguments ----------------------------------------------------------------------------------------
 
@@ -359,6 +366,17 @@ test("arguments: the deck and package are required unless --madie runs alone, an
   assert.equal(await main(["--catalog-id", "cms137", "--madie", "--record"], deps), 2, "--record without the deck is a usage error");
   assert.match(errors.join("\n"), /--cypress-bundle is required with --record/);
   assert.equal(readFileSync(f.manifestPath, "utf8"), before);
+
+  // A record vouches for every check, so --record without the package's declarations is a usage error,
+  // stopped before anything runs; without --record the same run only reports (and says so, below).
+  const noDeclarations = deckArgs(f, "--record");
+  assert.throws(() => parseArgs(noDeclarations), (e: unknown) => e instanceof DerivedCheckUsageError && /--package-cql-dir is required with --record/.test(e.message));
+  assert.equal(parseArgs(deckArgs(f)).packageCqlDir, undefined, "optional without --record");
+  const usage = setup(f);
+  assert.equal(await main(noDeclarations, usage.deps), 2);
+  assert.match(usage.errors.join("\n"), /--package-cql-dir is required with --record/);
+  assert.equal(usage.deckCalls.length, 0, "nothing ran");
+  assert.equal(readFileSync(f.manifestPath, "utf8"), before);
 });
 
 // ---- the full check -------------------------------------------------------------------------------------
@@ -367,7 +385,7 @@ test("--record on a pass writes both records against the hashes it computed, kee
   const f = fixture();
   const { deps, logs, errors, deckCalls } = setup(f);
   const before = readFileSync(f.manifestPath, "utf8");
-  const code = await main(deckArgs(f, "--record"), deps);
+  const code = await main(recordArgs(f), deps);
   assert.equal(code, 0, errors.join("\n"));
 
   // The deck ran the translation, on its own terminology, and then the break.
@@ -405,22 +423,25 @@ test("--record on a pass writes both records against the hashes it computed, kee
   assert.equal(now.derived!.oracles.length, 3, "the stale cypress-deck record was replaced, not duplicated");
   assert.match(logs.join("\n"), /2 changed by the release · 2 changed by the translation/);
   assert.doesNotMatch(logs.join("\n"), /Alpha|Beta|T0NEW|T0A/, "no patient name and no code is printed");
-  assert.match(logs.join("\n"), /NOTICE \*+ no --package-cql-dir/);
+  assert.match(logs.join("\n"), new RegExp(`package declarations: ${REQUIRED.length} value set\\(s\\) in 1 \\.cql file\\(s\\); the translation declares ${REQUIRED.length}`));
+  assert.doesNotMatch(logs.join("\n"), /no --package-cql-dir/);
   rmSync(f.root, { recursive: true, force: true });
 });
 
-test("without --record a pass writes nothing", async () => {
+test("without --record a pass writes nothing, and says loudly when the declarations went unchecked", async () => {
   const f = fixture();
   const before = readFileSync(f.manifestPath, "utf8");
-  assert.equal(await main(deckArgs(f), setup(f).deps), 0);
+  const { deps, logs } = setup(f);
+  assert.equal(await main(deckArgs(f), deps), 0);
   assert.equal(readFileSync(f.manifestPath, "utf8"), before);
+  assert.match(logs.join("\n"), /NOTICE \*+ no --package-cql-dir: the package's value-set DECLARATIONS were NOT checked/);
 });
 
 test("bytes on disk that are not the pinned ones are refused", async () => {
   const f = fixture({ stalePins: true });
   const { deps, errors, deckCalls } = setup(f);
   const before = readFileSync(f.manifestPath, "utf8");
-  assert.equal(await main(deckArgs(f, "--record"), deps), 1);
+  assert.equal(await main(recordArgs(f), deps), 1);
   assert.match(errors.join("\n"), /bundle\.json on disk hashes to sha256:[0-9a-f]{64}, the manifest pins sha256:e{64}/);
   assert.equal(deckCalls.length, 0, "nothing ran");
   assert.equal(readFileSync(f.manifestPath, "utf8"), before);
@@ -429,7 +450,7 @@ test("bytes on disk that are not the pinned ones are refused", async () => {
   const g = fixture();
   writeFileSync(join(g.dir, "terminology.json"), "{}");
   const second = setup(g);
-  assert.equal(await main(deckArgs(g, "--record"), second.deps), 1);
+  assert.equal(await main(recordArgs(g), second.deps), 1);
   assert.match(second.errors.join("\n"), /terminology\.json on disk hashes to/);
 });
 
@@ -439,7 +460,7 @@ test("a failing deck oracle exits 1 and leaves manifest.json untouched", async (
   const calls: DeckCall[] = [];
   const { deps, errors } = setup(f, { calculate: deckStub(calls, flipped) });
   const before = readFileSync(f.manifestPath, "utf8");
-  assert.equal(await main(deckArgs(f, "--record"), deps), 1);
+  assert.equal(await main(recordArgs(f), deps), 1);
   assert.match(errors.join("\n"), /cypress-deck: 1\/2 patients agree on every row/);
   assert.equal(readFileSync(f.manifestPath, "utf8"), before);
 });
@@ -448,7 +469,7 @@ test("an oracle that cannot see the break fails, however well it agrees", async 
   const f = fixture();
   const { deps, errors } = setup(f, { calculate: deckStub([], ANSWERS, false) });
   const before = readFileSync(f.manifestPath, "utf8");
-  assert.equal(await main(deckArgs(f, "--record"), deps), 1);
+  assert.equal(await main(recordArgs(f), deps), 1);
   assert.match(errors.join("\n"), /breaking the translation did not lower agreement/);
   assert.equal(readFileSync(f.manifestPath, "utf8"), before);
 });
@@ -458,7 +479,7 @@ test("a translation whose codes differ from the release fails terminology-equiva
   const f = fixture({ translationCodes: new Map([...RELEASE_CODES].map(([oid, codes]) => [oid, codes.filter((c) => c.code !== "T0NEW")])) });
   const { deps, errors, logs } = setup(f);
   const before = readFileSync(f.manifestPath, "utf8");
-  assert.equal(await main(deckArgs(f, "--record"), deps), 1);
+  assert.equal(await main(recordArgs(f), deps), 1);
   // Matched as a string, not a regex built from data: an OID is data, and escaping it by hand is the
   // CodeQL "incomplete escaping" shape this repo already retired once (4b727c27).
   assert.ok(
@@ -472,7 +493,7 @@ test("a translation whose codes differ from the release fails terminology-equiva
 test("a package that is not the one translated from is refused", async () => {
   const f = fixture({ packageSha: `sha256:${"0".repeat(64)}` });
   const { deps, errors, deckCalls } = setup(f);
-  assert.equal(await main(deckArgs(f, "--record"), deps), 1);
+  assert.equal(await main(recordArgs(f), deps), 1);
   assert.match(errors.join("\n"), /--package hashes to sha256:[0-9a-f]{64}, but the translation was derived from sha256:0{64}/);
   assert.equal(deckCalls.length, 0);
 });
@@ -622,7 +643,7 @@ test("files rewritten while the check ran are not vouched for", async () => {
   };
   const before = readFileSync(f.manifestPath, "utf8");
   const { deps, errors } = setup(f, { calculate: rewriting });
-  assert.equal(await main(deckArgs(f, "--record"), deps), 1);
+  assert.equal(await main(recordArgs(f), deps), 1);
   assert.match(errors.join("\n"), /the translation's files changed on disk while the check ran/);
   assert.equal(readFileSync(f.manifestPath, "utf8"), before);
 
@@ -639,7 +660,7 @@ test("files rewritten while the check ran are not vouched for", async () => {
   };
   const second = setup(g, { calculate: repinning });
   const repinned = readFileSync(g.manifestPath, "utf8");
-  assert.equal(await main(deckArgs(g, "--record"), second.deps), 1);
+  assert.equal(await main(recordArgs(g), second.deps), 1);
   assert.match(second.errors.join("\n"), /manifest\.json on disk no longer pins the files the check ran against/);
   assert.notEqual(readFileSync(g.manifestPath, "utf8"), repinned, "sanity: the stub did rewrite it");
   assert.doesNotMatch(readFileSync(g.manifestPath, "utf8"), /terminology-equivalence/, "and nothing was recorded into it");

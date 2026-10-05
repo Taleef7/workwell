@@ -164,7 +164,8 @@ translation score the one year it covers (2027); CMS's artifact still scores eve
 must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit the one key in `deploy-maui-mieweb.yml` **and**
 `reconcile-maui-mieweb.yml`, same value, and keep the build job's `vendor-derived-terminology.mjs` lines
 naming the same ids (and `ROUTED_TRANSLATIONS` in CI's `e2e-maui`). `official-flip-config.test.ts` fails
-the build otherwise, and pins TWH and staging to none.
+the build otherwise, and pins TWH and staging to none. `flip-gate.yml` does not read the key: a flip-gate
+run for a 2027 date scores CMS's 2026 artifact, not what Maui runs.
 
 ### The deploy script and the Container Manager API
 
@@ -631,7 +632,13 @@ No migration to undo — the schema is additive. Roll back by redeploying an ear
   rollback to an image built before `measures/derived/<id>/` was committed, the next self-heal recreate
   puts `main`'s `WORKWELL_DERIVED_MEASURES` on that image, the router refuses it (check D2, `no executable
   translation is committed`), and every evaluation 500s while health stays 200. Unset the key in **both**
-  Maui workflows on `main` first.
+  Maui workflows on `main` first. The same state arises with no operator action if the **first deploy
+  after the merge that adds a translation fails before its image is built** (a VSAC outage at the
+  `--verify-pin` line is enough): `main` carries the key, `maui-latest` is still the older image, and the
+  next self-heal recreate combines them. So after that merge, confirm the Maui deploy promoted
+  `maui-latest`; if it failed, re-run it or unset the key on `main` before any health event can recreate
+  the container. (The official allowlist has the same shape; the fix that removes it, routing lists that
+  travel with the image, is a separate decision.)
 
 ## Cost monitoring
 

@@ -36,7 +36,7 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 16934970,
-    "vendoredBytes": 2413290
+    "vendoredBytes": 2411884
   },
   "terminology": {
     "file": "terminology.json",
@@ -247,7 +247,7 @@
     },
     "sha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
   },
-  "sha256": "sha256:cff6b5bd34d6cd17877a43640594dcac2e658057c59c308115a5eb8949ac3848",
+  "sha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
   "derived": {
     "label": "WorkWell translation of CMS137v15",
     "derivedFrom": {
@@ -308,7 +308,7 @@
         "total": 36,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:cff6b5bd34d6cd17877a43640594dcac2e658057c59c308115a5eb8949ac3848",
+          "artifactSha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
           "terminologySha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
         }
       },
@@ -323,7 +323,7 @@
         "total": 28,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:cff6b5bd34d6cd17877a43640594dcac2e658057c59c308115a5eb8949ac3848",
+          "artifactSha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
           "terminologySha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
         }
       }

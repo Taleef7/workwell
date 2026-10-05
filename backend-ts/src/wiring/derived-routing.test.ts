@@ -139,6 +139,10 @@ const withManifest = (over: Partial<OfficialArtifact["manifest"]>) => ({ ...deri
 
 test("a fit translation passes every construction check", () => {
   assert.deepEqual(problemsWith(derived), []);
+  // Non-vacuous for D7's periods: the fit fixture's deck record is the deck's 2025, not the translation's
+  // 2027 — a different year is accepted for the logic check, and only for it.
+  const periods = Object.fromEntries(derived.manifest.derived!.oracles.map((o) => [o.name, o.period]));
+  assert.deepEqual(periods, { "cypress-deck": year(2025), "terminology-equivalence": year(2027) });
 });
 
 test("D1–D8: each unfit translation is refused with its own sentence", () => {
@@ -167,6 +171,17 @@ test("D1–D8: each unfit translation is refused with its own sentence", () => {
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => (o.name === "cypress-deck" ? { ...o, agree: 35 } : o)) } })), /no passing 'cypress-deck' check/);
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => ({ ...o, ranAgainst: { ...o.ranAgainst, artifactSha256: "sha256:other" } })) } })), /ran against a different artifact/);
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => ({ ...o, ranAgainst: { ...o.ranAgainst, terminologySha256: "sha256:other" } })) } })), /different artifact or terminology/);
+  // D7's periods: each record covers one calendar year, and the codes are proven for the translation's own.
+  const withPeriod = (name: string, period: { start: string; end: string }) =>
+    withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => (o.name === name ? { ...o, period } : o)) } });
+  expect(problemsWith(withPeriod("terminology-equivalence", year(2025))), /'terminology-equivalence' check ran over 2025-01-01\.\.2025-12-31, not the translation's own 2027-01-01\.\.2027-12-31: unlike the deck's logic check, it proves value sets/);
+  expect(problemsWith(withPeriod("cypress-deck", { start: "2025-01-01", end: "2026-12-31" })), /'cypress-deck' check ran over 2025-01-01\.\.2026-12-31, which is not one calendar year \(a deck's year may differ from the translation's, but it is one measurement year\)/);
+  expect(problemsWith(withPeriod("cypress-deck", { start: "2025-03-01", end: "2025-12-31" })), /'cypress-deck' check ran over 2025-03-01\.\.2025-12-31, which is not one calendar year/);
+  expect(problemsWith(withPeriod("terminology-equivalence", { start: "2027-01-01T00:00:00Z", end: "2027-12-31" })), /'terminology-equivalence' check ran over 2027-01-01T00:00:00Z\.\.2027-12-31, which is not one calendar year/);
+  const noPeriod = withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => (o.name === "cypress-deck" ? { ...o, period: undefined as never } : o)) } });
+  let refusal: string[] = [];
+  assert.doesNotThrow(() => (refusal = problemsWith(noPeriod)), "a record missing its period is a sentence, not an exception");
+  expect(refusal, /'cypress-deck' check ran over \?\.\.\?, which is not one calendar year/);
   expect(officialRoutingProblems(ENV as never, { ...checks, loadDerived: () => derived, loadTerminology: (a) => (a.kind === "derived" ? { ok: false, problem: "sidecar missing" } : terminologyOk(a)) }), /\(translation\): sidecar missing/);
   expect(officialRoutingProblems(ENV as never, { ...checks, loadDerived: () => derived, absentFor: (a) => (a.kind === "derived" ? ["2.16.9"] : []) }), /\(translation\): value set 2\.16\.9/);
   expect(officialRoutingProblems(ENV as never, { ...checks, loadDerived: () => derived, cappedFor: (a) => (a.kind === "derived" ? [{ oid: "2.16.8", have: 1000, declaredTotal: 1997 }] : []) }), /\(translation\): value set 2\.16\.8 expands to only 1000/);

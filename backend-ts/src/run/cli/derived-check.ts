@@ -8,9 +8,13 @@
  *                            built-in break ("Initial Population" forced false) that must lower agreement,
  *                            or the oracle is not looking at the translation at all.
  *   terminology-equivalence  its sidecar equals the deck's value-set export at the release on every
- *                            declared value set, and it changed exactly the sets the release changed.
+ *                            declared value set, and it changed exactly the sets the release changed. The
+ *                            export is the Cypress/CVU team's (for CMS137v15, the 2027 deck's
+ *                            `value-set-codes.csv`, eCQM Update 2026-05-14): their copy of that VSAC
+ *                            release, not a code list from the measure's steward.
  *   (package)                the CMS package it was translated from hashes to `derivedFrom.packageSha256`,
- *                            and every value set that package's CQL declares is one the translation declares.
+ *                            and every value set that package's CQL declares is one the translation declares
+ *                            (`--package-cql-dir`, required with `--record`).
  *   (--madie)                on CMS's MADiE deck and CMS's own 2026 value sets, the translation's logic
  *                            gives CMS's answer on every case and every define value. Credential-free;
  *                            reported, never recorded.
@@ -65,7 +69,7 @@ export const USAGE =
   "Usage: pnpm derived:check --catalog-id <id> --cypress-bundle <dir> --package <zip> [--package-cql-dir <dir>]" +
   " [--csv <path>] [--release <name>] [--record] [--madie] [--content-dir .official-content] [--limit N]\n" +
   "  With --madie and without --record, --cypress-bundle and --package may be omitted: the deck and" +
-  " terminology oracles (and the sidecar checks) are then skipped.";
+  " terminology oracles (and the sidecar checks) are then skipped. --record also needs --package-cql-dir.";
 
 export class DerivedCheckUsageError extends Error {
   override readonly name = "DerivedCheckUsageError";
@@ -123,6 +127,12 @@ export function parseArgs(argv: string[]): DerivedCheckArgs {
     if (values.has(flag) && !cypressBundle) throw new DerivedCheckUsageError(`${flag} needs --cypress-bundle: the terminology oracle runs with the deck\n${USAGE}`);
   }
   if (values.has("--package-cql-dir") && !packagePath) throw new DerivedCheckUsageError(`--package-cql-dir needs --package\n${USAGE}`);
+  // A record vouches for the translation on every check this tool has; one written with the package's
+  // value-set declarations unchecked would vouch for a check that never ran. Without --record the run
+  // only reports, and says loudly that the declarations were skipped.
+  if (record && !values.has("--package-cql-dir")) {
+    throw new DerivedCheckUsageError(`--package-cql-dir is required with --record: a record is written only when the package's value-set declarations were checked too\n${USAGE}`);
+  }
   const limitText = values.get("--limit") ?? "20";
   const limit = Number(limitText);
   if (!Number.isInteger(limit) || limit < 0) throw new DerivedCheckUsageError(`--limit takes a whole number\n${USAGE}`);

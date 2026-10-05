@@ -1,7 +1,11 @@
 /**
  * The `terminology-equivalence` oracle: a WorkWell translation's terminology sidecar holds exactly the
- * codes the Cypress deck's own value-set export lists for the release, for every value set its ELM
- * declares — and it changed exactly the value sets the release changed relative to CMS's artifact.
+ * codes the Cypress deck's value-set export lists for the release, for every value set its ELM declares —
+ * and it changed exactly the value sets the release changed relative to CMS's artifact.
+ *
+ * Whose list that is, precisely: the Cypress/CVU team's export of the VSAC release (for CMS137v15, the
+ * 2027 deck's `value-sets/value-set-codes.csv`, eCQM Update 2026-05-14). It is an independent copy of the
+ * same release the translation was expanded from, not a code list published by the measure's steward.
  *
  * Why this is a separate oracle from the deck: CMS137 v15 changes only value sets, and the Cypress deck
  * scores 36/36 under both the 2026 and the 2027 terminology, so a passing deck says nothing about which

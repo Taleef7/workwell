@@ -399,6 +399,24 @@ function withTerminology(
   }
 }
 
+/**
+ * Where two parsed manifests differ, as dotted key paths — never the values (a whole terminology block or
+ * oracle list printed into a CI log helps nobody, and a path says exactly which field to look at). Objects
+ * are descended; an array or a scalar that differs is reported at its own path. Equal data written in
+ * another key order is reported as such, since the bytes are what is pinned.
+ */
+export function differingManifestPaths(was: unknown, now: unknown, path = ""): string[] {
+  if (JSON.stringify(was) === JSON.stringify(now)) return [];
+  const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  if (isObject(was) && isObject(now)) {
+    const keys = [...new Set([...Object.keys(was), ...Object.keys(now)])];
+    const out = keys.flatMap((key) => differingManifestPaths(was[key], now[key], path ? `${path}.${key}` : key));
+    return out.length > 0 ? out : [`${path || "(top level)"} (key order)`];
+  }
+  if (isDeepStrictEqual(was, now)) return [`${path || "(top level)"} (key order)`];
+  return [path || "(the whole document)"];
+}
+
 function verifyAgainstCommitted(args: BuildDerivedArgs, deps: BuildDerivedDeps, outputDir: string, committed: OfficialManifest, built: Built): number {
   const id = args.catalogId;
   const differences: string[] = [];
@@ -408,18 +426,21 @@ function verifyAgainstCommitted(args: BuildDerivedArgs, deps: BuildDerivedDeps, 
     const bytes = deps.fs.readFile(bundlePath);
     if (!bytes.equals(Buffer.from(built.bundleJson, "utf8"))) differences.push(`bundle.json: committed ${sha256(bytes)}, rebuilt ${built.manifest.sha256}`);
   }
-  const rebuilt = built.manifest;
-  const compare: Array<[string, unknown, unknown]> = [
-    ["sha256", committed.sha256, rebuilt.sha256],
-    ["derived.build", committed.derived?.build, rebuilt.derived?.build],
-    ["derived.unchangedLibraries", committed.derived?.unchangedLibraries, rebuilt.derived?.unchangedLibraries],
-    ["derived.base", committed.derived?.base, rebuilt.derived?.base],
-  ];
-  if (args.package) compare.push(["derived.derivedFrom.packageSha256", committed.derived?.derivedFrom.packageSha256, rebuilt.derived?.derivedFrom.packageSha256]);
-  // A re-expansion was asked for, so the release must reproduce the committed block exactly.
-  if (built.sidecar) compare.push(["terminology", committed.terminology, rebuilt.terminology]);
-  for (const [label, was, now] of compare) {
-    if (!isDeepStrictEqual(was, now)) differences.push(`manifest ${label}: committed ${JSON.stringify(was)}, rebuilt ${JSON.stringify(now)}`);
+  // The WHOLE manifest text, not a list of fields: a field left off a list is a field anyone can hand-edit
+  // past the verify — `derived.label`, which every screen shows, was exactly that. Every field is
+  // reproducible: the oracle records carry forward when the bundle and terminology hashes are unchanged,
+  // the package hash comes from the committed manifest unless --package is given, and --skip-terminology
+  // reuses the committed block. So a rebuild of an untouched translation is this text byte for byte, and
+  // anything else is a difference to name. (A re-expansion must reproduce the committed block exactly.)
+  const committedText = deps.fs.readFile(join(outputDir, "manifest.json")).toString("utf8");
+  const rebuiltText = `${JSON.stringify(built.manifest, null, 2)}\n`;
+  if (committedText !== rebuiltText) {
+    const paths = differingManifestPaths(committed, built.manifest);
+    differences.push(
+      paths.length > 0
+        ? `manifest.json differs from the rebuild at: ${paths.join(", ")}`
+        : "manifest.json differs from the rebuild only in its formatting (indent, line endings or the trailing newline)",
+    );
   }
   if (differences.length > 0) {
     deps.error(`${id}: --verify FAILED, the committed translation is not what its inputs rebuild:`);
