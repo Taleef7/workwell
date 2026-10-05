@@ -83,7 +83,12 @@ export interface OfficialManifest {
       manifest: string;
       valueSets: Array<{
         oid: string;
-        reason?: "capped" | "absent-upstream";
+        /**
+         * `release` is a WorkWell translation's completion (C3a): every declared set re-expanded at the
+         * named VSAC release, where `had` is CMS's shipped count and `now` the release's. It is never
+         * written into an official manifest, so the key-set pin on cms122/cms125 is unaffected.
+         */
+        reason?: "capped" | "absent-upstream" | "release";
         had: number;
         now: number;
         declaredTotal: number | null;

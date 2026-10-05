@@ -125,11 +125,14 @@ const RETRYABLE_4XX = new Set([401, 429]);
  */
 export const VSAC_TIMEOUT_MS = 90_000;
 
-async function fetchVsacJson(url, headers, attempts = 4) {
+async function fetchVsacJson(url, headers, fetchImpl, attempts = 4) {
+  // Resolved per call, not at import: the tests here stub `globalThis.fetch` after importing this module,
+  // and `vendor-derived-terminology.mjs` injects its own transport so its `main` can be driven offline.
+  const doFetch = fetchImpl ?? globalThis.fetch;
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(url, { headers, signal: AbortSignal.timeout(VSAC_TIMEOUT_MS) });
+      const response = await doFetch(url, { headers, signal: AbortSignal.timeout(VSAC_TIMEOUT_MS) });
       if (response.ok) return JSON.parse(await response.text());
       if (response.status < 500 && !RETRYABLE_4XX.has(response.status)) throw new Error(`HTTP ${response.status}`);
       lastError = new Error(`HTTP ${response.status}`);
@@ -151,8 +154,10 @@ async function fetchVsacJson(url, headers, attempts = 4) {
  *
  * `offset` advances by the page's own length, never by `count`: a short page must still terminate, and
  * a server that ignores `offset` must not loop forever — hence the page ceiling.
+ *
+ * `fetch` is optional and defaults to the global one; it is a transport seam, not a behaviour switch.
  */
-export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey }) {
+export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl }) {
   const base = String(vsacBase).replace(/\/+$/, "");
   const headers = {
     Authorization: `Basic ${Buffer.from(`apikey:${apiKey}`).toString("base64")}`,
@@ -176,7 +181,7 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey }) {
       throw new Error(`VSAC $expand for ${oid}: exceeded ${VSAC_MAX_PAGES} pages (offset not advancing?)`);
     }
     const url = `${base}/ValueSet/${encodeURIComponent(oid)}/$expand?offset=${offset}&count=${VSAC_PAGE}${pin}`;
-    const body = await fetchVsacJson(url, headers);
+    const body = await fetchVsacJson(url, headers, fetchImpl);
     // No `expansion` at all is a different failure from an empty one: the server answered with
     // something that is not an expansion, and reading that as "zero codes" is how a value set empties
     // silently — the ADR-008 drift case `httpVsacClient` guards the same way.
@@ -195,6 +200,97 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey }) {
   // `total` stays 0 when the server volunteered none. That is NOT "zero codes" and callers must not read
   // it as a count — the absent-set path refuses on it precisely because it is an absence of evidence.
   return { codes, total, ...(echoedUrl ? { url: echoedUrl } : {}) };
+}
+
+/**
+ * Why `expandComplete` refused an answer VSAC did give. `kind` is one of `unpinned`, `empty`,
+ * `no-total`, `short`, `over`, `identity`; `total`, `distinct` and `echoedUrl` carry the numbers.
+ *
+ * A typed error rather than a bare message so a caller that words its own warnings — the absent-upstream
+ * branch of `completeTerminology`, whose sentences its tests and the runbooks already quote — can keep
+ * them without parsing ours. A transport failure (`HTTP 404`, a timeout after retries) is NOT one of
+ * these: it propagates as `expandFromVsac` threw it.
+ */
+export class IncompleteExpansionError extends Error {
+  constructor(kind, message, detail = {}) {
+    super(message);
+    this.name = "IncompleteExpansionError";
+    this.kind = kind;
+    Object.assign(this, detail);
+  }
+}
+
+/**
+ * One value set, expanded at a pinned release, returned ONLY if VSAC's answer is provably the whole set.
+ * Every other outcome throws; there is no fallback, ever.
+ *
+ * The strict primitive for a value set with no other source — an absent-upstream set (ADR-053) and every
+ * set in a WorkWell translation, whose terminology is 100% VSAC. Neither has upstream codes to contain or
+ * an upstream declared total to fall short of, so VSAC's own `expansion.total` is the only baseline, and
+ * each guard below closes a way a response can LOOK complete and not be:
+ *
+ * - **unpinned** — `expandFromVsac` silently drops an empty `vsacManifest` and VSAC then serves
+ *   latest-active, which is not reproducible. Refused before any request.
+ * - **empty** — indistinguishable from "this OID does not exist at this release", and an empty set
+ *   matches nothing, so fqm reports a whole roster out-of-population (ADR-043).
+ * - **no-total** — no baseline is no evidence. Review of #364 caught the first cut guarding on
+ *   `total > 0 && short`, which cannot fire when VSAC omits `total` (`expandFromVsac` leaves it 0 and its
+ *   loop stops on the first empty page regardless): the vacuous-guard shape, inside the guard.
+ * - **short** / **over** — the DISTINCT count must equal `total` exactly. Compared after dedupe, so a
+ *   response padded with duplicates cannot clear the bar and then shrink; and a response carrying more
+ *   distinct codes than VSAC itself counts is one whose count and content disagree, so neither is trusted.
+ * - **identity** — an echoed `url` naming a different OID would otherwise file someone else's codes under
+ *   the one we asked for, and a different set of the right size passes every size check. Compared on
+ *   normalized OIDs so a `|version` echo of the right set is accepted. An answer that echoes NO `url` is
+ *   accepted, as the absent-upstream path always has: whether live VSAC always echoes one has not been
+ *   measured, that path feeds the committed cms138 artifact, and the request path already names the OID.
+ *
+ * Returns `{ codes, total }`, codes canonicalized (deduped, sorted) because the sidecars are pinned by hash.
+ */
+export async function expandComplete(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl }) {
+  if (typeof vsacManifest !== "string" || vsacManifest === "") {
+    throw new IncompleteExpansionError(
+      "unpinned",
+      `refusing to expand ${oid} with no VSAC release pin — VSAC would serve latest-active, which no one can reproduce`,
+    );
+  }
+  const expanded = await expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl });
+  const codes = canonicalize(expanded.codes);
+  const detail = { total: expanded.total, distinct: codes.length, echoedUrl: expanded.url };
+  // Ordered as the absent-upstream branch always checked, so a response failing two guards is reported
+  // under the same sentence it was before this primitive existed.
+  if (codes.length === 0) {
+    throw new IncompleteExpansionError("empty", `VSAC returned no codes for ${oid} at ${vsacManifest}`, detail);
+  }
+  if (!(Number.isInteger(expanded.total) && expanded.total > 0)) {
+    throw new IncompleteExpansionError(
+      "no-total",
+      `VSAC returned no expansion.total for ${oid}, so there is no baseline to judge completeness against`,
+      detail,
+    );
+  }
+  if (codes.length < expanded.total) {
+    throw new IncompleteExpansionError(
+      "short",
+      `VSAC claimed ${expanded.total} codes for ${oid} and returned ${codes.length} distinct — a short read`,
+      detail,
+    );
+  }
+  if (codes.length > expanded.total) {
+    throw new IncompleteExpansionError(
+      "over",
+      `VSAC claimed ${expanded.total} codes for ${oid} and returned ${codes.length} distinct — its count and its content disagree`,
+      detail,
+    );
+  }
+  if (expanded.url && oidFromValueSetUrl(expanded.url) !== oid) {
+    throw new IncompleteExpansionError(
+      "identity",
+      `VSAC answered the request for ${oid} with an expansion of ${expanded.url} — a different value set`,
+      detail,
+    );
+  }
+  return { codes, total: expanded.total };
 }
 
 /**
@@ -350,65 +446,22 @@ export async function completeTerminology(terminology, args, env = process.env) 
   // ABSENT sets (ADR-053). Sourced whole from VSAC because upstream's bundle carries no ValueSet
   // resource for them at all — see the `reason` split above for why this is a weaker claim than a
   // completed cap, and why it is recorded as such rather than merged into the same bucket.
+  //
+  // The guards themselves live in `expandComplete`, the one strict primitive this path shares with a
+  // WorkWell translation's sidecar (`vendor-derived-terminology.mjs`), so the two can never apply
+  // different standards to a set VSAC alone vouches for. This branch only words the refusal.
+  //
+  // Identity is checked here (in `expandComplete`) and not on the capped path above, because the capped
+  // path already proves identity a stronger way — the expansion must CONTAIN the codes upstream shipped
+  // (ADR-041) — and tightening a guard we cannot re-run against live VSAC would risk the reproducibility
+  // of the committed artifacts for no measured gain.
   const stillAbsent = [];
   for (const want of absent) {
     let expanded;
     try {
-      expanded = await expandFromVsac(want.oid, { ...args, apiKey });
+      expanded = await expandComplete(want.oid, { ...args, apiKey });
     } catch (err) {
-      console.warn(`  WARNING could not source absent value set ${want.oid} from VSAC: ${err.message}`);
-      stillAbsent.push(want);
-      continue;
-    }
-    const canonical = canonicalize(expanded.codes);
-    // An empty expansion is the one outcome indistinguishable from "this OID does not exist at this
-    // release". Recording it as sourced would hand the executor an empty set, which fqm matches against
-    // nothing — reporting a whole roster out-of-population, the exact ADR-043 silence.
-    if (canonical.length === 0) {
-      console.warn(
-        `  WARNING VSAC returned no codes for absent value set ${want.oid} at ${args.vsacManifest};` +
-          " leaving it absent so routing keeps refusing.",
-      );
-      stillAbsent.push(want);
-      continue;
-    }
-    // VSAC's own `expansion.total` is the ONLY size baseline an absent set has, so a response that does
-    // not carry one carries NO evidence of completeness and is refused.
-    //
-    // Review of #364 caught the first cut here as `expanded.total > 0 && canonical.length < expanded.total`
-    // — which cannot fire when the server omits `total`, because `expandFromVsac` leaves it 0 and the
-    // paging loop stops on the first empty page regardless. A short response with no `total` was accepted
-    // silently, written with `declaredTotal` equal to whatever arrived, `truncated` empty and no warning:
-    // a set that LOOKS complete and is not, which is the one thing this file's header says no path
-    // produces. That is the vacuous-guard shape, inside the guard added to close a blind spot.
-    if (!(expanded.total > 0)) {
-      console.warn(
-        `  WARNING VSAC returned no expansion.total for absent value set ${want.oid}, so there is no` +
-          " baseline to judge completeness against — an absent set has no upstream codes to contain and" +
-          " no declared total to fall short of. Leaving it absent.",
-      );
-      stillAbsent.push(want);
-      continue;
-    }
-    if (canonical.length < expanded.total) {
-      console.warn(
-        `  WARNING VSAC claimed ${expanded.total} codes for absent value set ${want.oid} and returned` +
-          ` ${canonical.length} distinct — a short read, not an expansion. Leaving it absent.`,
-      );
-      stillAbsent.push(want);
-      continue;
-    }
-    // Identity, when the server volunteers it: a response echoing a DIFFERENT canonical would otherwise
-    // be written under the OID we asked for. Applied here and not to the capped path above, because the
-    // capped path already proves identity a stronger way — the expansion must CONTAIN the codes upstream
-    // shipped (ADR-041) — and tightening a guard we cannot re-run against live VSAC would risk the
-    // reproducibility of the committed artifacts for no measured gain.
-    if (expanded.url && oidFromValueSetUrl(expanded.url) !== want.oid) {
-      console.warn(
-        `  WARNING VSAC answered the request for ${want.oid} with an expansion of ${expanded.url} —` +
-          " a different value set. Leaving it absent rather than filing someone else's codes under this" +
-          " OID.",
-      );
+      console.warn(absentRefusal(want.oid, err, args.vsacManifest));
       stillAbsent.push(want);
       continue;
     }
@@ -417,16 +470,16 @@ export async function completeTerminology(terminology, args, env = process.env) 
       oid: want.oid,
       // The sidecar's own truncation bookkeeping, NOT a claim about what upstream declared — upstream
       // declared nothing. `buildManifest` derives `truncated` from `declaredTotal > codes.length`, so
-      // this must be the count we actually hold or a phantom truncation would appear. VSAC's own total
-      // when it gave one (we refused a short read above, so it can never exceed what we hold).
-      declaredTotal: expanded.total > 0 ? expanded.total : canonical.length,
-      codes: canonical,
+      // this must be the count we actually hold or a phantom truncation would appear. `expandComplete`
+      // guarantees VSAC's total equals the distinct codes we hold, so it is both.
+      declaredTotal: expanded.total,
+      codes: expanded.codes,
     });
     completed.push({
       oid: want.oid,
       reason: "absent-upstream",
       had: 0,
-      now: canonical.length,
+      now: expanded.codes.length,
       // Null, not VSAC's total: this field means "what the bundle declared", and for an absent set the
       // bundle declared nothing. Reporting VSAC's number here would read as upstream corroboration.
       declaredTotal: null,
@@ -437,14 +490,57 @@ export async function completeTerminology(terminology, args, env = process.env) 
 }
 
 /**
+ * The warning for an absent set `expandComplete` would not source, in the sentences this path has always
+ * printed. Each says "leaving it absent" because that is the operator's fact: routing keeps refusing.
+ */
+function absentRefusal(oid, err, vsacManifest) {
+  if (!(err instanceof IncompleteExpansionError)) {
+    return `  WARNING could not source absent value set ${oid} from VSAC: ${err.message}`;
+  }
+  switch (err.kind) {
+    case "empty":
+      return (
+        `  WARNING VSAC returned no codes for absent value set ${oid} at ${vsacManifest};` +
+        " leaving it absent so routing keeps refusing."
+      );
+    case "no-total":
+      return (
+        `  WARNING VSAC returned no expansion.total for absent value set ${oid}, so there is no` +
+        " baseline to judge completeness against — an absent set has no upstream codes to contain and" +
+        " no declared total to fall short of. Leaving it absent."
+      );
+    case "short":
+      return (
+        `  WARNING VSAC claimed ${err.total} codes for absent value set ${oid} and returned` +
+        ` ${err.distinct} distinct — a short read, not an expansion. Leaving it absent.`
+      );
+    case "over":
+      return (
+        `  WARNING VSAC claimed ${err.total} codes for absent value set ${oid} and returned` +
+        ` ${err.distinct} distinct — its count and its content disagree. Leaving it absent.`
+      );
+    case "identity":
+      return (
+        `  WARNING VSAC answered the request for ${oid} with an expansion of ${err.echoedUrl} —` +
+        " a different value set. Leaving it absent rather than filing someone else's codes under this" +
+        " OID."
+      );
+    default:
+      return `  WARNING could not source absent value set ${oid} from VSAC: ${err.message}. Leaving it absent.`;
+  }
+}
+
+/**
  * Dedupe and sort by `system|code`.
  *
  * The sidecar is pinned by hash, so its ORDERING is part of the artifact, and VSAC's page order is not
  * a contract. Code-point comparison rather than `localeCompare` for the reason `collectTerminology`'s
  * own sort spells out: ICU collation of punctuation is locale- and build-dependent, and a dev-vs-CI
  * divergence would surface as a hash mismatch whose remedy is "re-vendor" — which reproduces it.
+ *
+ * Exported so a translation's sidecar is canonicalized by the same function as an official one.
  */
-function canonicalize(codes) {
+export function canonicalize(codes) {
   const seen = new Set();
   const merged = [];
   for (const code of codes) {

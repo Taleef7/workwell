@@ -86,6 +86,7 @@ import {
   loadOfficialArtifact,
   selectArtifactForPeriod,
   type ArtifactKind,
+  type DerivedManifestBlock,
   type OfficialArtifact,
 } from "./official-artifacts.ts";
 import {
@@ -252,7 +253,7 @@ export interface RoutingCheckDeps {
    * fires at all.
    */
   absentFor?: (artifact: OfficialArtifact) => string[];
-  /** Injectable for tests: no translation is committed yet, so a test supplies its own. */
+  /** Injectable for tests, which supply their own translation rather than reading the committed one. */
   loadDerived?: (catalogId: string) => OfficialArtifact | null;
 }
 
@@ -381,7 +382,9 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
  *   D5 its terminology names the VSAC release it was expanded from;
  *   D6 its scoring, population basis, populations, improvement notation, group and stratifier ids equal
  *      CMS's — the semantics table, case logic and MeasureReport strata are all keyed by the measure;
- *   D7 every required check passed, against THIS artifact's hash and THIS terminology's hash;
+ *   D7 every required check passed, against THIS artifact's hash and THIS terminology's hash, over exactly
+ *      one calendar year — and the terminology check over the translation's own year: value sets are
+ *      bound to the year they score. The deck check's year is the deck's own (`oraclePeriodProblems`);
  *   D8 its terminology sidecar is present, matches its pin, and is neither capped nor missing a set;
  *   D9 its bundle holds only a Measure and Libraries: an embedded ValueSet would outrank its sidecar.
  */
@@ -460,6 +463,7 @@ function derivedRoutingProblems(
       } else if (record.ranAgainst.artifactSha256 !== manifest.sha256 || record.ranAgainst.terminologySha256 !== manifest.terminology?.sha256) {
         problems.push(`${id}: the translation's '${name}' check ran against a different artifact or terminology than the one committed`);
       }
+      if (record) problems.push(...oraclePeriodProblems(id, record, ep));
     }
 
     const terminology = deps.loadTerminology(translation);
@@ -469,6 +473,49 @@ function derivedRoutingProblems(
     }
     for (const oid of deps.absentFor(translation)) {
       problems.push(`${id} (translation): value set ${oid} is declared but the translation's terminology holds no codes for it`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * D7's period rules for one check record. Every record covers exactly one calendar year: a check over a
+ * span or a fragment of a year is not a measurement-year check at all.
+ *
+ * Beyond that the two required checks prove different things, so their periods mean different things:
+ *   - `terminology-equivalence` proves the translation's CODES, and value sets are bound to the year they
+ *     score — so it must have run over the translation's own `effectivePeriod`, or it proved some other
+ *     year's codes;
+ *   - `cypress-deck` proves the LOGIC, and its period is the deck's own (2025 for the deck CMS137v15 is
+ *     checked against): the deck's expected results exist only for the year they were written for, fqm
+ *     takes the period from the call rather than from `Measure.effectivePeriod`, and shifting the
+ *     patients' dates to another year would invent clinical data. The logic is period-independent (the
+ *     period is a parameter it is called with); the codes are not, which is what the terminology check is for.
+ * Read defensively: a hand-edited record missing its period is a sentence, never an exception here.
+ */
+function oraclePeriodProblems(
+  id: string,
+  record: DerivedManifestBlock["oracles"][number],
+  effectivePeriod: { start?: string; end?: string } | null | undefined,
+): string[] {
+  const start = record.period?.start;
+  const end = record.period?.end;
+  const year = typeof start === "string" ? start.slice(0, 4) : "";
+  const span = `${start ?? "?"}..${end ?? "?"}`;
+  const problems: string[] = [];
+  if (!/^\d{4}$/.test(year) || start !== `${year}-01-01` || end !== `${year}-12-31`) {
+    problems.push(
+      `${id}: the translation's '${record.name}' check ran over ${span}, which is not one calendar year` +
+        (record.name === "cypress-deck" ? " (a deck's year may differ from the translation's, but it is one measurement year)" : ""),
+    );
+  }
+  if (record.name === "terminology-equivalence") {
+    const own = `${effectivePeriod?.start?.slice(0, 10) ?? "?"}..${effectivePeriod?.end?.slice(0, 10) ?? "?"}`;
+    if (span !== own) {
+      problems.push(
+        `${id}: the translation's 'terminology-equivalence' check ran over ${span}, not the translation's own ${own}: ` +
+          "unlike the deck's logic check, it proves value sets, and value sets are bound to the year they score",
+      );
     }
   }
   return problems;

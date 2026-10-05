@@ -255,6 +255,31 @@ successful HTTP response is not by itself a pass claim: report the returned erro
 rule identifiers, locations, and messages. The upload route is structural/CDA/Schematron validation;
 it is not the separate Product/ProductTest Calculation Check.
 
+## Bundle agreement (`bundle-agreement.ts`)
+
+Runs a measure's FHIR artifact over a Cypress bundle's own QRDA I patients, at the bundle's own
+measurement period, and compares every population of every rate and every stratum with Cypress's
+precalculated `individual-results`. The comparison lives in `backend-ts/src/standards/cypress-agreement.ts`
+and is the same one `pnpm derived:check` records as a translation's `cypress-deck` oracle.
+
+```powershell
+cd backend-ts
+corepack pnpm@10 exec node --import tsx ../scripts/cvu/bundle-agreement.ts `
+  --bundle-dir C:/cvu-data/cypress/bundle-2026 --measure cms137 [--artifact official|derived] [--strata compare|count]
+```
+
+- `--artifact derived` runs the WorkWell translation under `measures/derived/` on its own terminology
+  sidecar; `--valuesets-dir` is refused with it.
+- `--strata compare` (the default) checks each `PopulationSet_N_Stratification_M` row: the engine places
+  the patient in stratifier M of rate N and in no other (fqm's `result`, not `appliesResult`), and its
+  rate-N populations equal the row's. `count` only counts them, as the harness did before.
+- Writes nothing; exit 2 on engine errors. The output names patients' QRDA files, which carry their
+  names — keep it local, and quote only counts.
+
+Measured 2026-10-05 on the 2027 deck (period 2025): cms137's official artifact agrees on 36/36 patients in
+each rate and on all 72 stratum rows (20/12/4 per rate), with its vendored terminology and with
+`--valuesets-dir` 2027 expansions alike.
+
 ## The Calculation Check (C2) comparison
 
 This is the second of the two paths above — the Product/ProductTest one — run **offline against the

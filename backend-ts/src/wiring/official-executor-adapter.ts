@@ -432,9 +432,30 @@ export async function expandArtifactTerminology(
   return cache;
 }
 
+/**
+ * `requiredOids` per BUNDLE OBJECT. The router asks for an artifact's OIDs on every construction — every
+ * run and every compliance request — through `cappedFor`, `absentFor` and preflight, and each answer
+ * decodes and parses every library's ELM (~2.4 MB for cms137; a routed translation adds a second copy).
+ *
+ * Keyed by the bundle object, not by `artifactKey`: the answer is a pure function of `artifact.bundle`,
+ * and the loaders hand out one cached, never-mutated bundle per artifact for the life of the process, so
+ * an entry can only ever describe the bytes it was read from. `artifactKey` trusts `manifest.sha256` to
+ * name the bundle, and a hand-built artifact need not keep that promise — the adapter's own tests build
+ * fake artifacts declaring different value sets under one sha — so a key by sha could hand one bundle
+ * another's OIDs. A WeakMap also lets a discarded bundle (a test variant, an edited copy) be collected.
+ */
+const requiredOidsMemo = new WeakMap<object, readonly string[]>();
+
 /** The bare OIDs an artifact needs expanded — for preflight reporting and the import CLI. */
 export function requiredOids(artifact: OfficialArtifact): string[] {
-  return referencedValueSetUrls(artifact.bundle).map(oidFromValueSetUrl);
+  const bundle = artifact.bundle as object;
+  let oids = requiredOidsMemo.get(bundle);
+  if (!oids) {
+    oids = Object.freeze(referencedValueSetUrls(artifact.bundle).map(oidFromValueSetUrl));
+    requiredOidsMemo.set(bundle, oids);
+  }
+  // A copy: callers own the array they get, and one sorting it in place must not reorder everyone's.
+  return [...oids];
 }
 
 /**

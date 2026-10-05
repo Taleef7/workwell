@@ -293,6 +293,32 @@ test("a value set that expands to nothing REFUSES the evaluation rather than nar
   assert.deepEqual(requiredOids(artifact), ["2.16.1", "2.16.2"]);
 });
 
+test("requiredOids decodes a bundle's ELM once, and never answers for another bundle", () => {
+  // The router asks on every construction; each uncached answer parses every library's ELM.
+  const artifact = fakeArtifact("fake", ["2.16.1", "2.16.2"]);
+  const first = requiredOids(artifact);
+  assert.deepEqual(first, ["2.16.1", "2.16.2"]);
+  const library = (artifact.bundle as { entry: Array<{ resource: { content?: Array<Record<string, unknown>> } }> }).entry[1]!.resource;
+  let reads = 0;
+  const data = library.content![0]!["data"];
+  Object.defineProperty(library.content![0]!, "data", { get: () => (reads++, data) });
+  assert.deepEqual(requiredOids(artifact), first);
+  assert.equal(reads, 0, "a second call must not read, let alone decode, the ELM again");
+  // A spread of the same artifact (the router's variants share one bundle) is the same bundle: same answer.
+  assert.deepEqual(requiredOids({ ...artifact, manifest: { ...artifact.manifest, version: "2" } }), first);
+  assert.equal(reads, 0);
+
+  // Callers own what they get: sorting one copy in place does not reorder the next caller's.
+  requiredOids(artifact).reverse();
+  assert.deepEqual(requiredOids(artifact), ["2.16.1", "2.16.2"]);
+
+  // Same catalog id, same declared sha, different bundle: a key by artifactKey would collide here.
+  const other = fakeArtifact("fake", ["2.16.9"]);
+  assert.equal(other.manifest.sha256, artifact.manifest.sha256);
+  assert.deepEqual(requiredOids(other), ["2.16.9"]);
+  assert.deepEqual(requiredOids(artifact), ["2.16.1", "2.16.2"], "and neither answer replaced the other");
+});
+
 test("a measure with no recorded semantics is refused, not guessed at", async () => {
   const executor = officialMeasureExecutor({
     expand: async () => [{ code: "a", system: "s" }],

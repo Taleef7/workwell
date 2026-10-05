@@ -20,6 +20,7 @@ import {
   verifiedModelInfo,
   withCompiledElm,
 } from "./qicore-compile.ts";
+import { QICORE_MODEL_INFO_SHA256 } from "./derived-identity.ts";
 
 const MODEL_INFO = new URL(`../../measures/derived/_modelinfo/${QICORE_MODEL_INFO.file}`, import.meta.url);
 const models = loadQiCoreModelInfos();
@@ -175,4 +176,16 @@ test("a Library without both its CQL and its ELM is refused", () => {
   const entry = libraryEntry("TinyQICore", "0.0.1", TINY);
   (entry.resource.content as unknown[]).splice(0, 1);
   assert.throws(() => bundleLibraries({ entry: [entry] }), /lacks text\/cql or application\/elm\+json/);
+});
+
+test("the router's copy of the model-info pin is this pin", () => {
+  // derived-identity.ts repeats the hash because importing this module would load the translator into
+  // the worker; this is what keeps the repeat from drifting.
+  assert.equal(QICORE_MODEL_INFO_SHA256, QICORE_MODEL_INFO.sha256);
+});
+
+test("compiling the same source twice yields byte-identical ELM, which build:derived requires", () => {
+  const once = compileLibrarySet([{ name: "TinyQICore", version: "0.0.1", cql: WITH_INCLUDE }, HELPER], { modelInfos: models });
+  const again = compileLibrarySet([{ name: "TinyQICore", version: "0.0.1", cql: WITH_INCLUDE }, HELPER], { modelInfos: models });
+  assert.equal(JSON.stringify(again[0]!.elm), JSON.stringify(once[0]!.elm));
 });

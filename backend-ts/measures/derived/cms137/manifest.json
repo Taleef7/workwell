@@ -1,0 +1,332 @@
+{
+  "catalogId": "cms137",
+  "measureName": "WorkWellCMS137Translation2027",
+  "version": "ww-2027.1",
+  "cmsId": null,
+  "url": "urn:workwell:measure:cms137:translation",
+  "status": "draft",
+  "effectivePeriod": {
+    "start": "2027-01-01",
+    "end": "2027-12-31"
+  },
+  "scoring": "proportion",
+  "populationBasis": "boolean",
+  "improvementNotation": "increase",
+  "populations": [
+    "initial-population",
+    "denominator",
+    "denominator-exclusion",
+    "numerator"
+  ],
+  "source": {
+    "repo": "cqframework/dqm-content-qicore-2025",
+    "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
+    "path": "bundles/measure/CMS137FHIRSUDTxInitEngagement/CMS137FHIRSUDTxInitEngagement-bundle.json",
+    "rawSha256": "sha256:f3490b93b5e951f521d5d208140e6f87044d93bd303bff2c4ba2ccd9e6ffc3fc"
+  },
+  "reduction": {
+    "keptResourceTypes": [
+      "Measure",
+      "Library"
+    ],
+    "libraryContentTypes": [
+      "application/elm+json"
+    ],
+    "strippedNarratives": true,
+    "strippedElmAnnotations": true,
+    "strippedValueSets": true,
+    "rawBytes": 16934970,
+    "vendoredBytes": 2411884
+  },
+  "terminology": {
+    "file": "terminology.json",
+    "valueSets": 28,
+    "codes": 976,
+    "truncated": [],
+    "completion": {
+      "source": "vsac",
+      "manifest": "http://cts.nlm.nih.gov/fhir/Library/ecqm-update-2026-05-14",
+      "valueSets": [
+        {
+          "oid": "2.16.840.1.113762.1.4.1021.121",
+          "reason": "release",
+          "had": 2,
+          "now": 2,
+          "declaredTotal": 2
+        },
+        {
+          "oid": "2.16.840.1.113762.1.4.1029.206",
+          "reason": "release",
+          "had": 36,
+          "now": 38,
+          "declaredTotal": 38
+        },
+        {
+          "oid": "2.16.840.1.113762.1.4.1110.38",
+          "reason": "release",
+          "had": 3,
+          "now": 3,
+          "declaredTotal": 3
+        },
+        {
+          "oid": "2.16.840.1.113762.1.4.1111.143",
+          "reason": "release",
+          "had": 1,
+          "now": 1,
+          "declaredTotal": 1
+        },
+        {
+          "oid": "2.16.840.1.113762.1.4.1147.197",
+          "reason": "release",
+          "had": 2,
+          "now": 2,
+          "declaredTotal": 2
+        },
+        {
+          "oid": "2.16.840.1.113883.3.117.1.7.1.292",
+          "reason": "release",
+          "had": 1,
+          "now": 1,
+          "declaredTotal": 1
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.1003",
+          "reason": "release",
+          "had": 26,
+          "now": 26,
+          "declaredTotal": 26
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.101.12.1001",
+          "reason": "release",
+          "had": 14,
+          "now": 24,
+          "declaredTotal": 24
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.101.12.1004",
+          "reason": "release",
+          "had": 3,
+          "now": 3,
+          "declaredTotal": 3
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.101.12.1006",
+          "reason": "release",
+          "had": 3,
+          "now": 3,
+          "declaredTotal": 3
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.101.12.1007",
+          "reason": "release",
+          "had": 2,
+          "now": 2,
+          "declaredTotal": 2
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.101.12.1010",
+          "reason": "release",
+          "had": 6,
+          "now": 6,
+          "declaredTotal": 6
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.101.12.1059",
+          "reason": "release",
+          "had": 11,
+          "now": 11,
+          "declaredTotal": 11
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.101.12.1080",
+          "reason": "release",
+          "had": 16,
+          "now": 25,
+          "declaredTotal": 25
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.101.12.1089",
+          "reason": "release",
+          "had": 15,
+          "now": 13,
+          "declaredTotal": 13
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.106.12.1001",
+          "reason": "release",
+          "had": 529,
+          "now": 533,
+          "declaredTotal": 533
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.106.12.1005",
+          "reason": "release",
+          "had": 56,
+          "now": 49,
+          "declaredTotal": 49
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.1149",
+          "reason": "release",
+          "had": 13,
+          "now": 12,
+          "declaredTotal": 12
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.1150",
+          "reason": "release",
+          "had": 21,
+          "now": 21,
+          "declaredTotal": 21
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.1156",
+          "reason": "release",
+          "had": 15,
+          "now": 20,
+          "declaredTotal": 20
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.1157",
+          "reason": "release",
+          "had": 10,
+          "now": 10,
+          "declaredTotal": 10
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.1165",
+          "reason": "release",
+          "had": 3,
+          "now": 3,
+          "declaredTotal": 3
+        },
+        {
+          "oid": "2.16.840.1.113883.3.526.3.1496",
+          "reason": "release",
+          "had": 16,
+          "now": 22,
+          "declaredTotal": 22
+        },
+        {
+          "oid": "2.16.840.1.113883.3.526.3.1584",
+          "reason": "release",
+          "had": 6,
+          "now": 6,
+          "declaredTotal": 6
+        },
+        {
+          "oid": "2.16.840.1.113883.3.666.5.307",
+          "reason": "release",
+          "had": 3,
+          "now": 7,
+          "declaredTotal": 7
+        },
+        {
+          "oid": "2.16.840.1.114222.4.11.3591",
+          "reason": "release",
+          "had": 125,
+          "now": 125,
+          "declaredTotal": 125
+        },
+        {
+          "oid": "2.16.840.1.114222.4.11.836",
+          "reason": "release",
+          "had": 6,
+          "now": 6,
+          "declaredTotal": 6
+        },
+        {
+          "oid": "2.16.840.1.114222.4.11.837",
+          "reason": "release",
+          "had": 2,
+          "now": 2,
+          "declaredTotal": 2
+        }
+      ]
+    },
+    "sha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
+  },
+  "sha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
+  "derived": {
+    "label": "WorkWell translation of CMS137v15",
+    "derivedFrom": {
+      "ecqm": "CMS137v15",
+      "packageSha256": "sha256:a5ea36066bf4c166d0f1d6b3fb09679dca54b200bdcb2e1870e1bc52472de1a0"
+    },
+    "base": {
+      "catalogId": "cms137",
+      "manifestSha256": "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24"
+    },
+    "build": {
+      "translator": "@cqframework/cql@4.0.0-beta.1",
+      "modelInfoSha256": "sha256:75cf34cca8b6ce28f0841201681ff6f2db2235cdcd4ad39bd84c01b8ea76ad33",
+      "signatureLevel": "All",
+      "translationSha256": "sha256:65da60a88e3eb6db424ac645fecf543e0acc5e5ee1587a6f762c210c30df88aa"
+    },
+    "unchangedLibraries": [
+      {
+        "name": "Hospice",
+        "version": "6.18.000",
+        "elmSha256": "sha256:461c376d21ad4e3fa45dbe2825132377f9285f2cb42cf7e86458de80e3b6389b"
+      },
+      {
+        "name": "QICoreCommon",
+        "version": "4.0.000",
+        "elmSha256": "sha256:2cb27d4b204c8e83c312b2ee41252c8dd4271293d7241b031ed53887aae8e5e1"
+      },
+      {
+        "name": "FHIRHelpers",
+        "version": "4.4.000",
+        "elmSha256": "sha256:0a96a8dc62261bbb6dcd18b853d2afb59688cbfdce68d8485b951224cdfa6a55"
+      },
+      {
+        "name": "Status",
+        "version": "1.15.000",
+        "elmSha256": "sha256:9fec0775b04d6411628eafc4aef3f42e2b27736cdb01fe0b8dc9aa3c915fdaff"
+      },
+      {
+        "name": "SupplementalDataElements",
+        "version": "5.1.000",
+        "elmSha256": "sha256:7cbbc16f964ee1f77c63055e65bdce69d77c67f9aa69f6659fc0e175de930928"
+      },
+      {
+        "name": "CQMCommon",
+        "version": "4.1.000",
+        "elmSha256": "sha256:6909d59cbd52bac3fc0734204d0d8bb3dd1caba827cee67b3dfe64a0fcfa8500"
+      }
+    ],
+    "oracles": [
+      {
+        "name": "cypress-deck",
+        "inputSha256": "sha256:a0e676ab50cf8041d1b25c157659a68f8e63e80d83b7866dc4c6d5b6cb7a18f6",
+        "period": {
+          "start": "2025-01-01",
+          "end": "2025-12-31"
+        },
+        "agree": 36,
+        "total": 36,
+        "result": "pass",
+        "ranAgainst": {
+          "artifactSha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
+          "terminologySha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
+        }
+      },
+      {
+        "name": "terminology-equivalence",
+        "inputSha256": "sha256:f23231a1f7b94c68952fafaec55c62b46611ba5978bed7d4a266a2657f6b63ef",
+        "period": {
+          "start": "2027-01-01",
+          "end": "2027-12-31"
+        },
+        "agree": 28,
+        "total": 28,
+        "result": "pass",
+        "ranAgainst": {
+          "artifactSha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
+          "terminologySha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
+        }
+      }
+    ]
+  }
+}

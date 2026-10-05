@@ -48,7 +48,8 @@ test("routedTranslationYear names the translation's year only while the executor
   assert.equal(routedTranslationYear("cms137", ROUTED, files(CMS_2026, manifest("2027-01-01", "2028-12-31", true))), null, "never a span of years");
 });
 
-test("reads the real deployment by default: nothing is allowlisted and no translation is committed", () => {
-  assert.equal(routedTranslationFor("cms137", 2027, {}), null);
-  assert.equal(routedTranslationFor("cms137", 2027, ROUTED), null, "C2 commits no translation");
+test("reads the real deployment by default: the committed cms137 translation is named only where it is routed", () => {
+  assert.equal(routedTranslationFor("cms137", 2027, {}), null, "not allowlisted: the committed translation stays invisible");
+  assert.equal(routedTranslationFor("cms137", 2027, ROUTED)?.derived?.label, "WorkWell translation of CMS137v15", "ww-2027.1 is committed under measures/derived/cms137");
+  assert.equal(routedTranslationFor("cms137", 2026, ROUTED), null, "CMS's artifact covers 2026, so the translation is not what runs");
 });
