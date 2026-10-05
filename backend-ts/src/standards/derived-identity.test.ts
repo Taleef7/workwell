@@ -5,24 +5,46 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { derivedCms137, FIXTURE_URL } from "../test-support/derived-fixture.ts";
-import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
+import { loadOfficialArtifact, type OfficialManifest } from "../wiring/official-artifacts.ts";
 import { createHash } from "node:crypto";
-import { derivedIdentityProblems } from "./derived-identity.ts";
+import { readFileSync } from "node:fs";
+import {
+  derivedIdentityProblems,
+  installedTranslatorVersion,
+  QICORE_MODEL_INFO_SHA256,
+  rewriteDerivedIdentity,
+  translatorId,
+} from "./derived-identity.ts";
 
 interface Res {
   resourceType?: string;
   [key: string]: unknown;
 }
+type B = { entry: Array<{ resource: Res }> };
 const fixture = derivedCms137();
-const clone = () => JSON.parse(JSON.stringify(fixture.bundle)) as { entry: Array<{ resource: Res }> };
-const measureIn = (b: { entry: Array<{ resource: Res }> }) => b.entry.find((e) => e.resource.resourceType === "Measure")!.resource;
-const mainIn = (b: { entry: Array<{ resource: Res }> }) => {
+const clone = () => JSON.parse(JSON.stringify(fixture.bundle)) as B;
+/** The verdict is memoized per object, so a bundle edited after a check is re-checked as a fresh copy. */
+const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const measureIn = (b: B) => b.entry.find((e) => e.resource.resourceType === "Measure")!.resource;
+const mainIn = (b: B) => {
   const url = (measureIn(b)["library"] as string[])[0];
   return b.entry.find((e) => e.resource["url"] === url)!.resource;
 };
+const libraryIn = (b: B, name: string) => b.entry.find((e) => e.resource.resourceType === "Library" && e.resource["name"] === name)!.resource;
+const elmOf = (library: Res) => {
+  const content = (library["content"] as Array<{ contentType: string; data: string }>).find((c) => c.contentType === "application/elm+json")!;
+  return {
+    elm: JSON.parse(Buffer.from(content.data, "base64").toString("utf8")),
+    save: (elm: unknown) => (content.data = Buffer.from(JSON.stringify(elm), "utf8").toString("base64")),
+  };
+};
 const cms137 = loadOfficialArtifact("cms137")!;
+const cmsMeasure = (cms137.bundle as unknown as B).entry.find((e) => e.resource.resourceType === "Measure")!.resource;
 const problems = (bundle: unknown, manifest = fixture.manifest, base: typeof cms137 | null = cms137) => derivedIdentityProblems(bundle as never, manifest, base);
-const expect = (list: string[], pattern: RegExp) => assert.ok(list.some((p) => pattern.test(p)), `expected ${pattern} in ${JSON.stringify(list)}`);
+const expect = (list: readonly string[], pattern: RegExp) => assert.ok(list.some((p) => pattern.test(p)), `expected ${pattern} in ${JSON.stringify(list)}`);
+const derivedWith = (patch: Partial<NonNullable<OfficialManifest["derived"]>>): OfficialManifest => ({ ...fixture.manifest, derived: { ...fixture.manifest.derived!, ...patch } });
+const buildWith = (patch: Partial<NonNullable<OfficialManifest["derived"]>["build"]>): OfficialManifest =>
+  derivedWith({ build: { ...fixture.manifest.derived!.build, ...patch } });
 
 test("the rewritten committed CMS137 bundle is a valid translation identity", () => {
   assert.deepEqual(problems(fixture.bundle), []);
@@ -120,7 +142,7 @@ test("a library WorkWell changed carries WorkWell identity in every field, not j
   // Renamed and re-versioned on the resource, but the ELM inside still identifies itself as CMS's library.
   hospice["name"] = "WorkWellHospice2027";
   hospice["version"] = "ww-2027.1";
-  const renamed = problems(b, notUnchanged);
+  const renamed = problems(fresh(b), notUnchanged);
   const sentence = `changed library WorkWellHospice2027|ww-2027.1's ELM is identified as 'Hospice|${cmsVersion}'`;
   assert.ok(renamed.some((p) => p.includes(sentence)), `expected "${sentence}" in ${JSON.stringify(renamed)}`);
   assert.ok(!renamed.some((p) => /keeps CMS's library name|not a ww- version/.test(p)), JSON.stringify(renamed));
@@ -130,15 +152,207 @@ test("a library WorkWell changed carries WorkWell identity in every field, not j
   const elm = JSON.parse(Buffer.from(content.data, "base64").toString("utf8"));
   elm.library.identifier = { id: "WorkWellHospice2027", version: "ww-2027.1" };
   content.data = Buffer.from(JSON.stringify(elm), "utf8").toString("base64");
-  assert.deepEqual(problems(b, notUnchanged).filter((p) => p.includes("WorkWellHospice2027")), []);
+  assert.deepEqual(problems(fresh(b), notUnchanged).filter((p) => p.includes("WorkWellHospice2027")), []);
 
   // A changed library with no ELM cannot be checked, so it is refused.
   hospice["content"] = [];
-  expect(problems(b, notUnchanged), /WorkWellHospice2027\|ww-2027\.1 has no ELM identifier to check/);
+  expect(problems(fresh(b), notUnchanged), /WorkWellHospice2027\|ww-2027\.1 has no ELM identifier to check/);
 });
 
 test("CMS's host is refused in any letter case: the check is a refusal, not a URL parser", () => {
   const b = clone();
   measureIn(b)["publisher"] = "MADiE.CMS.gov";
   expect(problems(b), /publisher still names madie\.cms\.gov/);
+});
+
+// ---- the rewrite reaches the identity no reader names a field for -------------------------------------
+
+test("the rewrite renames both resource ids and drops the contained Library that carries CMS's canonical", () => {
+  const cms = cms137.bundle as unknown as B;
+  const cmsMain = mainIn(cms);
+  // Non-vacuous: CMS's Measure does carry the contained Library and the extension pointing at it.
+  assert.ok((cmsMeasure["contained"] as Res[]).some((r) => r["id"] === "effective-data-requirements"));
+  assert.ok((cmsMeasure["extension"] as Array<Record<string, unknown>>).some((e) => e["valueCanonical"] === "#effective-data-requirements"));
+
+  const b = clone();
+  const measure = measureIn(b);
+  const main = mainIn(b);
+  assert.equal(measure["id"], "WorkWellCMS137Translation2027");
+  assert.equal(main["id"], "WorkWellCMS137Translation2027");
+  assert.equal(main["description"], "WorkWell translation of CMS137v15", "CMS describes its main library by its bare measure name");
+  assert.equal(main["publisher"], "WorkWell");
+  assert.ok(!(measure["contained"] as Res[] | undefined)?.some((r) => r["id"] === "effective-data-requirements"));
+  assert.ok(!JSON.stringify(measure["extension"] ?? []).includes("#effective-data-requirements"), "no extension may point at the removed Library");
+  assert.equal((measure["extension"] as unknown[]).length, (cmsMeasure["extension"] as unknown[]).length - 1, "only the extension that pointed at it is removed");
+  // Kept: the profiles a reader validates against, and the translator options CMS recorded (no CMS identity).
+  assert.deepEqual(measure["meta"], cmsMeasure["meta"]);
+  assert.deepEqual(main["meta"], cmsMain["meta"]);
+  assert.deepEqual(main["contained"], cmsMain["contained"]);
+  const options = JSON.stringify(main["contained"]);
+  assert.ok(options.includes('"id":"options"'), "the translator options Parameters survives");
+  assert.ok(!/madie\.cms\.gov/i.test(options) && !options.includes(String(cmsMeasure["id"])), "and names nothing of CMS's");
+});
+
+test("CMS's identity anywhere in the Measure or the main library is refused, not only in the named fields", () => {
+  const cmsId = String(cmsMeasure["id"]);
+  let b = clone();
+  measureIn(b)["id"] = cmsId;
+  expect(problems(b), new RegExp(`translated Measure still carries CMS's identity in 1 place\\(s\\): Measure\\.id '${cmsId}'`));
+
+  // The contained Library put back: CMS's host and name, nested where no field check looks.
+  b = clone();
+  measureIn(b)["contained"] = cmsMeasure["contained"];
+  expect(problems(b), /translated Measure still carries CMS's identity in \d+ place\(s\): Measure\.contained\[0\]/);
+
+  // CMS's measure url, deep in a group, and in another letter case.
+  b = clone();
+  ((measureIn(b)["group"] as Array<Record<string, unknown>>)[0]!)["description"] = `see ${String(cmsMeasure["url"]).toUpperCase()}`;
+  expect(problems(b), /translated Measure still carries CMS's identity in 1 place\(s\): Measure\.group\[0\]\.description/);
+
+  // The main library described by CMS's bare measure name (what CMS ships), or by CMS's main-library url.
+  b = clone();
+  mainIn(b)["description"] = cmsId;
+  expect(problems(b), new RegExp(`translated main library still carries CMS's identity in 1 place\\(s\\): Library\\.description '${cmsId}'`));
+  b = clone();
+  mainIn(b)["description"] = `${String(mainIn(cms137.bundle as unknown as B)["url"])}|1.0.000`;
+  expect(problems(b), /translated main library still carries CMS's identity in 1 place\(s\): Library\.description/);
+});
+
+test("CMS's canonicals are refused for themselves, not only because they name CMS's host", () => {
+  // A base whose Measure and main library live elsewhere: only the url needles can catch them.
+  const elsewhere = fresh(cms137.bundle as unknown as B);
+  const measure = measureIn(elsewhere);
+  const main = mainIn(elsewhere);
+  measure["url"] = "https://example.org/Measure/Elsewhere";
+  main["url"] = "https://example.org/Library/Elsewhere";
+  measure["library"] = ["https://example.org/Library/Elsewhere"];
+  const base = { ...cms137, bundle: elsewhere as never };
+  let b = clone();
+  measureIn(b)["description"] = "the base is https://example.org/Measure/Elsewhere";
+  expect(problems(b, fixture.manifest, base), /translated Measure still carries CMS's identity in 1 place\(s\): Measure\.description/);
+  b = clone();
+  mainIn(b)["description"] = "https://example.org/Library/Elsewhere|1.0.000";
+  expect(problems(b, fixture.manifest, base), /translated main library still carries CMS's identity in 1 place\(s\): Library\.description/);
+  assert.deepEqual(problems(fixture.bundle, fixture.manifest, base), [], "and the fixture names neither");
+});
+
+test("a Measure whose library is not in the bundle is refused", () => {
+  const b = clone();
+  measureIn(b)["library"] = ["urn:workwell:library:Nowhere"];
+  expect(problems(b), /translated Measure's library 'urn:workwell:library:Nowhere' names no library in the bundle/);
+});
+
+test("a main-library depends-on may name a library carried unchanged under CMS's canonical, and nothing else may", () => {
+  const unchangedFhirHelpers = "https://madie.cms.gov/Library/FHIRHelpers|4.4.000";
+  // Non-vacuous: the fixture passes WITH such entries in it.
+  assert.ok((mainIn(clone())["relatedArtifact"] as Array<Record<string, unknown>>).some((r) => r["type"] === "depends-on" && r["resource"] === unchangedFhirHelpers));
+  assert.deepEqual(problems(fixture.bundle), []);
+
+  const withRelated = (on: "main" | "measure", entry: Record<string, unknown>) => {
+    const b = clone();
+    const resource = on === "main" ? mainIn(b) : measureIn(b);
+    resource["relatedArtifact"] = [...((resource["relatedArtifact"] as unknown[]) ?? []), entry];
+    return b;
+  };
+  const cmsMainCanonical = `${String(mainIn(cms137.bundle as unknown as B)["url"])}|1.0.000`;
+  expect(problems(withRelated("main", { type: "depends-on", resource: cmsMainCanonical })), /main library still carries CMS's identity .*relatedArtifact\[\d+\]\.resource/);
+  expect(problems(withRelated("main", { type: "composed-of", resource: unchangedFhirHelpers })), /main library still carries CMS's identity .*relatedArtifact\[\d+\]\.resource/);
+  // Only the `resource` of an exempt entry is exempt: CMS's identity elsewhere in the same entry is not.
+  expect(problems(withRelated("main", { type: "depends-on", resource: unchangedFhirHelpers, display: unchangedFhirHelpers })), /main library still carries CMS's identity in 1 place\(s\): Library\.relatedArtifact\[\d+\]\.display/);
+  expect(problems(withRelated("measure", { type: "depends-on", resource: unchangedFhirHelpers })), /translated Measure still carries CMS's identity .*Measure\.relatedArtifact\[\d+\]\.resource/);
+});
+
+// ---- the manifest's own record ----------------------------------------------------------------------
+
+test("the manifest names the Measure, carries no CMS deck, and records the build this worker can trust", () => {
+  expect(problems(fixture.bundle, { ...fixture.manifest, measureName: String(cmsMeasure["name"]) }), /manifest's measureName 'CMS137FHIRSUDTxInitEngagement' is not the translated Measure's name 'WorkWellCMS137Translation2027'/);
+  expect(problems(fixture.bundle, { ...fixture.manifest, tests: cms137.manifest.tests }), /carries no tests block/);
+  expect(problems(fixture.bundle, buildWith({ modelInfoSha256: "sha256:75cf34cc" })), /compiled against model info sha256:75cf34cc, not the pinned QICore 6\.0\.0/);
+  expect(problems(fixture.bundle, derivedWith({ derivedFrom: { ecqm: "CMS137v15", packageSha256: "sha256:p" } })), /derivedFrom\.packageSha256 'sha256:p' is not a sha256/);
+  expect(problems(fixture.bundle, buildWith({ translationSha256: `sha256:${"B".repeat(64)}` })), /build\.translationSha256 .* is not a sha256/);
+  expect(problems(fixture.bundle, buildWith({ translationSha256: `sha256:${"b".repeat(63)}` })), /build\.translationSha256 .* is not a sha256/);
+
+  // A hand-edited manifest missing whole blocks is refused in sentences; the router never throws on it.
+  const hollow = { ...fixture.manifest, derived: { label: "x", oracles: [] } as never };
+  let list: readonly string[] = [];
+  assert.doesNotThrow(() => (list = problems(fixture.bundle, hollow)));
+  expect(list, /compiled against model info undefined/);
+  expect(list, /derivedFrom\.packageSha256 'undefined' is not a sha256/);
+  expect(list, /built on CMS's artifact undefined/);
+});
+
+test("the translator that compiled it must be the one installed here", () => {
+  const onDisk = JSON.parse(readFileSync(new URL("../../node_modules/@cqframework/cql/package.json", import.meta.url), "utf8")) as { version: string };
+  assert.equal(installedTranslatorVersion(), onDisk.version, "the reader finds the installed package's own version");
+  assert.equal(fixture.manifest.derived!.build.translator, translatorId(onDisk.version));
+  assert.equal(fixture.manifest.derived!.build.modelInfoSha256, `sha256:${QICORE_MODEL_INFO_SHA256}`);
+
+  // Valid under the installed translator, then asked again under another: the memo must not answer for it.
+  assert.deepEqual(problems(fixture.bundle), []);
+  const other = derivedIdentityProblems(fixture.bundle as never, fixture.manifest, cms137, { installedTranslatorVersion: () => "9.9.9" });
+  expect(other, /compiled by @cqframework\/cql@.+, but the installed translator is @cqframework\/cql@9\.9\.9; rebuild it/);
+  const unreadable = derivedIdentityProblems(fixture.bundle as never, fixture.manifest, cms137, {
+    installedTranslatorVersion: () => {
+      throw new Error("not installed");
+    },
+  });
+  expect(unreadable, /installed translator is unreadable: not installed/);
+});
+
+test("no library's ELM may carry the keys that hold CMS's CQL text, at any depth", () => {
+  // Non-vacuous for the unchanged ones: CMS's committed libraries really are stripped.
+  for (const library of (cms137.bundle as unknown as B).entry.filter((e) => e.resource.resourceType === "Library")) {
+    assert.ok(!/"(annotation|locator|localId)":/.test(JSON.stringify(elmOf(library.resource).elm)), `${String(library.resource["name"])} is committed stripped`);
+  }
+  let b = clone();
+  let main = elmOf(mainIn(b));
+  main.elm.library.annotation = [{ type: "CqlToElmInfo" }];
+  main.save(main.elm);
+  expect(problems(b), /library WorkWellCMS137Translation2027\|ww-2027\.1's ELM carries elm\.library\.annotation/);
+
+  b = clone();
+  main = elmOf(mainIn(b));
+  main.elm.library.statements.def[0].expression = { ...main.elm.library.statements.def[0].expression, localId: "7" };
+  main.save(main.elm);
+  expect(problems(b), /WorkWellCMS137Translation2027\|ww-2027\.1's ELM carries elm\.library\.statements\.def\[0\]\.expression\.localId/);
+
+  b = clone();
+  const hospice = elmOf(libraryIn(b, "Hospice"));
+  hospice.elm.library.statements.def[0].locator = "1:1-2:2";
+  hospice.save(hospice.elm);
+  expect(problems(b), /library Hospice\|6\.18\.000's ELM carries elm\.library\.statements\.def\[0\]\.locator/);
+});
+
+test("the verdict is computed once per artifact and served only to that artifact", () => {
+  const first = problems(fixture.bundle);
+  assert.equal(problems(fixture.bundle), first, "a repeated call returns the same verdict object");
+  assert.ok(Object.isFrozen(first), "and callers cannot edit the shared verdict");
+
+  // It does not re-read the bundle: the ELM made unreadable after the first call is never touched again.
+  const b = clone();
+  const verdict = problems(b);
+  const content = (mainIn(b)["content"] as Array<Record<string, unknown>>)[0]!;
+  Object.defineProperty(content, "data", { get: () => assert.fail("a memoized verdict must not decode the ELM again") });
+  assert.equal(problems(b), verdict);
+
+  // A different object declaring the same hashes gets its own verdict, never another artifact's.
+  const sameShaOtherName = { ...fixture.manifest, measureName: "Other" };
+  assert.equal(sameShaOtherName.sha256, fixture.manifest.sha256);
+  expect(problems(fixture.bundle, sameShaOtherName), /measureName 'Other'/);
+  const edited = clone();
+  measureIn(edited)["id"] = String(cmsMeasure["id"]);
+  expect(problems(edited), /Measure\.id/);
+  assert.deepEqual(problems(fixture.bundle), [], "and the fixture's own verdict is unchanged by either");
+});
+
+test("the rewrite is idempotent over the fixture's own identity", () => {
+  const twice = rewriteDerivedIdentity(fixture.bundle as never, {
+    url: FIXTURE_URL,
+    version: "ww-2027.1",
+    name: "WorkWellCMS137Translation2027",
+    title: "WorkWell translation of CMS137v15",
+    derivedFrom: "CMS137v15",
+    effectivePeriod: { start: "2027-01-01", end: "2027-12-31" },
+  });
+  assert.deepEqual(twice, fixture.bundle);
 });
