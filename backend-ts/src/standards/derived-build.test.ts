@@ -122,7 +122,7 @@ test("an edits file is an explicit array of complete edits", () => {
 
 // ---- the strip ------------------------------------------------------------------------------------------
 
-test("the strip removes annotation, locator and localId at every depth and nothing else", () => {
+test("the strip removes annotation and locator at every depth and nothing else", () => {
   const elm = {
     library: {
       annotation: [{ type: "CqlToElmInfo" }],
@@ -130,7 +130,7 @@ test("the strip removes annotation, locator and localId at every depth and nothi
       statements: {
         def: [
           { localId: "1", locator: "3:1-3:9", name: "A", expression: { localId: "2", type: "Literal", value: "1", annotation: [{ s: {} }] } },
-          { name: "B", operand: [[{ localId: "3", type: "Null" }]] },
+          { name: "B", operand: [[{ localId: "3", locator: "4:1-4:4", type: "Null" }]] },
         ],
       },
     },
@@ -139,13 +139,25 @@ test("the strip removes annotation, locator and localId at every depth and nothi
   assert.deepEqual(stripElmDebugKeys(elm), {
     library: {
       identifier: { id: "Demo", version: "1" },
-      statements: { def: [{ name: "A", expression: { type: "Literal", value: "1" } }, { name: "B", operand: [[{ type: "Null" }]] }] },
+      statements: {
+        def: [
+          { localId: "1", name: "A", expression: { localId: "2", type: "Literal", value: "1" } },
+          { name: "B", operand: [[{ localId: "3", type: "Null" }]] },
+        ],
+      },
     },
   });
   assert.equal(JSON.stringify(elm), before, "the input is not modified");
 });
 
-test("the strip is a byte-for-byte no-op on every committed official cms137 library, so it is the vendor script's strip", () => {
+test("localId survives the strip, at every depth: fqm reads each define's value by it", () => {
+  const stripped = stripElmDebugKeys({ library: { localId: "0", statements: { def: [{ localId: "1", expression: { operand: [{ localId: "2", locator: "1:1" }] } }] } } });
+  assert.equal(stripped.library.localId, "0");
+  assert.equal(stripped.library.statements.def[0]!.localId, "1");
+  assert.deepEqual(stripped.library.statements.def[0]!.expression.operand[0], { localId: "2" });
+});
+
+test("the strip is a byte-for-byte no-op on every committed official cms137 library (they carry none of the three keys)", () => {
   const libraries = librariesOf(baseBundle);
   assert.equal(libraries.length, 7);
   for (const library of libraries) {
@@ -156,7 +168,7 @@ test("the strip is a byte-for-byte no-op on every committed official cms137 libr
 
 // ---- the bundle -----------------------------------------------------------------------------------------
 
-/** CMS's main-library ELM with the debug keys a fresh compile carries, standing in for our compile. */
+/** CMS's main-library ELM with the keys a fresh compile carries, standing in for our compile. */
 function compiledMainElm() {
   const elm = decode(elmDataOf(mainOf(baseBundle)));
   elm.library.annotation = [{ type: "CqlToElmInfo", translatorOptions: "EnableAnnotations", signatureLevel: "All" }];
@@ -188,7 +200,8 @@ test("the assembled bundle carries CMS's Measure and shared libraries as they ar
   const main = mainOf(bundle);
   assert.deepEqual((main["content"] as Array<{ contentType: string }>).map((c) => c.contentType), ["application/elm+json"]);
   const elm = decode(elmDataOf(main));
-  assert.ok(!/"(annotation|locator|localId)":/.test(JSON.stringify(elm)), "the compiled ELM's debug keys are stripped");
+  assert.ok(!/"(annotation|locator)":/.test(JSON.stringify(elm)), "the compiled ELM's CQL text and positions are stripped");
+  assert.equal(elm.library.statements.def[0].localId, "9", "and its localIds are kept");
   assert.deepEqual(elm.library.identifier, { id: IDENTITY.name, version: IDENTITY.version });
 });
 

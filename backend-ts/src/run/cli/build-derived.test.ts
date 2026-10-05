@@ -4,7 +4,7 @@
  *
  * Most tests drive the CLI with stubs below the boundary it owns: an "upstream" bundle made from the
  * COMMITTED official cms137 artifact with CQL-shaped stand-ins written for the test (never CMS's CQL), a
- * compile that returns CMS's committed ELM with the debug keys a real compile carries, and a terminology
+ * compile that returns CMS's committed ELM with the extra keys a real compile carries, and a terminology
  * emit that writes a small sidecar. Everything is written under a temporary directory. The last test is the
  * real thing — CMS's CQL from `.official-content`, our translator — and skips itself when that licensed,
  * local-only checkout is absent.
@@ -427,7 +427,8 @@ test(
     assert.deepEqual(derivedIdentityProblems(bundle, manifest, cms137), []);
     const mainElm = Buffer.from(elmDataOf(mainOf(bundle)), "base64").toString("utf8");
     assert.ok(!/madie/i.test(mainElm), "our compile of the main library names no CMS host");
-    assert.ok(!/"(annotation|locator|localId)":/.test(mainElm), "and carries none of CMS's CQL text or positions");
+    assert.ok(!/"(annotation|locator)":/.test(mainElm), "and carries none of CMS's CQL text or positions");
+    assert.ok(/"localId":/.test(mainElm), "but keeps the localIds fqm reads define values by");
     const cmsMainName = String(mainOf(baseBundle)["name"]);
     const shared = librariesOf(baseBundle).filter((l) => l["name"] !== cmsMainName);
     assert.equal(shared.length, 6);

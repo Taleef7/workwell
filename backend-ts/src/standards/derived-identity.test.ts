@@ -299,22 +299,30 @@ test("the translator that compiled it must be the one installed here", () => {
   expect(unreadable, /installed translator is unreadable: not installed/);
 });
 
-test("no library's ELM may carry the keys that hold CMS's CQL text, at any depth", () => {
+test("no library's ELM may carry the keys that hold CMS's CQL text, at any depth; localId is not one", () => {
   // Non-vacuous for the unchanged ones: CMS's committed libraries really are stripped.
   for (const library of (cms137.bundle as unknown as B).entry.filter((e) => e.resource.resourceType === "Library")) {
-    assert.ok(!/"(annotation|locator|localId)":/.test(JSON.stringify(elmOf(library.resource).elm)), `${String(library.resource["name"])} is committed stripped`);
+    assert.ok(!/"(annotation|locator)":/.test(JSON.stringify(elmOf(library.resource).elm)), `${String(library.resource["name"])} is committed stripped`);
   }
   let b = clone();
   let main = elmOf(mainIn(b));
   main.elm.library.annotation = [{ type: "CqlToElmInfo" }];
   main.save(main.elm);
-  expect(problems(b), /library WorkWellCMS137Translation2027\|ww-2027\.1's ELM carries elm\.library\.annotation/);
+  expect(problems(b), /library WorkWellCMS137Translation2027\|ww-2027\.1's ELM carries elm\.library\.annotation; ELM is committed stripped of annotation and locator/);
 
   b = clone();
   main = elmOf(mainIn(b));
+  main.elm.library.statements.def[0].expression = { ...main.elm.library.statements.def[0].expression, locator: "3:1-3:9" };
+  main.save(main.elm);
+  expect(problems(b), /WorkWellCMS137Translation2027\|ww-2027\.1's ELM carries elm\.library\.statements\.def\[0\]\.expression\.locator/);
+
+  // A localId is a bare node number, and fqm reads each define's value by it: a translation keeps them.
+  b = clone();
+  main = elmOf(mainIn(b));
+  main.elm.library.statements.def[0].localId = "1";
   main.elm.library.statements.def[0].expression = { ...main.elm.library.statements.def[0].expression, localId: "7" };
   main.save(main.elm);
-  expect(problems(b), /WorkWellCMS137Translation2027\|ww-2027\.1's ELM carries elm\.library\.statements\.def\[0\]\.expression\.localId/);
+  assert.deepEqual(problems(b), []);
 
   b = clone();
   const hospice = elmOf(libraryIn(b, "Hospice"));

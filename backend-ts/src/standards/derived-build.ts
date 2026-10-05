@@ -5,7 +5,7 @@
  *
  * What is stored in the repo is only ever WorkWell's: the edits file holds WorkWell's replacement text
  * and a hash of the CMS lines it replaces (never those lines), and the main library's ELM is stripped of
- * the keys that carry CMS's CQL text. CMS's six shared libraries are copied byte-for-byte from the
+ * the keys that carry CMS's CQL text (`annotation`, `locator`). CMS's six shared libraries are copied byte-for-byte from the
  * committed official artifact, because a recompile of them would differ from CMS's ELM in bytes (include
  * paths, `identifier.system`, choice order) while meaning the same thing — and "unchanged" is checked
  * by those bytes (`derivedIdentityProblems`).
@@ -123,9 +123,13 @@ export function applyEdits(cql: string, edits: readonly CqlEdit[]): string {
 }
 
 /**
- * Drop ELM's `annotation`, `locator` and `localId` at every depth — exactly `stripAnnotations` in
- * `scripts/vendor-official-measure.mjs`, so the main library is stripped as CMS's libraries were. The
- * annotations hold CMS's CQL source text; committing them would commit CMS's CQL.
+ * Drop ELM's `annotation` and `locator` at every depth, the same walk as `stripAnnotations` in
+ * `scripts/vendor-official-measure.mjs`. `annotation` holds CMS's CQL text (the `s` narrative) and
+ * `locator` its positions; committing either would commit CMS's CQL.
+ *
+ * `localId` is KEPT, unlike the vendor script: it is a bare node number with no CQL in it, and fqm reads
+ * each define's value by it. Stripped, every define's `raw` is null and the MADiE define-value check (the
+ * evidence a translation reproduces CMS's logic define by define) cannot run on the translation.
  */
 export function stripElmDebugKeys<T>(elm: T): T {
   const strip = (node: unknown): unknown => {
@@ -133,7 +137,7 @@ export function stripElmDebugKeys<T>(elm: T): T {
     if (node && typeof node === "object") {
       const out: Record<string, unknown> = {};
       for (const key of Object.keys(node)) {
-        if (key === "annotation" || key === "locator" || key === "localId") continue;
+        if (key === "annotation" || key === "locator") continue;
         out[key] = strip((node as Record<string, unknown>)[key]);
       }
       return out;

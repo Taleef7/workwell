@@ -24,8 +24,13 @@ const CMS_HOST = "madie.cms.gov";
 /** A refusal, not a sanitizer: CMS's authoring host named ANYWHERE in a field fails the field. */
 const NAMES_CMS_HOST = /madie\.cms\.gov/i;
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
-/** The ELM keys that carry CQL source text and positions (`stripAnnotations` in the vendor script). */
-const ELM_DEBUG_KEYS = new Set(["annotation", "locator", "localId"]);
+/**
+ * The ELM keys that carry CQL source: `annotation` holds the CQL text itself (the `s` narrative) and
+ * `locator` its line/column positions. `localId` is NOT one of them — it is a bare node number carrying no
+ * CQL, and fqm resolves every define's value by it (stripped, every `raw` reads null, and the MADiE
+ * define-value check cannot run on a translation). So a translation keeps it.
+ */
+const ELM_SOURCE_KEYS = new Set(["annotation", "locator"]);
 /** The contained Library MADiE computes over CMS's ELM; it carries CMS's canonical and fqm never reads it. */
 const EFFECTIVE_DATA_REQUIREMENTS = "effective-data-requirements";
 
@@ -204,17 +209,17 @@ function* stringsIn(node: unknown, path: string): Generator<[string, string]> {
   }
 }
 
-/** The first ELM debug key found at any depth, as a path, or undefined. */
-function debugKeyIn(node: unknown, path: string): string | undefined {
+/** The first ELM key carrying CQL source found at any depth, as a path, or undefined. */
+function sourceKeyIn(node: unknown, path: string): string | undefined {
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
-      const found = debugKeyIn(node[i], `${path}[${i}]`);
+      const found = sourceKeyIn(node[i], `${path}[${i}]`);
       if (found) return found;
     }
   } else if (node && typeof node === "object") {
     for (const [key, value] of Object.entries(node)) {
-      if (ELM_DEBUG_KEYS.has(key)) return `${path}.${key}`;
-      const found = debugKeyIn(value, `${path}.${key}`);
+      if (ELM_SOURCE_KEYS.has(key)) return `${path}.${key}`;
+      const found = sourceKeyIn(value, `${path}.${key}`);
       if (found) return found;
     }
   }
@@ -231,7 +236,7 @@ function debugKeyIn(node: unknown, path: string): string | undefined {
  *
  * Also checked: the manifest's build record (the pinned model info, the translator installed HERE — a
  * translation compiled by another translator build is rebuilt, not trusted — and well-formed hashes),
- * and that no library's ELM carries the debug keys that hold CMS's CQL text. The result is memoized and
+ * and that no library's ELM carries the keys that hold CMS's CQL text. The result is memoized and
  * frozen; callers copy it, never mutate it.
  */
 export function derivedIdentityProblems(
@@ -380,20 +385,20 @@ function computeProblems(bundle: Bundle, manifest: OfficialManifest, base: Deriv
   const cmsLibraryNames = new Set(librariesOf((base?.bundle ?? {}) as Bundle).map((l) => String(l["name"])));
   for (const library of librariesOf(bundle)) {
     const key = `${String(library["name"])}|${String(library["version"])}`;
-    // ELM keeps CMS's CQL text in `annotation` and its positions in `locator`/`localId`. CMS's own
-    // libraries were vendored stripped, so EVERY library — unchanged ones included — must be free of them,
-    // or the repo would be committing CMS's CQL inside a WorkWell artifact.
+    // ELM keeps CMS's CQL text in `annotation` and its positions in `locator`. CMS's own libraries were
+    // vendored stripped, so EVERY library — unchanged ones included — must be free of both, or the repo
+    // would be committing CMS's CQL inside a WorkWell artifact. `localId` is allowed: it carries no CQL.
     const elmData = elmContent(library)?.data;
     let elm: { library?: { identifier?: { id?: unknown; version?: unknown } } } | undefined;
     if (elmData) {
       let leaked: string | undefined;
       try {
         elm = JSON.parse(Buffer.from(elmData, "base64").toString("utf8")) as typeof elm;
-        leaked = debugKeyIn(elm, "elm");
+        leaked = sourceKeyIn(elm, "elm");
       } catch {
         leaked = "(the ELM does not parse)";
       }
-      if (leaked) problems.push(`${id}: library ${key}'s ELM carries ${leaked}; ELM is committed stripped of annotation, locator and localId`);
+      if (leaked) problems.push(`${id}: library ${key}'s ELM carries ${leaked}; ELM is committed stripped of annotation and locator`);
     }
     const pinned = unchanged.get(key);
     if (pinned !== undefined) {
