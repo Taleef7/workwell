@@ -252,7 +252,7 @@ export interface RoutingCheckDeps {
    * fires at all.
    */
   absentFor?: (artifact: OfficialArtifact) => string[];
-  /** Injectable for tests: no translation is committed yet, so a test supplies its own. */
+  /** Injectable for tests, which supply their own translation rather than reading the committed one. */
   loadDerived?: (catalogId: string) => OfficialArtifact | null;
 }
 

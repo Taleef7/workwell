@@ -120,7 +120,7 @@ export function measureIdentityPayloadFor(
   measureId: string,
   officialRouted: boolean,
   translationRouted = false,
-  /** Injectable for tests: no translation is committed yet. */
+  /** Injectable for tests, which supply their own translation rather than reading the committed one. */
   translationOf: (measureId: string) => TranslationLogic | null = translationLogicFor,
 ): MeasureIdentityPayload | null {
   const identity = measureIdentityFor(measureId);

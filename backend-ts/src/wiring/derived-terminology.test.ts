@@ -48,11 +48,31 @@ interface ChangedValueSets {
  * computed, so a re-vendor that moves any code — a release that changed under the same name, a set that
  * quietly kept CMS's 2026 expansion — fails here and has to be explained in review.
  *
- * Empty because no translation is committed yet. The commit that lands the first one (cms137, 2027) fills
- * its entry from that first credentialed build; until then that translation's test fails and its message
- * carries the record this build computed.
+ * A translation with no entry fails with the record its build computed, so a new one is pinned after review,
+ * never by default.
+ *
+ * cms137 (ww-2027.1): CMS137 v14 → v15 is a value-set-only change, and these are the ten sets the
+ * eCQM Update 2026-05-14 release moved — the same ten an independent read of the raw VSAC dump found before
+ * the translation existed. +43/−13 is a NET of 30, which is why the sidecar holds 976 codes to CMS's 946.
  */
-const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {};
+const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
+  cms137: {
+    oids: [
+      "2.16.840.1.113762.1.4.1029.206", // Intensive Care Unit
+      "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit
+      "2.16.840.1.113883.3.464.1003.101.12.1080", // Telephone Visits
+      "2.16.840.1.113883.3.464.1003.101.12.1089", // Virtual Encounter
+      "2.16.840.1.113883.3.464.1003.106.12.1001", // Substance Use Disorder
+      "2.16.840.1.113883.3.464.1003.106.12.1005", // Substance Use Disorder Treatment
+      "2.16.840.1.113883.3.464.1003.1149", // SUD Long Acting Medication
+      "2.16.840.1.113883.3.464.1003.1156", // SUD Long Acting Medication Administration
+      "2.16.840.1.113883.3.526.3.1496", // Psych Visit Psychotherapy
+      "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient
+    ],
+    added: 43,
+    removed: 13,
+  },
+};
 
 interface SidecarValueSet {
   codes: ExpandedCode[];

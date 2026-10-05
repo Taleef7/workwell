@@ -18,7 +18,11 @@ lives in its own folder: `bundle.json` and `manifest.json` committed, and `termi
 build and gitignored. Its Measure and every library WorkWell changed carry WorkWell's identity. CMS's
 unchanged shared libraries keep CMS's names and are pinned by the hash of their ELM. CMS's direct-reference
 codes in the compiled ELM fall under the same terms as `measures/official/NOTICE.md`, NCQA's notice
-included. None is committed yet.
+included.
+
+- `cms137/` — WorkWell translation of CMS137v15 (`ww-2027.1`), built from CMS's CMS137FHIR v1.0.000 CQL
+  with no edit (v15 changes value sets only) and the eCQM Update 2026-05-14 value sets. Its `README.md`
+  carries the hashes, the commands and what its checks proved.
 
 ## What does not live here
 

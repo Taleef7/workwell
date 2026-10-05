@@ -3,8 +3,9 @@
  * its own bundle bytes, and pass every router construction check the committed files can decide — in the
  * default suite, so an unfit translation fails CI before any stack could be configured to route it.
  *
- * C2 commits none: the directory holds only the QI-Core model info and the NOTICE. The guard must still
- * SEE the model-info directory and skip it, or a future translation named oddly could hide the same way.
+ * cms137 (ww-2027.1) is the first committed translation. The directory also holds the QI-Core model info
+ * and the NOTICE; the guard must still SEE the model-info directory and skip it, or a translation named
+ * oddly could hide the same way.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -32,10 +33,12 @@ function guardProblems(id: string, loadDerived: (catalogId: string) => OfficialA
   ).filter((p) => p.startsWith(`${id}:`) || p.startsWith(`${id} `));
 }
 
-test("the guard sees the model-info directory, skips it, and finds no translation yet", () => {
+test("the guard sees the model-info directory, skips it, and finds exactly the committed translations", () => {
   assert.ok(dirs.includes("_modelinfo"), "the guard must be looking at the right directory");
   assert.ok(!VALID_CATALOG_ID.test("_modelinfo"), "and the model info can never be mistaken for a translation");
-  assert.deepEqual(artifacts, [], "C2 commits no translation; C3a's first one must pass the test below");
+  // Every translation this repo ships, by name: a new one is added here deliberately, and one that went
+  // missing or was renamed fails here rather than silently leaving the loop below with nothing to check.
+  assert.deepEqual(artifacts, ["cms137"], "the committed translations");
   assert.ok(existsSync(`${DERIVED_DIR}NOTICE.md`));
 });
 
@@ -62,5 +65,18 @@ for (const id of artifacts) {
     const bytes = readFileSync(`${DERIVED_DIR}${id}/bundle.json`, "utf8");
     assert.equal(translation.manifest.sha256, `sha256:${createHash("sha256").update(bytes).digest("hex")}`, `${id}: manifest.sha256 must pin bundle.json`);
     assert.deepEqual(guardProblems(id), []);
+    // What the identity check cannot ask of the fixture (built on CMS's own ELM with its identifier
+    // renamed) it can ask of a COMMITTED translation: the main library's ELM is WorkWell's compile. Our
+    // compile names its includes bare, so CMS's host appearing anywhere in it means CMS's ELM was carried
+    // instead; and the keys that would carry CMS's CQL text are what the builder strips.
+    const resources = ((translation.bundle as { entry?: Array<{ resource: Record<string, unknown> }> }).entry ?? []).map((e) => e.resource);
+    const measure = resources.find((r) => r.resourceType === "Measure") as { library?: string[] } | undefined;
+    const mainUrl = measure?.library?.[0];
+    assert.ok(mainUrl?.startsWith("urn:workwell:library:"), `${id}: the Measure must name WorkWell's main library, got ${String(mainUrl)}`);
+    const main = resources.find((r) => r.resourceType === "Library" && r.url === mainUrl) as { content?: Array<{ data?: string }> } | undefined;
+    const elm = Buffer.from(main?.content?.[0]?.data ?? "", "base64").toString("utf8");
+    assert.ok(elm.length > 0, `${id}: the main library must carry ELM`);
+    assert.doesNotMatch(elm, /madie\.cms\.gov/i, `${id}: the main library's ELM must be WorkWell's compile, which names no CMS host`);
+    assert.doesNotMatch(elm, /"(annotation|locator)"\s*:/, `${id}: the main library's ELM must be stripped of the keys that carry CQL text`);
   });
 }

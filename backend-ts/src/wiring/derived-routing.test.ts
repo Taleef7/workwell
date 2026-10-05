@@ -234,7 +234,8 @@ test("the real sidecar loader and expander key by ARTIFACT: a translation never 
     return;
   }
   // The same pin as CMS's, so the ONLY thing keeping them apart is where the sidecar is read from and
-  // what the cache keys it by: a translation has no sidecar under measures/derived/cms137/ yet.
+  // what the cache keys it by: the sidecar under measures/derived/cms137/ is the translation's own, pinned
+  // by a different sha, so CMS's pin cannot verify there.
   const samePin = { ...derived, manifest: { ...derived.manifest, terminology: { ...official.manifest.terminology! } } };
   assert.equal(loadOfficialTerminology(samePin).ok, false, "read from measures/derived/, never from CMS's cache or CMS's directory");
   const [oid] = requiredOids(official);
