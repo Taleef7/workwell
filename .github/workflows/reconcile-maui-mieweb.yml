@@ -249,6 +249,9 @@ jobs:
                 # Codex on #356 before it could happen; `official-flip-config.test.ts` now asserts the two
                 # workflows agree, so this pair cannot drift again.
                 {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125,cms2,cms130,cms165,cms137"},
+                # MUST mirror deploy-maui-mieweb.yml, for the same reason: dropped here, a self-heal would put
+                # 2027 back on the CMS 2026 draft with no signal. The test asserts the two agree.
+                {key: "WORKWELL_DERIVED_MEASURES", value: "cms137"},
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
                 {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},

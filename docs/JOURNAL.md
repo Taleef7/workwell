@@ -5,6 +5,32 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-05
+
+- **The first translation, CMS137v15 for 2027, is built, proven and on for Maui (C3a).** CMS's CMS137FHIR
+  v1.0.000 logic recompiled by WorkWell with no edit (v14 → v15 changes value sets only), carrying the
+  eCQM Update 2026-05-14 value sets, labelled "WorkWell translation of CMS137v15" (ww-2027.1). Maui routes
+  it (`WORKWELL_DERIVED_MEASURES=cms137`); TWH and staging do not. CMS's artifact still scores 2026, so a
+  run today is byte-identical to before; the translation runs on 2027-dated evaluations only.
+  - **Proof.** The Cypress 2027 deck agrees on all 36 patients, both rates and now every stratum row (the
+    harness used to count them). But the deck scores 36/36 on either year's codes, so the value-set proof
+    is a second oracle: all 28 declared sets equal the steward's own 2027 code list, and exactly ten differ
+    from CMS's 2026 sidecar (43 codes added, 13 removed), pinned in the sidecar test. CI also runs CMS's
+    MADiE deck through the translation and CMS's own run on every push: every case, rate, stratifier and
+    define value equal.
+  - **How it is built.** `pnpm build:derived` reads CMS's CQL from the hash-verified checkout, applies a
+    hash-anchored edit list (only WorkWell's text is ever stored), compiles twice and refuses on any byte
+    difference, strips the keys that carry CQL text (`localId` stays: fqm reads define values by it),
+    and carries the six shared CMS libraries byte-for-byte. `pnpm derived:check --record` writes the two
+    check records only when every check passed. The sidecar is 100% VSAC at the pinned release, gitignored,
+    regenerated at CI and deploy with `--verify-pin`, so a bad or missing sidecar fails the build before an
+    image exists (the worker would otherwise boot and 500 every evaluation).
+  - **Not done, on purpose.** The catalog description is unchanged: it is one global text that TWH shows
+    too, and the measure page already renders "For 2027: WorkWell translation of CMS137v15, not a CMS
+    measure" only where it is routed. A 2027 run on the sandbox (what #654 is missing) is the owner's call.
+  - Next: CMS130, then CMS125 — the first translations with real edits, where the main library's data
+    requirements must be recomputed (today they are CMS's, correct only while nothing changes).
+
 ## 2026-10-03
 
 - **Screens and APIs name a WorkWell translation (C2b).** Wherever a translation scored a row, it is

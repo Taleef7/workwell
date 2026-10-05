@@ -29,7 +29,8 @@ A push to `main` runs `deploy-twh-mieweb.yml` and `deploy-maui-mieweb.yml`, unle
 or root `*.md` files (no image contains them). Each:
 
 1. **Builds the backend**: vendors official terminology (Step 1), runs the reproducibility gate
-   `git diff --exit-code backend-ts/measures/official`, bakes `WORKWELL_BUILD_SHA` into the image.
+   `git diff --exit-code backend-ts/measures/official` (Maui adds `backend-ts/measures/derived`), bakes
+   `WORKWELL_BUILD_SHA` into the image.
    TWH tags `latest` + `sha-<SHA>`; Maui pushes only `maui-sha-<SHA>`.
 2. **Builds the frontend** with the stack's build args.
 3. **Deploys the backend**: validates required secrets, builds the container env as a fixed `jq` array,
@@ -54,6 +55,18 @@ node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pc
 Plain `node`, no install; retries transport errors and 5xx, a 4xx is final. Without the sidecar the
 fidelity diff silently degrades from `literal` to `subset`/`estimate`, and a routed measure refuses.
 Locally: `pnpm vendor:official --measure <MADiE name> --catalog-id <id> --strip-elm-annotations`.
+
+Maui also vendors the sidecar of each WorkWell translation it routes (`measures/derived/<id>/`), one line
+per id, before `docker build`:
+
+```bash
+node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin
+```
+
+Every value set is re-expanded from VSAC at the release the committed manifest names (there is no CMS
+copy to fall back to). `--verify-pin` exits 1 unless the bytes hash to the manifest's pin and every
+declared set is present, non-empty and uncapped, so the deploy fails here instead of shipping an image
+whose evaluations all 500 while health stays 200.
 
 #### Step 1a — `--complete-terminology`: value sets the bundle does not fully carry (ADR-041, ADR-053)
 
@@ -146,6 +159,13 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
 **Reversible:** remove the id from both workflows and redeploy; `logic_version` carries the artifact's
 identity (ADR-040), so no cache cleanup is needed.
 
+**Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms137`) lets a committed WorkWell
+translation score the one year it covers (2027); CMS's artifact still scores every other year. Each id
+must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit the one key in `deploy-maui-mieweb.yml` **and**
+`reconcile-maui-mieweb.yml`, same value, and keep the build job's `vendor-derived-terminology.mjs` lines
+naming the same ids (and `ROUTED_TRANSLATIONS` in CI's `e2e-maui`). `official-flip-config.test.ts` fails
+the build otherwise, and pins TWH and staging to none.
+
 ### The deploy script and the Container Manager API
 
 - **v1 API** (`<manager-origin>/api/v1`): `{"data": …}` envelopes; create body `template` +
@@ -171,7 +191,7 @@ The deploy fails if a required secret is missing. Suffixed secrets map to unsuff
 | `WORKWELL_AUTH_JWT_SECRET_TWH` / `_MAUI` / `_STAGING` | JWT signing secret |
 | `WORKWELL_PILOT_PASSWORD_HASH_MAUI` | PBKDF2 hash of the pilot accounts' password (the demo password is public). Rotate with a long random password: run `cd backend-ts; corepack pnpm@10 exec node --import tsx -e "import('./src/auth/password.ts').then(async (m) => console.log(await m.hashPassword(require('fs').readFileSync(0, 'utf8').replace(/\r?\n$/, ''))))"`, type the password and end the input (Ctrl+D; Ctrl+Z then Enter on Windows) so it stays out of shell history and the process list, and paste its output into `gh secret set WORKWELL_PILOT_PASSWORD_HASH_MAUI` (never `--body "…"`: the hash contains `$`), then redeploy with `workflow_dispatch` and `replace_existing=true` (a restart in place keeps the old env). Sessions opened under the old password end within 15 minutes of the redeploy: their refresh tokens carry the old credential version and cannot refresh. Unset on the deployed stack, pilot sign-in is disabled |
 | `OPENAI_API_KEY` | AI surfaces |
-| `WORKWELL_VSAC_API_KEY_VENDOR` | build-time VSAC (Step 1a); CI, deploys, flip-gate, vendor, cross-engine-sweep |
+| `WORKWELL_VSAC_API_KEY_VENDOR` | build-time VSAC (Step 1a, and Maui's translation sidecars in Step 1); CI, deploys, flip-gate, vendor, cross-engine-sweep |
 | `WORKWELL_VSAC_API_KEY_TWH` | runtime VSAC resolver on TWH **and** Maui |
 | `WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH` / `SECRET_ACCESS_KEY_TWH`, `…_MAUI` | R2 token per evidence bucket |
 | `WORKWELL_R2_S3_ENDPOINT` | R2 endpoint (secret because it embeds the account id; the repo is public) |
@@ -186,8 +206,8 @@ Both live stacks ship: `MIEWEB_TARGET=local`, `WORKWELL_ENVIRONMENT=production`,
 `OPENAI_API_KEY`, `WORKWELL_CORS_ALLOWED_ORIGINS` + `CORS_ALLOWED_ORIGINS` (the frontend URL),
 `WORKWELL_AUTH_COOKIE_SAME_SITE=None`, `WORKWELL_AUTH_COOKIE_SECURE=true`, `WORKWELL_AUTH_JWT_SECRET`,
 `WORKWELL_INSTANCE`, `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_OFFICIAL_MEASURES`,
-`WORKWELL_VSAC_API_KEY` and the five `WORKWELL_BUCKET_S3_*`; Maui adds the corpus variables and
-`WORKWELL_ALERT_WEBHOOK_URL`.
+`WORKWELL_VSAC_API_KEY` and the five `WORKWELL_BUCKET_S3_*`; Maui adds the corpus variables,
+`WORKWELL_DERIVED_MEASURES` and `WORKWELL_ALERT_WEBHOOK_URL`.
 `WORKWELL_EMAIL_PROVIDER` is unset, so email stays simulated. The reconcilers duplicate this array —
 **keep-in-sync**.
 
@@ -607,6 +627,11 @@ No migration to undo — the schema is additive. Roll back by redeploying an ear
   follows it, but the next push supersedes it, so revert on `main`.
 - During an NLM VSAC outage only a pre-ADR-041 SHA can be rebuilt (Step 1a).
 - Routing: remove the measure from both workflows. Data: `docs/BACKUP_DR_RUNBOOK.md`.
+- **Maui, rolling back past the translation:** the reconciler always runs `main`'s env. After a dispatch
+  rollback to an image built before `measures/derived/<id>/` was committed, the next self-heal recreate
+  puts `main`'s `WORKWELL_DERIVED_MEASURES` on that image, the router refuses it (check D2, `no executable
+  translation is committed`), and every evaluation 500s while health stays 200. Unset the key in **both**
+  Maui workflows on `main` first.
 
 ## Cost monitoring
 

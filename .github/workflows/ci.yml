@@ -748,8 +748,14 @@ jobs:
     # WORKWELL_OFFICIAL_MEASURES the deployed sandbox ships — by vendoring each measure's terminology
     # sidecar with the VSAC credential, exactly as flip-gate.yml does. A stack that is not the one the
     # pilot runs is not a pilot test.
+    #
+    # The same holds for the WorkWell translations the sandbox routes beside them. ROUTED_TRANSLATIONS is
+    # bound as a plain literal, never gated on the credential: this job cannot run without it (Dependabot
+    # is excluded above, a fork push runs in the fork, and the vendor step exits 1 on an empty key), so
+    # there is no uncredentialed boot for the key to take evaluation down in.
     env:
       ROUTED_MEASURES: cms122,cms125,cms2,cms130,cms165,cms137
+      ROUTED_TRANSLATIONS: cms137
     steps:
       # backend-ts consumes @mieweb/cloud + @mieweb/cli from the external/mieweb-cloud submodule.
       - uses: actions/checkout@v7
@@ -807,10 +813,17 @@ jobs:
               exit 1
             fi
           done
-      # Only the gitignored sidecar may be new; the committed artifact must still match its pin.
+          # Each routed translation's own sidecar, the way deploy-maui-mieweb.yml vendors it: every value
+          # set at the VSAC release its committed manifest names, and --verify-pin exits 1 unless the bytes
+          # hash to that pin, so the suite never boots a translation the router would refuse.
+          IFS=',' read -ra TRANSLATIONS <<< "$ROUTED_TRANSLATIONS"
+          for id in "${TRANSLATIONS[@]}"; do
+            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin
+          done
+      # Only the gitignored sidecars may be new; the committed artifacts must still match their pins.
       - name: The committed artifacts are reproducible from their pins
         working-directory: backend-ts
-        run: git diff --exit-code measures/official
+        run: git diff --exit-code measures/official measures/derived
       # ---- End of the credentialed steps. Everything below runs with no VSAC key in scope.
 
       - name: Install frontend dependencies
@@ -828,12 +841,15 @@ jobs:
           npx playwright install chromium --with-deps
 
       - name: Start the backend as Maui
+        id: backend
         working-directory: backend-ts
         env:
           WORKWELL_INSTANCE: maui
           WORKWELL_AUTH_JWT_SECRET: maui-e2e-ci-secret-key-32-characters-minimum
           # The configuration the sandbox deploys (deploy-maui-mieweb.yml), not a reduced stand-in.
+          # official-flip-config.test.ts fails if either list differs from what that workflow ships.
           WORKWELL_OFFICIAL_MEASURES: ${{ env.ROUTED_MEASURES }}
+          WORKWELL_DERIVED_MEASURES: ${{ env.ROUTED_TRANSLATIONS }}
         run: |
           nohup pnpm dev > ../backend-maui.log 2>&1 &
           for i in $(seq 1 60); do
@@ -882,6 +898,31 @@ jobs:
               exit 1
             }
           done
+      # The runnable= line cannot show a translation: routing one changes which artifact scores a year,
+      # not the measure's kind. And the router validates lazily, so a translation it refuses still boots,
+      # logs OFFICIAL_ROUTING_MISCONFIGURED on the first request, and answers 500 from every evaluating
+      # route while /actuator/health stays 200. So read both: each measure must name the translation for
+      # the year its manifest covers, and the log must hold no refusal. Read-only, so it runs before the suite.
+      - name: Every routed translation is named, and the router accepts it
+        run: |
+          API=http://localhost:8080
+          TOKEN="$(curl -fsS --max-time 60 -X POST "$API/api/auth/login" -H 'content-type: application/json' \
+            -d '{"email":"admin@maui.workwell.dev","password":"Workwell123!"}' | jq -er .token)"
+          IFS=',' read -ra TRANSLATIONS <<< "$ROUTED_TRANSLATIONS"
+          for id in "${TRANSLATIONS[@]}"; do
+            YEAR="$(jq -er '.effectivePeriod.start[0:4]' "backend-ts/measures/derived/${id}/manifest.json")"
+            MEASURE="$(curl -fsS --max-time 60 "$API/api/measures/${id}" -H "Authorization: Bearer $TOKEN")"
+            printf '%s' "$MEASURE" | jq -e --arg year "$YEAR" '.identity.translation.year == $year' > /dev/null || {
+              echo "::error::GET /api/measures/${id} does not name its ${YEAR} translation. Its identity:"
+              printf '%s' "$MEASURE" | jq '.identity'
+              exit 1
+            }
+            echo "${id}: $(printf '%s' "$MEASURE" | jq -c '.identity.translation | {label, version, year}')"
+          done
+          if grep -F 'OFFICIAL_ROUTING_MISCONFIGURED' backend-maui.log; then
+            echo "::error::the router refuses the routed configuration, so every evaluating route answers 500"
+            exit 1
+          fi
       - name: Build and start the frontend in patient mode
         working-directory: frontend
         env:
@@ -910,6 +951,43 @@ jobs:
         # Both Maui projects. `maui-writes` declares `dependencies: ["maui"]`, so the read-only specs
         # all finish before the run-triggering one starts, whatever order these are named in.
         run: npx playwright test --project=maui --project=maui-writes --reporter=list,html
+      # The translation actually scores: a sandbox patient evaluated on a date inside the year a translation
+      # covers must come back from it (kind "derived", and no CMS eCQM id over counts its logic produced),
+      # not from the CMS artifact. AFTER the suite, because the evaluate route needs an open run and leaves
+      # it RUNNING with an outcome in that year, which screens the suite asserts would read. It still runs
+      # when the suite fails, so a red suite never hides whether the translation scores.
+      - name: A sandbox patient evaluated in a translation year is scored by the translation
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
+        working-directory: backend-ts
+        run: |
+          API=http://localhost:8080
+          # Signed in again: the suite outlasts an access token.
+          TOKEN="$(curl -fsS --max-time 60 -X POST "$API/api/auth/login" -H 'content-type: application/json' \
+            -d '{"email":"admin@maui.workwell.dev","password":"Workwell123!"}' | jq -er .token)"
+          IFS=',' read -ra TRANSLATIONS <<< "$ROUTED_TRANSLATIONS"
+          for id in "${TRANSLATIONS[@]}"; do
+            DATE="$(jq -er '.effectivePeriod.start[0:4]' "measures/derived/${id}/manifest.json")-02-01"
+            # pat-001 of the sandbox corpus, its facts generated for that year, built as the run pipeline
+            # builds it (corpus-bundle-source.ts).
+            pnpm exec tsx -e "import {patientAt, measurementYearOf} from './src/engine/synthetic/corpus/corpus-patient.ts'; import {bundleForPatient} from './src/engine/synthetic/corpus/corpus-bundle.ts'; import {DEFAULT_CORPUS_SEED} from './src/engine/synthetic/corpus/corpus-parameters.ts'; process.stdout.write(JSON.stringify(bundleForPatient(patientAt(DEFAULT_CORPUS_SEED, 0, new Set(), measurementYearOf('${DATE}')), '${DATE}')))" > "$RUNNER_TEMP/probe-bundle.json"
+            jq -nc --arg id "$id" --arg date "$DATE" --slurpfile bundle "$RUNNER_TEMP/probe-bundle.json" \
+              '{measureId: $id, patientBundle: $bundle[0], evaluationDate: $date}' > "$RUNNER_TEMP/probe-request.json"
+            RUN_ID="$(curl -fsS --max-time 60 -X POST "$API/api/runs" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+              -d "{\"scopeType\":\"MEASURE\",\"scopeId\":\"${id}\"}" | jq -er .id)"
+            CODE="$(curl -sS --max-time 300 -o "$RUNNER_TEMP/probe-outcome.json" -w '%{http_code}' -X POST "$API/api/runs/${RUN_ID}/evaluate" \
+              -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @"$RUNNER_TEMP/probe-request.json")"
+            if [ "$CODE" != "201" ]; then
+              echo "::error::evaluating ${id} on ${DATE} answered ${CODE}:"
+              cat "$RUNNER_TEMP/probe-outcome.json"
+              exit 1
+            fi
+            jq -e '.evidence.official | .kind == "derived" and has("ecqmId") and .ecqmId == null' "$RUNNER_TEMP/probe-outcome.json" > /dev/null || {
+              echo "::error::${id} on ${DATE} was not scored by its translation. The evidence names:"
+              jq '.evidence.official | del(.populationResults)' "$RUNNER_TEMP/probe-outcome.json"
+              exit 1
+            }
+            echo "${id} on ${DATE}: $(jq -c '.status as $s | .evidence.official | {status: $s, kind, label, version, ecqmId}' "$RUNNER_TEMP/probe-outcome.json")"
+          done
       - name: Upload Playwright report and server logs
         uses: actions/upload-artifact@v7
         if: always()

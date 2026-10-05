@@ -374,8 +374,8 @@ test("PR-9c: the shipped configuration constructs cleanly — no routing problem
 //
 // The same "the workflow IS the source of truth" rule as the official list, for the same reason: the
 // router refuses an unfit translation at ENGINE construction, per request, while /actuator/health stays
-// 200. No workflow ships a translation yet, so the checks on real workflows hold vacuously today; each is
-// written to fail the moment one names a translation it cannot route, and the fixture tests prove that.
+// 200. The Maui deployment ships cms137's translation (pinned below) and TWH and staging ship none; each
+// check fails the moment a workflow names a translation it cannot route, and the fixture tests prove that.
 // ---------------------------------------------------------------------------
 
 const DERIVED_KEY = "WORKWELL_DERIVED_MEASURES";
@@ -471,6 +471,102 @@ test(`${DERIVED_KEY}: TWH and staging ship no translation`, () => {
   }
 });
 
+test(`${DERIVED_KEY}: the Maui deployment ships the cms137 translation`, () => {
+  // The agreement test above also passes when BOTH Maui files drop the key, which would put 2027 back on
+  // the CMS 2026 draft with every check green. So the value is pinned: turning the translation off, or on
+  // for another measure, has to be a deliberate edit of this line.
+  for (const workflow of ["deploy-maui-mieweb.yml", "reconcile-maui-mieweb.yml"]) {
+    assert.deepEqual(shippedDerived(workflow), ["cms137"], `${workflow} must ship ${DERIVED_KEY}=cms137`);
+  }
+});
+
+/**
+ * One job's lines, from workflow TEXT. A job is a two-space key under `jobs:`; its block runs to the next
+ * one, or to a top-level key. A job that is not found THROWS: a renamed job would otherwise read as
+ * "nothing there", and every check against it would pass.
+ */
+function jobLines(yaml: string, job: string): string[] {
+  const lines = yaml.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trimEnd() === `  ${job}:`);
+  if (start < 0) throw new Error(`no job '${job}' in the workflow — the guard is stale, not the workflow`);
+  let end = start + 1;
+  while (end < lines.length && !/^ {0,2}[A-Za-z0-9_-]+:/.test(lines[end]!)) end++;
+  return lines.slice(start + 1, end);
+}
+
+/** The one form of a translation vendor line that fails a deploy: an explicit id, `--verify-pin`, nothing after. */
+const VENDOR_TRANSLATION = /^\s*node scripts\/vendor-derived-terminology\.mjs --catalog-id ([a-z0-9]+) --verify-pin\s*$/;
+/** The image build, as a build-push-action step or a `docker build` / `docker buildx build` command. */
+const IMAGE_BUILD = /^\s*-?\s*uses:\s*docker\/build-push-action@|\bdocker\s+(?:buildx\s+)?build\b/;
+
+/**
+ * Which translation sidecars one job vendors, and the line (within the job) where it builds the image.
+ * Any other uncommented line that runs the vendor script lands in `unread`: no `--verify-pin`, a trailing
+ * `|| true`, an id from a variable. Each is either fail-soft or invisible to this reader, so each must fail
+ * the guard rather than be skipped by it.
+ */
+function translationVendoring(yaml: string, job: string) {
+  const vendored: Array<{ id: string; line: number }> = [];
+  const unread: string[] = [];
+  let build = -1;
+  jobLines(yaml, job).forEach((line, index) => {
+    if (line.trimStart().startsWith("#")) return;
+    const match = line.match(VENDOR_TRANSLATION);
+    if (match) vendored.push({ id: match[1]!, line: index });
+    else if (line.includes("vendor-derived-terminology")) unread.push(line.trim());
+    if (build < 0 && IMAGE_BUILD.test(line)) build = index;
+  });
+  return { vendored, unread, build };
+}
+
+test(`${DERIVED_KEY}: deploy-maui vendors every shipped translation with --verify-pin, before it builds the image`, () => {
+  // The worker boots even when the router refuses a translation (it only logs), and then every evaluating
+  // route 500s behind a green health check. So the sidecar is produced, and its pin verified, in the job
+  // that builds the image and BEFORE it does: a failed vendoring then fails the deploy instead of shipping.
+  const workflow = "deploy-maui-mieweb.yml";
+  const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
+  const { vendored, unread, build } = translationVendoring(readFileSync(path, "utf8"), "build-backend-ts");
+  assert.ok(build >= 0, `${workflow}: build-backend-ts builds no image that this guard can find, so it is not looking at what it guards`);
+  assert.deepEqual(unread, [], `${workflow}: a translation is vendored only as "node scripts/vendor-derived-terminology.mjs --catalog-id <id> --verify-pin"`);
+  assert.deepEqual(
+    vendored.map((v) => v.id).sort(),
+    [...(shippedDerived(workflow) ?? [])].sort(),
+    `${workflow}: the translations its build job vendors must be exactly the ${DERIVED_KEY} it ships`,
+  );
+  for (const { id, line } of vendored) {
+    assert.ok(line < build, `${workflow}: ${id} is vendored after the image is built, so the image ships without its sidecar`);
+  }
+});
+
+test("the vendor reader keeps to one job, refuses a fail-soft line, and finds the build", () => {
+  const workflow = (...buildSteps: string[]) =>
+    [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      ...buildSteps,
+      "  deploy:",
+      "    steps:",
+      "      - run: node scripts/vendor-derived-terminology.mjs --catalog-id cms2 --verify-pin",
+    ].join("\n");
+  const run = "      - run: |";
+  const vendor = (tail = "") => `          node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin${tail}`;
+  const image = "      - uses: docker/build-push-action@v7";
+  const read = (yaml: string) => translationVendoring(yaml, "build");
+
+  const fit = read(workflow(run, vendor(), "          # node scripts/vendor-derived-terminology.mjs --catalog-id cms9", image));
+  assert.deepEqual(fit.vendored.map((v) => v.id), ["cms137"], "another job's line and a comment are not this job's vendoring");
+  assert.deepEqual(fit.unread, []);
+  assert.ok(fit.vendored[0]!.line < fit.build);
+  const late = read(workflow(image, run, vendor()));
+  assert.ok(late.vendored[0]!.line > late.build, "a line after the build reads as after it");
+  assert.deepEqual(read(workflow(run, vendor(" || true"), image)).unread, [vendor(" || true").trim()]);
+  assert.equal(read(workflow(run, "          node scripts/vendor-derived-terminology.mjs --catalog-id cms137", image)).unread.length, 1, "no --verify-pin");
+  const cli = read(workflow(run, vendor(), "          docker buildx build ."));
+  assert.ok(cli.build > cli.vendored[0]!.line, "a docker build command counts as the build");
+  assert.equal(read(workflow(run, vendor())).build, -1, "no build in the job");
+});
+
 /**
  * One key of a ci.yml job, from the plain YAML `env:` form the jobs use (`KEY: value`, at job or step
  * level), with a `${{ env.X }}` value resolved to the job's own `X`. `null` when the job binds no such key.
@@ -482,21 +578,12 @@ function ciJobEnv(job: string, key: string): string | null {
 
 /** `ciJobEnv` over workflow TEXT, so its scoping and its refusals can be proved on a fixture. */
 function jobEnvIn(yaml: string, job: string, key: string, depth = 0): string | null {
-  const lines = yaml.split(/\r?\n/);
-  // A job is a two-space key under `jobs:`; its block runs to the next one, or to a top-level key. A job
-  // that is not found THROWS: a renamed job would otherwise read as "key absent" and every comparison
-  // against it would pass.
-  const start = lines.findIndex((line) => line.trimEnd() === `  ${job}:`);
-  if (start < 0) throw new Error(`no job '${job}' in the workflow — the guard is stale, not the workflow`);
-  let end = start + 1;
-  while (end < lines.length && !/^ {0,2}[A-Za-z0-9_-]+:/.test(lines[end]!)) end++;
-
   const binding = new RegExp(String.raw`^\s+` + key + String.raw`:[ \t]*(.*?)[ \t]*$`);
   // Any OTHER way of setting the key — a shell `KEY=…` prefix in a run block, a flow mapping — would
   // reach the process while this reader saw nothing, so it throws, like `shippedMeasures` on a stale pattern.
   const setting = new RegExp(String.raw`\b` + key + String.raw`\s*[:=]`);
   const values = new Set<string>();
-  for (const line of lines.slice(start + 1, end)) {
+  for (const line of jobLines(yaml, job)) {
     if (line.trimStart().startsWith("#")) continue;
     const match = line.match(binding);
     if (match) values.add(match[1]!.replace(/\s+#.*$/, "").replace(/^(["'])(.*)\1$/, "$2"));
@@ -561,7 +648,7 @@ test("e2e-maui boots with the translations the Maui sandbox ships", () => {
 /**
  * The construction-time check with BOTH lists, against the real artifacts and sidecars — `sidecarPresent`
  * extended to the translations' own sidecars. Scoped to the workflows that ship a translation, since those
- * are the only sidecars the check reads, so the vacuous case below needs none.
+ * are the only sidecars the check reads.
  */
 const DERIVED_SHIPPING = WORKFLOWS.filter((workflow) => shippedDerived(workflow) !== null);
 const derivedSidecarsPresent =
@@ -575,9 +662,11 @@ const derivedSidecarsPresent =
   });
 
 test(
-  `${DERIVED_KEY}: the shipped configuration, translations included, constructs cleanly` +
-    (DERIVED_SHIPPING.length === 0 ? " — VACUOUS until a workflow ships a translation" : ""),
+  `${DERIVED_KEY}: the shipped configuration, translations included, constructs cleanly`,
   (t) => {
+    // The real router, built with both keys against the real sidecars. Asserted non-vacuous, so the name
+    // cannot go on claiming that if every workflow stops shipping a translation.
+    assert.ok(DERIVED_SHIPPING.length > 0, `no workflow ships ${DERIVED_KEY}, so this test would construct nothing`);
     if (!derivedSidecarsPresent) {
       const why = "needs the shipped translations' sidecars and their measures' (node scripts/vendor-derived-terminology.mjs, pnpm vendor:official)";
       // CI's official-cases job vendors them and sets the flag: there a missing sidecar is a failure.
@@ -639,7 +728,7 @@ test("no jq env program in a deploy or reconcile workflow contains an apostrophe
   // #356: one apostrophe in a comment inside the single-quoted program closed the quote and turned the
   // production deploy step into a parse error. The run-block parse check in CI catches an ODD count; an
   // even count parses and hands jq a broken program, and only a scan of the program itself sees both.
-  // The translation key will be added inside these programs, which is why it is checked here now.
+  // The translation key and its comment live inside these programs too.
   for (const workflow of WORKFLOWS) {
     const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
     const programs = jqPrograms(readFileSync(path, "utf8"));
