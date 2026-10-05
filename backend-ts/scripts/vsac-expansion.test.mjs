@@ -12,9 +12,12 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+  canonicalize,
   completeTerminology,
   declaredValueSets,
+  expandComplete,
   expandFromVsac,
+  IncompleteExpansionError,
   oidFromValueSetUrl,
   sortValueSets,
   VSAC_TIMEOUT_MS,
@@ -692,5 +695,155 @@ describe("sortValueSets", () => {
     // locale-aware: this decides bytes hashed on a dev box and re-hashed on a CI runner.
     assert.deepEqual(once, ["2.16.1", "2.16.10", "2.16.9"]);
     assert.deepEqual(sortValueSets(t).valueSets.map((v) => v.oid), once);
+  });
+});
+
+/**
+ * The strict primitive shared by absent-upstream sets and a WorkWell translation's sidecar: either the
+ * whole value set, provably, or a throw. Each refusal test asserts the `kind`, because the absent branch
+ * words its warning from it and a translation's deploy step fails on it.
+ */
+describe("expandComplete", () => {
+  const PINNED = { vsacBase: ARGS.vsacBase, vsacManifest: ARGS.vsacManifest, apiKey: "test-key" };
+
+  /** One response, optionally echoing a canonical; `total` undefined means VSAC volunteered none. */
+  const answer = (codes, total, url) => ({
+    ok: true,
+    status: 200,
+    text: async () =>
+      JSON.stringify({
+        resourceType: "ValueSet",
+        ...(url ? { url } : {}),
+        expansion: {
+          ...(total === undefined ? {} : { total }),
+          contains: codes.map((code) => ({ system: "http://snomed.info/sct", code })),
+        },
+      }),
+  });
+
+  /** Serve `pages` in order, then empty pages — so a short read terminates as it would against VSAC. */
+  const serve = (...pages) => {
+    globalThis.fetch = async (url) => {
+      calls.push({ url: String(url) });
+      return pages[calls.length - 1] ?? answer([], pages.at(-1)?.total);
+    };
+  };
+
+  const refusedAs = async (kind, pattern) => {
+    const err = await expandComplete(OID, PINNED).then(
+      (result) => assert.fail(`expected a "${kind}" refusal, but ${result.codes.length} codes were accepted as complete`),
+      (caught) => caught,
+    );
+    assert.ok(err instanceof IncompleteExpansionError, `expected an IncompleteExpansionError, got ${err}`);
+    assert.equal(err.kind, kind);
+    assert.match(err.message, pattern);
+  };
+
+  it("returns the whole set canonicalized, with VSAC's total, when the answer is exact", async () => {
+    serve(answer(["c", "a"], 3, `http://cts.nlm.nih.gov/fhir/ValueSet/${OID}`), answer(["b"], 3));
+
+    const result = await expandComplete(OID, PINNED);
+
+    assert.deepEqual(result, {
+      codes: canonicalize([
+        { system: "http://snomed.info/sct", code: "a" },
+        { system: "http://snomed.info/sct", code: "b" },
+        { system: "http://snomed.info/sct", code: "c" },
+      ]),
+      total: 3,
+    });
+    assert.deepEqual(result.codes.map((c) => c.code), ["a", "b", "c"]);
+  });
+
+  it("REFUSES to expand unpinned, before any request — VSAC would serve latest-active", async () => {
+    // Recorded and answered 404 rather than thrown: a throw inside the transport is retried with backoff.
+    globalThis.fetch = async (url) => {
+      calls.push({ url: String(url) });
+      return { ok: false, status: 404, text: async () => "" };
+    };
+
+    for (const vsacManifest of [undefined, ""]) {
+      const err = await expandComplete(OID, { ...PINNED, vsacManifest }).catch((caught) => caught);
+      assert.equal(err?.kind, "unpinned", `vsacManifest=${JSON.stringify(vsacManifest)}: expected an unpinned refusal, got ${err}`);
+    }
+    assert.deepEqual(calls, [], "an unpinned expansion must not reach VSAC at all");
+  });
+
+  it("REFUSES an empty expansion", async () => {
+    serve(answer([], 0));
+    await refusedAs("empty", /returned no codes/);
+  });
+
+  it("REFUSES an answer with no expansion.total — no baseline is no evidence", async () => {
+    serve(answer(["a", "b"], undefined));
+    await refusedAs("no-total", /no expansion\.total/);
+  });
+
+  it("REFUSES a short read", async () => {
+    serve(answer(["a", "b"], 9));
+    await refusedAs("short", /claimed 9 codes .* returned 2 distinct/);
+  });
+
+  it("REFUSES a response padded with duplicates up to the total — compared after dedupe", async () => {
+    serve(answer(["a", "b", "a"], 3));
+    await refusedAs("short", /claimed 3 codes .* returned 2 distinct/);
+  });
+
+  it("REFUSES more distinct codes than VSAC's own total — count and content disagree", async () => {
+    serve(answer(["a", "b", "c"], 2));
+    await refusedAs("over", /claimed 2 codes .* returned 3 distinct/);
+  });
+
+  it("REFUSES an echo naming a different value set", async () => {
+    serve(answer(["a", "b"], 2, "http://cts.nlm.nih.gov/fhir/ValueSet/9.9.9.9"));
+    await refusedAs("identity", /with an expansion of .*9\.9\.9\.9/);
+  });
+
+  it("accepts a versioned echo of the right set, and an answer that echoes no url at all", async () => {
+    serve(answer(["a", "b"], 2, `http://cts.nlm.nih.gov/fhir/ValueSet/${OID}|20260514`));
+    assert.equal((await expandComplete(OID, PINNED)).total, 2);
+
+    calls = [];
+    serve(answer(["a", "b"], 2));
+    assert.equal((await expandComplete(OID, PINNED)).total, 2);
+  });
+
+  it("lets a transport failure through as itself, not as a refusal of VSAC's answer", async () => {
+    globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => "" });
+
+    const err = await expandComplete(OID, PINNED).catch((caught) => caught);
+
+    assert.ok(!(err instanceof IncompleteExpansionError));
+    assert.match(err.message, /HTTP 404/);
+  });
+
+  it("uses an injected transport in place of the global one", async () => {
+    globalThis.fetch = async () => assert.fail("the injected transport must be the one dialled");
+    const injected = [];
+
+    const result = await expandComplete(OID, {
+      ...PINNED,
+      fetch: async (url) => {
+        injected.push(String(url));
+        return answer(["a"], 1);
+      },
+    });
+
+    assert.equal(result.total, 1);
+    assert.equal(injected.length, 1);
+    assert.equal(new URL(injected[0]).searchParams.get("manifest"), ARGS.vsacManifest);
+  });
+});
+
+describe("completeTerminology — absent sets refused by expandComplete", () => {
+  it("leaves an absent set absent when VSAC serves more distinct codes than it counts", async () => {
+    globalThis.fetch = async () => expansionPage(["a", "b", "c"], 2);
+    const terminology = absentTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, []);
+    assert.deepEqual(terminology.absent.map((v) => v.oid), [ABSENT_OID]);
+    assert.match(warnings.join("\n"), /claimed 2 codes for absent value set .* returned 3 distinct — its count and its content disagree/);
   });
 });

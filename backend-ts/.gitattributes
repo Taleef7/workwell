@@ -3,3 +3,6 @@
 # these NUL-free JSON files on a Windows checkout (core.autocrlf=true is the Git-for-Windows default),
 # changing the digest and failing the integrity guard on a fresh clone while CI stays green.
 measures/official/**/*.json -text
+# A WorkWell translation's bundle.json is hashed the same way (src/wiring/derived-artifacts.test.ts),
+# and the oracle CLI hashes the bytes on disk before it records a check against them.
+measures/derived/**/*.json -text
