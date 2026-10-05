@@ -32,12 +32,12 @@
 import { test } from "node:test";
 import { RUN_STORE_PG_DDL } from "../stores/postgres/schema-pg.ts";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { officialRoutingProblems } from "./executor-router.ts";
-import { loadOfficialArtifact } from "./official-artifacts.ts";
+import { loadDerivedArtifact, loadOfficialArtifact } from "./official-artifacts.ts";
 import { absentValueSets, loadOfficialTerminology } from "./official-terminology.ts";
 import { requiredOids } from "./official-executor-adapter.ts";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
@@ -96,23 +96,40 @@ const MUST_AGREE: ReadonlyArray<readonly [string, string]> = [
  * second copy that drifts.
  */
 function shippedMeasures(workflow: string): string[] | null {
+  return shippedIdList(workflow, "WORKWELL_OFFICIAL_MEASURES");
+}
+
+/**
+ * The translations a workflow lets score the year they cover (`WORKWELL_DERIVED_MEASURES`, decision 3),
+ * read by the SAME pattern as the official list — one parser, so the two lists cannot be read two ways.
+ */
+function shippedDerived(workflow: string): string[] | null {
+  return shippedIdList(workflow, "WORKWELL_DERIVED_MEASURES");
+}
+
+function shippedIdList(workflow: string, key: string): string[] | null {
   const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
-  const yaml = readFileSync(path, "utf8");
-  const match = yaml.match(/\{key:\s*"WORKWELL_OFFICIAL_MEASURES",\s*value:\s*"([^"]*)"\}/);
+  return idListIn(readFileSync(path, "utf8"), key, workflow);
+}
+
+/** `shippedIdList` over workflow TEXT, so its stale-pattern refusal can be proved on a fixture. */
+function idListIn(yaml: string, key: string, workflow: string): string[] | null {
+  const match = yaml.match(new RegExp(String.raw`\{key:\s*"` + key + String.raw`",\s*value:\s*"([^"]*)"\}`));
   if (match) return match[1]!.split(",").map((s) => s.trim()).filter(Boolean);
 
-  // `null` means "this workflow does not route officially", which every test below treats as legal —
-  // so a regex that MISSED a present flag would make all of them pass vacuously. Review (#356) measured
-  // that hole: `{ key: … }` with inner spaces, jq single-quoted strings, `value: $official_measures`
-  // (the `--arg` style every secret in these files uses), or a swapped key/value order all returned
-  // null and sailed through. The literal appears exactly once per workflow when the flag is set, so its
-  // presence is a cheap, reliable discriminator between "absent" and "my pattern is stale".
+  // `null` means "this workflow does not route officially" (or ships no translation), which every test
+  // below treats as legal — so a regex that MISSED a present flag would make all of them pass
+  // vacuously. Review (#356) measured that hole: `{ key: … }` with inner spaces, jq single-quoted
+  // strings, `value: $official_measures` (the `--arg` style every secret in these files uses), or a
+  // swapped key/value order all returned null and sailed through. The literal appears exactly once per
+  // workflow when the flag is set, so its presence is a cheap, reliable discriminator between "absent"
+  // and "my pattern is stale".
   //
   // `\bkey:` excludes this very sentence and the surrounding prose comments, which mention the name
   // without setting it.
-  if (/\bkey:\s*"WORKWELL_OFFICIAL_MEASURES"/.test(yaml)) {
+  if (new RegExp(String.raw`\bkey:\s*"` + key + `"`).test(yaml)) {
     throw new Error(
-      `${workflow} sets WORKWELL_OFFICIAL_MEASURES but this test's pattern did not match it. The guard ` +
+      `${workflow} sets ${key} but this test's pattern did not match it. The guard ` +
         `is stale, not the workflow — fix the pattern rather than letting every assertion below pass ` +
         `vacuously.`,
     );
@@ -350,6 +367,305 @@ test("PR-9c: the shipped configuration constructs cleanly — no routing problem
         (complete ? "" : " (capped-expansion problems excused: this context vendored without a VSAC key)"),
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// WORKWELL_DERIVED_MEASURES — a WorkWell translation scoring the year it covers (decision 3).
+//
+// The same "the workflow IS the source of truth" rule as the official list, for the same reason: the
+// router refuses an unfit translation at ENGINE construction, per request, while /actuator/health stays
+// 200. No workflow ships a translation yet, so the checks on real workflows hold vacuously today; each is
+// written to fail the moment one names a translation it cannot route, and the fixture tests prove that.
+// ---------------------------------------------------------------------------
+
+const DERIVED_KEY = "WORKWELL_DERIVED_MEASURES";
+const OFFICIAL_KEY = "WORKWELL_OFFICIAL_MEASURES";
+const DERIVED_DIR = fileURLToPath(new URL("../../measures/derived/", import.meta.url));
+
+/** D2 as review can decide it: a manifest committed under the id that loads as a translation of that measure. */
+const translationCommitted = (id: string): boolean =>
+  existsSync(join(DERIVED_DIR, id, "manifest.json")) && loadDerivedArtifact(id)?.manifest.catalogId === id;
+
+/**
+ * What a workflow's two lists must satisfy to ship: the router's D1 and D2, the two refusals the committed
+ * files alone decide. Pure over the parsed lists, so a fixture can prove each one fires.
+ */
+function derivedShippingProblems(
+  workflow: string,
+  official: string[] | null,
+  derived: string[] | null,
+  committed: (id: string) => boolean,
+): string[] {
+  if (derived === null) return []; // unset is always legal: CMS's artifact scores every year
+  const problems: string[] = [];
+  if (derived.length === 0) problems.push(`${workflow}: ${DERIVED_KEY} is present but empty`);
+  for (const id of derived) {
+    // D1: a translation stands in for a routed measure's CMS artifact for one year, never for the measure.
+    if (!(official ?? []).includes(id)) {
+      problems.push(`${workflow} ships translation '${id}' but does not route '${id}' in ${OFFICIAL_KEY} (D1)`);
+    }
+    // D2: the deploy would otherwise construct an engine that refuses every evaluating request.
+    if (!committed(id)) {
+      problems.push(`${workflow} ships translation '${id}', but no translation of '${id}' is committed under measures/derived/ (D2)`);
+    }
+  }
+  return problems;
+}
+
+test(`${DERIVED_KEY}: a self-healed container scores with the same translations as a deployed one`, () => {
+  // The silent-revert case again: a reconciler that dropped the key would put 2027 back on CMS's 2026
+  // draft on a health event nobody initiated, and one that added it would turn a translation on.
+  for (const [a, b] of MUST_AGREE) {
+    assert.deepEqual(
+      shippedDerived(b),
+      shippedDerived(a),
+      `${b} must ship the same ${DERIVED_KEY} as ${a} — it recreates the same container on a self-heal`,
+    );
+  }
+});
+
+test(`${DERIVED_KEY}: every translation a workflow ships is officially routed and committed (D1, D2)`, () => {
+  for (const workflow of WORKFLOWS) {
+    assert.deepEqual(derivedShippingProblems(workflow, shippedMeasures(workflow), shippedDerived(workflow), translationCommitted), []);
+  }
+});
+
+test(`${DERIVED_KEY}: the shipping rule and its parser refuse a fixture workflow that breaks them`, () => {
+  const fixture = (official: string | null, derived: string | null) =>
+    [
+      "            jq -nc \\",
+      "              '[",
+      ...(official === null ? [] : [`                {key: "${OFFICIAL_KEY}", value: "${official}"},`]),
+      ...(derived === null ? [] : [`                {key: "${DERIVED_KEY}", value: "${derived}"},`]),
+      `                {key: "WORKWELL_INSTANCE", value: "maui"}`,
+      "              ]'",
+    ].join("\n");
+  const problemsFor = (yaml: string, committed: (id: string) => boolean = () => true) =>
+    derivedShippingProblems("fixture.yml", idListIn(yaml, OFFICIAL_KEY, "fixture.yml"), idListIn(yaml, DERIVED_KEY, "fixture.yml"), committed);
+
+  assert.deepEqual(problemsFor(fixture("cms137", "cms137")), []);
+  assert.deepEqual(problemsFor(fixture("cms137", null)), [], "no translation shipped is legal");
+  assert.deepEqual(idListIn(fixture("cms137", null), DERIVED_KEY, "fixture.yml"), null, "the two keys are never read for each other");
+  // D1 alone: cms2's translation is committed, but cms2 is not routed.
+  assert.deepEqual(problemsFor(fixture("cms137", "cms137,cms2")), [
+    "fixture.yml ships translation 'cms2' but does not route 'cms2' in WORKWELL_OFFICIAL_MEASURES (D1)",
+  ]);
+  assert.match(problemsFor(fixture(null, "cms137")).join("\n"), /does not route 'cms137'/, "no official list at all");
+  // D2 alone: routed, but nothing committed.
+  assert.deepEqual(problemsFor(fixture("cms137,cms2", "cms2"), (id) => id === "cms137"), [
+    "fixture.yml ships translation 'cms2', but no translation of 'cms2' is committed under measures/derived/ (D2)",
+  ]);
+  assert.match(problemsFor(fixture("cms137", "")).join("\n"), /present but empty/);
+  // A spelling the pattern does not read must throw, never read as "absent".
+  assert.throws(
+    () => idListIn(`{ key: "${DERIVED_KEY}", value: "cms137" }`, DERIVED_KEY, "fixture.yml"),
+    /sets WORKWELL_DERIVED_MEASURES but this test's pattern did not match it/,
+  );
+});
+
+test(`${DERIVED_KEY}: TWH and staging ship no translation`, () => {
+  // Translations exist for the pilot's performance year (decision 3). Turning one on for the occupational
+  // stack or for staging is its own decision, so it must fail here rather than ride along with a Maui change.
+  for (const workflow of ["deploy-twh-mieweb.yml", "reconcile-twh-mieweb.yml", "deploy-staging-mieweb.yml"]) {
+    assert.equal(shippedDerived(workflow), null, `${workflow} ships ${DERIVED_KEY}`);
+  }
+});
+
+/**
+ * One key of a ci.yml job, from the plain YAML `env:` form the jobs use (`KEY: value`, at job or step
+ * level), with a `${{ env.X }}` value resolved to the job's own `X`. `null` when the job binds no such key.
+ */
+function ciJobEnv(job: string, key: string): string | null {
+  const path = fileURLToPath(new URL("../../../.github/workflows/ci.yml", import.meta.url));
+  return jobEnvIn(readFileSync(path, "utf8"), job, key);
+}
+
+/** `ciJobEnv` over workflow TEXT, so its scoping and its refusals can be proved on a fixture. */
+function jobEnvIn(yaml: string, job: string, key: string, depth = 0): string | null {
+  const lines = yaml.split(/\r?\n/);
+  // A job is a two-space key under `jobs:`; its block runs to the next one, or to a top-level key. A job
+  // that is not found THROWS: a renamed job would otherwise read as "key absent" and every comparison
+  // against it would pass.
+  const start = lines.findIndex((line) => line.trimEnd() === `  ${job}:`);
+  if (start < 0) throw new Error(`no job '${job}' in the workflow — the guard is stale, not the workflow`);
+  let end = start + 1;
+  while (end < lines.length && !/^ {0,2}[A-Za-z0-9_-]+:/.test(lines[end]!)) end++;
+
+  const binding = new RegExp(String.raw`^\s+` + key + String.raw`:[ \t]*(.*?)[ \t]*$`);
+  // Any OTHER way of setting the key — a shell `KEY=…` prefix in a run block, a flow mapping — would
+  // reach the process while this reader saw nothing, so it throws, like `shippedMeasures` on a stale pattern.
+  const setting = new RegExp(String.raw`\b` + key + String.raw`\s*[:=]`);
+  const values = new Set<string>();
+  for (const line of lines.slice(start + 1, end)) {
+    if (line.trimStart().startsWith("#")) continue;
+    const match = line.match(binding);
+    if (match) values.add(match[1]!.replace(/\s+#.*$/, "").replace(/^(["'])(.*)\1$/, "$2"));
+    else if (setting.test(line)) {
+      throw new Error(`job '${job}' sets ${key} in a form this reader does not parse: "${line.trim()}" — fix the reader`);
+    }
+  }
+  if (values.size > 1) throw new Error(`job '${job}' binds ${key} to ${[...values].join(" and ")}; which a step sees depends on the step`);
+  const value = [...values][0];
+  if (value === undefined) return null;
+  const ref = value.match(/^\$\{\{\s*env\.(\w+)\s*\}\}$/);
+  if (!ref) return value;
+  if (depth > 3) throw new Error(`job '${job}': ${key} is a chain of env references this reader will not follow`);
+  const resolved = jobEnvIn(yaml, job, ref[1]!, depth + 1);
+  if (resolved === null) throw new Error(`job '${job}': ${key} reads env.${ref[1]}, which the job does not bind`);
+  return resolved;
+}
+
+test("ciJobEnv reads one job's env, follows ${{ env.X }}, and refuses what it cannot read", () => {
+  const ci = [
+    "jobs:",
+    "  first:",
+    "    env:",
+    "      ROUTED: cms137 # the pilot",
+    "    steps:",
+    "      - name: boot",
+    "        env:",
+    "          WORKWELL_OFFICIAL_MEASURES: ${{ env.ROUTED }}",
+    "        # WORKWELL_DERIVED_MEASURES: a comment is not a binding",
+    "        run: echo",
+    "  second:",
+    "    env:",
+    `      ${DERIVED_KEY}: "cms2"`,
+  ].join("\n");
+  assert.equal(jobEnvIn(ci, "first", OFFICIAL_KEY), "cms137", "a step binding through env. resolves to the job's value, comment stripped");
+  assert.equal(jobEnvIn(ci, "first", DERIVED_KEY), null, "another job's binding is not this job's");
+  assert.equal(jobEnvIn(ci, "second", DERIVED_KEY), "cms2", "quotes are YAML, not part of the value");
+  assert.throws(() => jobEnvIn(ci, "third", DERIVED_KEY), /no job 'third'/);
+  const shellSet = ci.replace("        run: echo", `        run: ${DERIVED_KEY}=cms137 pnpm dev`);
+  assert.throws(() => jobEnvIn(shellSet, "first", DERIVED_KEY), /in a form this reader does not parse/);
+  const dangling = ci.replace("      ROUTED: cms137 # the pilot\n", "");
+  assert.throws(() => jobEnvIn(dangling, "first", OFFICIAL_KEY), /reads env\.ROUTED, which the job does not bind/);
+});
+
+test("e2e-maui boots with the translations the Maui sandbox ships", () => {
+  // The e2e job is meant to run the configuration the pilot deploys. Compared as SETS: the order of an
+  // allowlist routes nothing.
+  const asSet = (list: string[] | null) => (list === null ? null : [...list].sort());
+  const parse = (raw: string | null) => (raw === null ? null : raw.split(",").map((s) => s.trim()).filter(Boolean));
+  // The anchor that keeps the line below from passing vacuously: the reader must find the official list
+  // the job actually boots with, through its `${{ env.ROUTED_MEASURES }}` indirection.
+  const official = ciJobEnv("e2e-maui", OFFICIAL_KEY);
+  assert.ok(official, "the e2e-maui job binds WORKWELL_OFFICIAL_MEASURES; the reader is not finding it");
+  assert.deepEqual(asSet(parse(official)), asSet(shippedMeasures("deploy-maui-mieweb.yml")));
+  assert.deepEqual(
+    asSet(parse(ciJobEnv("e2e-maui", DERIVED_KEY))),
+    asSet(shippedDerived("deploy-maui-mieweb.yml")),
+    `ci.yml's e2e-maui job must boot with the ${DERIVED_KEY} deploy-maui-mieweb.yml ships`,
+  );
+});
+
+/**
+ * The construction-time check with BOTH lists, against the real artifacts and sidecars — `sidecarPresent`
+ * extended to the translations' own sidecars. Scoped to the workflows that ship a translation, since those
+ * are the only sidecars the check reads, so the vacuous case below needs none.
+ */
+const DERIVED_SHIPPING = WORKFLOWS.filter((workflow) => shippedDerived(workflow) !== null);
+const derivedSidecarsPresent =
+  DERIVED_SHIPPING.flatMap((workflow) => shippedMeasures(workflow) ?? []).every((id) => {
+    const artifact = loadOfficialArtifact(id);
+    return artifact ? loadOfficialTerminology(artifact).ok : false;
+  }) &&
+  DERIVED_SHIPPING.flatMap((workflow) => shippedDerived(workflow) ?? []).every((id) => {
+    const translation = loadDerivedArtifact(id);
+    return translation ? loadOfficialTerminology(translation).ok : false;
+  });
+
+test(
+  `${DERIVED_KEY}: the shipped configuration, translations included, constructs cleanly` +
+    (DERIVED_SHIPPING.length === 0 ? " — VACUOUS until a workflow ships a translation" : ""),
+  (t) => {
+    if (!derivedSidecarsPresent) {
+      const why = "needs the shipped translations' sidecars and their measures' (node scripts/vendor-derived-terminology.mjs, pnpm vendor:official)";
+      // CI's official-cases job vendors them and sets the flag: there a missing sidecar is a failure.
+      if (process.env.WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY === "true") assert.fail(why);
+      t.skip(why);
+      return;
+    }
+    // No capped-expansion excuse here, unlike the official-only test above. That excuse exists for
+    // contexts without the VSAC credential, and those have no translation sidecar, so they skip above. In
+    // CI's credentialed run the same key completes CMS's sidecars, so any problem left is real.
+    for (const workflow of DERIVED_SHIPPING) {
+      const env = { [OFFICIAL_KEY]: (shippedMeasures(workflow) ?? []).join(","), [DERIVED_KEY]: shippedDerived(workflow)!.join(",") };
+      assert.deepEqual(
+        officialRoutingProblems(env),
+        [],
+        `${workflow} ships translations that official routing would REFUSE at construction`,
+      );
+    }
+  },
+);
+
+/**
+ * Each single-quoted jq program in a workflow: the lines between the opening `'` of a multi-line
+ * `jq -nc \` invocation and its closing `]'`, with the line number each starts at. Delimited by the
+ * closing BRACKET-and-quote rather than by the next quote, because the next quote is exactly the
+ * apostrophe being looked for.
+ */
+function jqPrograms(yaml: string): Array<{ line: number; body: string[] }> {
+  const lines = yaml.split(/\r?\n/);
+  const programs: Array<{ line: number; body: string[] }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*jq\s+-nc\b/.test(lines[i]!)) continue;
+    // The program follows the invocation's `--arg` continuation lines.
+    let open = i + 1;
+    while (open < lines.length && /\\\s*$/.test(lines[open - 1]!) && !lines[open]!.trimStart().startsWith("'")) open++;
+    let close = open + 1;
+    while (close < lines.length && !/^\s*[\]}]'/.test(lines[close]!)) close++;
+    if (open >= lines.length || !lines[open]!.trimStart().startsWith("'") || close >= lines.length) {
+      throw new Error(`line ${i + 1}: a jq invocation whose program this scan cannot delimit — extend the scan rather than skip it`);
+    }
+    const first = lines[open]!;
+    const last = lines[close]!;
+    programs.push({
+      line: open + 1,
+      body: [first.slice(first.indexOf("'") + 1), ...lines.slice(open + 1, close), last.slice(0, last.indexOf("'"))],
+    });
+    i = close;
+  }
+  return programs;
+}
+
+/** Every apostrophe inside a jq program, as `line N: <text>` — each one closes the quote around it. */
+const apostrophesIn = (programs: Array<{ line: number; body: string[] }>): string[] =>
+  programs.flatMap((program) =>
+    program.body.flatMap((text, offset) => (text.includes("'") ? [`line ${program.line + offset}: ${text.trim()}`] : [])),
+  );
+
+test("no jq env program in a deploy or reconcile workflow contains an apostrophe", () => {
+  // #356: one apostrophe in a comment inside the single-quoted program closed the quote and turned the
+  // production deploy step into a parse error. The run-block parse check in CI catches an ODD count; an
+  // even count parses and hands jq a broken program, and only a scan of the program itself sees both.
+  // The translation key will be added inside these programs, which is why it is checked here now.
+  for (const workflow of WORKFLOWS) {
+    const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
+    const programs = jqPrograms(readFileSync(path, "utf8"));
+    assert.ok(
+      programs.some((program) => program.body.join("\n").includes('{key: "WORKWELL_INSTANCE"')),
+      `${workflow}: the scan found no container env program, so it is not looking at what it guards`,
+    );
+    assert.deepEqual(apostrophesIn(programs), [], `${workflow}: an apostrophe inside a single-quoted jq program closes the quote`);
+  }
+});
+
+test("the apostrophe scan finds one inside a program, and none outside it", () => {
+  const workflow = [
+    "          # an apostrophe out here is shell's business, not the program's",
+    "            jq -nc \\",
+    '              --arg a "$A" \\',
+    "              '[",
+    '                {key: "WORKWELL_INSTANCE", value: "maui"},',
+    "                # CMS's measure",
+    "                # the 'flip'",
+    '                {key: "X", value: $a}',
+    "              ]'",
+  ].join("\n");
+  assert.deepEqual(apostrophesIn(jqPrograms(workflow)), ["line 6: # CMS's measure", "line 7: # the 'flip'"]);
+  assert.deepEqual(apostrophesIn(jqPrograms(workflow.replace("CMS's", "CMS").replace("'flip'", "flip"))), []);
+  assert.throws(() => jqPrograms("            jq -nc \\\n              --arg a \"$A\""), /cannot delimit/);
 });
 
 // ---------------------------------------------------------------------------

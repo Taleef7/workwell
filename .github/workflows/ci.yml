@@ -382,6 +382,52 @@ jobs:
           # vendored here all the same: without a sidecar the gate runs it on UPSTREAM terminology,
           # which the report-write guard correctly refuses to treat as evidence (ADR-074).
           pnpm vendor:official --measure CMS137FHIRSUDTxInitEngagement --catalog-id cms137 --strip-elm-annotations --with-tests $COMPLETE
+      # The WorkWell translations (decision 3) under measures/derived/, found once so every translation
+      # step below iterates over the same list. A translation is a directory with a manifest.json; the
+      # QI-Core model info in `_modelinfo/` is not one. A manifest under a name the artifact loader refuses
+      # is an ERROR, not a skip: that translation would otherwise be invisible to every step below while
+      # the job reported "none committed".
+      - name: Find the committed WorkWell translations
+        id: translations
+        run: |
+          ids=""
+          for manifest in measures/derived/*/manifest.json; do
+            [ -e "$manifest" ] || continue # the glob matched nothing
+            id="$(basename "$(dirname "$manifest")")"
+            [ "$id" = "_modelinfo" ] && continue
+            if ! [[ "$id" =~ ^[a-z0-9]+$ ]]; then
+              echo "::error::measures/derived/$id/ holds a manifest.json, but $id is not a catalog id the loader accepts, so nothing would check or route it."
+              exit 1
+            fi
+            ids="$ids $id"
+          done
+          ids="${ids# }"
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+          if [ -z "$ids" ]; then
+            echo "::notice::No WorkWell translation is committed under measures/derived/, so every translation step in this job has nothing to check."
+          else
+            echo "Committed translations: $ids"
+          fi
+      # A translation's terminology is NOT CMS's: every declared set is re-expanded at the VSAC release its
+      # manifest names, so it can only come from VSAC, and only with the credential. `--verify-pin` makes
+      # the step fail unless the regenerated sidecar hashes to the pin the committed manifest records —
+      # the same "reproducible from its pin" rule the official sidecars meet, and the bytes the router
+      # (D8) and the translation's check records (D7) were computed against.
+      - name: Vendor translation terminology
+        if: steps.vendor.outputs.credentialed == 'true'
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+          TRANSLATIONS: ${{ steps.translations.outputs.ids }}
+        run: |
+          n=0
+          for id in $TRANSLATIONS; do
+            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin
+            n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::notice::No WorkWell translation is committed; no translation terminology to vendor."
+          fi
+          echo "Vendored the terminology of $n translation(s)."
       # Re-vendoring must reproduce the COMMITTED artifact byte for byte. Nothing checked this before:
       # the manifest's SHA-256 is written by vendor:official about itself, so it could only ever prove
       # self-consistency. This proves the artifact in Git is what the pinned upstream actually produces.
@@ -390,17 +436,21 @@ jobs:
       # artifact: adding the WORKWELL_VSAC_API_KEY_VENDOR secret without also committing the re-vendored
       # manifests means CI now completes the capped expansion while Git still records it as capped.
       # The two land together, or this goes red on every unrelated PR — hence the message.
+      #
+      # measures/derived is in scope because the translation vendor step above wrote into it: only the
+      # gitignored sidecar may appear there, so a vendor tool that rewrote a committed manifest instead of
+      # verifying its pin fails here rather than leaving CI green over files nobody committed.
       - name: The committed artifact is reproducible from its pin
         if: steps.vendor.outputs.credentialed == 'true'
         run: |
           # `git status --porcelain`, not `git diff`: the vendored MADiE decks are whole FILES, and a
           # regenerated-but-UNTRACKED case file is invisible to `git diff`. That would let a deck that
           # no longer matches its pin pass this gate silently, which is the one thing it exists to stop.
-          UNCLEAN=$(git status --porcelain -- measures/official)
+          UNCLEAN=$(git status --porcelain -- measures/official measures/derived)
           if [ -n "$UNCLEAN" ]; then
             echo "$UNCLEAN"
-            git diff -- measures/official || true
-            echo "::error::measures/official does not match what this pin produces. If WORKWELL_VSAC_API_KEY_VENDOR was just added, re-run 'pnpm vendor:official … --complete-terminology' locally with the key and commit the regenerated manifests in the same change."
+            git diff -- measures/official measures/derived || true
+            echo "::error::measures/official or measures/derived does not match what its pin produces. If WORKWELL_VSAC_API_KEY_VENDOR was just added, re-run 'pnpm vendor:official … --complete-terminology' locally with the key and commit the regenerated manifests in the same change. A change under measures/derived means a translation's vendor step rewrote a committed file."
             exit 1
           fi
       # The uncredentialed half of the same check. `bundle.json` is the artifact that decides what gets
@@ -408,18 +458,24 @@ jobs:
       # terminology digest) and the gitignored sidecar move. So an untrusted PR can still prove the
       # committed bundle is what the pinned upstream produces; it just cannot verify the terminology
       # half, and says so rather than reporting a pass it did not earn.
+      #
+      # measures/derived is diffed WHOLE, not just its bundles: nothing in an uncredentialed context may
+      # write there at all (the translation's terminology vendor step needs the key and is skipped), so
+      # any change to a committed translation file is a fault. The translation's own reproducibility is the
+      # rebuild step after the calibration gate. `--` keeps git from reading a path as a revision.
       - name: The committed bundle is reproducible from its pin (no VSAC credential)
         if: steps.vendor.outputs.credentialed != 'true'
         run: |
-          if ! git diff --exit-code measures/official/*/bundle.json; then
-            echo "::error::the vendored bundle does not match what this pin produces."
+          if ! git diff --exit-code -- measures/official/*/bundle.json measures/derived; then
+            echo "::error::the vendored bundle does not match what this pin produces, or a committed translation file under measures/derived changed."
             exit 1
           fi
-          echo "::notice::Bundle bytes verified. manifest.json and terminology completion NOT verified — this context has no VSAC credential, so the manifest is regenerated uncompleted and cannot be compared. The credentialed run on merge covers both."
+          echo "::notice::Bundle bytes verified, translations untouched. manifest.json and terminology completion NOT verified — this context has no VSAC credential, so the manifest is regenerated uncompleted and cannot be compared, and no translation terminology is vendored. The credentialed run on merge covers both."
       # Every assertion that consults the ARTIFACT'S OWN terminology self-skips without the fetched
       # sidecar, and `pnpm test` runs in a job that has no sidecar — so this step is their only gate.
       # Any new test that loads a sidecar MUST be added here, or it is permanently skipped in CI while
       # reading as covered. That is not hypothetical: PR-8c shipped two such files and had to be told.
+      # A translation's sidecar counts: `derived-terminology.test.ts` reads it (vendored above).
       - name: Official terminology + corpus tests (need the fetched sidecar)
         env:
           # `corpus-official-population.test.ts` asserts that at least one measure ACTUALLY RAN when the
@@ -433,6 +489,7 @@ jobs:
           pnpm exec node --import tsx --test \
             src/wiring/official-terminology.test.ts \
             src/wiring/derived-routing.test.ts \
+            src/wiring/derived-terminology.test.ts \
             src/wiring/corpus-membership.test.ts \
             src/wiring/official-corpus-outcomes.test.ts \
             src/wiring/corpus-official-population.test.ts \
@@ -465,6 +522,50 @@ jobs:
       # the same on Dependabot's pushes. A 2027 translation compiles through this path.
       - name: Compiled-ELM calibration gate
         run: pnpm test:compiled-cases
+      # A committed translation must be what its recorded inputs produce: CMS's CQL from `.official-content`
+      # plus the committed edits.json, compiled with the translator the gate above just calibrated. Every
+      # input is read from the committed manifest rather than written here, so a workflow and a manifest
+      # can never disagree about which year or release a translation was built for. Terminology is
+      # skipped because the rebuild must run without the VSAC credential too (Dependabot's pushes); the
+      # sidecar is pinned by the vendor step and the terminology test above instead.
+      - name: Translation rebuild is reproducible
+        env:
+          TRANSLATIONS: ${{ steps.translations.outputs.ids }}
+        run: |
+          n=0
+          for id in $TRANSLATIONS; do
+            manifest="measures/derived/$id/manifest.json"
+            # jq -e exits non-zero on a missing field, so an incomplete manifest stops here instead of
+            # rebuilding for a year or release spelled "null". The revision is the `.N` of `ww-<year>.N`:
+            # left to the tool's default of 1, a second revision would fail the byte comparison falsely.
+            year="$(jq -er '.effectivePeriod.start[0:4]' "$manifest")"
+            ecqm="$(jq -er '.derived.derivedFrom.ecqm' "$manifest")"
+            release="$(jq -er '.terminology.completion.manifest' "$manifest")"
+            revision="$(jq -er '.version | capture("^ww-[0-9]{4}\\.(?<n>[1-9][0-9]*)$").n' "$manifest")"
+            pnpm build:derived --catalog-id "$id" --year "$year" --derived-from "$ecqm" --revision "$revision" \
+              --edits "measures/derived/$id/edits.json" --vsac-manifest "$release" --verify --skip-terminology
+            n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::notice::No WorkWell translation is committed; nothing to rebuild."
+          fi
+          echo "Rebuilt and byte-compared $n translation(s)."
+      # The translation's logic against CMS's own: CMS's MADiE deck run through the committed translation
+      # and through CMS's artifact must agree, case by case. It needs neither the credential nor the
+      # sidecar, so it runs in both branches — an uncredentialed push still proves the LOGIC equivalence.
+      - name: Translation logic equals CMS's on the MADiE deck
+        env:
+          TRANSLATIONS: ${{ steps.translations.outputs.ids }}
+        run: |
+          n=0
+          for id in $TRANSLATIONS; do
+            pnpm derived:check --catalog-id "$id" --madie
+            n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::notice::No WorkWell translation is committed; no MADiE equivalence to check."
+          fi
+          echo "Checked $n translation(s) against CMS's MADiE results."
       # The committed report is evidence, so its RESULTS must match what the harness just produced.
       # The comparison deliberately ignores the "**Generated:**" line: the harness stamps today's date,
       # so a naive `git diff --quiet` would go red the day after every regeneration and train people to
