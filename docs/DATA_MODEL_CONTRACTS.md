@@ -186,9 +186,10 @@ run describing another `evaluationPeriod` = `UNKNOWN`/`UNKNOWN`, run id filled. 
 - `latestOutreachDeliveryStatus`: `deliveryStatus` of the newest `OUTREACH_DELIVERY_UPDATED`/`OUTREACH_SENT`
 action (empty if none, never an older one), read in one batch.
 - `executedLogic` was appended, never inserted, and `measureVersion` changed meaning in place (#769): both
-describe the case's CITED outcome (`lastRunId`, subject, measure) as §6.2 does, read once per (run,
-measure) for the exported rows (`scoringForCases`), never from today's routing; empty when that run holds
-no row for the case. On a person-closed row they describe the frozen `currentOutcomeStatus`, not `live*`.
+describe the case's CITED outcome (`lastRunId`, subject, measure, and the row of the case's own
+`evaluationPeriod` where the run holds more than one) as §6.2 does, read once per (run, measure) for the
+exported rows through an identity-only projection (`scoringForCases`), never from today's routing; empty
+when that run holds no row for the case. On a person-closed row they describe the frozen `currentOutcomeStatus`, not `live*`.
 
 **Subject headers** (§6.2/§6.3, `subjectHeaders`): a patient deployment (`WORKWELL_INSTANCE=maui`,
 `subjectTerm === "patient"`) names the subject columns `patientExternalId`/`patientName`, and in §6.2
