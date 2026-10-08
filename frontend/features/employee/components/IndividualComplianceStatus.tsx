@@ -10,14 +10,19 @@ import { canRunMeasures } from "@/lib/rbac";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { ComplianceChip } from "@/features/compliance/ComplianceChip";
 import { CqlEvidence, type EvidenceJson } from "@/features/evidence/CqlEvidence";
-import { PANEL_OPTIONS, type PanelId, type Roster, type RosterCell } from "@/features/compliance/types";
+import { PANEL_OPTIONS, columnLogic, type PanelId, type Roster, type RosterCell } from "@/features/compliance/types";
+import type { ScoringLogic } from "@/lib/measure-identity";
 
 interface Row {
   measureId: string;
   name: string;
   complianceClass: "PERMANENT" | "RECURRING";
   cell: RosterCell;
+  /** The logic that scored the column's winning run (#769); null when unnamed or mixed. */
+  logic: ScoringLogic | null;
 }
+
+type MeasureLabel = (measureId: string, fallbackName: string, logic?: ScoringLogic | null) => string;
 interface EvidenceState {
   loading: boolean;
   evidence?: EvidenceJson;
@@ -32,10 +37,14 @@ export function IndividualComplianceStatus({
   externalId,
   onRecalculated,
   labelFor = (_measureId, fallbackName) => fallbackName,
+  titleFor,
 }: {
   externalId: string;
   onRecalculated?: () => void;
-  labelFor?: (measureId: string, fallbackName: string) => string;
+  /** Names a measure in its Rule cell, given the logic that scored it (#769). */
+  labelFor?: MeasureLabel;
+  /** The Rule cell's tooltip and the Info button's name (the full form), when given. */
+  titleFor?: MeasureLabel;
 }) {
   const api = useApi();
   const { user } = useAuth();
@@ -116,7 +125,7 @@ export function IndividualComplianceStatus({
         const cell = match.cells[col.measureId];
         if (!cell) continue;
         seen.add(col.measureId);
-        merged.push({ measureId: col.measureId, name: col.name, complianceClass: col.complianceClass, cell });
+        merged.push({ measureId: col.measureId, name: col.name, complianceClass: col.complianceClass, cell, logic: columnLogic(col) });
       }
     }
     setRows(merged);
@@ -223,19 +232,20 @@ export function IndividualComplianceStatus({
             {rows.map((row) => {
               const isOpen = open[row.measureId] ?? false;
               const ev = row.cell.evidenceRef ? evidenceByOutcome[row.cell.evidenceRef.outcomeId] : undefined;
-              const measureLabel = labelFor(row.measureId, row.name);
+              const measureLabel = labelFor(row.measureId, row.name, row.logic);
+              const measureTitle = titleFor ? titleFor(row.measureId, row.name, row.logic) : measureLabel;
               return (
                 <React.Fragment key={row.measureId}>
                   <tr className="border-t border-neutral-200 dark:border-neutral-800">
                     <td className="py-2 pr-3 align-top">
-                      <span className="font-medium">{measureLabel}</span>
+                      <span className="font-medium" title={titleFor ? measureTitle : undefined}>{measureLabel}</span>
                       <span className="ml-1 text-[10px] uppercase text-neutral-400">{row.complianceClass === "PERMANENT" ? "perm" : "rec"}</span>
                     </td>
                     <td className="py-2 pr-3 align-top"><ComplianceChip cell={row.cell} /></td>
                     <td className="py-2 align-top">
                       <button
                         type="button"
-                        aria-label={`Info: ${measureLabel}`}
+                        aria-label={`Info: ${measureTitle}`}
                         aria-expanded={isOpen}
                         aria-controls={`compliance-detail-${row.measureId}`}
                         onClick={() => void toggle(row.measureId, row.cell)}

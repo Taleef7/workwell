@@ -19,7 +19,7 @@ import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvid
 import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
 import { LocalOnlyNotice } from "@/features/common/LocalOnlyNotice";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { formatEvaluationPeriod } from "@/lib/format";
 
@@ -54,6 +54,8 @@ type CaseDetail = {
   measureName: string;
   measureVersionId: string;
   measureVersion: string;
+  /** The logic that scored the case's cited outcome (#769); null or absent = the unversioned crosswalk. */
+  logic?: ScoringLogic | null;
   evaluationPeriod: string;
   status: string;
   priority: string;
@@ -174,7 +176,7 @@ export default function CaseDetailPage() {
   // panel went blank once outreach was sent. Only the simulated delivery-state controls (Mark queued /
   // sent / failed) stay behind it.
   const canEngineering = canSeeEngineering(user?.role);
-  const { labelFor: measureLabelFor } = useMeasureIdentities();
+  const { labelFor: measureLabelFor, titleFor } = useMeasureIdentities();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);
   // The audit timeline opens collapsed to the newest entry — see the note at the timeline itself.
   const [showHistory, setShowHistory] = useState(false);
@@ -564,7 +566,13 @@ export default function CaseDetailPage() {
             <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{measureLabelFor(caseDetail.measureId, caseDetail.measureName)}</p>
+                  {/* The full versioned identity of the logic that scored this case's outcome (#769). */}
+                  <p
+                    className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400"
+                    title={titleFor(caseDetail.measureId, caseDetail.measureName, caseDetail.logic)}
+                  >
+                    {measureLabelFor(caseDetail.measureId, caseDetail.measureName, caseDetail.logic)}
+                  </p>
                   <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
                     <Link href={subjectPath(caseDetail.employeeId)} className="hover:underline hover:text-primary-700 dark:text-primary-400">
                       {caseDetail.employeeName}

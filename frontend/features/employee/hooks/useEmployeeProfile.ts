@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useApi } from '@/lib/api/hooks';
+import type { ScoringLogic } from '@/lib/measure-identity';
 
 export interface MeasureOutcomeSummary {
   measureId: string;
   measureVersionId: string;
   measureName: string;
+  /** Not shown: the measure label carries the version of the logic that scored the row (#769). */
   measureVersion: string;
+  /** The logic that scored this outcome (#769); null or absent = the unversioned crosswalk. */
+  logic?: ScoringLogic | null;
   /** The stored bucket. Show `displayStatus` instead. */
   outcomeStatus: string;
   /** Read the way the roster table reads an outcome (#671): out of population is OUT_OF_POPULATION. */
@@ -20,6 +24,8 @@ export interface OpenCaseSummary {
   caseId: string;
   measureId: string;
   measureName: string;
+  /** The logic that scored the case's cited outcome (#769); null or absent = the unversioned crosswalk. */
+  logic?: ScoringLogic | null;
   outcomeStatus: string;
   priority: string;
   assignee: string | null;

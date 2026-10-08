@@ -35,6 +35,13 @@ import { canSeeEngineering } from "@/lib/public-demo";
 import { AccessDenied } from "@/components/access-denied";
 import { ScrollRegion } from "@/components/scroll-region";
 import { RateEstimateNote } from "@/components/rate-estimate-note";
+import {
+  formatMeasureLabel,
+  formatMixedLogics,
+  formatVersionedIdentity,
+  type MeasureIdentity,
+  type ScoringLogic,
+} from "@/lib/measure-identity";
 
 type RunListItem = {
   runId: string;
@@ -102,6 +109,11 @@ type Reconciliation = {
   casesCiting: number;
   compaction: { exposed: boolean; cutoff: string | null };
   notes: string[];
+  /**
+   * Per measure, the logics that scored the run's rows, from their own evidence (#769). More than one is
+   * a run scored by more than one logic or measurement period; none, authored CQL. Absent: an older server.
+   */
+  scoringLogic?: Array<{ measureId: string; logics: ScoringLogic[] }>;
 };
 
 /** The ladder is optional on the page; anything that is not the documented shape renders as absent. */
@@ -148,9 +160,30 @@ type RunScopeType = "ALL_PROGRAMS" | "MEASURE" | "SITE" | "EMPLOYEE" | "CASE";
 type MeasureOption = {
   id: string;
   name: string;
+  /** The catalog record's version ("v1.0"), not what runs: never shown on a result or a picker (#769). */
   version: string;
   status: string;
+  identity?: MeasureIdentity | null;
 };
+
+/**
+ * One line per measure of a run, naming the logic that scored its rows (#769): the full form; the
+ * unversioned crosswalk and the list when the rows were scored by more than one logic or measurement
+ * period; the name alone for authored CQL.
+ */
+function scoringLogicLine(
+  entry: { measureId: string; logics: ScoringLogic[] },
+  measure: MeasureOption | undefined,
+): { text: string; title: string } {
+  const name = measure?.name ?? entry.measureId;
+  const identity = measure?.identity ?? null;
+  if (entry.logics.length > 1) {
+    const text = `${formatMeasureLabel(identity, name)}: ${formatMixedLogics(entry.logics)}`;
+    return { text, title: text };
+  }
+  const versioned = formatVersionedIdentity(identity, entry.logics[0] ?? null);
+  return versioned ? { text: `${versioned.full} · ${name}`, title: `${versioned.title} · ${name}` } : { text: name, title: name };
+}
 
 type RunInsightResponse = {
   fallback: boolean;
@@ -782,7 +815,9 @@ export default function RunsPage() {
         .filter((measure) => normalizeEnumValue(measure.status) === "ACTIVE")
         .map((measure) => ({
           value: measure.id,
-          label: `${measure.name} ${measure.version} (${labelFor(MEASURE_STATUS_LABELS, measure.status)})`,
+          // A picker selects a measure, which spans years and logics: the unversioned crosswalk, never
+          // the catalog record's "v1.0", which is not what runs (#769).
+          label: `${formatMeasureLabel(measure.identity, measure.name)} (${labelFor(MEASURE_STATUS_LABELS, measure.status)})`,
         })),
     ],
     [measures],
@@ -1117,6 +1152,25 @@ export default function RunsPage() {
                   {labelFor(RUN_STATUS_LABELS, selectedRun.status)}
                 </span>
               </p>
+              {/* Which logic scored each measure's rows, from their own evidence (#769) — CMS's artifact
+                  and a translation included, on a one-measure run and on the nightly alike. */}
+              {Array.isArray(reconciliation?.scoringLogic) && reconciliation.scoringLogic.length > 0 ? (
+                <div data-testid="run-scoring-logic">
+                  <p className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">Scored by</p>
+                  <ul className="text-xs text-neutral-600 dark:text-neutral-400">
+                    {reconciliation.scoringLogic
+                      .filter((entry) => Array.isArray(entry?.logics))
+                      .map((entry) => {
+                        const line = scoringLogicLine(entry, measures.find((m) => m.id === entry.measureId));
+                        return (
+                          <li key={entry.measureId} title={line.title}>
+                            {line.text}
+                          </li>
+                        );
+                      })}
+                  </ul>
+                </div>
+              ) : null}
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Trigger: {labelFor(TRIGGER_LABELS, selectedRun.triggerType)}</p>
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Started: {selectedRun.startedAt ? new Date(selectedRun.startedAt).toLocaleString() : "-"}</p>
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Completed: {selectedRun.completedAt ? new Date(selectedRun.completedAt).toLocaleString() : "-"}</p>

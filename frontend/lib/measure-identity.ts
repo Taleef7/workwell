@@ -156,6 +156,30 @@ export function formatVersionedIdentity(
   };
 }
 
+/**
+ * One logic by itself, for a list of them: "CMS137FHIR v1.0.000 (from CMS137v14)" /
+ * "WorkWell translation of CMS137v15 (ww-2027.1)". The full form without the MIPS id.
+ */
+export function formatScoringLogic(logic: ScoringLogic): string {
+  if (logic.kind === "workwell-translation") return `${logic.label} (${logic.version})`;
+  return `${logic.ecqmId} v${logic.version}${logic.derivedFrom ? ` (from ${logic.derivedFrom})` : ""}`;
+}
+
+export const MIXED_LOGICS_NOTE = "Scored by more than one logic or measurement period";
+
+/** "Scored by more than one logic or measurement period: CMS137FHIR v1.0.000 (from CMS137v14); …". */
+export function formatMixedLogics(logics: readonly ScoringLogic[]): string {
+  return `${MIXED_LOGICS_NOTE}: ${logics.map(formatScoringLogic).join("; ")}`;
+}
+
+/**
+ * The one logic a result surface may name from a list of them: exactly one, else null. More than one
+ * (a run that mixed logics or measurement periods) or none (unknown) is the unversioned crosswalk.
+ */
+export function singleScoringLogic(logics: readonly ScoringLogic[] | null | undefined): ScoringLogic | null {
+  return logics && logics.length === 1 ? logics[0] : null;
+}
+
 export function useMeasureIdentities() {
   const api = useApi();
   const [identities, setIdentities] = useState<Record<string, MeasureIdentity | null>>({});
@@ -234,5 +258,16 @@ export function useMeasureIdentities() {
     [identities],
   );
 
-  return { identities, measures, labelFor, labelForId, shortLabelFor, titleFor, loading, error, refetch: fetchIdentities };
+  // The chip form with the name after it, for a result shown in a list, card or column header (#769):
+  // "MIPS 305 · CMS137FHIR (from CMS137v14) · Substance Use". No logic: the unversioned label, as
+  // `labelFor`; no CMS identity: the name. Pair it with `titleFor` as its title / accessible name.
+  const compactLabelFor = useCallback(
+    (measureId: string, fallbackName: string, logic?: ScoringLogic | null): string => {
+      const versioned = formatVersionedIdentity(identities[measureId], logic);
+      return versioned ? `${versioned.short} · ${fallbackName}` : fallbackName;
+    },
+    [identities],
+  );
+
+  return { identities, measures, labelFor, labelForId, shortLabelFor, compactLabelFor, titleFor, loading, error, refetch: fetchIdentities };
 }

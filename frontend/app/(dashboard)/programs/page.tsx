@@ -25,7 +25,7 @@ import {
   CartesianGrid, ResponsiveContainer,
 } from "recharts";
 import { ChartDataTable } from "@/components/chart-data-table";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { formatMixedLogics, singleScoringLogic, useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { displayRate, formatRate, isSmallNumbers, type NotationSource } from "@/lib/measure-rate";
 import { chartablePoints, trendMeta, type TrendPoint } from "./trend-meta";
 import { yearLineFor } from "./year-line";
@@ -56,6 +56,11 @@ type ProgramSummary = {
   asOf?: string | null;
   /** The measure's own rates off the run's evidence (ADR-077 d5); read here only for a multi-rate measure (#697). */
   measureRate?: { rates?: Array<{ label?: string | null; score: number | null }> } | null;
+  /**
+   * The logics that scored the latest run's rows (#769): one names the card; more than one (a run that
+   * mixed logics or measurement periods) or none (unknown, or an older server) is the unversioned crosswalk.
+   */
+  scoringLogics?: ScoringLogic[];
 };
 
 /**
@@ -97,7 +102,7 @@ export default function ProgramsPage() {
   // set "Overdue 1,643" beside "Open cases (364)" (#699). The header hides the range on this page.
   const { siteId } = useGlobalFilters();
   const isPatientTerm = SUBJECT.singular === "patient";
-  const { identities, labelFor: measureLabelFor } = useMeasureIdentities();
+  const { identities, compactLabelFor, titleFor } = useMeasureIdentities();
   const [programs, setPrograms] = useState<ProgramSummary[]>([]);
   const [tenant, setTenant] = useState("");
   const [tenantOptions, setTenantOptions] = useState<TenantOption[]>([]);
@@ -319,7 +324,12 @@ export default function ProgramsPage() {
             programRate.value === null ? countedId : null,
             showsRateEstimateNote() ? "rate-estimate-note" : null,
           ].filter(Boolean).join(" ") || undefined;
-          const label = measureLabelFor(program.measureId, program.measureName);
+          // The card names the logic that scored its numbers (#769), in the chip form with the full
+          // form as its title; a run scored by more than one says so under the unversioned label.
+          const logics = program.scoringLogics ?? [];
+          const scoredBy = singleScoringLogic(logics);
+          const label = compactLabelFor(program.measureId, program.measureName, scoredBy);
+          const fullTitle = titleFor(program.measureId, program.measureName, scoredBy);
           const nothingYet = CARD_CHIPS.every(([, , field]) => program[field] === 0);
           return (
             <div key={program.measureId} className="@container group relative min-w-0 cursor-pointer rounded-lg border border-neutral-200 bg-white p-4 transition hover:border-primary-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-primary-600">
@@ -327,13 +337,20 @@ export default function ProgramsPage() {
                   carry `relative z-10` so they keep their own click targets. */}
               <Link
                 href={`/programs/${program.measureId}`}
-                aria-label={`View ${label} detail`}
+                aria-label={`View ${fullTitle} detail`}
                 className="absolute inset-0 z-0 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
               />
               {/* Title beside the rate only when the CARD is wide enough (a container query: in the
                   2- and 3-column grids a wide viewport still gives a narrow card). */}
               <div className="flex flex-col gap-2 @md:flex-row @md:items-start @md:justify-between @md:gap-3">
-                <h3 className="min-w-0 text-base font-semibold text-neutral-900 group-hover:text-primary-700 dark:text-neutral-100 dark:group-hover:text-primary-400">{label}</h3>
+                <div className="min-w-0">
+                  <h3 title={fullTitle} className="text-base font-semibold text-neutral-900 group-hover:text-primary-700 dark:text-neutral-100 dark:group-hover:text-primary-400">{label}</h3>
+                  {logics.length > 1 ? (
+                    <p data-testid={`card-logics-${program.measureId}`} className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                      {formatMixedLogics(logics)}
+                    </p>
+                  ) : null}
+                </div>
                 <div className="@md:shrink-0 @md:text-right">
                   <p
                     aria-describedby={describedBy}

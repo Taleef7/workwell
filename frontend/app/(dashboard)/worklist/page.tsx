@@ -27,7 +27,7 @@ import { emitToast } from "@/lib/toast";
 import { OUTCOME_LABELS, PRIORITY_LABELS, labelFor, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { ScrollRegion } from "@/components/scroll-region";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
@@ -66,6 +66,8 @@ type WorklistGap = {
   liveOutcomeStatus?: string | null;
   /** The cell's DISPLAY state — what a chip renders; see the cases page for why both travel. */
   liveDisplayStatus?: string | null;
+  /** The logic that scored the case's cited outcome (#769); null or absent = the unversioned crosswalk. */
+  logic?: ScoringLogic | null;
 };
 
 /** The two views of the patient work list (#569). */
@@ -146,7 +148,7 @@ export default function WorklistPage() {
   const { user } = useAuth();
   const canManage = canManageCases(user?.role);
   const { siteId, from, to } = useGlobalFilters();
-  const { labelFor: measureLabelFor, shortLabelFor } = useMeasureIdentities();
+  const { labelForId, shortLabelFor, titleFor } = useMeasureIdentities();
 
   const { options: providerOptions, nameFor: providerNameFor } = usePanelProviders();
   const { options: payerOptions, groups: payerGroups, available: payersAvailable, nameFor: payerNameFor } = usePanelPayers();
@@ -476,7 +478,7 @@ export default function WorklistPage() {
     // folded Filters button) are all that says the list is constrained: a link to ?status=staff_closed,
     // ?search= or ?measureId= otherwise opened a filtered list under a plain "Filters" (#700, Codex).
     if (statusView === "staff_closed") chips.push("Work: Closed by staff");
-    if (measureFilter) chips.push(`Measure: ${measureLabelFor(measureFilter, measureFilter)}`);
+    if (measureFilter) chips.push(`Measure: ${labelForId(measureFilter)}`);
     if (searchFilter) chips.push(`Search: ${searchFilter}`);
     // Named, not just "My panel": a staffer who owns four providers should see which four, and someone
     // who owns none should see that the heading is describing an empty set rather than a quiet failure.
@@ -493,7 +495,7 @@ export default function WorklistPage() {
     if (assigneeFilter) chips.push(`Assignee: ${assigneeFilter}`);
     if (outcomeFilter) chips.push(`Status: ${labelFor(OUTCOME_LABELS, outcomeFilter)}`);
     return chips;
-  }, [statusView, measureFilter, measureLabelFor, searchFilter, effectivePanel, myPanels, providerFilter, providerNameFor, payerFilter, payerNameFor, assigneeFilter, outcomeFilter]);
+  }, [statusView, measureFilter, labelForId, searchFilter, effectivePanel, myPanels, providerFilter, providerNameFor, payerFilter, payerNameFor, assigneeFilter, outcomeFilter]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -915,9 +917,11 @@ export default function WorklistPage() {
                             ? (gap.liveDisplayStatus ?? gap.liveOutcomeStatus ?? gap.outcomeStatus)
                             : gap.outcomeStatus;
                           const closureNote = gapClosureNote(gap);
-                          // The chip carries the short form ("MIPS 113 · CMS130", #648); the full label,
-                          // status and next action are its tooltip and its accessible name.
-                          const longLabel = measureLabelFor(gap.measureId, gap.measureName);
+                          // The chip carries the short form ("MIPS 113 · CMS130FHIR (from CMS130v14)",
+                          // #648, #769); the full versioned label, status and next action are its tooltip
+                          // and its accessible name. Both name the logic that scored the case's own
+                          // outcome, never today's routing; without one, the unversioned crosswalk.
+                          const longLabel = titleFor(gap.measureId, gap.measureName, gap.logic);
                           const describe = gap.otherAssignee
                             ? `${longLabel} — ${labelFor(OUTCOME_LABELS, shown)} (assigned to ${gap.assignee ?? "nobody"}, not the filtered assignee)`
                             : `${longLabel} — ${labelFor(OUTCOME_LABELS, shown)}${closureNote ? ` (${closureNote})` : ""}${gap.nextAction ? `: ${gap.nextAction}` : ""}`;
@@ -929,7 +933,7 @@ export default function WorklistPage() {
                               title={describe}
                               aria-label={describe}
                             >
-                              {shortLabelFor(gap.measureId, gap.measureName)}
+                              {shortLabelFor(gap.measureId, gap.measureName, gap.logic)}
                             </Link>
                           );
                         })}

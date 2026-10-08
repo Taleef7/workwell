@@ -14,7 +14,9 @@ test.describe("Maui measures catalog", () => {
   test("the identity column carries the MIPS crosswalk for every routed measure", async ({ page }) => {
     await page.goto("/measures");
     for (const m of ROUTED_MEASURES) {
-      await expect(page.getByText(`MIPS ${m.mips} · ${m.cms}`).first()).toBeVisible({ timeout: 20_000 });
+      // Exact: the catalog grid selects a measure across years, so its identity stays unversioned (#769);
+      // a substring would also accept "MIPS 112 · CMS125FHIR …".
+      await expect(page.getByText(`MIPS ${m.mips} · ${m.cms}`, { exact: true }).first()).toBeVisible({ timeout: 20_000 });
     }
     await expectNoErrorPage(page);
   });

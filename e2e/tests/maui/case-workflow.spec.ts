@@ -62,8 +62,12 @@ test.describe("Maui case workflow", () => {
     await expect(page).toHaveURL(/\/cases\//);
     await expectNoErrorPage(page);
 
-    // Crosswalk label rendered in the detail header — assert presence, not viewport visibility.
-    await expect(page.getByText(/MIPS 112 · CMS125/).first()).toBeAttached({ timeout: 20_000 });
+    // The detail header names the logic that scored this case's outcome, in full (#769) — the whole
+    // string: "MIPS 112 · CMS125" is a prefix of the unversioned and every versioned form alike, so it
+    // proved nothing about which logic the page named. Presence, not viewport visibility.
+    await expect(
+      page.getByText("MIPS 112 · CMS125FHIR v1.0.000 (from CMS125v14) · Breast Cancer Screening", { exact: true }).first(),
+    ).toBeAttached({ timeout: 20_000 });
 
     // Outcome status pill — the detail page renders it twice (a responsive duplicate is display:none),
     // so pick the VISIBLE one rather than the first in DOM order.

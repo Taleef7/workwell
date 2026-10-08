@@ -24,7 +24,7 @@ import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
 import { canManageCases } from "@/lib/rbac";
 import { worklistHref } from "@/lib/worklist-links";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
@@ -71,6 +71,14 @@ type CaseSummary = {
    */
   liveDisplayStatus?: string | null;
   liveOutcomeRunId?: string | null;
+  /** The logic that scored the case's cited outcome (#769); null or absent = the unversioned crosswalk. */
+  logic?: ScoringLogic | null;
+};
+
+/** How a case row names its measure: the chip form with the name, and the full form as its title. */
+type CaseMeasureLabels = {
+  compactLabelFor: (measureId: string, fallbackName: string, logic?: ScoringLogic | null) => string;
+  titleFor: (measureId: string, fallbackName: string, logic?: ScoringLogic | null) => string;
 };
 
 type MeasureOption = {
@@ -225,7 +233,9 @@ export default function CasesPage() {
   const { user } = useAuth();
   const canManage = canManageCases(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
-  const { labelFor: measureLabelFor } = useMeasureIdentities();
+  // `measureLabelFor` names a measure in the filter (unversioned: a filter spans years); a case row names
+  // the logic that scored its own outcome (#769).
+  const { labelFor: measureLabelFor, compactLabelFor, titleFor } = useMeasureIdentities();
   const isPhone = useMediaQuery(BELOW_MD);
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
@@ -921,7 +931,7 @@ export default function CasesPage() {
         table view carried over from a wider screen falls back to cards on a phone.
       */}
       {viewMode === "table" && !isPhone ? (
-        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canBulkAct} measureLabelFor={measureLabelFor} />
+        <CasesTable items={filteredCases} selectedCaseIds={selectedCaseIds} onToggle={toggleCase} canManage={canBulkAct} labels={{ compactLabelFor, titleFor }} />
       ) : (
       <div className="grid gap-3 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
         {filteredCases.map((item) => {
@@ -956,7 +966,12 @@ export default function CasesPage() {
               </div>
 
               <div className="mt-2">
-                <p className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">{measureLabelFor(item.measureId, item.measureName)}</p>
+                <p
+                  className="text-xs uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400"
+                  title={titleFor(item.measureId, item.measureName, item.logic)}
+                >
+                  {compactLabelFor(item.measureId, item.measureName, item.logic)}
+                </p>
                 <h4 className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">
                   <Link href={subjectPath(item.employeeId)} className="hover:text-primary-700 hover:underline dark:hover:text-primary-400">
                     {item.employeeName}
@@ -1037,13 +1052,13 @@ function CasesTable({
   selectedCaseIds,
   onToggle,
   canManage,
-  measureLabelFor,
+  labels,
 }: {
   items: CaseSummary[];
   selectedCaseIds: string[];
   onToggle: (caseId: string) => void;
   canManage: boolean;
-  measureLabelFor: (measureId: string, fallbackName: string) => string;
+  labels: CaseMeasureLabels;
 }) {
   if (items.length === 0) return null;
   return (
@@ -1087,7 +1102,12 @@ function CasesTable({
                 </Link>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">{item.employeeId}</p>
               </td>
-              <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{measureLabelFor(item.measureId, item.measureName)}</td>
+              <td
+                className="px-3 py-2 text-neutral-700 dark:text-neutral-300"
+                title={labels.titleFor(item.measureId, item.measureName, item.logic)}
+              >
+                {labels.compactLabelFor(item.measureId, item.measureName, item.logic)}
+              </td>
               <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{item.site}</td>
               <td className="px-3 py-2">
                 <div className="flex flex-col items-start gap-1">

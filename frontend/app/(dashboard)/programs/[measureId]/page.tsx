@@ -24,7 +24,13 @@ import { niceDomain, chartTooltipStyle } from "@/lib/charts";
 import { useTheme } from "@/lib/useTheme";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { ScrollRegion } from "@/components/scroll-region";
-import { formatExecutedLogic, formatTranslationLogic, useMeasureIdentities } from "@/lib/measure-identity";
+import {
+  formatExecutedLogic,
+  formatMixedLogics,
+  formatTranslationLogic,
+  singleScoringLogic,
+  useMeasureIdentities,
+} from "@/lib/measure-identity";
 import { RateEstimateNote, showsRateEstimateNote } from "@/components/rate-estimate-note";
 import { displayRate, formatRate, isSmallNumbers, type DisplayRate, type NotationSource, type TrendPoint } from "@/lib/measure-rate";
 import { chartablePoints } from "../trend-meta";
@@ -82,7 +88,7 @@ export default function ProgramDetailPage() {
   const isPatientTerm = SUBJECT.singular === "patient";
   const { startTracking } = useRunStatus();
   const { theme } = useTheme();
-  const { identities, labelFor: measureLabelFor } = useMeasureIdentities();
+  const { identities, labelFor: measureLabelFor, titleFor } = useMeasureIdentities();
 
   const [slices, setSlices] = useState<MeasureSlices<TrendPoint>>(() => freshSlices<TrendPoint>(measureId));
   const [error, setError] = useState<string | null>(null);
@@ -178,30 +184,34 @@ export default function ProgramDetailPage() {
   const prevRate = prevCounts ? displayRate(prevCounts, identity) : null;
   const delta = program && prevRate && rate.value !== null && prevRate.value !== null ? rate.value - prevRate.value : null;
   const yearLine = program ? yearLineFor([program], isPatientTerm) : null;
-  // The FHIR artifact an officially routed measure runs today (from /api/measures), for the "Runs …"
-  // line. The artifact and version beside the NUMBERS are the ones the run's evidence names; today's
-  // routing stands in only when the run carried official evidence but recorded no artifact. A run with
-  // no official evidence (`measureRate` null: authored CQL scored it) gets the catalog's own version and
-  // no FHIR artifact, and so do counts that fold in the authored scale tenant's. Never the catalog's
-  // QDM id or "v1.0" over official counts (§4.3).
+  // The FHIR artifact an officially routed measure runs today (from /api/measures), for the present-tense
+  // "Runs …" line ONLY. Everything that labels the NUMBERS names the logic the run's own evidence names
+  // (#769): today's routing never stands in, and neither does the catalog's QDM id or "v1.0" over
+  // official counts (§4.3). A run with no official evidence (`measureRate` null: authored CQL scored it)
+  // keeps the catalog's own version and no FHIR artifact, and so do counts that fold in the authored scale
+  // tenant's.
   const executed = identities[measureId]?.executed;
   const translation = identities[measureId]?.translation;
+  // The logics that scored these numbers. Mixed totals (the authored scale tenant's folded in) carry no
+  // single identity; a run scored by more than one logic or measurement period names none in the heading.
+  const scoringLogics = program?.includesAuthoredScaleCounts ? [] : (program?.scoringLogics ?? []);
+  const mixedLogics = scoringLogics.length > 1;
+  const scoredBy = singleScoringLogic(scoringLogics);
   const ranOfficial = program?.measureRate != null && !program.includesAuthoredScaleCounts;
   const ran = program?.measureRate?.official;
   // A WorkWell translation scored these numbers: it is named by its own label, and today's CMS artifact
   // never stands in for its missing eCQM id (§4.3).
   const ranTranslation = ranOfficial && ran?.kind === "derived";
   // The logic that scored these numbers, by name: the translation's label, or the CMS artifact the run's
-  // evidence names (today's routing only when the run recorded none). One expression, so no later branch
-  // can put a CMS id over a translated run.
-  const shownLogic = !ranOfficial
+  // evidence names (served CMS-prefixed). One expression, so no later branch can put a CMS id over a
+  // translated run; nothing when the evidence names none, or names more than one.
+  const shownLogic = !ranOfficial || mixedLogics
     ? undefined
     : ranTranslation
       ? (ran?.label ?? "WorkWell translation")
-      : ran?.ecqmId
-        ? (/^CMS/i.test(ran.ecqmId) ? ran.ecqmId : `CMS${ran.ecqmId}`)
-        : executed?.ecqmId;
-  const shownVersion = ranOfficial ? (ran?.version ?? (ranTranslation ? undefined : executed?.version) ?? program?.version) : program?.version;
+      : (ran?.ecqmId ?? undefined);
+  const shownVersion = mixedLogics ? undefined : ranOfficial ? (ran?.version ?? undefined) : program?.version;
+  const versionLine = [shownVersion ? `Version ${shownVersion}` : null, yearLine].filter(Boolean).join(" · ");
   // The label above the name names logic only when it is the logic that scored these numbers. A policy
   // reference that is itself a versioned CMS measure id (CMS125v14) is a measure neither engine ran, so it
   // never stands in for the artifact; any other policy reference (an OSHA citation) still shows.
@@ -232,8 +242,13 @@ export default function ProgramDetailPage() {
             {topLabel ? (
               <p data-testid="measure-top-label" className="text-xs uppercase tracking-[0.15em] text-neutral-500 dark:text-neutral-400">{topLabel}</p>
             ) : null}
-            <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">{measureLabelFor(measureId, program.measureName)}</h2>
-            <p className="text-sm text-neutral-600 dark:text-neutral-400">Version {shownVersion}{yearLine ? ` · ${yearLine}` : ""}</p>
+            <h2 title={titleFor(measureId, program.measureName, scoredBy)} className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
+              {measureLabelFor(measureId, program.measureName, scoredBy)}
+            </h2>
+            {mixedLogics ? (
+              <p data-testid="mixed-logics" className="text-sm text-neutral-600 dark:text-neutral-400">{formatMixedLogics(scoringLogics)}.</p>
+            ) : null}
+            {versionLine ? <p className="text-sm text-neutral-600 dark:text-neutral-400">{versionLine}</p> : null}
             {executed ? (
               <p data-testid="executed-logic" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
                 {formatExecutedLogic(executed)}.
@@ -597,7 +612,7 @@ export default function ProgramDetailPage() {
                 </thead>
                 <tbody>
                   <tr className="border-t border-neutral-200 dark:border-neutral-800">
-                    <td className="py-1 pr-3">{shownVersion}</td>
+                    <td className="py-1 pr-3">{shownVersion ?? "—"}</td>
                     <td className="py-1 pr-3">{program.compliant}</td>
                     <td className="py-1 pr-3">{program.dueSoon}</td>
                     <td className="py-1 pr-3">{program.overdue}</td>

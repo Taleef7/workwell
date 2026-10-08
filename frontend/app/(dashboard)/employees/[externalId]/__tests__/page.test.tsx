@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import EmployeeProfilePage from "../page";
+import { CMS125_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 const get = vi.fn();
 const post = vi.fn();
@@ -129,6 +130,86 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
     const oshaOutcomeRow = document.getElementById("measure-audiogram")!;
     expect(within(oshaOutcomeRow).getByText("Annual Audiogram Completed", { exact: true })).toBeInTheDocument();
     expect(within(oshaOutcomeRow).queryByText(/^MIPS/)).not.toBeInTheDocument();
+  });
+
+  describe("names the logic that scored each result, never today's routing (#769)", () => {
+    // Routing (identity.executed) names CMS's artifact for both CMS measures. The rows say: cms125 by
+    // CMS's artifact, cms137 by the translation. The served version is the authored "2.0.0" an older
+    // server printed beside a CMS-scored row; it must not be shown.
+    const outcome = (over: Record<string, unknown>) => ({ ...mockProfile.measureOutcomes[0]!, measureVersion: "2.0.0", ...over });
+    function withRows(cms125Logic: unknown, cms137Logic: unknown) {
+      get.mockImplementation((url: string) => {
+        if (url === "/api/measures") {
+          return Promise.resolve([
+            { id: "cms125", name: "Breast Cancer Screening", status: "Active", identity: ROUTED_IDENTITIES.cms125 },
+            { id: "cms137", name: "Substance Use Treatment", status: "Active", identity: ROUTED_IDENTITIES.cms137 },
+            { id: "audiogram", name: "Annual Audiogram Completed", status: "Active", identity: null },
+          ]);
+        }
+        if (url === "/api/employees/emp-001/profile") {
+          return Promise.resolve({
+            ...mockProfile,
+            measureOutcomes: [
+              outcome({ logic: cms125Logic }),
+              outcome({ measureId: "cms137", measureVersionId: "cms137", measureName: "Substance Use Treatment", openCaseId: "case-137", logic: cms137Logic }),
+              mockProfile.measureOutcomes[1],
+            ],
+            openCases: [
+              { ...mockProfile.openCases[0], logic: cms125Logic },
+              { ...mockProfile.openCases[0], caseId: "case-137", measureId: "cms137", measureName: "Substance Use Treatment", logic: cms137Logic },
+            ],
+          });
+        }
+        return Promise.resolve([]);
+      });
+    }
+
+    it("Measure Details: the full form; summary bar and open cases: the chip form, the full form as title", async () => {
+      withRows(CMS125_ARTIFACT, CMS137_TRANSLATION);
+      render(<EmployeeProfilePage />);
+      const details125 = await waitFor(() => {
+        const row = document.getElementById("measure-cms125");
+        expect(row).not.toBeNull();
+        return row!;
+      });
+      const full125 = await within(details125).findByText(`${LABELS.cms125Full} · Breast Cancer Screening`, { exact: true });
+      expect(full125.parentElement).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+      const details137 = document.getElementById("measure-cms137")!;
+      expect(within(details137).getByText(`${LABELS.cms137TranslationFull} · Substance Use Treatment`, { exact: true })).toBeInTheDocument();
+      expect(within(details137).queryByText(/CMS137FHIR/)).toBeNull();
+
+      const summaryBar = screen.getByText("Compliance Posture").parentElement!;
+      const chip125 = within(summaryBar).getByText(`${LABELS.cms125Short} · Breast Cancer Screening — Overdue`, { exact: true });
+      expect(chip125).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening — Overdue`);
+      expect(within(summaryBar).getByText(`${LABELS.cms137TranslationShort} · Substance Use Treatment — Overdue`, { exact: true })).toBeInTheDocument();
+
+      const open125 = screen.getByRole("link", { name: `${LABELS.cms125Short} · Breast Cancer Screening` });
+      expect(open125).toHaveAttribute("href", "/cases/case-001");
+      expect(open125).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+      expect(screen.getByRole("link", { name: `${LABELS.cms137TranslationShort} · Substance Use Treatment` })).toHaveAttribute("href", "/cases/case-137");
+
+      // The authored library version printed beside a CMS-scored row is gone; the label carries the version.
+      expect(screen.queryByText(/2\.0\.0/)).toBeNull();
+      // A measure with no CMS identity is unchanged, its own version included.
+      const osha = document.getElementById("measure-audiogram")!;
+      expect(within(osha).getByText("Annual Audiogram Completed", { exact: true })).toBeInTheDocument();
+      expect(within(osha).getByText("v1.0", { exact: true })).toBeInTheDocument();
+    });
+
+    it("rows that name no logic: the unversioned crosswalk everywhere, though routing names an artifact", async () => {
+      withRows(null, undefined);
+      render(<EmployeeProfilePage />);
+      const details125 = await waitFor(() => {
+        const row = document.getElementById("measure-cms125");
+        expect(row).not.toBeNull();
+        return row!;
+      });
+      expect(await within(details125).findByText(`${LABELS.cms125Plain} · Breast Cancer Screening`, { exact: true })).toBeInTheDocument();
+      const summaryBar = screen.getByText("Compliance Posture").parentElement!;
+      expect(within(summaryBar).getByText(`${LABELS.cms137Plain} · Substance Use Treatment — Overdue`, { exact: true })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
+      expect(screen.queryByText(/FHIR|2\.0\.0/)).toBeNull();
+    });
   });
 
   it("hides role and supervisor for patients, while keeping employee profile details byte-identical", async () => {

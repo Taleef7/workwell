@@ -10,6 +10,7 @@ import { canApproveMeasures, canAuthorMeasures, isAdmin } from "@/lib/rbac";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { AccessDenied } from "@/components/access-denied";
 import { useApi } from "@/lib/api/hooks";
+import { formatTranslationLogic } from "@/lib/measure-identity";
 import { useMeasureDetail } from "@/features/studio/hooks/useMeasureDetail";
 import { useValueSets } from "@/features/studio/hooks/useValueSets";
 import { useOshaReferences } from "@/features/studio/hooks/useOshaReferences";
@@ -141,6 +142,20 @@ export default function StudioMeasurePage() {
           {measure ? (
             <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
               {measure.version} • <span className={`rounded-full px-2 py-1 text-xs font-medium ${measureStatusClass(measure.status)}`}>{labelFor(MEASURE_STATUS_LABELS, measure.status)}</span>
+            </p>
+          ) : null}
+          {/* The version above labels this authoring record. What the deployment RUNS for an officially
+              routed measure is CMS's artifact (and a translation for the year it covers), named apart so
+              the record's version is never read as the executed logic's (#769). */}
+          {measure?.identity?.executed ? (
+            <p data-testid="studio-runs" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+              Runs: {measure.identity.executed.ecqmId} v{measure.identity.executed.version}
+              {measure.identity.executed.status === "draft" ? " (CMS draft)" : ""}
+            </p>
+          ) : null}
+          {measure?.identity?.executed && measure.identity.translation ? (
+            <p data-testid="studio-translation" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+              {formatTranslationLogic(measure.identity.translation)}
             </p>
           ) : null}
         </div>

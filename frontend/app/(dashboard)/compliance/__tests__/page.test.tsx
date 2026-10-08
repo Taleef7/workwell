@@ -45,6 +45,7 @@ vi.mock("@/lib/rbac", async (importOriginal) => {
 vi.mock("@/components/auth-provider", () => ({ useAuth: () => ({ user: { role: "ROLE_ADMIN" } }) }));
 
 import CompliancePage from "../page";
+import { CMS125_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 const rosterImmun = {
   data: {
@@ -207,14 +208,72 @@ describe("CompliancePage", () => {
     });
 
     render(<CompliancePage />);
-    expect(await screen.findByRole("columnheader", { name: /MIPS 112 · CMS125 · Breast Cancer Screening/ })).toBeInTheDocument();
+    const header = await screen.findByRole("columnheader", { name: /MIPS 112 · CMS125 · Breast Cancer Screening/ });
+    // Whole strings: "MIPS 112 · CMS125" is a prefix of every versioned form too.
+    expect(header.childNodes[0].textContent).toBe("MIPS 112 · CMS125 · Breast Cancer Screening");
     const audiogramHeader = screen.getByRole("columnheader", { name: /^Annual Audiogram Completed/ });
     expect(audiogramHeader).toBeInTheDocument();
     expect(audiogramHeader).not.toHaveTextContent(/MIPS|CMS/);
 
     const dt = screen.getByText(/MIPS 112 · CMS125/, { selector: "dt" });
-    expect(dt).toBeInTheDocument();
-    expect(dt).toHaveTextContent("MIPS 112 · CMS125");
+    expect(dt.childNodes[0].textContent).toBe("MIPS 112 · CMS125 · Breast Cancer Screening");
+  });
+
+  it("names each column by the logic that scored its winning run, in the table and the cards, never today's routing (#769)", async () => {
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", identity: ROUTED_IDENTITIES.cms125 },
+          { id: "cms137", name: "Substance Use Treatment", identity: ROUTED_IDENTITIES.cms137 },
+          { id: "cms122", name: "Diabetes HbA1c", identity: { cmsId: "CMS122", mipsQualityId: "001", executed: ROUTED_IDENTITIES.cms125.executed } },
+          { id: "cms130", name: "Colorectal Cancer Screening", identity: { cmsId: "CMS130", mipsQualityId: "113", executed: ROUTED_IDENTITIES.cms125.executed } },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        columns: [
+          { measureId: "cms125", name: "Breast Cancer Screening", complianceClass: "RECURRING", logic: CMS125_ARTIFACT, logicConflict: false },
+          // Routing names CMS's artifact; the column's run was scored by the translation.
+          { measureId: "cms137", name: "Substance Use Treatment", complianceClass: "RECURRING", logic: CMS137_TRANSLATION, logicConflict: false },
+          // Routing names an artifact; the run's rows named none.
+          { measureId: "cms122", name: "Diabetes HbA1c", complianceClass: "RECURRING", logic: null, logicConflict: false },
+          // The run's rows disagreed: no one logic names the column, whatever `logic` carries.
+          { measureId: "cms130", name: "Colorectal Cancer Screening", complianceClass: "RECURRING", logic: CMS125_ARTIFACT, logicConflict: true },
+        ],
+        rows: [{
+          subject: { externalId: "emp-001", name: "Ada Lovelace", role: "Nurse", site: "HQ" },
+          cells: {
+            cms125: { status: "COMPLIANT", method: "Mammogram on file" },
+            cms137: { status: "OVERDUE", method: "No engagement" },
+            cms122: { status: "COMPLIANT", method: "1 valid test" },
+            cms130: { status: "COMPLIANT", method: "Colonoscopy on file" },
+          },
+        }],
+      },
+      headers: new Headers({ "X-Total-Count": "1" }),
+    });
+    render(<CompliancePage />);
+
+    const expected: Array<[RegExp, string, string]> = [
+      [/^MIPS 112 · CMS125FHIR/, `${LABELS.cms125Short} · Breast Cancer Screening`, `${LABELS.cms125Title} · Breast Cancer Screening`],
+      [/^MIPS 305 · WW translation/, `${LABELS.cms137TranslationShort} · Substance Use Treatment`, `${LABELS.cms137TranslationTitle} · Substance Use Treatment`],
+      [/^MIPS 001 · CMS122/, "MIPS 001 · CMS122 · Diabetes HbA1c", "MIPS 001 · CMS122 · Diabetes HbA1c"],
+      [/^MIPS 113 · CMS130/, "MIPS 113 · CMS130 · Colorectal Cancer Screening", "MIPS 113 · CMS130 · Colorectal Cancer Screening"],
+    ];
+    for (const [name, text, title] of expected) {
+      // Desktop: the column header.
+      const header = await screen.findByRole("columnheader", { name });
+      expect(header.childNodes[0].textContent).toBe(text);
+      expect(header).toHaveAttribute("title", title);
+      // Phone: the card's term, the same label.
+      const dt = screen.getByText(name, { selector: "dt" });
+      expect(dt.childNodes[0].textContent).toBe(text);
+      expect(dt).toHaveAttribute("title", title);
+    }
+    expect(screen.queryByText(/CMS137FHIR/)).toBeNull();
   });
 
   it("refetches when the panel changes", async () => {

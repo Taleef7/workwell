@@ -28,6 +28,7 @@ vi.mock("@/components/auth-provider", () => ({
 }));
 
 import ListsPage from "../page";
+import { CMS125_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 const LIST = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -183,9 +184,52 @@ it("the report names each measure as every other page does, never by its id", as
   await screen.findByText("ACO Q3 attribution");
   await userEvent.click(screen.getByRole("button", { name: "Open" }));
   await userEvent.click(await screen.findByRole("button", { name: "Compute" }));
-  expect(await screen.findByText(/CMS125 · Breast Cancer Screening/)).toBeInTheDocument();
+  // No logic on the entry: the unversioned crosswalk, whole.
+  expect(await screen.findByText("MIPS 112 · CMS125 · Breast Cancer Screening", { exact: true })).toBeInTheDocument();
   expect(screen.queryByText("cms125")).not.toBeInTheDocument();
   expect(screen.getByRole("columnheader", { name: "Initial population" })).toBeInTheDocument();
+});
+
+it("the report names the logic that scored each measure's run, never today's routing (#769)", async () => {
+  get.mockImplementation(async (path: string) => {
+    if (path === "/api/subject-lists") return [LIST];
+    if (path === "/api/measures") {
+      return [
+        { id: "cms125", name: "Breast Cancer Screening", identity: ROUTED_IDENTITIES.cms125 },
+        { id: "cms137", name: "Substance Use Treatment", identity: ROUTED_IDENTITIES.cms137 },
+        { id: "cms122", name: "Diabetes HbA1c", identity: { cmsId: "CMS122", mipsQualityId: "001", executed: ROUTED_IDENTITIES.cms125.executed } },
+      ];
+    }
+    if (path.includes("/report")) {
+      const entry = (measureId: string, logic: unknown) => ({
+        measureId, ecqmId: null, runId: "run-1", logic,
+        measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+        compactionStatus: "complete", matchedSubjects: 2, distinctSubjectsSeen: 2, missingFromRun: 0,
+        rates: [{ label: null, ipp: 2, denom: 2, denex: 0, denexcep: 0, numer: 1, effectiveDenominator: 2, score: 0.5 }],
+      });
+      return {
+        measurementYear: 2027,
+        generatedAt: "2027-06-01T00:00:00.000Z",
+        members: { matched: 2, notFound: 0, ambiguous: 0, total: 2 },
+        compactedMeasures: [],
+        // Routing names CMS's artifact for all three; the runs say: artifact, translation, nothing.
+        measures: [entry("cms125", CMS125_ARTIFACT), entry("cms137", CMS137_TRANSLATION), entry("cms122", null)],
+      };
+    }
+    throw new Error(`unexpected GET ${path}`);
+  });
+  render(<ListsPage />);
+  await screen.findByText("ACO Q3 attribution");
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Compute" }));
+  const cms125 = await screen.findByText(`${LABELS.cms125Short} · Breast Cancer Screening`, { exact: true });
+  expect(cms125).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+  expect(screen.getByText(`${LABELS.cms137TranslationShort} · Substance Use Treatment`, { exact: true })).toHaveAttribute(
+    "title",
+    `${LABELS.cms137TranslationTitle} · Substance Use Treatment`,
+  );
+  expect(screen.getByText("MIPS 001 · CMS122 · Diabetes HbA1c", { exact: true })).toBeInTheDocument();
+  expect(screen.queryByText(/CMS137FHIR/)).toBeNull();
 });
 
 it("on the patient deployment the report says its scores are WorkWell's estimate, not the submitted rate", async () => {

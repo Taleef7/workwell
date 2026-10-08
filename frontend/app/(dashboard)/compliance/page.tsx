@@ -26,7 +26,7 @@ import { usePanelCache } from "@/features/compliance/usePanelCache";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { BELOW_MD, useMediaQuery } from "@/lib/use-media-query";
-import { PANEL_OPTIONS, type DisplayState, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
+import { PANEL_OPTIONS, columnLogic, type DisplayState, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
 const STATUS_FILTER_VALUES = new Set(STATUS_FILTER_OPTIONS);
@@ -83,7 +83,9 @@ export default function CompliancePage() {
   // cases & programs pages — not a page-local field, so the global filter actually applies here.
   const { siteId } = useGlobalFilters();
   const canRecalc = canRunMeasures(user?.role) && canSeeEngineering(user?.role);
-  const { labelFor: measureLabelFor, labelForId: measureLabelForId } = useMeasureIdentities();
+  // A column header names the logic that scored its measure's winning run (#769), in the chip form with
+  // the full form as its title; the "Scoped to" filter line names the measure unversioned.
+  const { compactLabelFor, titleFor, labelForId: measureLabelForId } = useMeasureIdentities();
 
   // Derived from the URL rather than useState-initialized, so browser back/forward between two
   // filtered /compliance URLs re-renders with the right filter.
@@ -889,8 +891,8 @@ export default function CompliancePage() {
                   {SUBJECT.Singular}
                 </th>
                 {columns.map((c) => (
-                  <th key={c.measureId} scope="col" className="px-3 py-2 text-left font-semibold">
-                    {measureLabelFor(c.measureId, c.name)}
+                  <th key={c.measureId} scope="col" className="px-3 py-2 text-left font-semibold" title={titleFor(c.measureId, c.name, columnLogic(c))}>
+                    {compactLabelFor(c.measureId, c.name, columnLogic(c))}
                     <span className="ml-1 text-[10px] font-normal uppercase text-neutral-400">{c.complianceClass === "PERMANENT" ? "perm" : "rec"}</span>
                   </th>
                 ))}
@@ -942,7 +944,8 @@ export default function CompliancePage() {
           columns={columns}
           rows={rows}
           loading={loading}
-          labelFor={measureLabelFor}
+          labelFor={compactLabelFor}
+          titleFor={titleFor}
           selection={assignEnabled && isPhone ? { selectableIds, selectedIds: selectedHere, onToggle: toggleOne } : undefined}
         />
 

@@ -27,6 +27,8 @@
  * (JOURNAL 2026-09-12 — the standing rule about that harness).
  */
 
+import type { ScoringLogic } from "@/lib/measure-identity";
+
 export type ProgramSummary = {
   measureId: string;
   measureName: string;
@@ -54,8 +56,8 @@ export type ProgramSummary = {
     /** "translation-evidence" when a WorkWell translation scored the run. Absent: an older backend. */
     source?: "official-evidence" | "translation-evidence";
     /**
-     * The artifact the run's evidence names (`ecqmId` as recorded, e.g. "125FHIR"). `kind: "derived"`
-     * with its `label` when a WorkWell translation scored the run; its `ecqmId` is then null.
+     * The artifact the run's evidence names (`ecqmId` served CMS-prefixed, "CMS125FHIR", #769). `kind:
+     * "derived"` with its `label` when a WorkWell translation scored the run; its `ecqmId` is then null.
      */
     official?: { ecqmId: string | null; version: string | null; kind?: "derived"; label?: string | null; derivedFrom?: string | null } | null;
     rates: Array<{ label: string | null; ipp: number; denom: number; denex: number; denexcep: number; numer: number; effectiveDenominator: number; score: number | null }>;
@@ -69,6 +71,11 @@ export type ProgramSummary = {
   logicVintage?: { artifactYears: string; measurementYear: number; note: string } | null;
   /** The counts include the generated scale tenant's, scored by the authored engine: label no artifact. */
   includesAuthoredScaleCounts?: boolean;
+  /**
+   * The logics that scored the latest run's rows (#769): one names the heading; more than one (a run that
+   * mixed logics or measurement periods) or none (unknown, or an older server) is the unversioned crosswalk.
+   */
+  scoringLogics?: ScoringLogic[];
 };
 
 export type TopDrivers = {
