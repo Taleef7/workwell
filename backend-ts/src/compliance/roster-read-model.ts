@@ -22,8 +22,8 @@ import type { HydratedSegment } from "../stores/segment-store.ts";
 import { isPanelId, ACTIVE_CATALOG_MEASURE_IDS, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS, type PanelId } from "./panels.ts";
 import { deriveCell, liveStateOfCell, type Cell } from "./roster-vocabulary.ts";
 import { hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters } from "./subject-filters.ts";
-import { isEvaluationErrorEvidence } from "../fhir/measure-report.ts";
-import { scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import { scoringOfRows } from "../fhir/run-aggregate.ts";
+import type { ScoringLogic } from "../measure/measure-identity.ts";
 
 export interface RosterColumn {
   measureId: string;
@@ -50,19 +50,16 @@ export interface ColumnScoring {
 }
 
 /**
- * The one logic a run's rows for a measure were scored by. An errored row names none and is skipped —
+ * The one logic a run's rows for a measure were scored by, by the rule the run detail and the programs
+ * card use (`scoringOfRows`), so the three cannot disagree. An errored row names none and is skipped —
  * it counts as no logic, as the exporters' `mixed_logic` refusal reads it — while authored CQL IS a
- * logic, so authored rows beside official ones are a conflict rather than a CMS column.
+ * logic, so authored rows beside official ones are a conflict rather than a CMS column. Two periods or
+ * two artifact digests under one printed name are a conflict too: the key is the evidence's scoring
+ * identity, not the display object, which carries neither.
  */
 export function columnScoringOf(evidences: Iterable<unknown>): ColumnScoring {
-  const seen = new Map<string, ScoringLogic | null>();
-  for (const evidence of evidences) {
-    if (isEvaluationErrorEvidence(evidence)) continue;
-    const logic = scoringLogicOf(evidence);
-    seen.set(logic ? JSON.stringify(logic) : "authored", logic);
-    if (seen.size > 1) return { logic: null, conflict: true };
-  }
-  return { logic: [...seen.values()][0] ?? null, conflict: false };
+  const { logics, conflict } = scoringOfRows(evidences);
+  return conflict ? { logic: null, conflict: true } : { logic: logics[0] ?? null, conflict: false };
 }
 /** The person who closed the case behind a cell CQL still counts (#569) — display only. */
 export interface StaffClosure {

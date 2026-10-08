@@ -108,9 +108,16 @@ describe("formatVersionedIdentity (#769)", () => {
     });
   });
 
-  it("a measure with no CMS identity is not labelled at all", () => {
-    expect(formatVersionedIdentity(null, cmsLogic)).toBeNull();
+  it("with no crosswalk entry the row's logic is still named, without the MIPS id; with neither, nothing", () => {
+    // /api/measures not loaded yet, failed, or no longer listing the measure: the result's own logic stands.
+    expect(formatVersionedIdentity(undefined, cmsLogic)).toEqual({
+      short: "CMS137FHIR (from CMS137v14)",
+      full: "CMS137FHIR v1.0.000 (from CMS137v14)",
+      title: "CMS137FHIR v1.0.000 (from CMS137v14), a CMS draft",
+    });
+    expect(formatVersionedIdentity(null, translation)?.full).toBe("WorkWell translation of CMS137v15 (ww-2027.1)");
     expect(formatVersionedIdentity(undefined, null)).toBeNull();
+    expect(formatVersionedIdentity(null, null)).toBeNull();
   });
 });
 

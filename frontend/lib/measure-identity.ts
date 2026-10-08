@@ -123,16 +123,18 @@ export interface VersionedIdentity {
 }
 
 /**
- * The versioned identity of one result. Null for a measure with no CMS identity (authored, TWH
- * occupational): show its name only, as before. No `logic` (nothing named scored the row, or the
- * surface has no row) gives the unversioned crosswalk, never a version guessed from routing.
+ * The versioned identity of one result. The row's `logic` is the authority: with no crosswalk entry
+ * (`/api/measures` not loaded yet, failed, or no longer listing the measure) it is still named, just
+ * without the MIPS id. No `logic` (nothing named scored the row, or the surface has no row) gives the
+ * unversioned crosswalk, never a version guessed from routing; with neither, null: show the name only,
+ * as before (authored, TWH occupational).
  */
 export function formatVersionedIdentity(
   identity: MeasureIdentity | null | undefined,
   logic: ScoringLogic | null | undefined,
 ): VersionedIdentity | null {
-  if (!identity) return null;
-  const mips = identity.mipsQualityId ? `MIPS ${identity.mipsQualityId} · ` : "";
+  if (!identity && !logic) return null;
+  const mips = identity?.mipsQualityId ? `MIPS ${identity.mipsQualityId} · ` : "";
   if (!logic) {
     const plain = formatMeasureIdentity(identity);
     return { short: plain, full: plain, title: plain };

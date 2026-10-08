@@ -5,7 +5,7 @@ import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 import { EMPLOYEES, isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS } from "./panels.ts";
-import { buildRoster, type RosterCellCache, type RosterFilters } from "./roster-read-model.ts";
+import { buildRoster, columnScoringOf, type RosterCellCache, type RosterFilters } from "./roster-read-model.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 // The first REAL (non-demo) directory subject. emp-001..004 are demo-login personas that now sink to the
@@ -520,3 +520,21 @@ test("buildRoster — a column names its winning run's logic from the rows' evid
   assert.equal(rederived.columns.find((col) => col.measureId === "cms125")!.logic?.kind, "workwell-translation");
   assert.ok(bare.get("cms125")!.scoring, "and the entry now carries it");
 });
+
+test("a column scored over two periods, or by two artifacts under one printed name, is a conflict (#769)", () => {
+  // scoringLogicOf's display object carries neither the period nor the digest, so keying on it would call
+  // these one logic; the run detail and the programs card call them two, and so must the column.
+  const row = (start: string, sha: string) => ({
+    official: {
+      ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: sha,
+      measurementPeriod: { start, end: `${start.slice(0, 4)}-12-31T23:59:59.999Z` },
+    },
+  });
+  const sha = "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8";
+  assert.deepEqual(columnScoringOf([row("2026-01-01T00:00:00.000Z", sha), row("2027-01-01T00:00:00.000Z", sha)]), { logic: null, conflict: true });
+  assert.deepEqual(columnScoringOf([row("2026-01-01T00:00:00.000Z", sha), row("2026-01-01T00:00:00.000Z", "sha256:other")]), { logic: null, conflict: true });
+  const one = columnScoringOf([row("2026-01-01T00:00:00.000Z", sha), row("2026-01-01T00:00:00.000Z", sha)]);
+  assert.equal(one.conflict, false);
+  assert.equal(one.logic?.kind, "cms-artifact");
+});
+
