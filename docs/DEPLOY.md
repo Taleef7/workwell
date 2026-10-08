@@ -25,16 +25,20 @@ Images: backend `ghcr.io/taleef7/workwell-api-ts` (shared; tags namespaced per s
 
 ### Deployment workflow
 
-A push to `main` runs `deploy-twh-mieweb.yml` and `deploy-maui-mieweb.yml`, unless it changes only `docs/`
-or root `*.md` files (no image contains them). Each:
+A push to `main` runs `deploy-twh-mieweb.yml` and `deploy-maui-mieweb.yml`, unless it changes only `docs/`,
+root `*.md` files or `wcdb-fhir-shim/` (no image contains them). Each:
 
 1. **Builds the backend**: vendors official terminology (Step 1), runs the reproducibility gate
    `git diff --exit-code backend-ts/measures/official` (Maui adds `backend-ts/measures/derived`), bakes
-   `WORKWELL_BUILD_SHA` into the image.
+   `WORKWELL_BUILD_SHA` and the routing lists (`WORKWELL_OFFICIAL_MEASURES`, `WORKWELL_DERIVED_MEASURES`,
+   #768) into the image as build args.
    TWH tags `latest` + `sha-<SHA>`; Maui pushes only `maui-sha-<SHA>`.
 2. **Builds the frontend** with the stack's build args.
 3. **Deploys the backend**: validates required secrets, builds the container env as a fixed `jq` array,
-   runs `.github/scripts/deploy-mieweb-container.sh` (delete + recreate, ~30–120 s of downtime).
+   runs `.github/scripts/deploy-mieweb-container.sh` (delete + recreate, ~30–120 s of downtime), then
+   `.github/scripts/verify-routing-health.sh`: it waits for the new build on `/health` and fails the job
+   unless that build routes exactly its build-arg lists with no routing problem. Maui promotes `maui-latest`
+   only after it passes; TWH's `:latest` is pushed at build, so there it fails the deploy loudly instead.
 4. **Deploys the frontend** only if the backend deploy succeeded.
 
 Each stack's deploy and reconcile share a concurrency group (`twh-mieweb-container-ops`,
@@ -148,8 +152,11 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
 3. **Check the numerator, not just membership** (ADR-044: CPT vs LOINC mammograms made screened women
    OVERDUE).
 
-4. **Edit the workflows, never the container**: the stack's deploy **and** reconcile workflow.
-   `official-flip-config.test.ts` fails the build if they disagree or a measure lacks its gate (ADR-045).
+4. **Edit the workflows, never the container**: in the deploy workflow, the `build-backend-ts` build args,
+   the routing gate's `EXPECTED_*` and the container env array; in the reconcile workflow, its env array
+   (until the env keys go, #768). For Maui also `flip-gate.yml`'s `routed` default and
+   `rebuild-quality-snapshots-maui.yml`. `official-flip-config.test.ts` fails the build if any of them
+   disagree or a measure lacks its gate (ADR-045).
 
 5. **Redeploy and check the signals.** A misconfiguration does not fail boot: grep
    `WORKWELL_ALERT {"kind":"OFFICIAL_ROUTING_MISCONFIGURED"` (health stays 200 while evaluations 500).
@@ -161,8 +168,8 @@ identity (ADR-040), so no cache cleanup is needed.
 
 **Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms137`) lets a committed WorkWell
 translation score the one year it covers (2027); CMS's artifact still scores every other year. Each id
-must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit the one key in `deploy-maui-mieweb.yml` **and**
-`reconcile-maui-mieweb.yml`, same value, and keep the build job's `vendor-derived-terminology.mjs` lines
+must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit it where step 4 says (the build arg, the gate's
+`EXPECTED_DERIVED`, both Maui env arrays), same value, and keep the build job's `vendor-derived-terminology.mjs` lines
 naming the same ids (and `ROUTED_TRANSLATIONS` in CI's `e2e-maui`). `official-flip-config.test.ts` fails
 the build otherwise, and pins TWH and staging to none. `flip-gate.yml` does not read the key: a flip-gate
 run for a 2027 date scores CMS's 2026 artifact, not what Maui runs.
@@ -372,8 +379,9 @@ The pilot group's sandbox (`deploy-maui-mieweb.yml`), with its own Neon project,
 - **Backend tags are namespaced — do not "simplify" this.** Maui deploys `maui-sha-<SHA>` and must never
   publish `:latest`, which TWH's reconciler heals from.
 - **Recovery tags name the last SUCCESSFUL DEPLOY.** After a container is up, its deploy job re-points
-  `maui-latest` (backend) or the frontend's `:latest` at the deployed digest (`docker buildx imagetools
-  create`). `reconcile-maui-mieweb.yml` heals from those, never onto a failed build.
+  `maui-latest` (backend, once the new build serves its routing on `/health`) or the frontend's `:latest`
+  at the deployed digest (`docker buildx imagetools create`). `reconcile-maui-mieweb.yml` heals from
+  those, never onto a failed build.
 - Demo accounts are profile-scoped (#520): only `@maui.workwell.dev` accounts sign in on Maui, and they
   are refused elsewhere. Password: the stack's own, from `WORKWELL_PILOT_PASSWORD_HASH_MAUI` (local runs
   and CI keep the demo password in `backend-ts/src/auth/demo-users.ts`).
@@ -611,7 +619,9 @@ Set a hard monthly usage limit and store the key only as the `OPENAI_API_KEY` se
 ## Health checks
 
 - Backend: `GET /api/version` → `{"api":"v1",…}`; `/actuator/health` → `{"status":"UP"}`; `/health` adds
-  `build.sha` — confirm it is the commit you deployed.
+  `build.sha` — confirm it is the commit you deployed — and `routing` (#768): the routed and translated
+  measure ids and the router's `problems` count, which must be 0 (`null` means the boot check, which runs
+  before every first request is answered, did not finish).
 - Frontend: `/` → 200. DB: `psql "<direct url>" -c "SELECT 1"`.
 - All health endpoints are DB-free, so also grep the log for `WORKWELL_ALERT` and the boot warm line.
 - `scripts/smoke-shadow.sh https://<api-host>` runs the post-deploy checklist (health, runs, open cases,
@@ -638,8 +648,8 @@ No migration to undo — the schema is additive. Roll back by redeploying an ear
   `--verify-pin` line is enough): `main` carries the key, `maui-latest` is still the older image, and the
   next self-heal recreate combines them. So after that merge, confirm the Maui deploy promoted
   `maui-latest`; if it failed, re-run it or unset the key on `main` before any health event can recreate
-  the container. (The official allowlist has the same shape; the fix that removes it, routing lists that
-  travel with the image, is a separate decision.)
+  the container. (The official allowlist has the same shape. Since #768 the image carries both lists, but
+  container env still overrides them until the reconcilers stop setting the keys.)
 
 ## Cost monitoring
 
