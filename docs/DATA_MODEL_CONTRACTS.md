@@ -48,7 +48,7 @@ resolved in one bounded read to each subject's ACTIVE case in that ONE measure, 
 unchanged (500 cap included). `measureId` is required and single; both shapes = 400; nothing found =
 `assigned: 0` in the success shape.
 
-### Audit ordering (#598, open)
+### Audit ordering (incomplete: see the missing primitive below)
 - **New code audits BEFORE it mutates**; the ledger errs toward an over-claim, never a silent change.
 `audit/audit-order.test.ts` holds it (the mutation fails; the event is still required); add new
 audit-first paths there. `backend-ts/scripts/audit-order-sweep.py` lists every `await` before an audit
@@ -61,15 +61,20 @@ on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfil
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
-- **The sweep reports 58 hits across 20 files (2026-10-02); check the count, not the labels.** The files
+- **The sweep reports 64 hits across 20 files (2026-10-08); check the count, not the labels.** The six
+added since 2026-10-02 are all in `rerunToVerify`: #763 removed a local `const … = (` the matcher read as
+a function start, so that function's earlier run writes now show against its `CASE_RERUN_FAILED` audit.
+The code is unchanged; the old count was the undercount. The files
 above account for 10; the other 10 are not violations: `panel-assignment` (mapping before consequences),
 `segments` and `outcome-compaction` (matcher artifacts / the ADR-073 d4 completion event),
 `subject-lists` (audit in `beforeComplete`), `evidence-service`, `audit-packet`, `materialize-run`,
 `measure-seed` (reads or pure computation), `case-event-store-postgres` (the audit writer itself) and
 `store-contract` (the test that drives them).
 - **Missing primitive:** no cross-store `applyCaseAction({ patch, action, audit })` (`CaseEventStore` +
-`CaseStore`). Until it exists, do not rely on the ledger being complete for run-created transitions; a
-reconciliation job is no substitute.
+`CaseStore`), and no open issue tracks it (#598 was closed by a PR keyword on 2026-09-21; its remainder
+was listed in #614, which was closed on 2026-09-23 as superseded by the milestone, and no milestone issue
+carries the primitive). Until it exists, do not rely on the ledger being complete for
+run-created transitions; a reconciliation job is no substitute.
 
 ### The work list is read two ways; both must agree (ADR-084)
 `/api/cases` takes page + exact total in one statement (`CaseStore.listCasesPage`, `COUNT(*) OVER ()`)
