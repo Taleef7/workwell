@@ -30,7 +30,7 @@ import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
-import { distinctScoringLogics } from "../fhir/run-aggregate.ts";
+import { scoringOfRows } from "../fhir/run-aggregate.ts";
 import type { ScoringLogic } from "../measure/measure-identity.ts";
 
 export type PacketFormat = "json" | "html";
@@ -118,19 +118,23 @@ async function runOutcomeRowsWithCases(caseStore: CaseStore, outcomes: OutcomeRe
 }
 
 /**
- * The distinct logics that scored each measure's rows in this run (#769), in the shape and order the
- * run reconciliation serves (`{ measureId, logics }`, `distinctScoringLogics`), computed from the rows
- * the packet already holds. More than one entry for a measure means its rows were scored by more than
- * one logic or measurement period; an authored or errored row has no name to list.
+ * The distinct logics that scored each measure's rows in this run (#769), in the shape, order and
+ * conflict rule the run reconciliation serves (`{ measureId, logics, conflict }`, `scoringOfRows`),
+ * computed from the rows the packet already holds. `conflict` is true when a measure's rows were scored
+ * by more than one logic or measurement period, authored rows beside named ones included; an authored or
+ * errored row has no name to list.
  */
-function scoringLogicByMeasure(outcomes: OutcomeRecord[]): Array<{ measureId: string; logics: ScoringLogic[] }> {
+function scoringLogicByMeasure(outcomes: OutcomeRecord[]): Array<{ measureId: string; logics: ScoringLogic[]; conflict: boolean }> {
   const byMeasure = new Map<string, unknown[]>();
   for (const o of outcomes) {
     const evidences = byMeasure.get(o.measureId) ?? [];
     evidences.push(o.evidence);
     byMeasure.set(o.measureId, evidences);
   }
-  return [...byMeasure.keys()].sort().map((measureId) => ({ measureId, logics: distinctScoringLogics(byMeasure.get(measureId)!) }));
+  return [...byMeasure.keys()].sort().map((measureId) => {
+    const { logics, conflict } = scoringOfRows(byMeasure.get(measureId)!);
+    return { measureId, logics, conflict };
+  });
 }
 
 /** A merged-timeline entry as stored by CaseEventStore (payload carries a timelineSource tag). */
@@ -156,7 +160,7 @@ export async function buildCasePacket(
   const c = await deps.cases.getCase(caseId);
   if (!c) throw new PacketNotFoundError(`Case not found: ${caseId}`);
 
-  const outcome = await outcomeForCase(deps.outcomes, c.lastRunId, c.employeeId, c.measureId);
+  const outcome = await outcomeForCase(deps.outcomes, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const rawTimeline = (await deps.events.caseTimeline(caseId)) as TimelineEntry[];
   const latest = await deps.events.latestOutreachDeliveryStatus(caseId);
   const detail = toCaseDetail(c, outcome, rawTimeline, latest);

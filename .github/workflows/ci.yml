@@ -1038,7 +1038,9 @@ jobs:
           PLAYWRIGHT_PROFILE: maui
           PLAYWRIGHT_BASE_URL: http://localhost:3000
           PLAYWRIGHT_API_BASE_URL: http://localhost:8080
-        run: npx playwright test tests/maui/translated-label.spec.ts --project=maui --reporter=list
+        # Its own output dir: Playwright empties outputDir at the start of a run, which would delete the
+        # main suite's traces and screenshots before the upload below collects them.
+        run: npx playwright test tests/maui/translated-label.spec.ts --project=maui --reporter=list --output=test-results-translated
       - name: Upload Playwright report and server logs
         uses: actions/upload-artifact@v7
         if: always()
@@ -1047,5 +1049,6 @@ jobs:
           path: |
             e2e/playwright-report/
             e2e/test-results/
+            e2e/test-results-translated/
             backend-maui.log
             frontend-maui.log

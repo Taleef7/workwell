@@ -87,8 +87,18 @@ export interface ProgramSummary {
    * rows' own evidence (`scoringLogicOf`), never from today's routing; sorted. Empty for authored rows
    * or no winning run. More than one entry means the rows were scored by more than one logic or
    * measurement period, and `measureRate` is then null: there is no one rate to name (#769).
+   *
+   * Always empty when `includesAuthoredScaleCounts`: those counts are not one artifact's, so no logic
+   * names them.
    */
   scoringLogics: ScoringLogic[];
+  /**
+   * The winning run's rows for this measure were scored by more than one logic or measurement period —
+   * two named logics, or authored rows beside named ones (`officialMeasureRateResult(...).conflict`),
+   * which `scoringLogics` alone cannot show because authored rows carry no name. `measureRate` is null
+   * whenever this is true. False when `includesAuthoredScaleCounts` (no logic is named at all) (#769).
+   */
+  scoringConflict: boolean;
   /**
    * The year the winning run SCORED and the day its numbers describe (#637), read from the run's own
    * record rather than its start date — a rerun started in January that scores the year before is
@@ -538,6 +548,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       staffClosedGapCount,
       measureRate: null,
       scoringLogics: [],
+      scoringConflict: false,
       measurementYear: null,
       asOf: null,
       logicVintage: null,
@@ -566,7 +577,10 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       // The same memoized read answers both: the rate, and which logics scored the rows behind it.
       const result = await officialMeasureRateResult(deps.outcomeStore, s.latestRunId, s.measureId);
       s.measureRate = result.rate;
-      s.scoringLogics = result.scoringLogics;
+      // A total that folds in the authored scale tenant's counts is not one artifact's (the contract on
+      // `includesAuthoredScaleCounts`): no logic names it, and there is no one-logic claim to conflict.
+      s.scoringLogics = s.includesAuthoredScaleCounts ? [] : result.scoringLogics;
+      s.scoringConflict = s.includesAuthoredScaleCounts ? false : result.conflict;
     }
     const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
     s.measurementYear = period?.measurementYear ?? null;

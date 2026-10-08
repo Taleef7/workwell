@@ -35,6 +35,9 @@ const ROWS: OutcomeRecord[] = [
   row("o-3", "emp-022", "cms125", ERRORED),
   row("o-4", "emp-023", "cms137", TRANSLATION),
   row("o-5", "emp-024", "audiogram", { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] }),
+  // cms122: CMS's artifact scored one row and authored CQL the other — one NAME, but two logics.
+  row("o-6", "emp-025", "cms122", { official: { ecqmId: "122FHIR", version: "1.0.000" }, expressionResults: [] }),
+  row("o-7", "emp-026", "cms122", { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] }),
 ];
 
 const caseOf = (id: string, employeeId: string, measureId: string): CaseRecord => ({
@@ -98,7 +101,7 @@ const runPacket = async (run: Partial<RunRecord>) => {
     events: events(),
   } as unknown as RunPacketDeps;
   return JSON.parse((await buildRunPacket(deps, RUN, "auditor@example.org", "json")).content) as {
-    run: { measureVersion: string; scoringLogic: Array<{ measureId: string; logics: Array<Record<string, unknown>> }> };
+    run: { measureVersion: string; scoringLogic: Array<{ measureId: string; logics: Array<Record<string, unknown>>; conflict: boolean }> };
   };
 };
 
@@ -108,13 +111,19 @@ test("the RUN packet never prints the authored or catalog version for a measure 
   assert.notEqual(cms125Run.run.measureVersion, "v1.0", "the catalog record's version names no logic at all");
 
   // What scored the rows, per measure, from the rows themselves: two CMS125FHIR rows are ONE logic,
-  // the errored row adds none, and the authored measure has no name to list.
+  // the errored row adds none, and the authored measure has no name to list. cms122's authored row
+  // beside a CMS row is a conflict the one name cannot show — the reconciliation's rule (`scoringOfRows`).
   assert.deepEqual(
-    cms125Run.run.scoringLogic.map((m) => ({ measureId: m.measureId, names: m.logics.map((l) => (l.kind === "cms-artifact" ? `${l.ecqmId} v${l.version}` : `${l.label} (${l.version})`)) })),
+    cms125Run.run.scoringLogic.map((m) => ({
+      measureId: m.measureId,
+      names: m.logics.map((l) => (l.kind === "cms-artifact" ? `${l.ecqmId} v${l.version}` : `${l.label} (${l.version})`)),
+      conflict: m.conflict,
+    })),
     [
-      { measureId: "audiogram", names: [] },
-      { measureId: "cms125", names: ["CMS125FHIR v1.0.000"] },
-      { measureId: "cms137", names: ["WorkWell translation of CMS137v15 (ww-2027.1)"] },
+      { measureId: "audiogram", names: [], conflict: false },
+      { measureId: "cms122", names: ["CMS122FHIR v1.0.000"], conflict: true },
+      { measureId: "cms125", names: ["CMS125FHIR v1.0.000"], conflict: false },
+      { measureId: "cms137", names: ["WorkWell translation of CMS137v15 (ww-2027.1)"], conflict: false },
     ],
   );
 

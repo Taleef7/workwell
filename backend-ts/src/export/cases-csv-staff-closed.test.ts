@@ -481,3 +481,28 @@ test("the cases CSV reads the same unbounded candidate set the work list does", 
   );
   assert.ok(queries[0]!.offset === undefined || queries[0]!.offset === 0, "and it is not a page");
 });
+
+test("one run holding a patient's 2026 and 2027 rows: each case's CSV row names the row of ITS period (#769)", async () => {
+  // An /evaluate or import run resolves the date per call: emp-030's 2026 row (CMS's artifact) was
+  // written first, the 2027 row (the translation) after. Each case cites its own year's row.
+  const rows2: OutcomeRecord[] = [
+    { id: "m-1", runId: "mixed-1", subjectId: "emp-030", measureId: "cms137", evaluationPeriod: "2026-12-31", status: "OVERDUE", evidence: CMS137, evaluatedAt: "2026-10-01T00:00:00Z" },
+    { id: "m-2", runId: "mixed-1", subjectId: "emp-030", measureId: "cms137", evaluationPeriod: "2027-12-31", status: "OVERDUE", evidence: TRANSLATION, evaluatedAt: "2026-10-01T00:00:05Z" },
+  ];
+  const deps = {
+    outcomeStore: {
+      listLatestPopulationRuns: latestRunsFromRows([]),
+      listOutcomes: async (runId: string) => rows2.filter((o) => o.runId === runId),
+    },
+  } as unknown as LiveCellDeps;
+  const open = (id: string, evaluationPeriod: string) =>
+    caseRow({ id, employeeId: "emp-030", measureId: "cms137", evaluationPeriod, status: "OPEN", lastRunId: "mixed-1", closedAt: null, closedReason: null, closedBy: null });
+  const store = { listCases: async () => [open("k-2027", "2027-12-31"), open("k-2026", "2026-12-31")] } as unknown as CaseStore;
+  const { rows } = parse(await casesCsv(store, eventStore(), {}, {}, deps));
+  const cell = (caseId: string) => {
+    const r = rows.find((x) => x.caseId === caseId)!;
+    return [r.measureVersion, r.executedLogic];
+  };
+  assert.deepEqual(cell("k-2027"), ["ww-2027.1", "WorkWell translation of CMS137v15 (ww-2027.1)"], "the 2027 row, though the 2026 one was written first");
+  assert.deepEqual(cell("k-2026"), ["1.0.000", "CMS137FHIR v1.0.000"]);
+});

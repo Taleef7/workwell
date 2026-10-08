@@ -13,7 +13,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 // @ts-expect-error — @mieweb/cloud-local ships .mjs without types
 import { createSqliteD1 } from "@mieweb/cloud-local";
-import { handleRuns } from "./runs.ts";
+import { handleRuns, resetScoringLogicMemo, scoringLogicByMeasure } from "./runs.ts";
 import { getStores } from "../stores/factory.ts";
 import { EVALUABLE_EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { buildQrda1Document, qrda1NonConformance } from "../fhir/qrda1-export.ts";
@@ -709,7 +709,7 @@ test("a run scored by a WorkWell translation: QRDA refuses it (no CMS identity t
   // The reconciliation ladder says which logic its rates came from.
   const recon = (await (await get(`/api/runs/${runId}/reconciliation`))!.json()) as {
     official: { logic?: unknown; rates: unknown[] } | null;
-    scoringLogic: Array<{ measureId: string; logics: unknown[] }>;
+    scoringLogic: Array<{ measureId: string; logics: unknown[]; conflict: boolean }>;
   };
   assert.deepEqual(recon.official?.logic, { kind: "workwell-translation", label: "WorkWell translation of CMS137v15" });
   // #769: the run detail names the logic from the rows, never from routing — cms137 routes to CMS's
@@ -717,6 +717,7 @@ test("a run scored by a WorkWell translation: QRDA refuses it (no CMS identity t
   assert.deepEqual(recon.scoringLogic, [{
     measureId: "cms137",
     logics: [{ kind: "workwell-translation", label: "WorkWell translation of CMS137v15", version: "ww-2027.1", url: "urn:workwell:measure:cms137:translation-2027", derivedFrom: "CMS137v15" }],
+    conflict: false,
   }]);
   assert.doesNotMatch(JSON.stringify(recon.scoringLogic), /137FHIR/, "a translation never carries a CMS eCQM id");
 });
@@ -740,17 +741,27 @@ test("reconciliation names every measure's scoring logics on an ALL_PROGRAMS run
     row("p-4", "cms137", derivedEvidence()),
     row("p-5", "cms137", { evaluationError: "CQL engine failure", message: "boom" }),
     row("p-6", "audiogram", { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] }),
+    // cms125: CMS's artifact scored one row and authored CQL another (an open run that straddled a
+    // routing flip). Only one logic has a name, so `logics` alone reads as one logic — `conflict` says not.
+    row("p-7", "cms125", { expressionResults: [], official: { ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8", populationResults: populations, measurementPeriod: { start: "2026-01-01", end: "2026-12-31" } } }),
+    row("p-8", "cms125", { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] }),
   ]);
   const body = (await (await get(`/api/runs/${run.id}/reconciliation`))!.json()) as {
     official: unknown;
-    scoringLogic: Array<{ measureId: string; logics: Array<Record<string, unknown>> }>;
+    scoringLogic: Array<{ measureId: string; logics: Array<Record<string, unknown>>; conflict: boolean }>;
   };
   assert.equal(body.official, null, "`official` describes ONE measure's rate and stays null on a multi-measure run");
   assert.deepEqual(body.scoringLogic, [
-    { measureId: "audiogram", logics: [] },
+    { measureId: "audiogram", logics: [], conflict: false },
     {
       measureId: "cms122",
       logics: [{ kind: "cms-artifact", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14", status: "draft", statusNote: "posted for public comment Jan–Feb 2026" }],
+      conflict: false,
+    },
+    {
+      measureId: "cms125",
+      logics: [{ kind: "cms-artifact", ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14", status: "draft", statusNote: "posted for public comment Jan–Feb 2026" }],
+      conflict: true,
     },
     {
       measureId: "cms137",
@@ -759,8 +770,45 @@ test("reconciliation names every measure's scoring logics on an ALL_PROGRAMS run
         { kind: "cms-artifact", ecqmId: "CMS137FHIR", version: "1.0.000", derivedFrom: null, status: "unknown", statusNote: null },
         { kind: "workwell-translation", label: "WorkWell translation of CMS137v15", version: "ww-2027.1", url: "urn:workwell:measure:cms137:translation-2027", derivedFrom: "CMS137v15" },
       ],
+      conflict: true,
     },
   ]);
+  // A COMPLETED run's answer is memoized: the route passes the run's status, so a second open of the run
+  // detail does not read the store again (a row written behind its back is not seen).
+  await outcomeStore.recordOutcomes([row("p-9", "audiogram", derivedEvidence())]);
+  const again = (await (await get(`/api/runs/${run.id}/reconciliation`))!.json()) as { scoringLogic: unknown };
+  assert.deepEqual(again.scoringLogic, body.scoringLogic);
+});
+
+test("scoringLogicByMeasure: authored rows beside a named logic are a conflict; a finished run is read once, a moving one every time (#769)", async () => {
+  resetScoringLogicMemo();
+  const cms125 = { ecqmId: "125FHIR", version: "1.0.000", artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8" };
+  const calls: string[] = [];
+  const os = {
+    distinctScoringLogicForRun: async (runId: string) => {
+      calls.push(runId);
+      return [
+        { measureId: "cms125", official: cms125 },
+        { measureId: "cms125", official: null },
+        { measureId: "cms122", official: { ecqmId: "122FHIR", version: "1.0.000" } },
+        { measureId: "audiogram", official: null },
+      ];
+    },
+  };
+  const first = await scoringLogicByMeasure(os, "run-done", "COMPLETED");
+  assert.deepEqual(first.map((m) => [m.measureId, m.logics.length, m.conflict]), [["audiogram", 0, false], ["cms122", 1, false], ["cms125", 1, true]]);
+  // Terminal statuses are cached, case-insensitively, and the answer is the same.
+  assert.deepEqual(await scoringLogicByMeasure(os, "run-done", "COMPLETED"), first);
+  await scoringLogicByMeasure(os, "run-partial", "partial_failure");
+  await scoringLogicByMeasure(os, "run-partial", "PARTIAL_FAILURE");
+  await scoringLogicByMeasure(os, "run-failed", "FAILED");
+  await scoringLogicByMeasure(os, "run-failed", "FAILED");
+  assert.deepEqual(calls, ["run-done", "run-partial", "run-failed"], "one store read per finished run");
+  // A run in flight (or a status not given) is read every time: its next chunk can add a logic.
+  calls.length = 0;
+  for (const status of ["RUNNING", "RUNNING", "QUEUED", undefined]) await scoringLogicByMeasure(os, "run-moving", status);
+  assert.deepEqual(calls, ["run-moving", "run-moving", "run-moving", "run-moving"]);
+  resetScoringLogicMemo();
 });
 
 test("a run whose rows were scored for two different years is refused rather than labelled with the first row", async () => {

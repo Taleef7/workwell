@@ -41,7 +41,7 @@ import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRun
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
-import { aggregateOfficialRun, distinctScoringLogics, scoringIdentityKey } from "../fhir/run-aggregate.ts";
+import { aggregateOfficialRun, scoringIdentityKey, scoringOfRows } from "../fhir/run-aggregate.ts";
 import type { ScoringLogic } from "../measure/measure-identity.ts";
 import { officialMeasureRate } from "../program/measure-rate.ts";
 import { resolveAlertChannels } from "../run/alert-channel.ts";
@@ -349,26 +349,71 @@ function rowScoring(rows: ReadonlyArray<{ evidence: unknown }>): { derived: bool
   return { derived: identities.some((i) => i?.kind === "derived"), mixed: keys.size > 1 };
 }
 
+/** One measure's entry in the reconciliation's `scoringLogic` (#769). */
+export interface MeasureScoringLogic {
+  measureId: string;
+  /** The distinct NAMED logics, sorted; empty for authored rows. */
+  logics: ScoringLogic[];
+  /**
+   * The measure's rows were scored by more than one logic or measurement period — two named logics, or
+   * authored rows beside named ones (which `logics` alone cannot show, authored rows having no name). The
+   * programs card's `scoringConflict` by the same rule (`scoringOfRows`).
+   */
+  conflict: boolean;
+}
+
+/**
+ * Memo of {@link scoringLogicByMeasure} per TERMINAL run id: a finished run's rows no longer change, and
+ * the run detail asks again on every open. Bounded LRU, like the measure-rate memo. A run still in
+ * flight is never cached — its next chunk can add a logic.
+ */
+const scoringLogicMemo = new Map<string, MeasureScoringLogic[]>();
+const SCORING_LOGIC_MEMO_LIMIT = 64;
+const SCORING_LOGIC_CACHEABLE = new Set(["COMPLETED", "PARTIAL_FAILURE", "FAILED"]);
+export function resetScoringLogicMemo(): void {
+  scoringLogicMemo.clear();
+}
+
 /**
  * Per measure of a run, the distinct logics that scored its evaluated rows (#769), named from the rows'
- * own evidence: one identity-only store read, then `distinctScoringLogics` — the function the programs
- * card's list comes from — so the two screens name the same logics for the same rows. More than one
- * entry is a run scored by more than one logic or measurement period. A measure with only authored rows
- * is listed with no logics; errored rows were scored by nothing and are not read. Sorted by measure.
+ * own evidence: one identity-only store read, then `scoringOfRows` — the rule the programs card's list
+ * and conflict come from — so the two screens name the same logics for the same rows. More than one
+ * logic, or authored rows beside named ones, is a `conflict`. A measure with only authored rows is
+ * listed with no logics; errored rows were scored by nothing and are not read. Sorted by measure.
+ *
+ * `runStatus` decides caching: a COMPLETED, PARTIAL_FAILURE or FAILED run is memoized by id; any other
+ * status (or none) reads the store every time.
  */
 export async function scoringLogicByMeasure(
   os: Pick<OutcomeStore, "distinctScoringLogicForRun">,
   runId: string,
-): Promise<Array<{ measureId: string; logics: ScoringLogic[] }>> {
+  runStatus?: string,
+): Promise<MeasureScoringLogic[]> {
+  const cacheable = runStatus !== undefined && SCORING_LOGIC_CACHEABLE.has(runStatus.toUpperCase());
+  if (cacheable) {
+    const cached = scoringLogicMemo.get(runId);
+    if (cached) {
+      // Refreshed on a hit, so the eviction below drops the least recently READ run.
+      scoringLogicMemo.delete(runId);
+      scoringLogicMemo.set(runId, cached);
+      return cached;
+    }
+  }
   const byMeasure = new Map<string, unknown[]>();
   for (const row of await os.distinctScoringLogicForRun(runId)) {
     const evidences = byMeasure.get(row.measureId) ?? [];
     evidences.push({ official: row.official });
     byMeasure.set(row.measureId, evidences);
   }
-  return [...byMeasure.keys()]
-    .sort()
-    .map((measureId) => ({ measureId, logics: distinctScoringLogics(byMeasure.get(measureId)!) }));
+  const result = [...byMeasure.keys()].sort().map((measureId): MeasureScoringLogic => {
+    const { logics, conflict } = scoringOfRows(byMeasure.get(measureId)!);
+    return { measureId, logics, conflict };
+  });
+  if (cacheable) {
+    if (scoringLogicMemo.size >= SCORING_LOGIC_MEMO_LIMIT) scoringLogicMemo.delete(scoringLogicMemo.keys().next().value as string);
+    scoringLogicMemo.set(runId, result);
+  }
+  return result;
 }
 
 /** Subjects counted in no rate (ADR-074 d5/d11), on the summary MeasureReport and QRDA III responses. */
@@ -1459,8 +1504,8 @@ export async function handleRuns(
     }
     // Which logic scored each measure's rows — for EVERY run, an ALL_PROGRAMS nightly included, where
     // `official` above stays null because it describes one measure's rate. Read from the rows' own
-    // evidence by one identity-only DISTINCT, never from today's routing (#769).
-    const scoringLogic = await scoringLogicByMeasure(stores.outcomes, reconId);
+    // evidence by one identity-only DISTINCT, never from today's routing (#769). Memoized per finished run.
+    const scoringLogic = await scoringLogicByMeasure(stores.outcomes, reconId, run.status);
     return json({
       runId: reconId,
       status: run.status,

@@ -8,14 +8,13 @@
  * slices); they are optional/nullable in the frontend type.
  */
 import type { CaseRecord } from "../stores/case-store.ts";
-import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { closureKindOf, type ClosureKind } from "./case-logic.ts";
 import type { LiveState } from "../compliance/roster-vocabulary.ts";
 import { employeeById, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
 import type { ScoringLogic } from "../measure/measure-identity.ts";
-import { caseLogicKey, scoringForCases } from "./case-scoring-logic.ts";
+import { caseLogicKey, scoringForCases, type CaseScoringReader } from "./case-scoring-logic.ts";
 
 /**
  * **SLA was REMOVED here, not forgotten (#600).** `slaRemainingDays: null` and `slaBreached: false`
@@ -174,10 +173,11 @@ export function toCaseSummary(
  * cases on the pilot), and only the rows shown need naming.
  */
 export async function withScoringLogic<T extends CaseSummary>(
-  outcomes: Pick<OutcomeStore, "listOutcomes">,
+  outcomes: CaseScoringReader,
   summaries: readonly T[],
 ): Promise<T[]> {
   if (summaries.length === 0) return [];
+  // Each summary is its own ref, `evaluationPeriod` included, so the row cited is the case's period's.
   const scoring = await scoringForCases(outcomes, summaries);
   return summaries.map((s) => {
     const found = scoring.get(caseLogicKey(s));

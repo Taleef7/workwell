@@ -385,3 +385,24 @@ for (const honourFilters of [true, false]) {
     for (const c of calls) assert.ok(c.subjectIds, "every read is bounded to the page's subjects");
   });
 }
+
+test("withGapLogic: one run holding a patient's 2026 and 2027 rows — each gap names the row of ITS period (#769)", async () => {
+  // An /evaluate run resolves the date per call: p-1's 2026 row (CMS's artifact) was written first, the
+  // 2027 row (the translation) after. A gap per cycle, both citing that one run.
+  const translation = { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } };
+  const cms137 = { official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24" } };
+  const rows = [
+    { id: "o-1", runId: "run-mixed", subjectId: "p-1", measureId: "cms137", evaluationPeriod: "2026-01-01", status: "OVERDUE", evidence: cms137, evaluatedAt: "2026-10-01T00:00:00Z" },
+    { id: "o-2", runId: "run-mixed", subjectId: "p-1", measureId: "cms137", evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence: translation, evaluatedAt: "2026-10-01T00:00:05Z" },
+  ] as OutcomeRecord[];
+  const outcomes: Pick<OutcomeStore, "listOutcomes"> = { listOutcomes: async (runId) => rows.filter((r) => r.runId === runId) };
+  const record = (id: string, evaluationPeriod: string): CaseRecord => ({
+    id, employeeId: "p-1", measureId: "cms137", lastRunId: "run-mixed", evaluationPeriod, status: "OPEN", priority: "HIGH", assignee: null,
+    nextAction: null, nextActionSource: "SYSTEM", assignmentSource: null, currentOutcomeStatus: "OVERDUE",
+    createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z", closedAt: null, closedReason: null, closedBy: null,
+  });
+  const served = await withGapLogic(outcomes, groupIntoPatients([toCaseSummary(record("c-2027", "2027-01-01"), 0, lookup), toCaseSummary(record("c-2026", "2026-01-01"), 0, lookup)]));
+  const gap = (caseId: string) => served.flatMap((r) => r.openGaps).find((g) => g.caseId === caseId)!;
+  assert.equal(gap("c-2027").logic?.kind, "workwell-translation", "the 2027 gap: the 2027 row, though the 2026 one was written first");
+  assert.equal(gap("c-2026").logic?.kind, "cms-artifact", "the 2026 gap: the 2026 row");
+});

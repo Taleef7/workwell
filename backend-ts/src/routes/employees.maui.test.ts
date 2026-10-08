@@ -108,16 +108,21 @@ const logicScript = `
   const CMS137 = { official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24" } };
   const TRANSLATION = { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } };
   const CMS125 = { official: { ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8" } };
-  const record = (runId, measureId, period, status, evidence) =>
-    outcomes.recordOutcome({ runId, subjectId: "pat-003", measureId, evaluationPeriod: period, status, evidence });
+  const record = (runId, measureId, period, status, evidence, evaluatedAt) =>
+    outcomes.recordOutcome({ runId, subjectId: "pat-003", measureId, evaluationPeriod: period, status, evidence, evaluatedAt });
   await record(run2026.id, "cms137", "2026-01-01", "OVERDUE", CMS137);
   // The winning (2027) run: the translation scored CMS137; cms122's evaluation failed.
   await record(run2027.id, "cms137", "2027-01-01", "OVERDUE", TRANSLATION);
   await record(run2027.id, "cms125", "2027-01-01", "OVERDUE", CMS125);
   await record(run2027.id, "cms122", "2027-01-01", "MISSING_DATA", { evaluationError: "CQL engine failure", message: "boom" });
-  // The 2026 CMS137 case is still open and cites the 2026 run; the cms125 case cites the winning run.
+  // cms130 in the winning run holds TWO periods for the patient: a 2026 row whose evaluation failed,
+  // written first, and the 2027 row CMS's artifact scored. The 2027 case cites the 2027 row.
+  await record(run2027.id, "cms130", "2026-01-01", "MISSING_DATA", { evaluationError: "CQL engine failure", message: "boom" }, "2027-02-01T12:00:00.000Z");
+  await record(run2027.id, "cms130", "2027-01-01", "OVERDUE", { official: { ecqmId: "130FHIR", version: "1.0.000" } }, "2027-02-01T12:00:05.000Z");
+  // The 2026 CMS137 case is still open and cites the 2026 run; the cms125 and cms130 cases cite the winning run.
   const old137 = await cases.upsertFromOutcome({ runId: run2026.id, subjectId: "pat-003", measureId: "cms137", evaluationPeriod: "2026-01-01", outcomeStatus: "OVERDUE" });
   const case125 = await cases.upsertFromOutcome({ runId: run2027.id, subjectId: "pat-003", measureId: "cms125", evaluationPeriod: "2027-01-01", outcomeStatus: "OVERDUE" });
+  const case130 = await cases.upsertFromOutcome({ runId: run2027.id, subjectId: "pat-003", measureId: "cms130", evaluationPeriod: "2027-01-01", outcomeStatus: "OVERDUE" });
 
   const res = await handleEmployees(new Request("http://x/api/employees/pat-003/profile"), { DB: db });
   const profile = await res.json();
@@ -126,7 +131,8 @@ const logicScript = `
   const reads = [];
   const counting = new Proxy(outcomes, {
     get(target, key) {
-      if (key === "listOutcomes") return (runId, opts) => { reads.push({ runId, opts }); return target.listOutcomes(runId, opts); };
+      if (key === "listOutcomes") return (runId, opts) => { reads.push({ via: "rows", runId, opts }); return target.listOutcomes(runId, opts); };
+      if (key === "listScoringIdentities") return (runId, opts) => { reads.push({ via: "identities", runId, opts }); return target.listScoringIdentities(runId, opts); };
       const value = target[key];
       return typeof value === "function" ? value.bind(target) : value;
     },
@@ -140,7 +146,8 @@ const logicScript = `
     openCases: profile.openCases.map((c) => ({ caseId: c.caseId, logic: c.logic })),
     old137: old137.id,
     case125: case125.id,
-    reads: reads.map((r) => ({ run: runName(r.runId), measureId: r.opts?.measureId ?? null, subjectIds: r.opts?.subjectIds ?? null })),
+    case130: case130.id,
+    reads: reads.map((r) => ({ via: r.via, run: runName(r.runId), measureId: r.opts?.measureId ?? null, subjectIds: r.opts?.subjectIds ?? null })),
   }));
 `;
 
@@ -169,11 +176,15 @@ test("Maui patient page: each row names the logic that scored it, never routing'
   assert.equal(open.get(output.old137 as string)?.ecqmId, "CMS137FHIR");
   assert.equal(open.get(output.old137 as string)?.derivedFrom, "CMS137v14");
   assert.equal(open.get(output.case125 as string)?.ecqmId, "CMS125FHIR");
+  // The 2027 case cites the 2027 row of a run holding two periods — not the errored 2026 row written first.
+  assert.equal(open.get(output.case130 as string)?.kind, "cms-artifact");
+  assert.equal(open.get(output.case130 as string)?.ecqmId, "CMS130FHIR");
 
-  // One read per winning measure, plus ONE bounded read for the case citing an older run; the case citing
-  // the winning run reuses the row already read.
-  const reads = output.reads as Array<{ run: string; measureId: string | null; subjectIds: string[] | null }>;
-  assert.equal(reads.filter((r) => r.run === "2027").length, 3, "the three winning measures' rows");
-  assert.deepEqual(reads.filter((r) => r.run === "2026"), [{ run: "2026", measureId: "cms137", subjectIds: ["pat-003"] }]);
-  assert.equal(reads.length, 4);
+  // One read per winning measure, plus ONE bounded, identity-only read for the case citing an older run;
+  // the cases citing the winning run reuse the rows already read.
+  const reads = output.reads as Array<{ via: string; run: string; measureId: string | null; subjectIds: string[] | null }>;
+  assert.equal(reads.filter((r) => r.run === "2027").length, 4, "the four winning measures' rows");
+  assert.ok(reads.filter((r) => r.run === "2027").every((r) => r.via === "rows"));
+  assert.deepEqual(reads.filter((r) => r.run === "2026"), [{ via: "identities", run: "2026", measureId: "cms137", subjectIds: ["pat-003"] }]);
+  assert.equal(reads.length, 5);
 });

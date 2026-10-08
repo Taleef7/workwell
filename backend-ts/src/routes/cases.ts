@@ -300,7 +300,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const c = await (await caseStore(env)).getCase(detailId);
     if (!c) return json({ error: "not_found", id: detailId }, 404);
     if (!profileSubjectMatcher(employeeLookup)(c.employeeId)) return json({ error: "not_found", id: detailId }, 404);
-    const outcome = await outcomeForCase(await outcomeStore(env), c.lastRunId, c.employeeId, c.measureId);
+    const outcome = await outcomeForCase(await outcomeStore(env), c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
     const events = (await getStores(env)).events;
     const timeline = await events.caseTimeline(detailId);
     const latest = await events.latestOutreachDeliveryStatus(detailId);

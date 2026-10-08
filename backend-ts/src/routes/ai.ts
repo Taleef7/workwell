@@ -127,7 +127,7 @@ export async function handleAi(req: Request, env: AiEnv, actor = "system"): Prom
     const s = await getStores(env);
     const c = await s.cases.getCase(explainId);
     if (!c) return json({ error: "not_found", id: explainId }, 404);
-    const outcome = await outcomeForCase(s.outcomes, c.lastRunId, c.employeeId, c.measureId);
+    const outcome = await outcomeForCase(s.outcomes, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
     const detail = toCaseDetail(c, outcome);
 
     const cacheKey = `${detail.caseId}:${detail.measureVersion}`;

@@ -15,9 +15,8 @@
 import type { CaseSummary } from "./case-read-models.ts";
 import { priorityRankOf, type ClosureKind } from "./case-logic.ts";
 import type { LiveState } from "../compliance/roster-vocabulary.ts";
-import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { ScoringLogic } from "../measure/measure-identity.ts";
-import { caseLogicKey, scoringLogicForCases } from "./case-scoring-logic.ts";
+import { caseLogicKey, scoringLogicForCases, type CaseScoringReader } from "./case-scoring-logic.ts";
 
 /** One patient, with every open gap they have. */
 export interface WorklistPatientRow {
@@ -176,18 +175,18 @@ export function groupIntoPatients(
  * grouped list, which is every active case behind the filters. Call it after paging.
  */
 export async function withGapLogic(
-  outcomes: Pick<OutcomeStore, "listOutcomes">,
+  outcomes: CaseScoringReader,
   rows: readonly WorklistPatientRow[],
 ): Promise<WorklistPatientRow[]> {
-  const refs = rows.flatMap((r) => r.openGaps.map((g) => ({ lastRunId: g.lastRunId, employeeId: r.employeeId, measureId: g.measureId })));
+  // The gap's period travels with its ref, so a run holding the patient's rows for two years cites the
+  // row of the gap's year (`citedRow`), as the case page does.
+  const refOf = (r: WorklistPatientRow, g: WorklistGap) => ({ lastRunId: g.lastRunId, employeeId: r.employeeId, measureId: g.measureId, evaluationPeriod: g.evaluationPeriod });
+  const refs = rows.flatMap((r) => r.openGaps.map((g) => refOf(r, g)));
   if (refs.length === 0) return [...rows];
   const logic = await scoringLogicForCases(outcomes, refs);
   return rows.map((r) => ({
     ...r,
-    openGaps: r.openGaps.map((g) => ({
-      ...g,
-      logic: logic.get(caseLogicKey({ lastRunId: g.lastRunId, employeeId: r.employeeId, measureId: g.measureId })) ?? null,
-    })),
+    openGaps: r.openGaps.map((g) => ({ ...g, logic: logic.get(caseLogicKey(refOf(r, g))) ?? null })),
   }));
 }
 

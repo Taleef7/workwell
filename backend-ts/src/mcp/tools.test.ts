@@ -697,3 +697,53 @@ test("#769: no MCP response pairs policyRef (or any QDM id) with the executed ve
 
   assert.deepEqual(qdmPairings(responses), [], "no response pairs a QDM id with the executed version");
 });
+
+/** Records the subject sets the cited-row projection is asked for, on the real store instance. */
+async function withIdentityReads<T>(fn: (asked: string[][]) => Promise<T>): Promise<T> {
+  const store = deps.outcomeStore;
+  const original = store.listScoringIdentities.bind(store);
+  const asked: string[][] = [];
+  store.listScoringIdentities = async (id, opts) => {
+    asked.push([...opts.subjectIds]);
+    return original(id, opts);
+  };
+  try {
+    return await fn(asked);
+  } finally {
+    delete (store as { listScoringIdentities?: unknown }).listScoringIdentities;
+  }
+}
+
+test("#769: list_noncompliant names the logics of the rows it RETURNS only, never the whole non-compliant set", async () => {
+  const everyone = ((await call("list_noncompliant", { limit: 100 })).payload.results as JsonRecord[]);
+  assert.ok(everyone.length > 1, "more non-compliant cases than the page below returns");
+  await withIdentityReads(async (asked) => {
+    const page = ((await call("list_noncompliant", { limit: 1 })).payload.results as JsonRecord[]);
+    assert.equal(page.length, 1);
+    assert.deepEqual(asked.flat(), [page[0]!.employeeExternalId], "one subject read: the returned row's");
+  });
+});
+
+test("#769: a run holding a patient's 2026 and 2027 rows — the MCP case tools name the row of the CASE's period", async () => {
+  const run = await deps.runStore.createRun({
+    scopeType: "MEASURE", scopeId: "cms137", triggeredBy: "test", requestedScope: { measureId: "cms137" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z",
+  });
+  await deps.runStore.finalizeRun(run.id, "COMPLETED");
+  // The 2026 row (CMS's artifact) is written FIRST; the 2027 case is about the 2027 row (the translation).
+  await deps.outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-030", measureId: "cms137", evaluationPeriod: "2026-12-31", status: "OVERDUE", evidence: { ...CMS125_EVIDENCE, official: { ...CMS125_EVIDENCE.official, ecqmId: "137FHIR" } }, evaluatedAt: "2026-10-01T00:00:00.000Z" });
+  await deps.outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-030", measureId: "cms137", evaluationPeriod: "2027-12-31", status: "OVERDUE", evidence: TRANSLATION_EVIDENCE, evaluatedAt: "2026-10-01T00:00:05.000Z" });
+  const c2027 = (await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "emp-030", measureId: "cms137", evaluationPeriod: "2027-12-31", outcomeStatus: "OVERDUE" }))!;
+
+  const listed = ((await call("list_cases", { status: "open", measureId: "cms137" })).payload.results as JsonRecord[]).find((r) => r.case_id === c2027.id)!;
+  assert.equal((listed.logic as JsonRecord).kind, "workwell-translation", "list_cases: the case's year's row, not the run's first row");
+  assert.equal(listed.measure_version, "ww-2027.1");
+  const noncompliant = ((await call("list_noncompliant", { measureName: "Initiation and Engagement of Substance Use Disorder Treatment", limit: 100 })).payload.results as JsonRecord[]);
+  const listedNc = noncompliant.find((r) => r.caseId === c2027.id)!;
+  assert.equal((listedNc.logic as JsonRecord).kind, "workwell-translation", "list_noncompliant: the same row");
+  const detail = (await call("get_case", { caseId: c2027.id })).payload;
+  assert.equal((detail.logic as JsonRecord).kind, "workwell-translation", "get_case names the same row");
+  assert.equal(detail.measureVersion, "ww-2027.1");
+  const explained = (await call("explain_outcome", { caseId: c2027.id })).payload;
+  assert.equal((explained.logic as JsonRecord).kind, "workwell-translation", "explain_outcome explains the same row");
+});

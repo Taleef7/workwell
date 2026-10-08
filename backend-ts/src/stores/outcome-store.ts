@@ -174,6 +174,17 @@ export function scoringIdentityOf(official: unknown): Record<string, unknown> | 
   return out;
 }
 
+/** One row of {@link OutcomeStore.listScoringIdentities}: which logic scored it, and nothing else. */
+export interface ScoringIdentityRow {
+  subjectId: string;
+  measureId: string;
+  evaluationPeriod: string;
+  /** {@link scoringIdentityOf} of the row's `official` block; null when the row has none (authored). */
+  official: Record<string, unknown> | null;
+  /** The evidence carries an `evaluationError` key: nothing scored the row. */
+  errored: boolean;
+}
+
 /**
  * Normalise a store's distinct-identity rows to the contract's answer: each `official` re-projected
  * through {@link scoringIdentityOf} (fixed key order, so the two stores' rows compare equal), duplicates
@@ -367,6 +378,26 @@ export interface OutcomeStore {
    * by measure then by the identity's JSON so both stores answer identically.
    */
   distinctScoringLogicForRun(runId: string): Promise<Array<{ measureId: string; official: unknown }>>;
+  /**
+   * The cited-row read behind case lists' `logic`/`measureVersion` (#769): every row of ONE measure of a
+   * run for a SET of subjects, carrying only what names the logic that scored it — never the evidence.
+   *
+   * `official` is `scoringIdentityOf(evidence_json.official)` (the {@link SCORING_IDENTITY_KEYS} and
+   * `measurementPeriod.{start,end}`, absent and JSON-null keys dropped; null when there is no `official`
+   * object), so `populationResults`, `rates`, `strata` and `expressionResults` — the bulk of a row — never
+   * leave the database. `errored` is the `evaluationError` key's PRESENCE (a JSON null is still the
+   * marker), as {@link distinctScoringLogicForRun} reads it. Errored rows are returned, not dropped: a
+   * case can cite one, and its answer is "nothing named scored it".
+   *
+   * Ordered `evaluated_at ASC, id ASC` — the order `listOutcomes` (and so `outcomeForCase`) reads — so a
+   * caller picking "the first row per subject" picks the row the case page shows. One array bind on the
+   * ceiling over the `(run_id, measure_id)` index; chunked `IN` lists on the floor. An EMPTY set matches
+   * nobody, and an unknown or malformed run id is empty.
+   */
+  listScoringIdentities(
+    runId: string,
+    opts: { measureId: string; subjectIds: readonly string[] },
+  ): Promise<ScoringIdentityRow[]>;
   /**
    * Outcomes joined to their run (started_at), filtered by measure + run period in SQL —
    * bounds the scan to the selected measure/date range instead of all run history. Used by

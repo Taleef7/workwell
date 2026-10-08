@@ -200,3 +200,32 @@ test("listLatestPopulationRuns: an empty measure list never touches the database
   assert.deepEqual(await store.listLatestPopulationRuns([], { excludeScale: true }), []);
   assert.equal(sql.length, 0, "nothing to ask about, so nothing is asked");
 });
+
+test("listScoringIdentities: ONE statement, one array bind, the identity keys only, in evaluated order (#769)", async () => {
+  const { pool, sql, binds } = recordingPool(() => [
+    { subject_id: "p-1", measure_id: "cms125", evaluation_period: "2026", errored: false, official: { ecqmId: "125FHIR", version: "1.0.000", label: null, kind: null, measurementPeriod: null } },
+    { subject_id: "p-2", measure_id: "cms125", evaluation_period: "2026", errored: true, official: null },
+  ]);
+  const store = new PgOutcomeStore(pool);
+  const ids = Array.from({ length: 2000 }, (_, i) => `p-${i}`);
+  const rows = await store.listScoringIdentities(RUN, { measureId: "cms125", subjectIds: ids });
+  assert.equal(sql.length, 1, "one statement however many subjects: the set is one array, not an IN list");
+  const text = flat(sql[0]!);
+  assert.match(text, /WHERE run_id = \$1 AND measure_id = \$2 AND subject_id = ANY\(\$3::text\[\]\)/);
+  assert.match(text, /ORDER BY evaluated_at ASC, id ASC$/);
+  assert.doesNotMatch(text, /\bIN \(/);
+  // The evidence never leaves the database: only `-> 'official'` and the error marker are read from it.
+  assert.equal(text.match(/evidence_json/g)?.length, 2);
+  assert.deepEqual(text.match(/evidence_json \S+ '\w+' AS \w+/g), ["evidence_json -> 'official' AS official", "evidence_json ? 'evaluationError' AS errored"]);
+  assert.doesNotMatch(text, /populationResults|expressionResults/);
+  assert.deepEqual(binds[0], [RUN, "cms125", ids]);
+  // Rows are re-projected: JSON nulls dropped.
+  assert.deepEqual(rows, [
+    { subjectId: "p-1", measureId: "cms125", evaluationPeriod: "2026", official: { ecqmId: "125FHIR", version: "1.0.000" }, errored: false },
+    { subjectId: "p-2", measureId: "cms125", evaluationPeriod: "2026", official: null, errored: true },
+  ]);
+  // An empty set or a malformed run id never touches the database.
+  assert.deepEqual(await store.listScoringIdentities(RUN, { measureId: "cms125", subjectIds: [] }), []);
+  assert.deepEqual(await store.listScoringIdentities("not-a-run", { measureId: "cms125", subjectIds: ["p-1"] }), []);
+  assert.equal(sql.length, 1);
+});

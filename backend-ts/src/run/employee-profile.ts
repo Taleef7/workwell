@@ -19,6 +19,7 @@ import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { measureVersionOf, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
 import { caseLogicKey, scoringLogicForCases, type CaseOutcomeRef } from "../case/case-scoring-logic.ts";
+import { citedRow } from "../case/case-outcome.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { deriveCell, type DisplayState } from "../compliance/roster-vocabulary.ts";
@@ -203,10 +204,10 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     if (!runByMeasure.has(w.measureId)) runByMeasure.set(w.measureId, w.runId);
   }
   const winningRows: OutcomeRecord[] = [];
-  // The FIRST of this subject's rows in each winning run: the row a case citing that run names
-  // (`outcomeForCase` reads the same order with `limit: 1`), kept so an open case citing the winning run
-  // costs no second read for its logic below. Null records "read, and no row".
-  const citedInWinningRun = new Map<string, { runId: string; row: OutcomeRecord | null }>();
+  // ALL of this subject's rows in each winning run, in order: a case citing that run names one of them
+  // (`citedRow`: its period's first row, else the first, as `outcomeForCase` reads), kept so an open case
+  // citing the winning run costs no second read for its logic below. Empty records "read, and no row".
+  const citedInWinningRun = new Map<string, { runId: string; rows: OutcomeRecord[] }>();
   // In turn, not `Promise.all`: one page view must not take a connection per measure at once.
   for (const measureId of measureIds) {
     const runId = runByMeasure.get(measureId);
@@ -214,7 +215,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     // Rows arrive evaluated_at ASC, so the last is the one the roster's derivation keeps.
     const rows = (await deps.outcomes.listOutcomes(runId, { measureId, subjectId: externalId }))
       .filter((r) => r.measureId === measureId && r.subjectId === externalId);
-    citedInWinningRun.set(measureId, { runId, row: rows[0] ?? null });
+    citedInWinningRun.set(measureId, { runId, rows });
     const row = rows.at(-1);
     if (row) winningRows.push(row);
   }
@@ -252,8 +253,9 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   const unread: CaseOutcomeRef[] = [];
   for (const c of openCases) {
     const winning = citedInWinningRun.get(c.measureId);
-    if (winning && c.lastRunId && winning.runId === c.lastRunId) caseLogic.set(caseLogicKey(c), scoringLogicOf(winning.row?.evidence));
-    else unread.push(c);
+    if (winning && c.lastRunId && winning.runId === c.lastRunId) {
+      caseLogic.set(caseLogicKey(c), scoringLogicOf(citedRow(winning.rows, c.evaluationPeriod)?.evidence));
+    } else unread.push(c);
   }
   if (unread.length > 0) for (const [key, logic] of await scoringLogicForCases(deps.outcomes, unread)) caseLogic.set(key, logic);
 

@@ -36,8 +36,12 @@ const CMS_LOGIC = {
   status: "draft", statusNote: "posted for public comment Jan–Feb 2026",
 };
 
-/** The overview's fakes, one winning cms122 run whose rows carry `evidences`; counts the membership reads. */
-function depsFor(runId: string, evidences: unknown[]) {
+/**
+ * The overview's fakes, one winning cms122 run whose rows carry `evidences`; counts the membership reads.
+ * `scale` adds a completed run of the generated scale tenant for cms122, which the AUTHORED engine scores
+ * and the overview folds into the card's counts.
+ */
+function depsFor(runId: string, evidences: unknown[], scale = false) {
   const startedAt = "2026-02-01T00:00:00.000Z";
   const rows: OutcomeWithRun[] = [{
     runId, runStartedAt: startedAt, runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual",
@@ -53,10 +57,10 @@ function depsFor(runId: string, evidences: unknown[]) {
         reads.count++;
         return measureId === MEASURE ? evidences.map((evidence) => ({ status: "COMPLIANT", evidence })) : [];
       },
-      aggregateScaleRun: async () => [],
+      aggregateScaleRun: async () => (scale ? [{ status: "COMPLIANT", count: 5 }] : []),
     } as unknown as OutcomeStore,
     runStore: {
-      listRuns: async () => [],
+      listRuns: async () => (scale ? [{ id: "scale-1", triggeredBy: "seed:scale", status: "COMPLETED", scopeId: MEASURE, startedAt }] : []),
       getRun: async (id: string) =>
         id === runId ? { id, measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z", startedAt, requestedScope: {} } : null,
     } as unknown as RunStore,
@@ -118,4 +122,40 @@ test("authored rows name no logic", async () => {
   const s = await summaryOf(deps);
   assert.equal(s.measureRate, null);
   assert.deepEqual(s.scoringLogics, []);
+  assert.equal(s.scoringConflict, false);
+});
+
+test("one logic is no conflict; two named logics are", async () => {
+  clearOverview();
+  resetMeasureRateMemo();
+  assert.equal((await summaryOf(depsFor("run-sl-one", [cms122(), cms122()]).deps)).scoringConflict, false);
+  clearOverview();
+  assert.equal((await summaryOf(depsFor("run-sl-two", [cms122(), translated]).deps)).scoringConflict, true);
+});
+
+test("CMS's row beside an authored row: one NAMED logic, but a conflict and no rate", async () => {
+  clearOverview();
+  resetMeasureRateMemo();
+  const { deps } = depsFor("run-sl-authored-mix", [cms122(), { expressionResults: [] }]);
+  const s = await summaryOf(deps);
+  assert.equal(s.measureRate, null, "authored memberships are never summed under the artifact's name");
+  assert.deepEqual(s.scoringLogics, [CMS_LOGIC], "the authored row has no name to list");
+  assert.equal(s.scoringConflict, true, "so only the flag can say the rows were scored two ways");
+});
+
+test("a card that folds in the authored scale tenant's counts names no logic and claims no conflict", async () => {
+  clearOverview();
+  resetMeasureRateMemo();
+  // The live run's rows were all CMS's — but the card's numbers are not, so no logic labels them.
+  const one = await summaryOf(depsFor("run-sl-scale", [cms122(), cms122()], true).deps);
+  assert.equal(one.includesAuthoredScaleCounts, true);
+  assert.equal(one.totalEvaluated, 6, "the live row and the five scale rows");
+  assert.deepEqual(one.scoringLogics, []);
+  assert.equal(one.scoringConflict, false);
+  // A live run that WAS mixed is no different: there is no one-logic claim on the card to conflict with.
+  clearOverview();
+  const mixed = await summaryOf(depsFor("run-sl-scale-mixed", [cms122(), translated], true).deps);
+  assert.equal(mixed.includesAuthoredScaleCounts, true);
+  assert.deepEqual(mixed.scoringLogics, []);
+  assert.equal(mixed.scoringConflict, false);
 });

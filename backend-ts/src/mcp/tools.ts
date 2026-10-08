@@ -228,7 +228,7 @@ async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
   const directory = directoryForSubjects(deps, [c.employeeId]);
   if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
-  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId);
+  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
   const evidence = detail.evidenceJson ?? {};
   const whyFlagged = (evidence as JsonRecord).why_flagged ?? {};
@@ -256,10 +256,11 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
     summaries = await withLiveStatus({ outcomeStore: deps.outcomeStore, cellCache: rosterCellCache }, summaries);
   }
   // What scored each case's CITED outcome (#769): one bounded read per (run, measure), never today's
-  // routing. On a person-closed row it describes the frozen status, not the `live_*` fields.
-  const scoring = await scoringForCases(deps.outcomeStore, rows);
-  const scoredFor = (s: (typeof summaries)[number]) =>
-    scoring.get(caseLogicKey({ lastRunId: s.lastRunId, employeeId: s.employeeId, measureId: s.measureId }));
+  // routing. On a person-closed row it describes the frozen status, not the `live_*` fields. Read for
+  // exactly the summaries returned below — this tool has no page, so that is every row it answers with —
+  // each carrying its period, so a run holding a subject's rows for two years cites the case's year's.
+  const scoring = await scoringForCases(deps.outcomeStore, summaries);
+  const scoredFor = (s: (typeof summaries)[number]) => scoring.get(caseLogicKey(s));
   const results = summaries.map((s) => ({
     case_id: s.caseId,
     employee_id: s.employeeId,
@@ -435,7 +436,7 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
   if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
   const directory = directoryForSubjects(deps, [c.employeeId]);
   if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
-  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId);
+  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
   const wf = ((detail.evidenceJson ?? {}) as JsonRecord).why_flagged as JsonRecord | undefined;
   const val = (k: string, fb: string): string => (wf && wf[k] != null ? String(wf[k]) : fb);
@@ -598,7 +599,8 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   }
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   rows = rows.slice(0, limit);
-  // The cited outcome's logic and version for the returned page only (at most 100 cases).
+  // The cited outcome's logic and version for the returned page only (at most 100 cases) — AFTER the
+  // slice, never over the whole non-compliant set — each case's own period choosing its cited row.
   const scoring = await scoringForCases(deps.outcomeStore, rows);
   const results = rows.map((c) => {
     const emp = directory.employeeById(c.employeeId);

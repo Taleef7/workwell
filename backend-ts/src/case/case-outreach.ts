@@ -169,14 +169,14 @@ function computeDueDate(evidence: Record<string, unknown>, evaluationPeriod: str
   return due < today ? today : due;
 }
 
-async function loadOutcomeEvidence(deps: OutreachDeps, lastRunId: string, employeeId: string, measureId: string) {
-  return outcomeForCase(deps.outcomes, lastRunId, employeeId, measureId);
+async function loadOutcomeEvidence(deps: OutreachDeps, lastRunId: string, employeeId: string, measureId: string, evaluationPeriod: string) {
+  return outcomeForCase(deps.outcomes, lastRunId, employeeId, measureId, evaluationPeriod);
 }
 
 async function buildDetail(deps: OutreachDeps, caseId: string): Promise<CaseDetail | null> {
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
-  const outcome = await loadOutcomeEvidence(deps, c.lastRunId, c.employeeId, c.measureId);
+  const outcome = await loadOutcomeEvidence(deps, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const timeline = await deps.events.caseTimeline(caseId);
   const latest = await deps.events.latestOutreachDeliveryStatus(caseId);
   return toCaseDetail(c, outcome, timeline, latest);
@@ -188,7 +188,7 @@ async function buildDetail(deps: OutreachDeps, caseId: string): Promise<CaseDeta
  * date is last_exam_date + window (the raw stored outcome evidence has no why_flagged block).
  */
 async function renderContext(deps: OutreachDeps, c: { lastRunId: string; employeeId: string; measureId: string; evaluationPeriod: string }) {
-  const outcome = await loadOutcomeEvidence(deps, c.lastRunId, c.employeeId, c.measureId);
+  const outcome = await loadOutcomeEvidence(deps, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const detail = toCaseDetail(c as never, outcome);
   return {
     employeeName: detail.employeeName,

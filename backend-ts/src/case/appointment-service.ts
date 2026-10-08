@@ -34,7 +34,7 @@ export interface ScheduleInput {
 async function buildDetail(deps: AppointmentDeps, caseId: string): Promise<CaseDetail | null> {
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
-  const outcome = await outcomeForCase(deps.outcomes, c.lastRunId, c.employeeId, c.measureId);
+  const outcome = await outcomeForCase(deps.outcomes, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const timeline = await deps.events.caseTimeline(caseId);
   const latest = await deps.events.latestOutreachDeliveryStatus(caseId);
   return toCaseDetail(c, outcome, timeline, latest);
