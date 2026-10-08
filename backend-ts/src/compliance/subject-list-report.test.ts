@@ -319,6 +319,13 @@ test("rows of one year scored by two logics refuse the report; an errored row is
   // One logic plus an errored row reports as before.
   const errored = await runReport({ rows: [row("pat-001", translated), row("pat-002", { evaluationError: "CQL engine failure", message: "boom" })] });
   assert.equal(errored.ok, true);
+  // Legacy rows with no digest that name different versions of CMS's artifact are two logics, though
+  // kind, digest and period agree; summing them would label the total with whichever came first.
+  const v1 = { official: { ...cms.official, ecqmId: "122FHIR", version: "1.0.000" } };
+  const v2 = { official: { ...cms.official, ecqmId: "122FHIR", version: "1.1.000" } };
+  const versions = await runReport({ rows: [row("pat-001", v1), row("pat-002", v2)] });
+  assert.equal((versions as unknown as { body: { error: string } }).body.error, "mixed_logic");
+  assert.equal((await runReport({ rows: [row("pat-001", v1), row("pat-002", v1)] })).ok, true, "one version reports");
 });
 
 test("two rows for one subject collapse to the NEWEST, whatever order the store returned them", async () => {

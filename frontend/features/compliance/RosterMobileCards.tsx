@@ -4,7 +4,7 @@ import { ComplianceChip } from "./ComplianceChip";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import type { ScoringLogic } from "@/lib/measure-identity";
-import { columnLogic, type RosterColumn, type RosterRow, type RosterCell } from "./types";
+import { COLUMN_MIXED_LOGICS, columnLogic, columnTitle, type RosterColumn, type RosterRow, type RosterCell } from "./types";
 
 type MeasureLabel = (measureId: string, fallbackName: string, logic?: ScoringLogic | null) => string;
 
@@ -89,12 +89,17 @@ export function RosterMobileCards({
               <div key={c.measureId} className="flex items-start justify-between gap-3 py-1.5">
                 <dt
                   className="text-sm text-neutral-700 dark:text-neutral-300"
-                  title={titleFor ? titleFor(c.measureId, c.name, columnLogic(c)) : undefined}
+                  title={titleFor ? columnTitle(titleFor(c.measureId, c.name, columnLogic(c)), c) : undefined}
                 >
                   {labelFor ? labelFor(c.measureId, c.name, columnLogic(c)) : c.name}
                   <span className="ml-1 text-[10px] font-normal uppercase text-neutral-400">
                     {c.complianceClass === "PERMANENT" ? "perm" : "rec"}
                   </span>
+                  {c.logicConflict ? (
+                    <span data-testid={`roster-mobile-mixed-${c.measureId}`} className="block text-[10px] font-normal text-amber-700 dark:text-amber-400">
+                      {COLUMN_MIXED_LOGICS}
+                    </span>
+                  ) : null}
                 </dt>
                 <dd className="text-right">
                   <ComplianceChip cell={r.cells[c.measureId] ?? NA_FALLBACK} className="items-end" />

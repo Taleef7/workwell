@@ -49,7 +49,7 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { SubjectListStore, SubjectList } from "../stores/subject-list-store.ts";
 import { createRateAggregator, membershipRatesFor, officialReportIdentity, reportingPeriod, type OfficialReportIdentity } from "../fhir/measure-report.ts";
 import { isEvaluationErrorEvidence } from "../fhir/measure-report.ts";
-import { scoringIdentityKey } from "../fhir/run-aggregate.ts";
+import { scoringOfRows } from "../fhir/run-aggregate.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { isPopulationRun } from "../program/rollup-shared.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
@@ -506,12 +506,15 @@ async function readMeasure(
   let identity: ReturnType<typeof officialReportIdentity> = null;
   // Every counted row's logic, compared: an import-driven run evaluated before and after a routing change
   // for the SAME year can hold CMS's draft and a translation, and one `executedLogic` cannot name both.
-  const logics = new Set<string>();
+  // Compared by the rule the run detail and the programs card use (`scoringOfRows`): kind, digest and
+  // period, AND the eCQM id, version and label, so legacy rows without a digest that name different
+  // versions are a mix too. Errored rows name no logic and are skipped there.
+  const evidences: unknown[] = [];
   for (const row of newest.values()) {
     aggregator.add(row);
     identity ??= officialReportIdentity(row.evidence);
     const errored = isEvaluationErrorEvidence(row.evidence);
-    if (!errored) logics.add(scoringIdentityKey(officialReportIdentity(row.evidence)));
+    evidences.push(row.evidence);
     // Memberships are read ONCE per row and reused for the row's flags and its bucket. The first cut
     // built a whole `createRateAggregator` per row for the flags alone — 300,000 stateful aggregators
     // at the 50,000-member cap across six measures, each re-parsing the evidence.
@@ -560,7 +563,7 @@ async function readMeasure(
     buckets,
     duplicateRowsCollapsed,
     periodMismatch,
-    mixedLogic: logics.size > 1,
+    mixedLogic: scoringOfRows(evidences).conflict,
   };
 }
 

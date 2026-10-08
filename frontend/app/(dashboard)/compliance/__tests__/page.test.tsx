@@ -261,7 +261,7 @@ describe("CompliancePage", () => {
       [/^MIPS 112 · CMS125FHIR/, `${LABELS.cms125Short} · Breast Cancer Screening`, `${LABELS.cms125Title} · Breast Cancer Screening`],
       [/^MIPS 305 · WW translation/, `${LABELS.cms137TranslationShort} · Substance Use Treatment`, `${LABELS.cms137TranslationTitle} · Substance Use Treatment`],
       [/^MIPS 001 · CMS122/, "MIPS 001 · CMS122 · Diabetes HbA1c", "MIPS 001 · CMS122 · Diabetes HbA1c"],
-      [/^MIPS 113 · CMS130/, "MIPS 113 · CMS130 · Colorectal Cancer Screening", "MIPS 113 · CMS130 · Colorectal Cancer Screening"],
+      [/^MIPS 113 · CMS130/, "MIPS 113 · CMS130 · Colorectal Cancer Screening", "MIPS 113 · CMS130 · Colorectal Cancer Screening · Scored by more than one logic or measurement period"],
     ];
     for (const [name, text, title] of expected) {
       // Desktop: the column header.
@@ -274,6 +274,11 @@ describe("CompliancePage", () => {
       expect(dt).toHaveAttribute("title", title);
     }
     expect(screen.queryByText(/CMS137FHIR/)).toBeNull();
+    // The mixed column says so on both layouts; the unnamed one (cms122) reads as plain, not mixed.
+    expect(screen.getByTestId("roster-mixed-cms130")).toHaveTextContent("Mixed logics");
+    expect(screen.getByTestId("roster-mobile-mixed-cms130")).toHaveTextContent("Mixed logics");
+    expect(screen.queryByTestId("roster-mixed-cms122")).toBeNull();
+    expect(screen.queryByTestId("roster-mobile-mixed-cms122")).toBeNull();
   });
 
   it("refetches when the panel changes", async () => {

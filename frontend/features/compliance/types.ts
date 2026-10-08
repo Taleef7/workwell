@@ -1,5 +1,5 @@
 import { SUBJECT } from "@/lib/terminology";
-import type { ScoringLogic } from "@/lib/measure-identity";
+import { MIXED_LOGICS_NOTE, type ScoringLogic } from "@/lib/measure-identity";
 
 // TS mirror of the GET /api/compliance/roster contract (backend-ts/src/compliance/*). Kept in sync by
 // hand; the read model owns the vocabulary — the UI renders these strings verbatim (ADR-008).
@@ -34,6 +34,17 @@ export interface RosterColumn {
 }
 
 /** The one logic a roster column may be labelled with: none when its run mixed logics. */
+/**
+ * A column whose winning run mixed logics or periods says so beside its label (the run detail and the
+ * programs card do the same): the unversioned label alone would read as an authored or unnamed column.
+ */
+export const COLUMN_MIXED_LOGICS = "Mixed logics";
+
+/** The header's title: the label's own title, plus the mixed-logic note when the column has one. */
+export function columnTitle(title: string, column: Pick<RosterColumn, "logicConflict">): string {
+  return column.logicConflict ? `${title} · ${MIXED_LOGICS_NOTE}` : title;
+}
+
 export function columnLogic(column: Pick<RosterColumn, "logic" | "logicConflict">): ScoringLogic | null {
   return column.logicConflict ? null : (column.logic ?? null);
 }
