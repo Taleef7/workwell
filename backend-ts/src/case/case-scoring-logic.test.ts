@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { caseLogicKey, scoringLogicForCases } from "./case-scoring-logic.ts";
+import { caseLogicKey, scoringForCases, scoringLogicForCases } from "./case-scoring-logic.ts";
 import type { OutcomeRecord, OutcomeStore } from "../stores/outcome-store.ts";
 
 const cms = { official: { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24" } };
@@ -69,3 +69,20 @@ test("no run, no row, an errored row or an authored row: null, never a guess fro
     assert.equal(logic.get(caseLogicKey(r)), null);
   }
 });
+
+test("scoringForCases carries the cited row's version: the artifact's, '' for an errored row, the authored library's for authored CQL", async () => {
+  const { store } = fakeStore([
+    row("r1", "p1", "cms137", cms, "2026-10-01T00:00:00Z"),
+    row("r1", "p2", "cms125", { evaluationError: "CQL engine failure", message: "x" }, "2026-10-01T00:00:00Z"),
+    row("r1", "p3", "cms125", { expressionResults: [] }, "2026-10-01T00:00:00Z"),
+  ]);
+  const refs = [
+    { lastRunId: "r1", employeeId: "p1", measureId: "cms137" },
+    { lastRunId: "r1", employeeId: "p2", measureId: "cms125" },
+    { lastRunId: "r1", employeeId: "p3", measureId: "cms125" },
+    { lastRunId: "r1", employeeId: "p9", measureId: "cms125" },
+  ];
+  const s = await scoringForCases(store, refs);
+  assert.deepEqual(refs.map((r) => s.get(caseLogicKey(r))?.version), ["1.0.000", "", "2.0.0", ""]);
+});
+
