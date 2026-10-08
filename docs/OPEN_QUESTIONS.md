@@ -14,7 +14,7 @@
 > already answered. This file exists because an unanswered question with no home decays silently —
 > every entry below had been raised at least once, some three times, with no record of an answer.
 
-**As of 2026-10-02.** Fifteen open.
+**As of 2026-10-08.** Twenty-one open; one answered (§5).
 
 ---
 
@@ -22,19 +22,15 @@
 
 ### 1.1 Does WorkWell serve the separate MIPS group submission?
 
-**Raised:** twice, in two separate meetings (2026-08, 2026-09). **Status:** unanswered.
+**Raised:** twice (2026-08, 2026-09). **Status:** answered in part 2026-09-09: from 2027 the practice
+participates as a MIPS APM, its quality is reported at the ACO level through APP, and practice-level
+reporting is optional. Still open: if the practice chooses to report at practice level, does it expect
+WorkWell to serve that submission?
 
-The practice carries a MIPS group reporting obligation distinct from the ACO's APP Plus submission.
-The stated reason it differs: the group includes hospitalists and radiologists who sit outside the
-ACO-attributed population, so the denominators are not the same people.
-
-`ROADMAP_2026-08-30.md` §7.11 records that whether WorkWell is expected to serve that submission
-**is still unasked**.
-
-**Why it needs an answer before more is built:** it changes the scope of the measure catalog, the
-attribution model and the export surface at once. Every one of those is currently designed around a
-single attributed population. Building further on that assumption and then discovering a second
-population is the expensive order.
+The practice's group includes clinicians outside the ACO-attributed population (hospitalists and
+radiologists), so a practice-level submission would cover different people from the ACO's. WorkWell is
+designed around a single attributed population; a second one changes the measure catalog, the
+attribution model and the export surface at once.
 
 ### 1.2 Which health plan, and can we have its metric list?
 
@@ -76,6 +72,17 @@ the run history's 31 December run.
 the point at which somebody stops believing the number, and a dashboard nobody believes is worth
 nothing regardless of whether it is right.
 
+### 1.4 What does the practice record as meeting each measure, and how are unconfirmed conditions kept?
+
+**Raised:** 2026-09-10. **Status:** unasked as a written question. Feeds the data-coverage work.
+
+- For each of the six measures, which entries does the practice treat as meeting it: a diagnosis, a
+  document type, a CPT code, a result? A measure reads only coded data, so an entry that is not coded
+  the way the measure's value set expects is a gap in WorkWell even where the practice considers it done.
+- Are conditions that are suspected or not yet confirmed recorded as unconfirmed (a verification
+  status), or as ordinary diagnoses? Read as confirmed, they put patients into denominators they do not
+  belong to.
+
 ---
 
 ## 2. For the ACO
@@ -95,7 +102,10 @@ Two halves, and the second is ours to build once the first arrives:
 
 ### 2.2 The ACO's own structure — which track, and who is benchmarked against whom
 
-**Raised:** 2026-09. **Status:** unanswered.
+**Raised:** 2026-09. **Status:** partly answered 2026-09-09: the pilot group was described as entering
+MSSP for 2027 (the track was named as "A"; to confirm in writing, and dependent on the CY2027 final
+rule). Still unknown: the track as MSSP names it, the benchmark, and the level at which performance is
+compared.
 
 `ROADMAP_2026-08-30.md` §7.17 records this as *ask before building anything that assumes a single
 flat ACO*.
@@ -104,16 +114,25 @@ It decides who submits, against which benchmark, and at what level performance i
 scorecards in #596 cannot be designed without it — a scorecard is a comparison, and nothing here
 currently knows what the comparison set is.
 
-### 2.3 Confirm that 837/835 claims files are out of scope
+*(2.3 is answered; see §5.)*
 
-**Raised:** 2026-09, in a meeting where WorkWell was the system being demonstrated.
-**Status:** believed out of scope, never stated.
+### 2.4 Does the ACO want CMS137 for 2027?
 
-Claims files belong to the practice-management system. WorkWell does not read them and there is no
-plan that it should.
+**Raised:** 2026-10-08. **Status:** unasked.
 
-Nothing written says so, which is why it will be asked again. One sentence in a reply closes it
-permanently; leaving it unsaid does not.
+The CY2027 proposed rule would remove Quality ID 305 (CMS137) from APP Plus, and the final rule is
+expected around November. WorkWell is set up to score CMS137's 2027 periods with its own translation
+(routed on Maui, #767). If
+the ACO does not want it whatever the rule says, it should come off the pilot's catalog rather than sit
+on every screen.
+
+### 2.5 Every patient, or only the ACO's attributed patients?
+
+**Raised:** 2026-10-08. **Status:** unasked.
+
+The attributed-list report (#654) scores whichever patients are on the list. Whether the ACO wants
+quality for every patient the practice sees, or only for the patients the ACO attributes to the
+practice, decides what the list should hold and what the report's denominators mean.
 
 ---
 
@@ -147,25 +166,31 @@ should show it is a separate call.
 
 ## 4. For MIE
 
-Raised 2026-10-02 from a check of the teatea trial, the docs and the dev database (the facts are in
-`WEBCHART_API_ASSUMPTIONS_2026-07.md`, "Verified on the teatea trial"). None has been asked yet.
+4.1–4.7 were raised 2026-10-02 from a check of the teatea trial, the docs and the dev database (the facts
+are in `WEBCHART_API_ASSUMPTIONS_2026-07.md`, "Verified on the teatea trial"). 4.1, 4.2 and 4.6 were put
+to MIE on 2026-10-02, and 4.4 and 4.5 in part; 4.3 and 4.7 have not been asked. 4.8–4.10 were written
+down 2026-10-08; 4.11 comes from #663.
 
 ### 4.1 Can WebChart call WorkWell at the point of care?
 
-**Status:** unasked.
+**Status:** asked 2026-10-02. On 2026-10-07 MIE said any WebChart change goes through a written request
+to its product team; that request is the route for this question.
 
-WebChart has no CDS Hooks client: no setting, table or documentation mentions one. Its own decision
-support is Scripted Rules, which MIE programs and which cannot call out.
+The 2026-10-02 check found no CDS Hooks client that could call WorkWell: no setting, table or
+documentation mentions one. Its own decision support is Scripted Rules, which MIE programs and which
+cannot call out.
 - WorkWell's CDS service (`CDS_HOOKS.md`) is built and live, so the question is the caller.
 - Is a CDS Hooks client planned, in the classic UI or the new UI?
+- If one exists or is coming: which hook fires (WorkWell answers `patient-view`); can it call a service
+  that is not a payer's; does it send the patient's data with the request (prefetch); what are its `iss`
+  and its JWKS URL; and how does it display a card?
 - If not, can a SMART app open from inside a chart (a chart tab, with the open patient's context)? The
   smart-configuration advertises `launch-ehr`; the docs put the launch on a home-page portlet with a
   patient picker.
-- If a CDS Hooks client is coming: what are its `iss` and its JWKS URL?
 
 ### 4.2 Do the API terms apply to WorkWell?
 
-**Status:** unasked.
+**Status:** asked 2026-10-02; unanswered.
 
 The published Terms of API Use forbid storing User Content beyond a session and cap use at 15,000 calls
 per app per day. WorkWell stores outcomes and evidence. A nightly over a practice through per-resource
@@ -182,7 +207,8 @@ searches would exceed the cap; bulk export would not.
 
 ### 4.4 Where are the measure exclusions recorded?
 
-**Status:** unasked.
+**Status:** asked in part 2026-10-02 (how exceptions should count); where WebChart records them is not
+yet asked.
 
 WebChart's own measure pages point hospice, palliative care and frailty to a "Long-Term, Chronic, and End
 of Life Care" page that is not published. Mastectomy (CMS125) and colectomy (CMS130) have no documented
@@ -190,7 +216,8 @@ workflow. CQL only sees what reaches FHIR.
 
 ### 4.5 Can WorkWell read changes and write back?
 
-**Status:** unasked. #641 (change signal), #565 (write-back).
+**Status:** asked in part 2026-10-02 (an outbound HL7 trigger, and the code an outreach encounter should
+carry). #641 (change signal), #565 (write-back).
 
 - Can a Refer-to-System send WorkWell HL7 events (ADT, ORU, MDM, SIU) over HTTPS?
 - Can MDM^T02 come in with an agreed document type?
@@ -201,12 +228,14 @@ workflow. CQL only sees what reaches FHIR.
 
 ### 4.6 How should scanned screening documents count?
 
-**Status:** unasked.
+**Status:** asked 2026-10-02; answered in part. MIE's quality team confirmed that a document alone does
+not meet a measure: only a result recorded in discrete, coded fields counts. Still open: who tells the
+pilot group, and what WebChart's Preventive Care "last reported" date counts for.
 
-WebChart counts a scanned mammogram, colonoscopy, FOBT or similar document, and a Preventive Care "last
-reported" date, as screening evidence. Over FHIR these are mostly untyped DocumentReferences that the CMS
-measures do not read. So a patient can be compliant in WebChart and a gap in WorkWell. The two must be
-reconciled before anyone compares the numbers.
+WebChart can show a scanned mammogram, colonoscopy, FOBT or similar document, and a Preventive Care "last
+reported" date, as screening evidence on its own screens. Over FHIR these are mostly untyped
+DocumentReferences that the CMS measures do not read, so a patient whose only evidence is a scanned
+document is a gap in WorkWell. The pilot group needs to hear that before anyone compares the numbers.
 
 ### 4.7 Which result statuses mean a final result?
 
@@ -218,9 +247,52 @@ obtained would count toward a measure if it were read as final. On the trial, FH
 panels with `status: unknown`.
 - Which `obs_status` values does WebChart write, and which are final?
 - How does WebChart's FHIR server map them to `Observation.status`?
+- Blood pressure: which key does WebChart's FHIR layer use to pair a systolic and a diastolic reading into
+  one panel, why do the panels arrive with `status: unknown` (CMS165 accepts only final, amended or
+  corrected), and is `Observation.encounter` set (CMS165 leaves out readings taken in an emergency or
+  inpatient visit)?
+
+### 4.8 Can WorkWell read which measures a practice is enrolled in?
+
+**Status:** discussed with MIE 2026-10-07; not yet asked in writing.
+
+WebChart keeps quality-reporting enrollment per provider, per measure and per period. WorkWell's measure
+list is configured per deployment today, so it would show a gap for a measure the practice is not
+enrolled in.
+- Is the enrollment exposed over FHIR or bulk export, or only inside WebChart?
+- When a provider is enrolled in a new measure, could WebChart notify WorkWell?
+
+### 4.9 Which order and medication data does WebChart's FHIR server carry?
+
+**Status:** raised 2026-10-08; unasked. Feeds #713.
+
+- `DeviceRequest` is not in the trial's CapabilityStatement. Where do device orders (walkers,
+  wheelchairs, oxygen) live? Four measures read them for the frailty exclusion.
+- Is `_include=MedicationRequest:medication` supported? Without it, every referenced Medication is a
+  separate read.
+- How are a medication order's `status` and `intent` filled, and does it carry a dosage or days' supply?
+  The measures' active-medication logic needs them.
+
+### 4.10 Can WebChart score the Cypress test patients, and share its results?
+
+**Status:** discussed with MIE 2026-10-07; unanswered.
+
+WorkWell's agreement with the 2027 Cypress decks is measured patient by patient. WebChart's own results on
+the same patients would show in advance where the two systems' numbers will differ, and why.
+
+### 4.11 Does Create-a-Container restart an exited process, and can it health-check over HTTP?
+
+**Status:** raised 2026-09-22 in #663, and asked there; unanswered.
+
+Part B of #663 (exiting on a stall, so the platform restarts the worker) is safe only if the platform
+restarts an exited process. Without that, exiting would leave Maui down until the next self-heal.
 
 ---
 
 ## 5. Answered
 
-*(Nothing yet. Move an entry here with its answer and the date it was given.)*
+### 2.3 Are 837/835 claims files in scope?
+
+**Raised:** 2026-09. **Answered 2026-09-09:** the ACO asked for the 837/835 files, and the practice will
+export them from its practice-management system. WorkWell is not in that path and does not read claims
+files.

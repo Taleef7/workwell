@@ -81,7 +81,7 @@ What happens, in order:
 4. **The batch produces work, not just numbers.** Every evaluation persists the verdict *and the
    value of every rule that led to it*; a non-compliant result opens (or refreshes — idempotently,
    never duplicates) a case in a worklist, and a now-compliant result resolves it. Every state
-   change should write an audit event; that is not yet true everywhere (#598, open; see
+   change should write an audit event; that is not yet true everywhere (see
    [`DATA_MODEL_CONTRACTS.md`](../DATA_MODEL_CONTRACTS.md) §4).
 5. **Results surface through WorkWell's interface today.** A quality manager reads dashboards,
    pass rates and trends; a coordinator works the case list — either **by gap** (`/cases`, one row
@@ -189,8 +189,8 @@ sequenceDiagram
   MGR->>WW: population dashboards, already accumulated
 ```
 
-Solid arrows are built on WorkWell's side only: WebChart has no CDS Hooks client (checked
-2026-10-02), so nothing fires the hook today. The dashed one at the bottom is step 2, the piece that
+Solid arrows are built on WorkWell's side only: nothing in WebChart calls the service today (no client
+that could was found on 2026-10-02), so nothing fires the hook. The dashed one at the bottom is step 2, the piece that
 would make a card reflect *this* visit rather than the last completed run.
 
 What happens, in order:
@@ -260,7 +260,7 @@ answer is **traceable to the measure's logic** (CMS's FHIR draft, where routed),
 | **Follow-up offered as an order the clinician accepts** | **Built** — a card `suggestion` carrying a draft `ServiceRequest`, so nothing is written by WorkWell. Only for order codes with an APPROVED terminology mapping, which today excludes cms122/cms125 |
 | **Did anyone act on the finding** | **Built** — the CDS Hooks feedback endpoint, audited |
 | Evaluating data supplied on the request | Not built — this is step 2, and `prefetch` is where it would go. WorkWell declares none, because it evaluates none |
-| WebChart pushing an encounter as it happens | Not built — WebChart has no CDS Hooks client (checked 2026-10-02); how it could call the cards is an ask to MIE |
+| WebChart pushing an encounter as it happens | Not built — nothing in WebChart calls the cards today (checked 2026-10-02); whether and how it could is an ask to MIE |
 | Quality rendered inside WebChart's own UI | Not built — cards are structured for a client to draw; nothing draws them today |
 | Tasks and documents written back into WebChart | Not built — a suggestion proposes an order; there is no task or document write path |
 | Send/receive reconciliation of encounters | Not built — card feedback answers "was it acted on", not "did every encounter arrive" |
@@ -285,7 +285,7 @@ for free, since a proposed order travels as data the EHR performs rather than as
 would need credentials for.
 
 What the standard does **not** settle: how WebChart would call the service, and how it would
-authenticate. WebChart has no CDS Hooks client (checked 2026-10-02), so a client in its new UI
+authenticate. No WebChart client that could call it was found (checked 2026-10-02), so a client in its new UI
 or a chart-tab app launch is an ask to MIE. CDS Hooks defines its own signed-JWT profile which forbids symmetric algorithms, so
 WorkWell's bearer token is not it — the gap is named in [`CDS_HOOKS.md`](../CDS_HOOKS.md) rather than
 papered over, and it reduces to two things to ask for: an issuer and a JWKS URL.

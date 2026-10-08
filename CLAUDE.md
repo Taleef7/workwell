@@ -31,7 +31,7 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
   supplies or replaces a code (an absent field stays absent), and the synthetic corpus holds no fact dated
   after its as-of. WebChart ingest's derivations from real rows (us-core-sex from gender, the mammogram
   Observation from its Procedure) are mappings, not exceptions.
-- Every state change writes an `audit_event` — the rule, **not yet everywhere true (#598, open)**. Write new code **audit-first** (the event before the mutation). Some paths are still mutate-first: run-boundary ones by design, outreach and the identity links pending owner decisions — `DATA_MODEL_CONTRACTS` §4 lists them. #598 stays open until the cross-store `applyCaseAction` primitive exists.
+- Every state change writes an `audit_event` — the rule, **not yet everywhere true**. Write new code **audit-first** (the event before the mutation). Some paths are still mutate-first: run-boundary ones by design, outreach and the identity links pending owner decisions — `DATA_MODEL_CONTRACTS` §4 lists them. The cross-store `applyCaseAction` primitive (for case actions and run-created transitions) does not exist, and no open issue tracks it (#598 was closed by a PR keyword on 2026-09-21).
 - No silent scope changes; if a plan's stop condition triggers, record the fallback in JOURNAL.md
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
 

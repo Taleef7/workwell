@@ -78,7 +78,7 @@ shape, so nothing downstream knows which answered. [Chapters 3](03-compiler-and-
 **Stage 4 — after the answer.** The verdict is saved together with the value of every rule the
 measure evaluated — the working, not just the conclusion. The person's case is opened, updated or
 closed under a key that cannot duplicate. The rule is that every real state change writes an
-append-only audit row; it is not yet true on every path (#598).
+append-only audit row; it is not yet true on every path (DATA_MODEL_CONTRACTS §4).
 Monthly numerator/denominator figures roll up at the end. [Chapter 6](06-data-and-databases.md).
 
 **Stage 5 — Postgres.** Twenty-two tables of results and paperwork. No measure logic lives in the

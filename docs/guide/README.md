@@ -114,7 +114,7 @@ flowchart TB
    verdict plus the value of every rule evaluated, never just the conclusion. The case is upserted
    under a key that cannot duplicate — an operator's in-progress status is preserved, a
    human-closed case is never reopened by a machine. A re-confirmation that changed nothing writes
-   no audit row; everything else writes an append-only `audit_events` row (the rule; not yet true on every path, #598). Older
+   no audit row; everything else writes an append-only `audit_events` row (the rule; not yet true on every path, DATA_MODEL_CONTRACTS §4). Older
    open cycles for the same person and measure are closed as rolled over, the run finishes, and the
    monthly figures roll up last, once the run is already finished and structurally unable to fail
    it.

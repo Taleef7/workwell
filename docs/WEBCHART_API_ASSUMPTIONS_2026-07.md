@@ -67,8 +67,8 @@ WebChart EHR 8.4, release RC202509. Checked with WorkWell's registered backend c
 browser UI, docs.webchartnow.com and MIE's dev database. Synthetic data; a practice's configuration may
 differ. Open asks that follow from these are in `OPEN_QUESTIONS.md` §4.
 
-- **No CDS Hooks client.** No setting, table or documentation mentions one, so nothing in WebChart can call
-  WorkWell's CDS service today (`OPEN_QUESTIONS.md` §4.1).
+- **No CDS Hooks client that could call WorkWell.** No setting, table or documentation mentions one, so
+  nothing in WebChart calls WorkWell's CDS service today (`OPEN_QUESTIONS.md` §4.1).
 - **Bulk export works per partition.**
   - `Group/{id}/$export` returns 202 → poll → ndjson, and needs the access token.
   - The Groups are WebChart record partitions ("Test Patients", "Provider", "Insurance"…), not provider panels.
@@ -76,6 +76,8 @@ differ. Open asks that follow from these are in `OPEN_QUESTIONS.md` §4.
   - `_since` is honoured; `_type` is ignored (other types come back too).
   - `Patient/$export` returns 404; system-level `$export` returns 400.
 - **Not in FHIR:** Appointment, Slot, Schedule, Task, Communication. Searches return 400 and reads 404.
+  DeviceRequest is not in the CapabilityStatement either (checked 2026-10-08), and MedicationRequest declares
+  no `searchInclude`.
 - **Writes:** create/update only on Patient, Condition and Claim. Everything else is read-only.
 - **The PCP is sparse.** `Patient.generalPractitioner` is on 3 of 36 patients, matching a CareTeam "Attending
   Physician". In the schema a patient's providers are `user_patients` roles. "Primary Care Physician" (role

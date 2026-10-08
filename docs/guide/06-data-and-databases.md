@@ -42,7 +42,7 @@ the mechanics, [chapter 5](05-fhir.md) the mapping. The app consumes it through 
 **3. A live WebChart FHIR server.** Auth is SMART Backend Services — a signed JWT assertion, no
 static API key — with paged `Patient` searches and per-resource `?patient=` composition, because
 the real server exposes no `$everything` operation. The `teatea` trial tenant is registered and
-live. The server quirks found there (400s on `_count`, 403s on a bare `/Patient`, no `$export`,
+live. The server quirks found there (400s on `_count`, 403s on a bare `/Patient`, bulk export only per partition Group,
 blood-pressure panels with `status=unknown`) are exactly the class of thing only a real server
 teaches you.
 
@@ -111,7 +111,7 @@ HTTP.
 | `outcomes` | One row per person, measure and run: verdict plus `evidence_json` | after each evaluation |
 | `cases` | The workflow layer, keyed so it cannot duplicate | the upsert after each outcome |
 | `case_actions` | Operator actions: outreach, assign, escalate, rerun | route handlers |
-| `audit_events` | The append-only ledger. The rule is every state change; not yet true on every path (#598) | everywhere state changes |
+| `audit_events` | The append-only ledger. The rule is every state change; not yet true on every path (DATA_MODEL_CONTRACTS §4) | everywhere state changes |
 | `measures` | The authoring catalog (63 measures; 14 runnable on TWH, 6 on Maui) | the Studio |
 | `measure_versions` | Per-version spec JSON, CQL text, compile status, test fixtures | the Studio |
 | `value_sets` | Terminology: OID, canonical URL, codes, expansion hash | value-set import / VSAC |
