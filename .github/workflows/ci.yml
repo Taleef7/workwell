@@ -52,6 +52,10 @@ jobs:
       # decision between the two is invisible to PR CI unless it is tested here.
       - name: The self-heal restarts in place before it recreates
         run: bash .github/scripts/mieweb-restart-first.test.sh
+      # The promotion gate (#768): `maui-latest` moves only to an image whose new build answers /health
+      # with the routing its build args name. Run only after merge, so tested here like the rest.
+      - name: The recovery tag moves only to an image that serves its routing
+        run: bash .github/scripts/verify-routing-health.test.sh
       # Deploy workflows only RUN on push to main — i.e. after merge — so a shell syntax error in one is
       # invisible to every PR check. PR-9c put an apostrophe inside a single-quoted jq program and turned
       # the production deploy step into a parse error; nothing before merge could see it (#356).
@@ -850,6 +854,8 @@ jobs:
           # official-flip-config.test.ts fails if either list differs from what that workflow ships.
           WORKWELL_OFFICIAL_MEASURES: ${{ env.ROUTED_MEASURES }}
           WORKWELL_DERIVED_MEASURES: ${{ env.ROUTED_TRANSLATIONS }}
+          # So the promotion gate below can recognise this build on /health, as the deploy's image does.
+          WORKWELL_BUILD_SHA: ${{ github.sha }}
         run: |
           nohup pnpm dev > ../backend-maui.log 2>&1 &
           for i in $(seq 1 60); do
@@ -923,6 +929,17 @@ jobs:
             echo "::error::the router refuses the routed configuration, so every evaluating route answers 500"
             exit 1
           fi
+      # The deploy's promotion gate (#768), run against this backend: /health must name the routing the
+      # sandbox ships and report no routing problem, or `maui-latest` would never move after a merge.
+      - name: The promotion gate passes on the routed configuration
+        env:
+          HEALTH_URL: http://localhost:8080/health
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_OFFICIAL: ${{ env.ROUTED_MEASURES }}
+          EXPECTED_DERIVED: ${{ env.ROUTED_TRANSLATIONS }}
+          ROUTING_HEALTH_ATTEMPTS: "6"
+          ROUTING_HEALTH_DELAY_SECONDS: "5"
+        run: bash .github/scripts/verify-routing-health.sh
       - name: Build and start the frontend in patient mode
         working-directory: frontend
         env:
