@@ -76,6 +76,8 @@ differ. Open asks that follow from these are in `OPEN_QUESTIONS.md` §4.
   - `_since` is honoured; `_type` is ignored (other types come back too).
   - `Patient/$export` returns 404; system-level `$export` returns 400.
 - **Not in FHIR:** Appointment, Slot, Schedule, Task, Communication. Searches return 400 and reads 404.
+  DeviceRequest is not in the CapabilityStatement either (checked 2026-10-08), and MedicationRequest declares
+  no `searchInclude`.
 - **Writes:** create/update only on Patient, Condition and Claim. Everything else is read-only.
 - **The PCP is sparse.** `Patient.generalPractitioner` is on 3 of 36 patients, matching a CareTeam "Attending
   Physician". In the schema a patient's providers are `user_patients` roles. "Primary Care Physician" (role

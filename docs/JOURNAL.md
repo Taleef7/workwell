@@ -7,8 +7,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-08
 
-- **#767 is proven live.** Every weekday nightly since its deploy completed on Maui. Today's run evaluated
-  120,000 patient-measure pairs with 0 evaluation errors, so the router builds with the translation set.
+- **#767 is deployed and the nightlies are unaffected.** Every weekday nightly since its deploy completed on
+  Maui. Today's run evaluated 120,000 patient-measure pairs with 0 evaluation errors, so the router builds
+  with the translation set; the translation itself scores only 2027 periods and has not run live.
 - **The docs say what is true after #767.**
   - The 2027 wording now says WorkWell translates, CMS137's translation is routed, and the rest warn.
   - The conformance matrix: Maui routes all six measures, plus a translation row.
@@ -19,9 +20,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - "No CDS Hooks client" is narrowed to what we checked.
   - Bulk export works per partition.
   - OPEN_QUESTIONS: asked dates added, two entries answered on 09-09, seven new questions.
-- **The order changed** (a scope change from the 10-02 cut line and the 10-07 order): versioned identity
-  (#769) → #768 → data coverage → #713 → the CMS130 and CMS125 translations → CMS165 blood-pressure
-  pairing.
+- **The order of the next work** (a scope change, recorded here): versioned identity (#769) → #768 →
+  data coverage → #713 → the CMS130 and CMS125 translations → CMS165 blood-pressure pairing.
   - The translations moved ahead of CMS165: they must be live for the 2027-01-01 nightly, and CMS165's
     pairing waits on rule edits and a new dependency.
   - Live cards are paused until MIE says how a WebChart client would call them.

@@ -111,7 +111,7 @@ HTTP.
 | `outcomes` | One row per person, measure and run: verdict plus `evidence_json` | after each evaluation |
 | `cases` | The workflow layer, keyed so it cannot duplicate | the upsert after each outcome |
 | `case_actions` | Operator actions: outreach, assign, escalate, rerun | route handlers |
-| `audit_events` | The append-only ledger. The rule is every state change; not yet true on every path (#598) | everywhere state changes |
+| `audit_events` | The append-only ledger. The rule is every state change; not yet true on every path (DATA_MODEL_CONTRACTS §4) | everywhere state changes |
 | `measures` | The authoring catalog (63 measures; 14 runnable on TWH, 6 on Maui) | the Studio |
 | `measure_versions` | Per-version spec JSON, CQL text, compile status, test fixtures | the Studio |
 | `value_sets` | Terminology: OID, canonical URL, codes, expansion hash | value-set import / VSAC |

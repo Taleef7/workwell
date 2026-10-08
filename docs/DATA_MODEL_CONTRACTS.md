@@ -62,9 +62,9 @@ one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — ac
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
 - **The sweep reports 64 hits across 20 files (2026-10-08); check the count, not the labels.** The six
-added since 2026-10-02 are all in `rerunToVerify` and are a matcher artifact: #763 removed a local
-`const … = (` the matcher read as a function start, so that function's earlier awaits now show; the
-code around the audit is unchanged. The files
+added since 2026-10-02 are all in `rerunToVerify`: #763 removed a local `const … = (` the matcher read as
+a function start, so that function's earlier run writes now show against its `CASE_RERUN_FAILED` audit.
+The code is unchanged; the old count was the undercount. The files
 above account for 10; the other 10 are not violations: `panel-assignment` (mapping before consequences),
 `segments` and `outcome-compaction` (matcher artifacts / the ADR-073 d4 completion event),
 `subject-lists` (audit in `beforeComplete`), `evidence-service`, `audit-packet`, `materialize-run`,
@@ -72,7 +72,8 @@ above account for 10; the other 10 are not violations: `panel-assignment` (mappi
 `store-contract` (the test that drives them).
 - **Missing primitive:** no cross-store `applyCaseAction({ patch, action, audit })` (`CaseEventStore` +
 `CaseStore`), and no open issue tracks it (#598 was closed by a PR keyword on 2026-09-21; its remainder
-went to #614, closed into the milestone). Until it exists, do not rely on the ledger being complete for
+was listed in #614, which was closed on 2026-09-23 as superseded by the milestone, and no milestone issue
+carries the primitive). Until it exists, do not rely on the ledger being complete for
 run-created transitions; a reconciliation job is no substitute.
 
 ### The work list is read two ways; both must agree (ADR-084)

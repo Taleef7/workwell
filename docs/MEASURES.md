@@ -44,9 +44,10 @@ banked (2026-09-07):** `flip-gate --measure cms137 --subjects all` over all 20,0
 both rates alive (numerators 231 and 81) and the effectivePeriod covering the measured year — evidence
 FOR the flip on the full roster, not a 2,000-subject sample
 (`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`).
-Its flip landed with the others on 2026-09-08 (ADR-078); it is un-routed by the same workflow edit if the
-final rule removes Quality ID 305. For 2027, Maui scores it with WorkWell's translation of CMS137v15
-(ww-2027.1, #767), never under CMS's measure identity.
+Its flip landed with the others on 2026-09-08 (ADR-078); it is un-routed, if the final rule removes Quality
+ID 305, by removing it from both `WORKWELL_OFFICIAL_MEASURES` and `WORKWELL_DERIVED_MEASURES` (DEPLOY.md,
+"Turning a translation on or off"). For 2027, Maui scores it with WorkWell's translation of CMS137v15
+(ww-2027.1, #767), never under a CMS eCQM id.
 
 **CMS2's verification debt is paid (2026-09-07).** Its seven cross-engine disagreements, open and
 unexplained since 2026-08-04, are proven to one cause: the Java engine takes a medication order's start

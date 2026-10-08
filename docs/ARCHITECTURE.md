@@ -211,7 +211,7 @@ Operators assign (single or `POST /api/cases/bulk-assign`), escalate, send outre
 upload evidence, and rerun-to-verify. A rerun closes the case only on COMPLIANT or EXCLUDED.
 
 ### 5.6 Actions -> Audit
-State changes write `audit_events`. That is the rule, and it is not yet true everywhere (#598); the
+State changes write `audit_events`. That is the rule, and it is not yet true everywhere (DATA_MODEL_CONTRACTS §4); the
 exceptions are listed in `DATA_MODEL_CONTRACTS.md` §4. New code audits before it mutates.
 `recordCaseEvent` writes the action row and the audit row in one transaction before the case patch.
 Evidence downloads write `EVIDENCE_DOWNLOADED`.

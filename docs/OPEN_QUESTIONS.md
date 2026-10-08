@@ -14,13 +14,23 @@
 > already answered. This file exists because an unanswered question with no home decays silently —
 > every entry below had been raised at least once, some three times, with no record of an answer.
 
-**As of 2026-10-08.** Twenty open; two answered (§5).
+**As of 2026-10-08.** Twenty-one open; one answered (§5).
 
 ---
 
 ## 1. For the pilot group
 
-*(1.1 is answered; see §5.)*
+### 1.1 Does WorkWell serve the separate MIPS group submission?
+
+**Raised:** twice (2026-08, 2026-09). **Status:** answered in part 2026-09-09: from 2027 the practice
+participates as a MIPS APM, its quality is reported at the ACO level through APP, and practice-level
+reporting is optional. Still open: if the practice chooses to report at practice level, does it expect
+WorkWell to serve that submission?
+
+The practice's group includes clinicians outside the ACO-attributed population (hospitalists and
+radiologists), so a practice-level submission would cover different people from the ACO's. WorkWell is
+designed around a single attributed population; a second one changes the measure catalog, the
+attribution model and the export surface at once.
 
 ### 1.2 Which health plan, and can we have its metric list?
 
@@ -92,8 +102,9 @@ Two halves, and the second is ours to build once the first arrives:
 
 ### 2.2 The ACO's own structure — which track, and who is benchmarked against whom
 
-**Raised:** 2026-09. **Status:** partly answered 2026-09-09: the practice joins MSSP Track A for 2027,
-alongside another member group. Still unknown: the benchmark, and the level at which performance is
+**Raised:** 2026-09. **Status:** partly answered 2026-09-09: the pilot group was described as entering
+MSSP for 2027 (the track was named as "A"; to confirm in writing, and dependent on the CY2027 final
+rule). Still unknown: the track as MSSP names it, the benchmark, and the level at which performance is
 compared.
 
 `ROADMAP_2026-08-30.md` §7.17 records this as *ask before building anything that assumes a single
@@ -110,7 +121,8 @@ currently knows what the comparison set is.
 **Raised:** 2026-10-08. **Status:** unasked.
 
 The CY2027 proposed rule would remove Quality ID 305 (CMS137) from APP Plus, and the final rule is
-expected around November. WorkWell already scores CMS137 for 2027 with its own translation (#767). If
+expected around November. WorkWell is set up to score CMS137's 2027 periods with its own translation
+(routed on Maui, #767). If
 the ACO does not want it whatever the rule says, it should come off the pilot's catalog rather than sit
 on every screen.
 
@@ -156,8 +168,8 @@ should show it is a separate call.
 
 4.1–4.7 were raised 2026-10-02 from a check of the teatea trial, the docs and the dev database (the facts
 are in `WEBCHART_API_ASSUMPTIONS_2026-07.md`, "Verified on the teatea trial"). 4.1, 4.2 and 4.6 were put
-to MIE on 2026-10-02, and 4.4 and 4.5 in part; 4.3 and 4.7 have not been asked. 4.8–4.11 were raised
-2026-10-08.
+to MIE on 2026-10-02, and 4.4 and 4.5 in part; 4.3 and 4.7 have not been asked. 4.8–4.10 were written
+down 2026-10-08; 4.11 comes from #663.
 
 ### 4.1 Can WebChart call WorkWell at the point of care?
 
@@ -242,7 +254,7 @@ panels with `status: unknown`.
 
 ### 4.8 Can WorkWell read which measures a practice is enrolled in?
 
-**Status:** raised 2026-10-08; unasked.
+**Status:** discussed with MIE 2026-10-07; not yet asked in writing.
 
 WebChart keeps quality-reporting enrollment per provider, per measure and per period. WorkWell's measure
 list is configured per deployment today, so it would show a gap for a measure the practice is not
@@ -261,16 +273,16 @@ enrolled in.
 - How are a medication order's `status` and `intent` filled, and does it carry a dosage or days' supply?
   The measures' active-medication logic needs them.
 
-### 4.10 What does WebChart calculate for the Cypress test patients?
+### 4.10 Can WebChart score the Cypress test patients, and share its results?
 
-**Status:** raised 2026-10-08; unasked.
+**Status:** discussed with MIE 2026-10-07; unanswered.
 
 WorkWell's agreement with the 2027 Cypress decks is measured patient by patient. WebChart's own results on
-the same patients are the only way to see in advance where the two systems' numbers will differ, and why.
+the same patients would show in advance where the two systems' numbers will differ, and why.
 
 ### 4.11 Does Create-a-Container restart an exited process, and can it health-check over HTTP?
 
-**Status:** raised 2026-09-22 in #663; unasked as a written question.
+**Status:** raised 2026-09-22 in #663, and asked there; unanswered.
 
 Part B of #663 (exiting on a stall, so the platform restarts the worker) is safe only if the platform
 restarts an exited process. Without that, exiting would leave Maui down until the next self-heal.
@@ -279,15 +291,8 @@ restarts an exited process. Without that, exiting would leave Maui down until th
 
 ## 5. Answered
 
-### 1.1 Does WorkWell serve the separate MIPS group submission?
-
-**Raised:** twice (2026-08, 2026-09). **Answered 2026-09-09** by the ACO: from 2027 the practice
-participates as a MIPS APM, its quality is reported at the ACO level through APP, and practice-level
-reporting is optional. WorkWell's single attributed population fits that; nothing more is built for a
-separate group submission unless the practice decides to report one.
-
 ### 2.3 Are 837/835 claims files in scope?
 
-**Raised:** 2026-09. **Answered 2026-09-09:** the ACO asked the practice for its 837/835 files directly,
-and the practice will send them from its practice-management system. WorkWell is not in that path and
-does not read claims files.
+**Raised:** 2026-09. **Answered 2026-09-09:** the ACO asked for the 837/835 files, and the practice will
+export them from its practice-management system. WorkWell is not in that path and does not read claims
+files.
