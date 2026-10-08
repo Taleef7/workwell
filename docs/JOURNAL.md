@@ -5,6 +5,30 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-08
+
+- **#767 is proven live.** Every weekday nightly since its deploy completed on Maui. Today's run evaluated
+  120,000 patient-measure pairs with 0 evaluation errors, so the router builds with the translation set.
+- **The docs say what is true after #767.**
+  - The 2027 wording now says WorkWell translates, CMS137's translation is routed, and the rest warn.
+  - The conformance matrix: Maui routes all six measures, plus a translation row.
+  - Stale #598 lines: it was closed by a PR keyword, but `applyCaseAction` still does not exist and is
+    untracked.
+  - The audit sweep count is 64; the six new hits are a matcher artifact.
+  - `critical` is described as the highest urgency, not "must not proceed".
+  - "No CDS Hooks client" is narrowed to what we checked.
+  - Bulk export works per partition.
+  - OPEN_QUESTIONS: asked dates added, two entries answered on 09-09, seven new questions.
+- **The order changed** (a scope change from the 10-02 cut line and the 10-07 order): versioned identity
+  (#769) → #768 → data coverage → #713 → the CMS130 and CMS125 translations → CMS165 blood-pressure
+  pairing.
+  - The translations moved ahead of CMS165: they must be live for the 2027-01-01 nightly, and CMS165's
+    pairing waits on rule edits and a new dependency.
+  - Live cards are paused until MIE says how a WebChart client would call them.
+  - No 2027 run on live Maui: it would close and reopen every 2026 case. The 2027 label is proven in CI
+    (#654).
+- Next: #769.
+
 ## 2026-10-05
 
 - **The first translation, CMS137v15 for 2027, is built, proven and on for Maui (C3a).** CMS's CMS137FHIR

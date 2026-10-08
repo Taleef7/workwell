@@ -42,7 +42,7 @@ the mechanics, [chapter 5](05-fhir.md) the mapping. The app consumes it through 
 **3. A live WebChart FHIR server.** Auth is SMART Backend Services — a signed JWT assertion, no
 static API key — with paged `Patient` searches and per-resource `?patient=` composition, because
 the real server exposes no `$everything` operation. The `teatea` trial tenant is registered and
-live. The server quirks found there (400s on `_count`, 403s on a bare `/Patient`, no `$export`,
+live. The server quirks found there (400s on `_count`, 403s on a bare `/Patient`, bulk export only per partition Group,
 blood-pressure panels with `status=unknown`) are exactly the class of thing only a real server
 teaches you.
 

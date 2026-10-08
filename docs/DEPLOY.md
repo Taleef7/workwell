@@ -395,7 +395,8 @@ us-east-1, 0.25–2 CU), `staging-*` tags, scheduler off, no self-heal.
   base64-encodes it. teatea 403s a bare `GET /Patient`, so the workflow sets
   `WORKWELL_WEBCHART_PATIENT_SEARCH=birthdate=le9999-12-31`.
 - **Residual gap:** the client detects a truncated fetch (`Bundle.total`) but not a query that
-  under-matches, and no birthdate bound reaches a record with no `birthDate`; teatea has no `$export`.
+  under-matches, and no birthdate bound reaches a record with no `birthDate`; teatea's only bulk export is per
+  partition (`Group/{id}/$export`), and FHIR offers no way to find the Group id.
 - Verify: staging's seam line reads `webchart=on`; TWH and Maui still read `webchart=off`. When the trial
   lapses, live runs fail and the prior population stays authoritative.
 

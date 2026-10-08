@@ -45,7 +45,8 @@ both rates alive (numerators 231 and 81) and the effectivePeriod covering the me
 FOR the flip on the full roster, not a 2,000-subject sample
 (`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`).
 Its flip landed with the others on 2026-09-08 (ADR-078); it is un-routed by the same workflow edit if the
-final rule removes Quality ID 305, and the 2027 pilot year still needs the MM-1d re-vendor.
+final rule removes Quality ID 305. For 2027, Maui scores it with WorkWell's translation of CMS137v15
+(ww-2027.1, #767), never under CMS's measure identity.
 
 **CMS2's verification debt is paid (2026-09-07).** Its seven cross-engine disagreements, open and
 unexplained since 2026-08-04, are proven to one cause: the Java engine takes a medication order's start
@@ -96,10 +97,12 @@ is **362 of 387 across eight measures**, CMS165 deliberately excluded.
 > at ingest, BP status arriving final) is closed. That condition now sits in the PHI readiness gate.
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
-rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027,
-so every such run logs an `effectivePeriod` warning naming both periods until MM-1d lands, and the measure
-page says "Scored with the 2026 FHIR logic; 2027 logic not yet available" beside the rate (the programs
-summary's `logicVintage`, set only for a run that carried official evidence).
+rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027.
+Where a WorkWell translation covers the year (CMS137 on Maui, #767), it scores the run with no warning.
+Otherwise the run logs an `effectivePeriod` warning naming both periods, and the measure page says
+"Scored with the 2026 FHIR logic; 2027 logic not yet available" beside the rate, or "…; <translation>
+applies from the next run" for a run scored before the translation was routed (the programs summary's
+`logicVintage`, set only for a run that carried official evidence).
 
 **What runs, and what the rates are.** The vendored artifacts are CMS's FHIR versions of the measures
 (`CMS125FHIR` v1.0.000 and so on), drafts CMS posted for public comment in January–February 2026 and
@@ -116,9 +119,10 @@ pilot group's reported rates, so on the patient profile every rate screen calls 
 > tag, no `bundles/` directory, and none of the six pilot measures in `input/cql` or
 > `input/resources/measure`. Since our shipping content is authored on **QI-Core 6**, the arrival of
 > PY2027 FHIR content is a **profile migration plus a full MADiE re-gate per measure**, not a refresh —
-> re-sized in `ROADMAP_2026-08-30.md` MM-1d and §7.9. Until then the `effectivePeriod` warning fires
-> through all of 2027, which is the warning doing its job rather than a defect to silence. Check the
-> repository for a release tag before assuming this is still true.
+> re-sized in `ROADMAP_2026-08-30.md` MM-1d and §7.9. Until then, a measure without a WorkWell
+> translation fires the `effectivePeriod` warning through 2027, which is the warning doing its job rather
+> than a defect to silence; CMS137 has one (#767). Check the repository for a release tag before assuming
+> this is still true.
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
 

@@ -90,8 +90,8 @@ A successful invoke is `200` with a `cards` array, per the specification.
 
 ### `indicator` never reaches `critical`
 
-The specification allows `info | warning | critical`, and `critical` means *the user must not proceed*.
-WorkWell is supplementary to WebChart and is not entitled to say that about someone else's encounter, so
+The specification orders `indicator` by urgency: `info` < `warning` < `critical`. WorkWell is supplementary
+to WebChart and does not raise the loudest available signal inside someone else's encounter, so
 `OVERDUE` maps to `warning` and everything else to `info`. This is enforced by the card type, not by
 convention.
 
@@ -220,9 +220,9 @@ eligible for a suggestion — the last of these moves when a terminology mapping
 - **CORS is an exact-origin allowlist and is not relaxed.** A browser-based CDS client (including the public
   sandbox at `sandbox.cds-hooks.org`) needs its origin added to `WORKWELL_CORS_ALLOWED_ORIGINS`. The
   specification requires CORS support but explicitly declines to specify an allowlist rule.
-- **Nothing in WebChart fires this hook today.** WebChart has no CDS Hooks client (checked 2026-10-02 on the
-  teatea trial, in WebChart's docs and in MIE's dev database). How WebChart could call this service, through
-  a client in its new UI or an app launched from a chart tab, is an ask to MIE (`OPEN_QUESTIONS.md` §4.1).
+- **Nothing in WebChart fires this hook today.** A check on 2026-10-02 (the teatea trial, WebChart's docs and
+  MIE's dev database) found no CDS Hooks client that could call this service. Whether and how WebChart could
+  call it, through a client or an app launched from a chart tab, is an ask to MIE (`OPEN_QUESTIONS.md` §4.1).
 - **Conformance is self-graded.** No external CDS Hooks conformance suite exists — the community validator is
   JSON Schemas last touched in 2018, the sandbox is ungraded, and Inferno has no CDS Hooks kit. See
   `docs/STANDARDS_CONFORMANCE.md`.

@@ -67,8 +67,8 @@ WebChart EHR 8.4, release RC202509. Checked with WorkWell's registered backend c
 browser UI, docs.webchartnow.com and MIE's dev database. Synthetic data; a practice's configuration may
 differ. Open asks that follow from these are in `OPEN_QUESTIONS.md` §4.
 
-- **No CDS Hooks client.** No setting, table or documentation mentions one, so nothing in WebChart can call
-  WorkWell's CDS service today (`OPEN_QUESTIONS.md` §4.1).
+- **No CDS Hooks client that could call WorkWell.** No setting, table or documentation mentions one, so
+  nothing in WebChart calls WorkWell's CDS service today (`OPEN_QUESTIONS.md` §4.1).
 - **Bulk export works per partition.**
   - `Group/{id}/$export` returns 202 → poll → ndjson, and needs the access token.
   - The Groups are WebChart record partitions ("Test Patients", "Provider", "Insurance"…), not provider panels.

@@ -157,7 +157,7 @@ sequenceDiagram
     API->>DB: finalize run (COMPLETED / PARTIAL_FAILURE)
 ```
 
-Every state change is meant to write an `audit_event`, but that is not yet true on every path (#598, open): a few write it after the change, best-effort, so a failed write leaves the change without its event. [`docs/DATA_MODEL_CONTRACTS.md`](docs/DATA_MODEL_CONTRACTS.md) §4 lists them. Case upsert is keyed `(employee, measure_version, evaluation_period)`, so a nightly re-run updates rather than duplicates, and never clobbers an operator's in-progress work.
+Every state change is meant to write an `audit_event`, but that is not yet true on every path: a few write it after the change, best-effort, so a failed write leaves the change without its event. [`docs/DATA_MODEL_CONTRACTS.md`](docs/DATA_MODEL_CONTRACTS.md) §4 lists them. Case upsert is keyed `(subject, measure, evaluation_period)`, so a nightly re-run updates rather than duplicates, and never clobbers an operator's in-progress work.
 
 ---
 
@@ -181,7 +181,7 @@ CMS68 is refused at **construction time**, not by convention: it declares `popul
 
 **Maui is a sandbox, not a submission.** The six measures run there over a 20,000-patient generated corpus; running a real measurement year against real data is a later, separately gated decision ([`docs/PRODUCTION_READINESS_2026-07.md`](docs/PRODUCTION_READINESS_2026-07.md)). Two conditions gate the real-data phase, not the sandbox: CMS137 stays only if Quality ID 305 survives the CY2027 final rule, and CMS165 needs blood pressures profile-stamped at ingest.
 
-**Alerting today is WorkWell-screens-only.** The CDS Hooks service is live and follows the CDS Hooks 2.0.1 shapes (self-graded), but WebChart has no CDS Hooks client (checked 2026-10-02), so nothing invokes it yet; cards render the most recent finalized run when asked ([`docs/CDS_HOOKS.md`](docs/CDS_HOOKS.md), [guide ch. 10](docs/guide/10-scenarios.md)).
+**Alerting today is WorkWell-screens-only.** The CDS Hooks service is live and follows the CDS Hooks 2.0.1 shapes (self-graded), but nothing in WebChart calls it yet, and whether a WebChart client can is an open question to MIE; cards render the most recent finalized run when asked ([`docs/CDS_HOOKS.md`](docs/CDS_HOOKS.md), [guide ch. 10](docs/guide/10-scenarios.md)).
 
 ---
 
@@ -281,7 +281,7 @@ The surfaces another system can use, each documented and refusing dishonest answ
 
 | Surface | What it is |
 |---|---|
-| [CDS Hooks 2.0.1](docs/CDS_HOOKS.md) — `GET /cds-services`, invoke, feedback | Care-gap **cards** into a clinician's workflow: summary, plain-English reason, provenance, and a draft-order `suggestion` the clinician accepts — never `systemActions`, never `critical`. WebChart has no CDS Hooks client yet. |
+| [CDS Hooks 2.0.1](docs/CDS_HOOKS.md) — `GET /cds-services`, invoke, feedback | Care-gap **cards** into a clinician's workflow: summary, plain-English reason, provenance, and a draft-order `suggestion` the clinician accepts — never `systemActions`, never `critical`. Nothing in WebChart calls it yet. |
 | [`GET /api/v1/compliance/{subject}/{measure}`](docs/COMPLIANCE_API.md) | One subject, one measure, one stable answer — status, population membership, and `populationsSource` saying where the booleans came from. **404 when no run has covered the subject**, never an empty 200. |
 | `GET /api/v1/openapi.json` · public `/api-docs` | Hand-authored OpenAPI 3.1.1 over the **promised** surface only, guarded by a two-way routed-path test. |
 | [MCP server](docs/MCP.md) | 13 read-only, role-gated tools (`/sse` stream + `/mcp/**` message endpoint) — an AI client reads compliance state; nothing mutates. |
@@ -312,7 +312,7 @@ Full surface in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 **The Maui sandbox, before performance year 2027 starts on 2027-01-01.** The six ACO measures (CMS122, CMS125, CMS2, CMS130, CMS165 and CMS137) run there on CMS's FHIR drafts. The work is the GitHub milestone "Ready for January", and [`docs/JOURNAL.md`](docs/JOURNAL.md) (newest first) is the running log. The owner's locked decisions are in [`docs/LOCKED_DECISIONS.md`](docs/LOCKED_DECISIONS.md).
 
-**2027 logic.** CMS has not published FHIR versions of the 2027 measures. Until 2027 logic exists that passes the 2027 test patients, a 2027 period is scored with the 2026 drafts, and the measure page says so. On the 2027 Cypress test deck (bundle 2026.1.0), the drafts as the live stacks run them agree patient by patient for CMS122 (64/64), CMS125 (155/155), CMS130 (269/269) and CMS137 (36/36, both rates). CMS2 agrees for 375 of 379; its four differences are in the draft's logic, not the import. CMS165 cannot be loaded that way yet, because it reads only profile-tagged blood pressures.
+**2027 logic.** CMS has not published FHIR versions of the 2027 measures, so WorkWell translates them itself, one measure at a time. A translation is labelled as WorkWell's own, never as CMS's measure, and scores only the year it covers. CMS137's (ww-2027.1) is routed on Maui; a measure without one still scores a 2027 period with its 2026 draft, and the measure page says which logic scored a result. On the 2027 Cypress test deck (bundle 2026.1.0), the drafts as the live stacks run them agree patient by patient for CMS122 (64/64), CMS125 (155/155), CMS130 (269/269) and CMS137 (36/36, both rates). CMS2 agrees for 375 of 379; its four differences are in the draft's logic, not the import. CMS165 cannot be loaded that way yet, because it reads only profile-tagged blood pressures.
 
 **Cypress is evidence, not the bar.** Both QRDA Category I and III validate at 0 findings against the HL7 base IG in a local Cypress v7.5.1 ([`CVU_VALIDATION_RUN_2026-08-02.md`](docs/evidence/CVU_VALIDATION_RUN_2026-08-02.md)). A Cypress Calculation Check green was retired as a goal on 2026-08-04: Cypress grades by the QDM measure identity (`CMS125v14`), WorkWell runs the FHIR artifact (`CMS125FHIR`), and relabelling one as the other is forbidden ([`CVU_C2_SUBMISSION_2026-08-03.md`](docs/evidence/CVU_C2_SUBMISSION_2026-08-03.md)). The bar is a named set of FHIR-column checks ([`docs/ROADMAP_2026-08-04.md`](docs/ROADMAP_2026-08-04.md) §4). Among them, MeasureReports validate at 0 base-R4 errors ([`DEQM_VALIDATION_2026-08-04.md`](docs/evidence/DEQM_VALIDATION_2026-08-04.md)), and HAPI's `cqf-fhir-cr`, an engine that is not ours, agrees with ours on 362 of 387 cases across eight measures (the `CROSS_ENGINE_*` reports in [`docs/evidence/`](docs/evidence/), from [`CROSS_ENGINE_2026-08-04.md`](docs/evidence/CROSS_ENGINE_2026-08-04.md) on).
 
