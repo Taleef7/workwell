@@ -165,11 +165,22 @@ export function formatScoringLogic(logic: ScoringLogic): string {
   return `${logic.ecqmId} v${logic.version}${logic.derivedFrom ? ` (from ${logic.derivedFrom})` : ""}`;
 }
 
+/** One logic by itself for a title/aria: the full form plus what it is ("…, a CMS draft" / "…, not a CMS measure"). */
+export function formatScoringLogicTitle(logic: ScoringLogic): string {
+  const full = formatScoringLogic(logic);
+  if (logic.kind === "workwell-translation") return `${full}, not a CMS measure`;
+  return logic.status === "draft" ? `${full}, a CMS draft` : full;
+}
+
 export const MIXED_LOGICS_NOTE = "Scored by more than one logic or measurement period";
 
-/** "Scored by more than one logic or measurement period: CMS137FHIR v1.0.000 (from CMS137v14); …". */
+/**
+ * "Scored by more than one logic or measurement period: CMS137FHIR v1.0.000 (from CMS137v14); …".
+ * The server may say a run was mixed (`scoringConflict`) and serve one logic or none (authored rows
+ * name none): the note stands alone or names what was served, never reads as one logic's result.
+ */
 export function formatMixedLogics(logics: readonly ScoringLogic[]): string {
-  return `${MIXED_LOGICS_NOTE}: ${logics.map(formatScoringLogic).join("; ")}`;
+  return logics.length > 0 ? `${MIXED_LOGICS_NOTE}: ${logics.map(formatScoringLogic).join("; ")}` : MIXED_LOGICS_NOTE;
 }
 
 /**

@@ -135,9 +135,11 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
   describe("names the logic that scored each result, never today's routing (#769)", () => {
     // Routing (identity.executed) names CMS's artifact for both CMS measures. The rows say: cms125 by
     // CMS's artifact, cms137 by the translation. The served version is the authored "2.0.0" an older
-    // server printed beside a CMS-scored row; it must not be shown.
-    const outcome = (over: Record<string, unknown>) => ({ ...mockProfile.measureOutcomes[0]!, measureVersion: "2.0.0", ...over });
-    function withRows(cms125Logic: unknown, cms137Logic: unknown) {
+    // server printed beside a CMS-scored row; it must not be shown beside a row that names its logic.
+    let servedVersion = "2.0.0";
+    const outcome = (over: Record<string, unknown>) => ({ ...mockProfile.measureOutcomes[0]!, measureVersion: servedVersion, ...over });
+    function withRows(cms125Logic: unknown, cms137Logic: unknown, version = "2.0.0") {
+      servedVersion = version;
       get.mockImplementation((url: string) => {
         if (url === "/api/measures") {
           return Promise.resolve([
@@ -197,7 +199,8 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
     });
 
     it("rows that name no logic: the unversioned crosswalk everywhere, though routing names an artifact", async () => {
-      withRows(null, undefined);
+      // The server's shape for an official row that named no artifact: no logic, and no version.
+      withRows(null, undefined, "");
       render(<EmployeeProfilePage />);
       const details125 = await waitFor(() => {
         const row = document.getElementById("measure-cms125");
@@ -209,6 +212,47 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
       expect(within(summaryBar).getByText(`${LABELS.cms137Plain} · Substance Use Treatment — Overdue`, { exact: true })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
       expect(screen.queryByText(/FHIR|2\.0\.0/)).toBeNull();
+    });
+
+    it("a CMS measure's row authored CQL scored (no logic) shows the authored version the server read off it", async () => {
+      // TWH-shaped: a CMS-identified measure the authored library scored; the server serves its version.
+      withRows(null, null, "2.0.0");
+      render(<EmployeeProfilePage />);
+      const details125 = await waitFor(() => {
+        const row = document.getElementById("measure-cms125");
+        expect(row).not.toBeNull();
+        return row!;
+      });
+      expect(await within(details125).findByText(`${LABELS.cms125Plain} · Breast Cancer Screening`, { exact: true })).toBeInTheDocument();
+      expect(within(details125).getByText("2.0.0", { exact: true })).toBeInTheDocument();
+      expect(screen.queryByText(/FHIR/)).toBeNull();
+    });
+
+    // The version beside a row with no logic is the row's own fact: it never waits on, or depends on,
+    // /api/measures (an authored row once lost its version whenever the identities had not loaded).
+    it.each([
+      ["still loading", () => new Promise<never>(() => {})],
+      ["failed", () => Promise.reject(new Error("measures unavailable"))],
+    ])("an authored (TWH) row shows its version while the measure identities are %s", async (_state, measures) => {
+      get.mockImplementation((url: string) => {
+        if (url === "/api/measures") return measures();
+        if (url === "/api/employees/emp-001/profile") {
+          return Promise.resolve({
+            ...mockProfile,
+            measureOutcomes: [{ ...mockProfile.measureOutcomes[1]!, measureVersion: "1.3.0", logic: null }],
+            openCases: [],
+          });
+        }
+        return Promise.resolve([]);
+      });
+      render(<EmployeeProfilePage />);
+      const osha = await waitFor(() => {
+        const row = document.getElementById("measure-audiogram");
+        expect(row).not.toBeNull();
+        return row!;
+      });
+      expect(within(osha).getByText("Annual Audiogram Completed", { exact: true })).toBeInTheDocument();
+      expect(within(osha).getByText("1.3.0", { exact: true })).toBeInTheDocument();
     });
   });
 

@@ -188,15 +188,16 @@ export default function ProgramDetailPage() {
   // "Runs …" line ONLY. Everything that labels the NUMBERS names the logic the run's own evidence names
   // (#769): today's routing never stands in, and neither does the catalog's QDM id or "v1.0" over
   // official counts (§4.3). A run with no official evidence (`measureRate` null: authored CQL scored it)
-  // keeps the catalog's own version and no FHIR artifact, and so do counts that fold in the authored scale
-  // tenant's.
+  // names no FHIR artifact, and neither do counts that fold in the authored scale tenant's; only a measure
+  // with no CMS identity shows the catalog's own version (`shownVersion`).
   const executed = identities[measureId]?.executed;
   const translation = identities[measureId]?.translation;
   // The logics that scored these numbers. Mixed totals (the authored scale tenant's folded in) carry no
-  // single identity; a run scored by more than one logic or measurement period names none in the heading.
+  // single identity; a run scored by more than one logic or measurement period names none in the heading,
+  // including one the server marks mixed (`scoringConflict`) while listing a single logic, or none.
   const scoringLogics = program?.includesAuthoredScaleCounts ? [] : (program?.scoringLogics ?? []);
-  const mixedLogics = scoringLogics.length > 1;
-  const scoredBy = singleScoringLogic(scoringLogics);
+  const mixedLogics = program?.scoringConflict === true || scoringLogics.length > 1;
+  const scoredBy = mixedLogics ? null : singleScoringLogic(scoringLogics);
   const ranOfficial = program?.measureRate != null && !program.includesAuthoredScaleCounts;
   const ran = program?.measureRate?.official;
   // A WorkWell translation scored these numbers: it is named by its own label, and today's CMS artifact
@@ -210,7 +211,18 @@ export default function ProgramDetailPage() {
     : ranTranslation
       ? (ran?.label ?? "WorkWell translation")
       : (ran?.ecqmId ?? undefined);
-  const shownVersion = mixedLogics ? undefined : ranOfficial ? (ran?.version ?? undefined) : program?.version;
+  // The catalog record's version ("v1.0") names the numbers only for a measure with no CMS identity
+  // (`null` once /api/measures has loaded): authored CQL is that record. An officially routed measure
+  // whose winning run carries no official evidence shows no version, and neither does any measure while
+  // its identity is unknown (loading, or the read failed) — never "v1.0" over a CMS measure's numbers.
+  const noCmsIdentity = identities[measureId] === null;
+  const shownVersion = mixedLogics
+    ? undefined
+    : ranOfficial
+      ? (ran?.version ?? undefined)
+      : noCmsIdentity
+        ? program?.version
+        : undefined;
   const versionLine = [shownVersion ? `Version ${shownVersion}` : null, yearLine].filter(Boolean).join(" · ");
   // The label above the name names logic only when it is the logic that scored these numbers. A policy
   // reference that is itself a versioned CMS measure id (CMS125v14) is a measure neither engine ran, so it

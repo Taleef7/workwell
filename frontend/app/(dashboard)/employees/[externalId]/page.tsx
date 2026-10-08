@@ -105,7 +105,7 @@ export default function EmployeeProfilePage() {
   const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManageThisCase);
   // Every result here names the logic that scored it (#769): the full form in Measure Details, the chip
   // form with the full form as its title elsewhere. The simulation is not a result and stays unversioned.
-  const { identities, labelFor: measureLabelFor, compactLabelFor, titleFor } = useMeasureIdentities();
+  const { labelFor: measureLabelFor, compactLabelFor, titleFor } = useMeasureIdentities();
   const isPatientTerm = SUBJECT.singular === 'patient';
 
   // Skeletons on the first load of THIS patient only. A refresh (after Recalculate or any finished run)
@@ -245,16 +245,17 @@ export default function EmployeeProfilePage() {
               className="rounded-lg border border-neutral-200 dark:border-neutral-800 p-4"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                {/* A measure with a CMS identity: the full form of the logic that scored this outcome
-                    carries its version (#769). The version printed beside it was the authored library's
-                    ("2.0.0") over rows CMS's artifact scored, so it is gone. A measure with no CMS
-                    identity (authored, occupational) keeps its own version, as before. */}
+                {/* A row a named logic scored: the full form carries its version (#769), so nothing is
+                    printed beside it. A row with no logic prints the version the server read off the row
+                    itself: the authored library's for authored CQL (TWH, occupational), "" for an official
+                    row that named no artifact. It is the row's fact, so it shows whether or not the
+                    measure identities have loaded. */}
                 <span
                   className="min-w-0 font-medium text-neutral-900 dark:text-neutral-100"
                   title={titleFor(o.measureId, o.measureName, o.logic)}
                 >
                   <span>{measureLabelFor(o.measureId, o.measureName, o.logic)}</span>
-                  {identities[o.measureId] === null && o.measureVersion ? (
+                  {!o.logic && o.measureVersion ? (
                     <>
                       {' '}
                       <span className="text-xs font-normal text-neutral-600 dark:text-neutral-400">{o.measureVersion}</span>

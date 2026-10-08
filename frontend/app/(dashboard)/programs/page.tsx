@@ -61,6 +61,16 @@ type ProgramSummary = {
    * mixed logics or measurement periods) or none (unknown, or an older server) is the unversioned crosswalk.
    */
   scoringLogics?: ScoringLogic[];
+  /**
+   * The run behind the rate mixed logics or measurement periods (authored rows beside official ones
+   * included), whatever `scoringLogics` lists: it may then name one logic, or none.
+   */
+  scoringConflict?: boolean;
+  /**
+   * The counts include the generated scale tenant's, which the AUTHORED engine scored: no one logic's
+   * numbers, so the card names none, whatever `scoringLogics` says.
+   */
+  includesAuthoredScaleCounts?: boolean;
 };
 
 /**
@@ -325,9 +335,12 @@ export default function ProgramsPage() {
             showsRateEstimateNote() ? "rate-estimate-note" : null,
           ].filter(Boolean).join(" ") || undefined;
           // The card names the logic that scored its numbers (#769), in the chip form with the full
-          // form as its title; a run scored by more than one says so under the unversioned label.
-          const logics = program.scoringLogics ?? [];
-          const scoredBy = singleScoringLogic(logics);
+          // form as its title; a run scored by more than one says so under the unversioned label. A run the
+          // server marks mixed may list one logic (or none): it is still mixed, never that logic's result.
+          // Totals that fold in the authored scale tenant's are no one logic's either.
+          const logics = program.includesAuthoredScaleCounts ? [] : (program.scoringLogics ?? []);
+          const mixed = program.scoringConflict === true || logics.length > 1;
+          const scoredBy = mixed ? null : singleScoringLogic(logics);
           const label = compactLabelFor(program.measureId, program.measureName, scoredBy);
           const fullTitle = titleFor(program.measureId, program.measureName, scoredBy);
           const nothingYet = CARD_CHIPS.every(([, , field]) => program[field] === 0);
@@ -345,7 +358,7 @@ export default function ProgramsPage() {
               <div className="flex flex-col gap-2 @md:flex-row @md:items-start @md:justify-between @md:gap-3">
                 <div className="min-w-0">
                   <h3 title={fullTitle} className="text-base font-semibold text-neutral-900 group-hover:text-primary-700 dark:text-neutral-100 dark:group-hover:text-primary-400">{label}</h3>
-                  {logics.length > 1 ? (
+                  {mixed ? (
                     <p data-testid={`card-logics-${program.measureId}`} className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
                       {formatMixedLogics(logics)}
                     </p>
@@ -407,7 +420,7 @@ export default function ProgramsPage() {
                       label={text}
                       tone={tone}
                       href={chipHref(program.measureId, bucket, { siteId, tenant }, mayWorkGaps)}
-                      ariaLabel={`${label}: ${text}`}
+                      ariaLabel={`${fullTitle}: ${text}`}
                     />
                   );
                 })}

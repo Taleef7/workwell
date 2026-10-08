@@ -76,6 +76,11 @@ export type ProgramSummary = {
    * mixed logics or measurement periods) or none (unknown, or an older server) is the unversioned crosswalk.
    */
   scoringLogics?: ScoringLogic[];
+  /**
+   * The run behind the rate mixed logics or measurement periods (authored rows beside official ones
+   * included), whatever `scoringLogics` lists: it may then name one logic, or none.
+   */
+  scoringConflict?: boolean;
 };
 
 export type TopDrivers = {

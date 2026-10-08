@@ -4,7 +4,7 @@
  * year is scored with logic written for another year.
  */
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
@@ -83,11 +83,23 @@ const TRANSLATION = {
   year: "2027",
 };
 
-function mockApi({ executed = true, translation = false, summary = program() }: { executed?: boolean; translation?: boolean; summary?: ReturnType<typeof program> } = {}) {
+function mockApi({
+  executed = true,
+  translation = false,
+  cmsIdentity = true,
+  summary = program(),
+}: { executed?: boolean; translation?: boolean; cmsIdentity?: boolean; summary?: ReturnType<typeof program> } = {}) {
   get.mockReset().mockImplementation((url: string) => {
     if (url === "/api/measures") {
       return Promise.resolve([
-        { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112", ...(executed ? { executed: EXECUTED } : {}), ...(translation ? { translation: TRANSLATION } : {}) } },
+        {
+          id: "cms125",
+          name: "Breast Cancer Screening",
+          // `cmsIdentity: false`: a measure with no CMS identity at all (authored, occupational).
+          identity: cmsIdentity
+            ? { cmsId: "CMS125", mipsQualityId: "112", ...(executed ? { executed: EXECUTED } : {}), ...(translation ? { translation: TRANSLATION } : {}) }
+            : null,
+        },
       ]);
     }
     if (url === "/api/programs") return Promise.resolve([summary]);
@@ -170,13 +182,17 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     render(<ProgramDetailPage />);
     await screen.findByTestId("executed-logic"); // the present-tense routing line may stay
     expect(screen.getByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
-    expect(screen.getByText(/^Version v1\.0/)).toBeInTheDocument();
-    expect(screen.queryByText(/^Version 1\.0\.000/)).toBeNull();
+    // No version line: the catalog's "v1.0" is not what scored a CMS measure's numbers, and the run named
+    // nothing else.
+    expect(screen.queryByText(/^Version /)).toBeNull();
+    expect(screen.queryByText(/Version v1\.0/)).toBeNull();
     expect(screen.queryByText("CMS125FHIR")).toBeNull();
     // Nor with the QDM measure version the catalog cites: authored CQL is not CMS125v14 either.
     expect(screen.queryByTestId("measure-top-label")).toBeNull();
-    // The outcome-by-version row carries the same version as the header.
-    expect(screen.getByRole("cell", { name: "v1.0" })).toBeInTheDocument();
+    // The outcome-by-version row says it does not know, as the header does.
+    const breakdown = screen.getByRole("region", { name: "Outcome breakdown by version table" });
+    expect(within(breakdown).queryByRole("cell", { name: "v1.0" })).toBeNull();
+    expect(within(breakdown).getByRole("cell", { name: "—" })).toBeInTheDocument();
     // Still an estimate, but no claim that CMS's FHIR logic produced it.
     expect(screen.getByText("WorkWell's estimate. WebChart calculates and submits the reported rate.")).toBeInTheDocument();
     expect(screen.queryByText(ESTIMATE)).toBeNull();
@@ -187,7 +203,12 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     mockApi({ summary: program({ includesAuthoredScaleCounts: true }) });
     render(<ProgramDetailPage />);
     await screen.findByTestId("executed-logic");
-    expect(screen.getByText(/^Version v1\.0/)).toBeInTheDocument();
+    // No version at all: not the artifact's, and not the catalog's "v1.0" over a CMS measure's numbers.
+    expect(screen.queryByText(/^Version /)).toBeNull();
+    expect(screen.queryByText(/Version v1\.0/)).toBeNull();
+    const breakdown = screen.getByRole("region", { name: "Outcome breakdown by version table" });
+    expect(within(breakdown).queryByRole("cell", { name: "v1.0" })).toBeNull();
+    expect(within(breakdown).getByRole("cell", { name: "—" })).toBeInTheDocument();
     expect(screen.queryByText("CMS125FHIR")).toBeNull();
     expect(screen.getByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
     // Mixed totals carry no single measure identity: not the artifact, and not the QDM version either.
@@ -206,11 +227,29 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
     expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("OSHA 29 CFR 1910.95");
   });
 
-  it("an authored measure keeps its catalog version and shows no executed-logic line", async () => {
-    mockApi({ executed: false, summary: program({ measureRate: null, scoringLogics: [] }) });
+  it("an authored measure (no CMS identity) keeps its catalog version and shows no executed-logic line", async () => {
+    mockApi({ cmsIdentity: false, summary: program({ measureRate: null, scoringLogics: [], policyRef: "OSHA 29 CFR 1910.95" }) });
     render(<ProgramDetailPage />);
     expect(await screen.findByText(/^Version v1\.0/)).toBeInTheDocument();
+    const breakdown = screen.getByRole("region", { name: "Outcome breakdown by version table" });
+    expect(within(breakdown).getByRole("cell", { name: "v1.0" })).toBeInTheDocument();
     expect(screen.queryByTestId("executed-logic")).toBeNull();
+  });
+
+  it("a run the server marks mixed names no logic as the measure's, though it lists one", async () => {
+    // Authored rows beside CMS's artifact: only the artifact names itself, so one logic is served.
+    mockApi({ summary: program({ scoringConflict: true, scoringLogics: [CMS125_ARTIFACT] }) });
+    render(<ProgramDetailPage />);
+    const heading = await screen.findByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` });
+    expect(heading).toHaveAttribute("title", `${LABELS.cms125Plain} · Breast Cancer Screening`);
+    expect(screen.getByTestId("mixed-logics").textContent).toBe(
+      "Scored by more than one logic or measurement period: CMS125FHIR v1.0.000 (from CMS125v14).",
+    );
+    expect(screen.queryByTestId("measure-top-label")).toBeNull();
+    expect(screen.queryByText(/^Version /)).toBeNull();
+    const breakdown = screen.getByRole("region", { name: "Outcome breakdown by version table" });
+    expect(within(breakdown).queryByRole("cell", { name: "1.0.000" })).toBeNull();
+    expect(within(breakdown).getByRole("cell", { name: "—" })).toBeInTheDocument();
   });
 
   it("says beside the rates that they are WorkWell's estimate, on the patient deployment", async () => {

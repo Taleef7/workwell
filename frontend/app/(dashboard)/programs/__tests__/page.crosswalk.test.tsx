@@ -119,10 +119,13 @@ describe("ProgramsPage crosswalk heading rendering", () => {
       const cms125 = await screen.findByRole("heading", { name: `${LABELS.cms125Short} · Breast Cancer Screening` });
       expect(cms125).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
       expect(screen.getByRole("link", { name: `View ${LABELS.cms125Title} · Breast Cancer Screening detail` })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: `${LABELS.cms125Short} · Breast Cancer Screening: Overdue 2` })).toBeInTheDocument();
+      // The status chips' accessible names carry the full wording, as the title does (never the chip form).
+      expect(screen.getByRole("link", { name: `${LABELS.cms125Title} · Breast Cancer Screening: Overdue 2` })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: `${LABELS.cms125Short} · Breast Cancer Screening: Overdue 2` })).toBeNull();
 
       const cms137 = screen.getByRole("heading", { name: `${LABELS.cms137TranslationShort} · Substance Use Treatment` });
       expect(cms137).toHaveAttribute("title", `${LABELS.cms137TranslationTitle} · Substance Use Treatment`);
+      expect(screen.getByRole("link", { name: `${LABELS.cms137TranslationTitle} · Substance Use Treatment: Overdue 2` })).toBeInTheDocument();
       expect(screen.queryByText(/CMS137FHIR/)).toBeNull();
       // A measure with no CMS identity is unchanged.
       expect(screen.getByRole("heading", { name: "Annual Audiogram Completed" })).toBeInTheDocument();
@@ -143,6 +146,35 @@ describe("ProgramsPage crosswalk heading rendering", () => {
       expect(screen.getByTestId("card-logics-cms137").textContent).toBe(
         "Scored by more than one logic or measurement period: CMS137FHIR v1.0.000 (from CMS137v14); WorkWell translation of CMS137v15 (ww-2027.1)",
       );
+    });
+
+    it("a run the server marks mixed is mixed though it lists one logic: no versioned label, and the line says so", async () => {
+      // Authored rows beside CMS's artifact: the authored rows name no logic, so only one is served.
+      withPrograms([{ ...cms137Program, scoringLogics: [CMS137_ARTIFACT], scoringConflict: true }]);
+      render(<ProgramsPage />);
+      const heading = await screen.findByRole("heading", { name: `${LABELS.cms137Plain} · Substance Use Treatment` });
+      expect(heading).toHaveAttribute("title", `${LABELS.cms137Plain} · Substance Use Treatment`);
+      expect(screen.getByTestId("card-logics-cms137").textContent).toBe(
+        "Scored by more than one logic or measurement period: CMS137FHIR v1.0.000 (from CMS137v14)",
+      );
+      expect(screen.queryByText(LABELS.cms137ArtifactShort, { exact: false })).toBeNull();
+      expect(screen.getByRole("link", { name: `${LABELS.cms137Plain} · Substance Use Treatment: Overdue 2` })).toBeInTheDocument();
+    });
+
+    it("a run the server marks mixed with no logic served says it was mixed, naming none", async () => {
+      withPrograms([{ ...cms137Program, scoringLogics: [], scoringConflict: true }]);
+      render(<ProgramsPage />);
+      expect(await screen.findByRole("heading", { name: `${LABELS.cms137Plain} · Substance Use Treatment` })).toBeInTheDocument();
+      expect(screen.getByTestId("card-logics-cms137").textContent).toBe("Scored by more than one logic or measurement period");
+    });
+
+    it("totals that fold in the authored scale tenant's name no logic, whatever scoringLogics says", async () => {
+      withPrograms([{ ...cmsProgram, scoringLogics: [CMS125_ARTIFACT], includesAuthoredScaleCounts: true }]);
+      render(<ProgramsPage />);
+      const heading = await screen.findByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` });
+      expect(heading).toHaveAttribute("title", `${LABELS.cms125Plain} · Breast Cancer Screening`);
+      expect(screen.queryByText(/CMS125FHIR/)).toBeNull();
+      expect(screen.queryByRole("link", { name: /CMS125FHIR/ })).toBeNull();
     });
   });
 });

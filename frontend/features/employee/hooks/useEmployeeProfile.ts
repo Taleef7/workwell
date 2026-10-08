@@ -6,7 +6,10 @@ export interface MeasureOutcomeSummary {
   measureId: string;
   measureVersionId: string;
   measureName: string;
-  /** Not shown: the measure label carries the version of the logic that scored the row (#769). */
+  /**
+   * The row's own version (#769): the authored library's for authored CQL, "" for an official row that
+   * named no artifact. Shown only when the row has no `logic`; with one, the label carries the version.
+   */
   measureVersion: string;
   /** The logic that scored this outcome (#769); null or absent = the unversioned crosswalk. */
   logic?: ScoringLogic | null;

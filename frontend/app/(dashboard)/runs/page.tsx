@@ -38,6 +38,8 @@ import { RateEstimateNote } from "@/components/rate-estimate-note";
 import {
   formatMeasureLabel,
   formatMixedLogics,
+  formatScoringLogic,
+  formatScoringLogicTitle,
   formatVersionedIdentity,
   type MeasureIdentity,
   type ScoringLogic,
@@ -113,8 +115,14 @@ type Reconciliation = {
    * Per measure, the logics that scored the run's rows, from their own evidence (#769). More than one is
    * a run scored by more than one logic or measurement period; none, authored CQL. Absent: an older server.
    */
-  scoringLogic?: Array<{ measureId: string; logics: ScoringLogic[] }>;
+  scoringLogic?: Array<ScoringLogicEntry>;
 };
+
+/**
+ * `conflict`: the server says the measure's rows mixed logics or measurement periods (authored rows beside
+ * official ones included), whatever `logics` lists — it may then name one, or none.
+ */
+type ScoringLogicEntry = { measureId: string; logics: ScoringLogic[]; conflict?: boolean };
 
 /** The ladder is optional on the page; anything that is not the documented shape renders as absent. */
 function asReconciliation(value: unknown): Reconciliation | null {
@@ -169,20 +177,21 @@ type MeasureOption = {
 /**
  * One line per measure of a run, naming the logic that scored its rows (#769): the full form; the
  * unversioned crosswalk and the list when the rows were scored by more than one logic or measurement
- * period; the name alone for authored CQL.
+ * period (or the server says so); the name alone for authored CQL. A logic is never dropped for want of
+ * the measure's identity: a measure missing from /api/measures (or a failed read) still names its logic.
  */
-function scoringLogicLine(
-  entry: { measureId: string; logics: ScoringLogic[] },
-  measure: MeasureOption | undefined,
-): { text: string; title: string } {
+function scoringLogicLine(entry: ScoringLogicEntry, measure: MeasureOption | undefined): { text: string; title: string } {
   const name = measure?.name ?? entry.measureId;
   const identity = measure?.identity ?? null;
-  if (entry.logics.length > 1) {
+  if (entry.conflict === true || entry.logics.length > 1) {
     const text = `${formatMeasureLabel(identity, name)}: ${formatMixedLogics(entry.logics)}`;
     return { text, title: text };
   }
-  const versioned = formatVersionedIdentity(identity, entry.logics[0] ?? null);
-  return versioned ? { text: `${versioned.full} · ${name}`, title: `${versioned.title} · ${name}` } : { text: name, title: name };
+  const logic = entry.logics[0] ?? null;
+  const versioned = formatVersionedIdentity(identity, logic);
+  if (versioned) return { text: `${versioned.full} · ${name}`, title: `${versioned.title} · ${name}` };
+  if (logic) return { text: `${formatScoringLogic(logic)} · ${name}`, title: `${formatScoringLogicTitle(logic)} · ${name}` };
+  return { text: name, title: name };
 }
 
 type RunInsightResponse = {
