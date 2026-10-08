@@ -12,8 +12,8 @@
 import type { CaseRecord } from "../stores/case-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
-import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
+import { measureVersionOf, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { type ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
@@ -27,7 +27,14 @@ export interface CaseDetail {
   measureId: string;
   measureName: string;
   measureVersionId: string;
+  /** The cited outcome's scoring version (`measureVersionOf`, #769); "" with no outcome, as on the case list. */
   measureVersion: string;
+  /**
+   * The logic that scored the outcome this page shows (#769) — the same cited row as `evidenceJson`, so
+   * the badge and the evidence beneath it cannot name two logics. Null for authored CQL, an errored row
+   * or no row.
+   */
+  logic: ScoringLogic | null;
   evaluationPeriod: string;
   status: string;
   priority: string;
@@ -76,12 +83,6 @@ function outcomeSummaryFor(outcome: string): string {
     default:
       return "Unknown status.";
   }
-}
-
-function measureVersion(measureId: string): string {
-  const lib = MEASURES[measureId]?.library ?? "";
-  const dash = lib.lastIndexOf("-");
-  return dash >= 0 ? lib.slice(dash + 1) : "";
 }
 
 export interface ExprResult {
@@ -205,7 +206,10 @@ export function toCaseDetail(
     measureId: c.measureId,
     measureName: measureDisplayName(c.measureId),
     measureVersionId: c.measureId,
-    measureVersion: measureVersion(c.measureId),
+    // The row's own logic, never the authored library's version for a measure CMS's artifact scores
+    // ("2.0.0" on cms125). No row: "" and null, which is what the case list says for the same case.
+    measureVersion: outcome ? measureVersionOf(c.measureId, outcome.evidence) : "",
+    logic: scoringLogicOf(outcome?.evidence),
     evaluationPeriod: c.evaluationPeriod,
     status: c.status,
     priority: c.priority,

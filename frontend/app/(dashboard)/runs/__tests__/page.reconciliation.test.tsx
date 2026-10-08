@@ -1,6 +1,8 @@
 import React from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CMS125_ARTIFACT, CMS137_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 const get = vi.fn();
 const apiMock = { get, getWithHeaders: vi.fn(async (url: string) => ({ data: await get(url), headers: new Headers() })), post: vi.fn(), downloadBlob: vi.fn() };
@@ -78,5 +80,132 @@ describe("RunsPage reconciliation", () => {
     expect(screen.getByTestId("qrda-not-offered")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "QRDA III (XML)" })).toBeNull();
     expect(screen.getByRole("button", { name: "MeasureReport (FHIR)" })).toBeInTheDocument();
+  });
+});
+
+describe("RunsPage names the logic that scored each measure's rows (#769)", () => {
+  // Routing (identity.executed) names CMS's artifact for every CMS measure; the run's rows say otherwise.
+  const MEASURES = [
+    { id: "cms125", name: "Breast Cancer Screening", version: "v1.0", status: "Active", identity: ROUTED_IDENTITIES.cms125 },
+    { id: "cms137", name: "Substance Use Treatment", version: "v1.0", status: "Active", identity: ROUTED_IDENTITIES.cms137 },
+    { id: "cms122", name: "Diabetes HbA1c", version: "v1.0", status: "Active", identity: { cmsId: "CMS122", mipsQualityId: "001", executed: ROUTED_IDENTITIES.cms125.executed } },
+    { id: "cms130", name: "Colorectal Cancer Screening", version: "v1.0", status: "Active", identity: { cmsId: "CMS130", mipsQualityId: "113", executed: ROUTED_IDENTITIES.cms125.executed } },
+    { id: "audiogram", name: "Annual Audiogram Completed", version: "v1.0", status: "Active", identity: null },
+  ];
+  const CMS130_ARTIFACT = { ...CMS125_ARTIFACT, ecqmId: "CMS130FHIR", derivedFrom: "CMS130v14" };
+  const CMS130_TRANSLATION = { ...CMS137_TRANSLATION, label: "WorkWell translation of CMS130v15", derivedFrom: "CMS130v15" };
+
+  /** `measures`: the /api/measures answer, or an Error for a failed read. */
+  function withScoringLogic(scoringLogic: unknown, measures: unknown[] | Error = MEASURES) {
+    get.mockReset().mockImplementation((url: string) => {
+      if (url === "/api/runs?limit=20") return Promise.resolve([{ ...run, scopeType: "ALL_PROGRAMS", measureName: "All Programs" }]);
+      if (url === "/api/measures") return measures instanceof Error ? Promise.reject(measures) : Promise.resolve(measures);
+      if (url === "/api/runs/run-1") return Promise.resolve({ ...summary, scopeType: "ALL_PROGRAMS", measureName: "All Programs" });
+      if (url === "/api/runs/run-1/reconciliation") return Promise.resolve({ ...reconciliation, official: null, scoringLogic });
+      return Promise.resolve([]);
+    });
+  }
+
+  it("one line per measure: the full form; more than one logic is named as such; authored is the name", async () => {
+    withScoringLogic([
+      { measureId: "audiogram", logics: [] },
+      { measureId: "cms122", logics: [] },
+      { measureId: "cms125", logics: [CMS125_ARTIFACT] },
+      { measureId: "cms130", logics: [CMS130_ARTIFACT, CMS130_TRANSLATION] },
+      { measureId: "cms137", logics: [CMS137_TRANSLATION] },
+    ]);
+    render(<RunsPage />);
+    const block = await screen.findByTestId("run-scoring-logic");
+    await waitFor(() => expect(within(block).getAllByRole("listitem")[2].textContent).toBe(`${LABELS.cms125Full} · Breast Cancer Screening`));
+    const lines = within(block).getAllByRole("listitem");
+    expect(lines.map((li) => li.textContent)).toEqual([
+      "Annual Audiogram Completed",
+      // Routing names an artifact, the rows name none: the unversioned crosswalk.
+      "MIPS 001 · CMS122 · Diabetes HbA1c",
+      `${LABELS.cms125Full} · Breast Cancer Screening`,
+      "MIPS 113 · CMS130 · Colorectal Cancer Screening: Scored by more than one logic or measurement period: CMS130FHIR v1.0.000 (from CMS130v14); WorkWell translation of CMS130v15 (ww-2027.1)",
+      // Routing names CMS137FHIR, the rows name the translation.
+      `${LABELS.cms137TranslationFull} · Substance Use Treatment`,
+    ]);
+    expect(lines[2]).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+    expect(lines[4]).toHaveAttribute("title", `${LABELS.cms137TranslationTitle} · Substance Use Treatment`);
+  });
+
+  it("a measure the server marks mixed is mixed though it lists one logic, or none", async () => {
+    withScoringLogic([
+      // Authored rows beside CMS's artifact: only the artifact names itself.
+      { measureId: "cms137", logics: [CMS137_ARTIFACT], conflict: true },
+      { measureId: "cms122", logics: [], conflict: true },
+    ]);
+    render(<RunsPage />);
+    const block = await screen.findByTestId("run-scoring-logic");
+    await waitFor(() => expect(within(block).getAllByRole("listitem")[0].textContent).toMatch(/^MIPS 305/));
+    const lines = within(block).getAllByRole("listitem");
+    expect(lines.map((li) => li.textContent)).toEqual([
+      "MIPS 305 · CMS137 · Substance Use Treatment: Scored by more than one logic or measurement period: CMS137FHIR v1.0.000 (from CMS137v14)",
+      "MIPS 001 · CMS122 · Diabetes HbA1c: Scored by more than one logic or measurement period",
+    ]);
+    expect(lines[0]).toHaveAttribute("title", lines[0].textContent);
+    expect(within(block).queryByText(new RegExp(`^${LABELS.cms137ArtifactFull}`))).toBeNull();
+  });
+
+  it("a measure missing from /api/measures still names the logic that scored it", async () => {
+    const CMS165_ARTIFACT = { ...CMS125_ARTIFACT, ecqmId: "CMS165FHIR", derivedFrom: "CMS165v14" };
+    withScoringLogic([
+      { measureId: "cms125", logics: [CMS125_ARTIFACT] },
+      { measureId: "cms165", logics: [CMS165_ARTIFACT] },
+    ]);
+    render(<RunsPage />);
+    const block = await screen.findByTestId("run-scoring-logic");
+    await waitFor(() => expect(within(block).getAllByRole("listitem")[0].textContent).toBe(`${LABELS.cms125Full} · Breast Cancer Screening`));
+    const missing = within(block).getAllByRole("listitem")[1];
+    expect(missing.textContent).toBe("CMS165FHIR v1.0.000 (from CMS165v14) · cms165");
+    expect(missing).toHaveAttribute("title", "CMS165FHIR v1.0.000 (from CMS165v14), a CMS draft · cms165");
+  });
+
+  it("a failed /api/measures read still names each measure's logic, never a bare id", async () => {
+    withScoringLogic(
+      [
+        { measureId: "audiogram", logics: [] },
+        { measureId: "cms125", logics: [CMS125_ARTIFACT] },
+        { measureId: "cms137", logics: [CMS137_TRANSLATION] },
+      ],
+      new Error("measures unavailable"),
+    );
+    render(<RunsPage />);
+    const block = await screen.findByTestId("run-scoring-logic");
+    const lines = within(block).getAllByRole("listitem");
+    expect(lines.map((li) => li.textContent)).toEqual([
+      // Authored CQL names no logic: the id is all there is.
+      "audiogram",
+      "CMS125FHIR v1.0.000 (from CMS125v14) · cms125",
+      "WorkWell translation of CMS137v15 (ww-2027.1) · cms137",
+    ]);
+    expect(lines[1]).toHaveAttribute("title", "CMS125FHIR v1.0.000 (from CMS125v14), a CMS draft · cms125");
+    expect(lines[2]).toHaveAttribute("title", "WorkWell translation of CMS137v15 (ww-2027.1), not a CMS measure · cms137");
+  });
+
+  it("an older server that sends no scoringLogic shows no Scored-by list", async () => {
+    withScoringLogic(undefined);
+    render(<RunsPage />);
+    await screen.findByTestId("run-reconciliation");
+    expect(screen.queryByTestId("run-scoring-logic")).toBeNull();
+  });
+
+  it("Run This Measure offers each measure by its unversioned crosswalk, never the catalog's v1.0", async () => {
+    withScoringLogic([]);
+    render(<RunsPage />);
+    await userEvent.click(await screen.findByRole("combobox", { name: "Scope" }));
+    await userEvent.click(screen.getByRole("option", { name: "Measure" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Measure" }));
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    expect(options).toEqual([
+      "Select a measure",
+      "MIPS 112 · CMS125 · Breast Cancer Screening (Active)",
+      "MIPS 305 · CMS137 · Substance Use Treatment (Active)",
+      "MIPS 001 · CMS122 · Diabetes HbA1c (Active)",
+      "MIPS 113 · CMS130 · Colorectal Cancer Screening (Active)",
+      "Annual Audiogram Completed (Active)",
+    ]);
   });
 });

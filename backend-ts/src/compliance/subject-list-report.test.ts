@@ -319,6 +319,13 @@ test("rows of one year scored by two logics refuse the report; an errored row is
   // One logic plus an errored row reports as before.
   const errored = await runReport({ rows: [row("pat-001", translated), row("pat-002", { evaluationError: "CQL engine failure", message: "boom" })] });
   assert.equal(errored.ok, true);
+  // Legacy rows with no digest that name different versions of CMS's artifact are two logics, though
+  // kind, digest and period agree; summing them would label the total with whichever came first.
+  const v1 = { official: { ...cms.official, ecqmId: "122FHIR", version: "1.0.000" } };
+  const v2 = { official: { ...cms.official, ecqmId: "122FHIR", version: "1.1.000" } };
+  const versions = await runReport({ rows: [row("pat-001", v1), row("pat-002", v2)] });
+  assert.equal((versions as unknown as { body: { error: string } }).body.error, "mixed_logic");
+  assert.equal((await runReport({ rows: [row("pat-001", v1), row("pat-002", v1)] })).ok, true, "one version reports");
 });
 
 test("two rows for one subject collapse to the NEWEST, whatever order the store returned them", async () => {
@@ -656,4 +663,83 @@ test("executedLogic names the logic behind each measure's rows: CMS's artifact b
   assert.equal(cell("EVALUATED", "ecqmId"), "");
   assert.equal(cell("MISSING_FROM_RUN", "executedLogic"), "WorkWell translation of CMS122v15", "filled wherever the measure columns are");
   assert.equal(cell("NOT_MATCHED", "executedLogic"), "");
+  // The structured logic rides beside the §6.6 string (#769): the translation by its label and version.
+  assert.deepEqual(report.measures[0]!.logic, {
+    kind: "workwell-translation", label: "WorkWell translation of CMS122v15", version: "ww-2027.1", url: null, derivedFrom: null,
+  });
+});
+
+// ---- #769: one eCQM spelling, and the structured logic --------------------------------------
+
+/** The committed cms122 artifact's digest, so the lineage comes off the evidence. */
+const CMS122_SHA = "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552";
+
+test("the JSON and the CSV serve CMS's id as CMS122FHIR from the stored bare 122FHIR; executedLogic is byte-identical; `logic` names the artifact (#769)", async () => {
+  const cms = {
+    official: {
+      ecqmId: "122FHIR", version: "1.0.000", artifactSha256: CMS122_SHA,
+      populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false },
+      measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+    },
+  };
+  const result = await runReport({
+    members: [
+      { rawIdentifier: "pat-001", subjectId: "pat-001", resolution: "MATCHED" },
+      { rawIdentifier: "pat-003", subjectId: "pat-003", resolution: "MATCHED" },
+    ],
+    rows: [row("pat-001", cms)],
+  });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  const entry = report.measures[0]!;
+  assert.equal(entry.ecqmId, "CMS122FHIR", "the evidence's bare id, in the one served spelling");
+  assert.equal(entry.executedLogic, "CMS122FHIR v1.0.000", "the §6.6 string, unchanged");
+  assert.deepEqual(entry.logic, {
+    kind: "cms-artifact", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14",
+    status: "draft", statusNote: "posted for public comment Jan–Feb 2026",
+  });
+  const headers = reportCsvHeaders("patient");
+  const lines = subjectListReportCsv(report, profile, "patient").split("\r\n").slice(1).map((l) => l.split(","));
+  const cell = (status: string, column: string) => lines.find((l) => l[headers.indexOf("rowStatus")] === status)![headers.indexOf(column)];
+  assert.equal(cell("EVALUATED", "ecqmId"), "CMS122FHIR");
+  assert.equal(cell("MISSING_FROM_RUN", "ecqmId"), "CMS122FHIR");
+  assert.equal(cell("EVALUATED", "executedLogic"), "CMS122FHIR v1.0.000");
+
+  // The CSV spells the id itself, whoever built the entry: a bare id handed straight to it is prefixed.
+  const bare = { ...report, measures: [{ ...entry, ecqmId: "122FHIR" }] };
+  const bareLines = subjectListReportCsv(bare, profile, "patient").split("\r\n").slice(1).map((l) => l.split(","));
+  assert.equal(bareLines.find((l) => l[headers.indexOf("rowStatus")] === "EVALUATED")![headers.indexOf("ecqmId")], "CMS122FHIR");
+});
+
+test("a translation's rows that wrongly carried a CMS id still give no ecqmId anywhere, and `logic` is the translation (#769)", async () => {
+  const stray = {
+    official: {
+      kind: "derived", label: "WorkWell translation of CMS122v15", ecqmId: "122FHIR", version: "ww-2027.1",
+      populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false },
+      measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+    },
+  };
+  const result = await runReport({ rows: [row("pat-001", stray)] });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  assert.equal(report.measures[0]!.ecqmId, null);
+  assert.equal(report.measures[0]!.logic?.kind, "workwell-translation");
+  assert.equal(report.measures[0]!.executedLogic, "WorkWell translation of CMS122v15");
+  assert.doesNotMatch(subjectListReportCsv(report, profile, "patient"), /122FHIR/);
+});
+
+test("an errored row never names the report's logic, even when it kept an official block (#769)", async () => {
+  // An errored row scored nothing; if it came first, reading `logic` off the first identity labelled the
+  // authored rows' counts with the errored row's artifact.
+  const erroredWithBlock = { evaluationError: "CQL engine failure", message: "boom", official: { ecqmId: "122FHIR", version: "1.0.000" } };
+  const result = await runReport({ rows: [row("pat-001", erroredWithBlock), row("pat-002", { expressionResults: [] })] });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  assert.equal(report.measures[0]!.logic, null);
+  assert.equal(report.measures[0]!.ecqmId, null);
+  assert.equal(report.measures[0]!.executedLogic, null);
+});
+
+test("a measure with no run has no logic", async () => {
+  const result = await runReport({ rows: [], runs: [] });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  assert.equal(report.measures[0]!.logic, null);
+  assert.equal(report.measures[0]!.ecqmId, null);
 });

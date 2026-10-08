@@ -766,3 +766,132 @@ test("GET /api/cases accepts a calendar day, with or without the rest of an ISO 
     assert.equal(res?.status, 200, `${good} is a day and must be accepted`);
   }
 });
+
+// ---- #769: every case row and the case page name the logic of the outcome the case CITES ---------
+test("the case list and the case page name each case's cited row's logic, read once per (run, measure) for the PAGE only", async () => {
+  const db = await createSqliteD1(":memory:");
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const logicEnv = { DB: db, BUCKET: createFsBucket(join(tmpdir(), `workwell-cases-logic-${crypto.randomUUID()}`)) };
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE", scopeId: "cms137", triggeredBy: "test", requestedScope: { measureId: "cms137" },
+    measurementPeriodStart: "2027-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z",
+  });
+  const outcomes = new SqliteOutcomeStore(db);
+  const cases = new SqliteCaseStore(db);
+  const translation = { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } };
+  const cms125 = { official: { ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8" } };
+  const fixtures: Array<[string, string, unknown]> = [
+    // The manifest and the routing name CMS137FHIR for cms137; these rows were scored by the translation.
+    ["emp-006", "cms137", translation],
+    ["emp-007", "cms137", translation],
+    ["emp-009", "cms137", translation],
+    ["emp-008", "cms125", cms125],
+    // An official measure's errored row, and TWH's authored audiogram.
+    ["emp-010", "cms122", { evaluationError: "CQL engine failure", message: "boom" }],
+    ["emp-011", "audiogram", { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] }],
+  ];
+  const ids = new Map<string, string>();
+  for (const [subjectId, measureId, evidence] of fixtures) {
+    const period = bucketPeriodForMeasure(measureId, TODAY);
+    await outcomes.recordOutcome({ runId: run.id, subjectId, measureId, evaluationPeriod: period, status: "OVERDUE", evidence });
+    const c = await cases.upsertFromOutcome({ runId: run.id, subjectId, measureId, evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+    ids.set(subjectId, c!.id);
+  }
+  const listOf = async (qs: string) =>
+    (await (await handleCases(new Request(`http://x/api/cases${qs}`), logicEnv as never))!.json()) as Array<{
+      caseId: string; employeeId: string; measureVersion: string; logic: { kind: string; label?: string; ecqmId?: string; version: string } | null;
+    }>;
+
+  const all = new Map((await listOf("?status=open&limit=500")).map((r) => [r.employeeId, r]));
+  assert.equal(all.get("emp-006")!.logic?.kind, "workwell-translation", "the cited row's logic, not routing's CMS137FHIR");
+  assert.equal(all.get("emp-006")!.logic?.label, "WorkWell translation of CMS137v15");
+  assert.equal(all.get("emp-006")!.logic?.ecqmId, undefined, "a translation carries no CMS eCQM id");
+  assert.equal(all.get("emp-006")!.measureVersion, "ww-2027.1");
+  assert.equal(all.get("emp-008")!.logic?.ecqmId, "CMS125FHIR");
+  assert.equal(all.get("emp-008")!.measureVersion, "1.0.000", "not the authored library's 2.0.0");
+  assert.equal(all.get("emp-010")!.logic, null);
+  assert.equal(all.get("emp-010")!.measureVersion, "", "an errored official row names no version — never 2.0.0");
+  assert.equal(all.get("emp-011")!.logic, null);
+  assert.equal(all.get("emp-011")!.measureVersion, "1.0.0", "authored CQL keeps its library version");
+
+  // The case page names the same row.
+  const detailOf = async (subjectId: string) =>
+    (await (await handleCases(new Request(`http://x/api/cases/${ids.get(subjectId)}`), logicEnv as never))!.json()) as { measureVersion: string; logic: { kind: string } | null };
+  assert.equal((await detailOf("emp-006")).logic?.kind, "workwell-translation");
+  assert.equal((await detailOf("emp-006")).measureVersion, "ww-2027.1");
+  assert.equal((await detailOf("emp-010")).measureVersion, "");
+
+  // Counted at the store: ONE read for the page, bounded to the page's subjects — never one per row, and
+  // never the filtered set behind the page — and through the identity-only projection, so no row's
+  // evidence is fetched to name it.
+  const calls: Array<{ runId: string; measureId?: string; subjectIds?: readonly string[] }> = [];
+  const evidenceReads: string[] = [];
+  const original = SqliteOutcomeStore.prototype.listScoringIdentities;
+  const originalRows = SqliteOutcomeStore.prototype.listOutcomes;
+  SqliteOutcomeStore.prototype.listScoringIdentities = function (this: SqliteOutcomeStore, runId: string, opts: Parameters<typeof original>[1]) {
+    calls.push({ runId, measureId: opts.measureId, subjectIds: opts.subjectIds });
+    return original.call(this, runId, opts);
+  } as typeof original;
+  SqliteOutcomeStore.prototype.listOutcomes = function (this: SqliteOutcomeStore, runId: string, opts?: Parameters<typeof originalRows>[1]) {
+    evidenceReads.push(runId);
+    return originalRows.call(this, runId, opts);
+  } as typeof originalRows;
+  try {
+    const page = await listOf("?status=open&measureId=cms137&limit=2");
+    assert.equal(page.length, 2);
+    assert.ok(page.every((r) => r.logic?.kind === "workwell-translation"));
+    assert.equal(calls.length, 1, "one read for the page's (run, measure)");
+    assert.equal(calls[0]!.measureId, "cms137");
+    assert.deepEqual([...(calls[0]!.subjectIds ?? [])].sort(), page.map((r) => r.employeeId).sort(), "the page's subjects only");
+    assert.deepEqual(evidenceReads, [], "naming the page's logics reads no evidence");
+
+    // The staff-closed list resolves its WHOLE set for its header counts, and still names the page alone.
+    // Its rows name the FROZEN status's logic: the row the case cites.
+    for (const s of ["emp-006", "emp-007"]) {
+      await cases.patchCase(ids.get(s)!, { status: "CLOSED", closedAt: new Date().toISOString(), closedReason: "MANUAL_RESOLVE", closedBy: "cm@workwell.dev" });
+    }
+    calls.length = 0;
+    const closed = await listOf("?status=staff_closed&limit=1");
+    assert.equal(closed.length, 1);
+    assert.equal(closed[0]!.logic?.kind, "workwell-translation");
+    // No winning run is finished, so the live pass reads nothing; the one read is the page's.
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0]!.subjectIds, [closed[0]!.employeeId]);
+    assert.deepEqual(evidenceReads, []);
+  } finally {
+    SqliteOutcomeStore.prototype.listScoringIdentities = original;
+    SqliteOutcomeStore.prototype.listOutcomes = originalRows;
+  }
+});
+
+test("one run holding a patient's 2026 and 2027 rows: the 2027 case's list row and page name the 2027 row, written second (#769)", async () => {
+  // An /evaluate or import run resolves the date per call, so one run can score a patient's 2026 row
+  // with CMS's artifact and their 2027 row with the translation. Each case cites its own year's row.
+  const db = await createSqliteD1(":memory:");
+  await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
+  const periodEnv = { DB: db, BUCKET: createFsBucket(join(tmpdir(), `workwell-cases-period-${crypto.randomUUID()}`)) };
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE", scopeId: "cms137", triggeredBy: "test", requestedScope: { measureId: "cms137" },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z",
+  });
+  const outcomes = new SqliteOutcomeStore(db);
+  const cases = new SqliteCaseStore(db);
+  const cms137 = { official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24" } };
+  const translation = { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } };
+  const current = bucketPeriodForMeasure("cms137", TODAY);
+  // The CURRENT cycle's case (the list's default) cites the row written SECOND; a prior cycle's row first.
+  const prior = String(Number(current.slice(0, 4)) - 1) + current.slice(4);
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "cms137", evaluationPeriod: prior, status: "OVERDUE", evidence: cms137, evaluatedAt: "2026-10-01T00:00:00.000Z" });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "cms137", evaluationPeriod: current, status: "OVERDUE", evidence: translation, evaluatedAt: "2026-10-01T00:00:05.000Z" });
+  const c = await cases.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "cms137", evaluationPeriod: current, outcomeStatus: "OVERDUE" });
+
+  const list = (await (await handleCases(new Request("http://x/api/cases?status=open&measureId=cms137"), periodEnv as never))!.json()) as Array<{
+    caseId: string; measureVersion: string; logic: { kind: string } | null;
+  }>;
+  const listed = list.find((r) => r.caseId === c!.id)!;
+  assert.equal(listed.logic?.kind, "workwell-translation", "the case's year's row, not the first row the run holds for the patient");
+  assert.equal(listed.measureVersion, "ww-2027.1");
+  const detail = (await (await handleCases(new Request(`http://x/api/cases/${c!.id}`), periodEnv as never))!.json()) as { measureVersion: string; logic: { kind: string } | null };
+  assert.equal(detail.logic?.kind, "workwell-translation", "the case page names the same row");
+  assert.equal(detail.measureVersion, "ww-2027.1");
+});

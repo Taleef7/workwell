@@ -25,7 +25,7 @@ import { canManageCases } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { ScrollRegion } from "@/components/scroll-region";
 import { useSubjectLists, type SubjectListRow } from "@/features/subject-list/use-subject-lists";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { RateEstimateNote } from "@/components/rate-estimate-note";
 
 type Resolution = "MATCHED" | "NOT_FOUND" | "AMBIGUOUS";
@@ -53,6 +53,8 @@ interface RateGroup {
 interface MeasureEntry {
   measureId: string;
   ecqmId: string | null;
+  /** The logic that scored the selected run's rows (#769); null or absent = the unversioned crosswalk. */
+  logic?: ScoringLogic | null;
   runId: string | null;
   measurementPeriod: { start: string; end: string } | null;
   compactionStatus: "complete" | "compacted" | "no_run";
@@ -376,8 +378,14 @@ function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typ
 }
 
 function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<typeof useApi> }) {
-  // The measure's name, as every other page shows it, not its id ("cms122").
-  const { labelForId } = useMeasureIdentities();
+  // The measure's name, as every other page shows it, not its id ("cms122"), after the logic that scored
+  // the report's run (#769): the chip form, the full form as its title.
+  const { measures: catalog, compactLabelFor, titleFor } = useMeasureIdentities();
+  const nameOf = (measureId: string): string => catalog.find((m) => m.id === measureId)?.name ?? measureId;
+  const measureCell = (measure: MeasureEntry) => ({
+    title: titleFor(measure.measureId, nameOf(measure.measureId), measure.logic),
+    label: compactLabelFor(measure.measureId, nameOf(measure.measureId), measure.logic),
+  });
   const thisYear = new Date().getUTCFullYear();
   // The NEXT year is offered too. The pilot's target is PY2027 while the clock says 2026, and a run
   // can already be created with a 2027 evaluation date — so a list offering only past years would
@@ -498,7 +506,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                 {report.measures.map((measure) =>
                   measure.rates.length === 0 ? (
                     <tr key={measure.measureId}>
-                      <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium">{labelForId(measure.measureId)}</td>
+                      <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium" title={measureCell(measure).title}>{measureCell(measure).label}</td>
                       <td className="text-muted-foreground p-3" colSpan={8}>
                         {measure.compactionStatus === "compacted"
                           ? "Refused — the run predates a retention cutoff"
@@ -508,7 +516,9 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                   ) : (
                     measure.rates.map((rate, i) => (
                       <tr key={`${measure.measureId}-${rate.label ?? i}`}>
-                        <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium">{i === 0 ? labelForId(measure.measureId) : ""}</td>
+                        <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium" title={i === 0 ? measureCell(measure).title : undefined}>
+                          {i === 0 ? measureCell(measure).label : ""}
+                        </td>
                         <td className="p-3">{rate.label ?? "—"}</td>
                         <td className="p-3">{rate.ipp.toLocaleString()}</td>
                         <td className="p-3">{rate.effectiveDenominator.toLocaleString()}</td>

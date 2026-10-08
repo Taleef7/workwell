@@ -19,6 +19,8 @@ const runState = { isActive: false };
 vi.mock("@/components/run-status-provider", () => ({ useRunStatus: () => ({ startTracking, isActive: runState.isActive }) }));
 
 import { IndividualComplianceStatus } from "./IndividualComplianceStatus";
+import { useMeasureIdentities } from "@/lib/measure-identity";
+import { CMS125_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 function rosterFor(panel: string, measureId: string, name: string, status: string, method: string, outcomeId = "oc-1") {
   return {
@@ -176,6 +178,57 @@ describe("IndividualComplianceStatus", () => {
     );
     expect(keyWarnings).toHaveLength(0);
     errorSpy.mockRestore();
+  });
+
+  it("names each Rule by the logic that scored its column's winning run, never today's routing (#769)", async () => {
+    get.mockReset().mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", identity: ROUTED_IDENTITIES.cms125 },
+          { id: "cms137", name: "Substance Use Treatment", identity: ROUTED_IDENTITIES.cms137 },
+          { id: "cms122", name: "Diabetes HbA1c", identity: { cmsId: "CMS122", mipsQualityId: "001", executed: ROUTED_IDENTITIES.cms125.executed } },
+        ]);
+      }
+      return Promise.resolve({ evidenceJson: {} });
+    });
+    getWithHeaders.mockReset().mockResolvedValue({
+      data: {
+        panel: "wellness",
+        availablePanels: ["wellness"],
+        columns: [
+          { measureId: "cms125", name: "Breast Cancer Screening", complianceClass: "RECURRING", logic: CMS125_ARTIFACT },
+          // Routing says CMS's artifact; the column's run says the translation.
+          { measureId: "cms137", name: "Substance Use Treatment", complianceClass: "RECURRING", logic: CMS137_TRANSLATION },
+          // Routing names an artifact; the column's run named none, then one whose rows disagreed.
+          { measureId: "cms122", name: "Diabetes HbA1c", complianceClass: "RECURRING", logic: CMS125_ARTIFACT, logicConflict: true },
+        ],
+        rows: [{
+          subject: { externalId: "emp-001", name: "Ada Lovelace", role: "Nurse", site: "HQ" },
+          cells: {
+            cms125: { status: "COMPLIANT", method: "Screened" },
+            cms137: { status: "OVERDUE", method: "No engagement" },
+            cms122: { status: "COMPLIANT", method: "1 valid test" },
+          },
+        }],
+      },
+      headers: new Headers({ "X-Total-Count": "1" }),
+    });
+    function WithIdentities() {
+      const { compactLabelFor, titleFor } = useMeasureIdentities();
+      return <IndividualComplianceStatus externalId="emp-001" labelFor={compactLabelFor} titleFor={titleFor} />;
+    }
+    render(<WithIdentities />);
+
+    const cms125 = await screen.findByText(`${LABELS.cms125Short} · Breast Cancer Screening`, { exact: true });
+    expect(cms125).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+    expect(screen.getByRole("button", { name: `Info: ${LABELS.cms125Title} · Breast Cancer Screening` })).toBeInTheDocument();
+    expect(screen.getByText(`${LABELS.cms137TranslationShort} · Substance Use Treatment`, { exact: true })).toHaveAttribute(
+      "title",
+      `${LABELS.cms137TranslationTitle} · Substance Use Treatment`,
+    );
+    expect(screen.queryByText(/CMS137FHIR/)).toBeNull();
+    // A column whose run mixed logics names none of them.
+    expect(screen.getByText("MIPS 001 · CMS122 · Diabetes HbA1c", { exact: true })).toBeInTheDocument();
   });
 
   it("makes exactly one roster request when the first response specifies availablePanels: ['wellness']", async () => {

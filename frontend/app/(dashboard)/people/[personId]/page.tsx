@@ -12,7 +12,7 @@ import { SkeletonCard } from "@/components/skeleton-loader";
 import { ScrollRegion } from "@/components/scroll-region";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { COMPLIANCE_STATUS_LABELS, complianceStatusClass, labelFor } from "@/lib/status";
 
 /**
@@ -68,6 +68,8 @@ type TimelineEntry = {
   tenantName: string;
   externalId: string;
   sourceStatus: "ACTIVE" | "PRIOR";
+  /** The logic that scored this outcome (#769); null or absent = the unversioned crosswalk. */
+  logic?: ScoringLogic | null;
 };
 
 type PersonSearchRow = {
@@ -115,7 +117,8 @@ export default function PersonDetailPage() {
   const api = useApi();
   const router = useRouter();
   const { user } = useAuth();
-  const { labelFor: measureLabelFor } = useMeasureIdentities();
+  // Each history row names the logic that scored that outcome (#769): the chip form, the full form as title.
+  const { compactLabelFor, titleFor } = useMeasureIdentities();
   const mayReconcile = canReconcileIdentity(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
   const [detail, setDetail] = useState<PersonDetail | null>(null);
@@ -356,7 +359,9 @@ export default function PersonDetailPage() {
                     {detail.timeline.entries.map((e, i) => (
                       <tr key={`${e.externalId}-${e.measureId}-${e.evaluatedAt}-${i}`} className="border-b border-neutral-100 dark:border-neutral-800/60">
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">{fmt(e.evaluatedAt)}</td>
-                        <td className="px-3 py-2">{measureLabelFor(e.measureId, e.measureName ?? e.measureId)}</td>
+                        <td className="px-3 py-2" title={titleFor(e.measureId, e.measureName ?? e.measureId, e.logic)}>
+                          {compactLabelFor(e.measureId, e.measureName ?? e.measureId, e.logic)}
+                        </td>
                         <td className="px-3 py-2"><OutcomeChip status={e.displayStatus ?? e.status} /></td>
                         <td className="px-3 py-2 text-neutral-600 dark:text-neutral-400">
                           {e.runKind ? runKindLabel(e.runKind) : "—"}

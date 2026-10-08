@@ -86,6 +86,113 @@ export function formatMeasureLabel(
   return `${prefix} · ${name}`;
 }
 
+/**
+ * The logic that scored ONE result, as the backend reads it from that result's own evidence (#769).
+ * Never derived from `identity.executed`, which is today's routing: a row scored before a translation
+ * was routed, or by authored CQL, would be relabelled.
+ */
+export type ScoringLogic =
+  | {
+      kind: "cms-artifact";
+      /** "CMS125FHIR" */
+      ecqmId: string;
+      /** "1.0.000" */
+      version: string;
+      /** "CMS125v14"; null when the artifact's lineage is not pinned. */
+      derivedFrom: string | null;
+      status: "draft" | "unknown";
+      statusNote: string | null;
+    }
+  | {
+      kind: "workwell-translation";
+      /** "WorkWell translation of CMS137v15" */
+      label: string;
+      /** "ww-2027.1" */
+      version: string;
+      url: string | null;
+      derivedFrom: string | null;
+    };
+
+export interface VersionedIdentity {
+  /** For a chip: "MIPS 305 · CMS137FHIR (from CMS137v14)" / "MIPS 305 · WW translation of CMS137v15". */
+  short: string;
+  /** For a heading or wide cell: "MIPS 305 · CMS137FHIR v1.0.000 (from CMS137v14)". */
+  full: string;
+  /** For title/aria: the full form plus what it is ("…, a CMS draft" / "…, not a CMS measure"). */
+  title: string;
+}
+
+/**
+ * The versioned identity of one result. The row's `logic` is the authority: with no crosswalk entry
+ * (`/api/measures` not loaded yet, failed, or no longer listing the measure) it is still named, just
+ * without the MIPS id. No `logic` (nothing named scored the row, or the surface has no row) gives the
+ * unversioned crosswalk, never a version guessed from routing; with neither, null: show the name only,
+ * as before (authored, TWH occupational).
+ */
+export function formatVersionedIdentity(
+  identity: MeasureIdentity | null | undefined,
+  logic: ScoringLogic | null | undefined,
+): VersionedIdentity | null {
+  if (!identity && !logic) return null;
+  const mips = identity?.mipsQualityId ? `MIPS ${identity.mipsQualityId} · ` : "";
+  if (!logic) {
+    const plain = formatMeasureIdentity(identity);
+    return { short: plain, full: plain, title: plain };
+  }
+  if (logic.kind === "workwell-translation") {
+    const full = `${mips}${logic.label} (${logic.version})`;
+    return {
+      short: `${mips}${logic.label.replace(/^WorkWell translation of /, "WW translation of ")}`,
+      full,
+      title: `${full}, not a CMS measure`,
+    };
+  }
+  const from = logic.derivedFrom ? ` (from ${logic.derivedFrom})` : "";
+  const full = `${mips}${logic.ecqmId} v${logic.version}${from}`;
+  return {
+    // The chip keeps the CMS version (the "from" lineage changes with the year; the FHIR artifact's
+    // own "v1.0.000" does not), and drops the artifact version only when the lineage is known.
+    short: logic.derivedFrom ? `${mips}${logic.ecqmId}${from}` : `${mips}${logic.ecqmId} v${logic.version}`,
+    full,
+    title: logic.status === "draft" ? `${full}, a CMS draft` : full,
+  };
+}
+
+/**
+ * One logic by itself, for a list of them: "CMS137FHIR v1.0.000 (from CMS137v14)" /
+ * "WorkWell translation of CMS137v15 (ww-2027.1)". The full form without the MIPS id.
+ */
+export function formatScoringLogic(logic: ScoringLogic): string {
+  if (logic.kind === "workwell-translation") return `${logic.label} (${logic.version})`;
+  return `${logic.ecqmId} v${logic.version}${logic.derivedFrom ? ` (from ${logic.derivedFrom})` : ""}`;
+}
+
+/** One logic by itself for a title/aria: the full form plus what it is ("…, a CMS draft" / "…, not a CMS measure"). */
+export function formatScoringLogicTitle(logic: ScoringLogic): string {
+  const full = formatScoringLogic(logic);
+  if (logic.kind === "workwell-translation") return `${full}, not a CMS measure`;
+  return logic.status === "draft" ? `${full}, a CMS draft` : full;
+}
+
+export const MIXED_LOGICS_NOTE = "Scored by more than one logic or measurement period";
+
+/**
+ * "Scored by more than one logic or measurement period: CMS137FHIR v1.0.000 (from CMS137v14); …".
+ * The server may say a run was mixed (`scoringConflict`) and serve one logic or none (authored rows
+ * name none): the note stands alone or names what was served, never reads as one logic's result.
+ */
+export function formatMixedLogics(logics: readonly ScoringLogic[]): string {
+  return logics.length > 0 ? `${MIXED_LOGICS_NOTE}: ${logics.map(formatScoringLogic).join("; ")}` : MIXED_LOGICS_NOTE;
+}
+
+/**
+ * The one logic a result surface may name from a list of them: exactly one, else null. More than one
+ * (a run that mixed logics or measurement periods) or none (unknown) is the unversioned crosswalk.
+ */
+export function singleScoringLogic(logics: readonly ScoringLogic[] | null | undefined): ScoringLogic | null {
+  return logics && logics.length === 1 ? logics[0] : null;
+}
+
 export function useMeasureIdentities() {
   const api = useApi();
   const [identities, setIdentities] = useState<Record<string, MeasureIdentity | null>>({});
@@ -130,10 +237,21 @@ export function useMeasureIdentities() {
     };
   }, [fetchIdentities]);
 
+  // With a row's `logic`, the versioned identity (#769); without one, the unversioned crosswalk as before.
   const labelFor = useCallback(
-    (measureId: string, fallbackName: string): string => {
+    (measureId: string, fallbackName: string, logic?: ScoringLogic | null): string => {
       const identity = identities[measureId];
-      return formatMeasureLabel(identity, fallbackName);
+      const versioned = formatVersionedIdentity(identity, logic);
+      return versioned ? `${versioned.full} · ${fallbackName}` : formatMeasureLabel(identity, fallbackName);
+    },
+    [identities],
+  );
+
+  // The accessible name / tooltip for a result: the full versioned identity and what it is.
+  const titleFor = useCallback(
+    (measureId: string, fallbackName: string, logic?: ScoringLogic | null): string => {
+      const versioned = formatVersionedIdentity(identities[measureId], logic);
+      return versioned ? `${versioned.title} · ${fallbackName}` : fallbackName;
     },
     [identities],
   );
@@ -148,9 +266,21 @@ export function useMeasureIdentities() {
   // The short form, for a chip in a table cell (#648): the published identity alone ("MIPS 113 · CMS130"),
   // or the name for a measure that has none. Pair it with the long form as the chip's accessible name.
   const shortLabelFor = useCallback(
-    (measureId: string, fallbackName: string): string => formatMeasureIdentity(identities[measureId]) || fallbackName,
+    (measureId: string, fallbackName: string, logic?: ScoringLogic | null): string =>
+      formatVersionedIdentity(identities[measureId], logic)?.short || fallbackName,
     [identities],
   );
 
-  return { identities, measures, labelFor, labelForId, shortLabelFor, loading, error, refetch: fetchIdentities };
+  // The chip form with the name after it, for a result shown in a list, card or column header (#769):
+  // "MIPS 305 · CMS137FHIR (from CMS137v14) · Substance Use". No logic: the unversioned label, as
+  // `labelFor`; no CMS identity: the name. Pair it with `titleFor` as its title / accessible name.
+  const compactLabelFor = useCallback(
+    (measureId: string, fallbackName: string, logic?: ScoringLogic | null): string => {
+      const versioned = formatVersionedIdentity(identities[measureId], logic);
+      return versioned ? `${versioned.short} · ${fallbackName}` : fallbackName;
+    },
+    [identities],
+  );
+
+  return { identities, measures, labelFor, labelForId, shortLabelFor, compactLabelFor, titleFor, loading, error, refetch: fetchIdentities };
 }

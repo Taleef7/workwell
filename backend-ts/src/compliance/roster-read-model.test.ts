@@ -5,7 +5,7 @@ import { latestRunsFromRows } from "../test-support/latest-runs.ts";
 import { EMPLOYEES, isDemoPersona } from "../engine/synthetic/employee-catalog.ts";
 import type { HydratedSegment } from "../stores/segment-store.ts";
 import { PANELS } from "./panels.ts";
-import { buildRoster, type RosterCellCache, type RosterFilters } from "./roster-read-model.ts";
+import { buildRoster, columnScoringOf, type RosterCellCache, type RosterFilters } from "./roster-read-model.ts";
 import { replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 // The first REAL (non-demo) directory subject. emp-001..004 are demo-login personas that now sink to the
@@ -48,6 +48,8 @@ function fakeStore(withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecor
     listOutcomesForEmployee: async () => { throw new Error("unused"); },
     getOutcomeById: async () => { throw new Error("unused"); },
     distinctMeasuresForRun: async () => { throw new Error("unused"); },
+    distinctScoringLogicForRun: async () => { throw new Error("unused"); },
+    listScoringIdentities: async () => { throw new Error("unused"); },
     aggregateScaleRun: async () => [],
     countOutcomesByStatus: async () => [],
   } as OutcomeStore;
@@ -461,3 +463,78 @@ test("buildRoster — a single-measure roster drops out-of-population rows and s
     assert.equal(panel.notInPopulation, 0, "nothing is hidden when no single measure is in scope");
   }
 });
+
+// ---- #769: each column names the logic its winning run's rows were scored by -----------------------
+test("buildRoster — a column names its winning run's logic from the rows' evidence; disagreeing rows are a conflict, not the first row's", async () => {
+  const [a, b, c] = EMPLOYEES.filter((e) => !isDemoPersona(e.externalId)).map((e) => e.externalId);
+  const CMS122 = { official: { ecqmId: "122FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552" } };
+  const TRANSLATION = { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } };
+  const ERRORED = { evaluationError: "CQL engine failure", message: "boom" };
+  const rows: Array<[string, string, unknown]> = [
+    // cms125: the vendored manifest names CMS125FHIR; these rows were scored by a translation. The errored
+    // row names no logic, so it is no conflict.
+    ["cms125", a!, TRANSLATION], ["cms125", b!, TRANSLATION], ["cms125", c!, ERRORED],
+    // cms122: two logics in one run (an evaluation that spanned a year boundary).
+    ["cms122", a!, CMS122], ["cms122", b!, TRANSLATION],
+    // hypertension: authored CQL — no identity, and no conflict.
+    ["hypertension", a!, ev([["Outcome Status", "OVERDUE"]])], ["hypertension", b!, ev([["Outcome Status", "COMPLIANT"]])],
+    // obesity_bmi: authored CQL beside CMS's artifact is two logics too.
+    ["obesity_bmi", a!, ev([["Outcome Status", "OVERDUE"]])], ["obesity_bmi", b!, CMS122],
+  ];
+  const withRun: OutcomeWithRun[] = rows.map(([measureId, subjectId]) => ({
+    runId: "run-1", runStartedAt: "2027-02-01T00:00:00Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "scheduler", subjectId, measureId, status: "OVERDUE",
+  }));
+  // `fakeStore` ignores the measure filter: every measure's rows come back for every column, so a column
+  // that pooled them would read cms125 as a conflict.
+  const byRun: Record<string, OutcomeRecord[]> = {
+    "run-1": rows.map(([measureId, subjectId, evidence], i) => ({ id: `o-${i}`, runId: "run-1", subjectId, measureId, evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence, evaluatedAt: "2027-02-01T00:00:00Z" })),
+  };
+  let loads = 0;
+  const store = { ...fakeStore(withRun, byRun), listOutcomes: async (runId: string) => { loads++; return byRun[runId] ?? []; } } as OutcomeStore;
+  const cache: RosterCellCache = new Map();
+  const roster = await buildRoster({ outcomeStore: store, segments: [], cellCache: cache }, { panel: "wellness" });
+  const column = (id: string) => roster.columns.find((col) => col.measureId === id)!;
+
+  assert.deepEqual(column("cms125").logic, {
+    kind: "workwell-translation", label: "WorkWell translation of CMS137v15", version: "ww-2027.1",
+    url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15",
+  }, "the rows' evidence, not the vendored CMS125 manifest");
+  assert.equal(column("cms125").logicConflict, false, "an errored row is no logic, so no conflict");
+  assert.equal(column("cms122").logic, null, "two logics: no one label");
+  assert.equal(column("cms122").logicConflict, true);
+  assert.equal(column("hypertension").logic, null);
+  assert.equal(column("hypertension").logicConflict, false, "authored CQL alone is one logic");
+  assert.equal(column("obesity_bmi").logicConflict, true, "authored CQL beside CMS's artifact is two");
+  assert.equal(column("diabetes_hba1c").logic, null, "no winning run, nothing named");
+  assert.equal(column("diabetes_hba1c").logicConflict, false);
+
+  // A warm roster names the same logic from the cache, without the evidence.
+  const loadsAfterFirst = loads;
+  const warm = await buildRoster({ outcomeStore: store, segments: [], cellCache: cache }, { panel: "wellness" });
+  assert.equal(loads, loadsAfterFirst, "served from the cache");
+  assert.deepEqual(warm.columns, roster.columns);
+
+  // A cache entry that carries cells but no column logic is re-derived rather than served unnamed.
+  const bare: RosterCellCache = new Map([["cms125", { runId: "run-1", cells: cache.get("cms125")!.cells }]]);
+  const rederived = await buildRoster({ outcomeStore: store, segments: [], cellCache: bare }, { panel: "wellness" });
+  assert.equal(rederived.columns.find((col) => col.measureId === "cms125")!.logic?.kind, "workwell-translation");
+  assert.ok(bare.get("cms125")!.scoring, "and the entry now carries it");
+});
+
+test("a column scored over two periods, or by two artifacts under one printed name, is a conflict (#769)", () => {
+  // scoringLogicOf's display object carries neither the period nor the digest, so keying on it would call
+  // these one logic; the run detail and the programs card call them two, and so must the column.
+  const row = (start: string, sha: string) => ({
+    official: {
+      ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: sha,
+      measurementPeriod: { start, end: `${start.slice(0, 4)}-12-31T23:59:59.999Z` },
+    },
+  });
+  const sha = "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8";
+  assert.deepEqual(columnScoringOf([row("2026-01-01T00:00:00.000Z", sha), row("2027-01-01T00:00:00.000Z", sha)]), { logic: null, conflict: true });
+  assert.deepEqual(columnScoringOf([row("2026-01-01T00:00:00.000Z", sha), row("2026-01-01T00:00:00.000Z", "sha256:other")]), { logic: null, conflict: true });
+  const one = columnScoringOf([row("2026-01-01T00:00:00.000Z", sha), row("2026-01-01T00:00:00.000Z", sha)]);
+  assert.equal(one.conflict, false);
+  assert.equal(one.logic?.kind, "cms-artifact");
+});
+

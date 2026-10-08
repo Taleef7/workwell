@@ -11,9 +11,16 @@ import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
-import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
-import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, DIRECTORY, classifyRunnable, isRunnableMeasure, profileSubjectMatcher } from "../config/deployment-profile.ts";
+import {
+  formatScoringLogic,
+  measureVersionOf,
+  scoringLogicOf,
+  type ExecutedLogic,
+  type TranslationLogic,
+} from "../measure/measure-identity.ts";
+import { caseLogicKey, scoringForCases } from "../case/case-scoring-logic.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
@@ -22,7 +29,7 @@ import { toCaseSummary } from "../case/case-read-models.ts";
 import { worklistQueryFor, withLiveStatus, STAFF_CLOSED_TOKEN } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { toRunSummaryFromCounts, toRunListItemFromCounts } from "../run/read-models.ts";
-import { toMeasureDetail } from "../measure/measure-read-models.ts";
+import { toMeasure, toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
@@ -113,10 +120,21 @@ function requireString(args: JsonRecord, key: string): string {
   return String(v);
 }
 
-function measureVersionOf(measureId: string): string {
-  const lib = MEASURES[measureId]?.library ?? "";
-  const dash = lib.lastIndexOf("-");
-  return dash >= 0 ? lib.slice(dash + 1) : "";
+/**
+ * What this deployment runs for a measure, exactly as `/api/measures` computes it (`identity.executed`
+ * and `identity.translation`, from the same read model). Null where nothing official is routed.
+ *
+ * These sit BESIDE the catalog record's `policyRef` and `version`, never in place of them: `policyRef`
+ * is the catalog's QDM lineage ("CMS125v14") and `version` the record's own ("v1.0"). Pairing that QDM
+ * id with the executed artifact's version ("CMS125v14 1.0.000") would name a QDM identity over
+ * FHIR-executed counts, which LOCKED §4.3 forbids, so the executed version only ever travels inside
+ * `executed`, beside its own eCQM id.
+ */
+function executedFor(identity: { executed?: ExecutedLogic; translation?: TranslationLogic } | null): {
+  executed: ExecutedLogic | null;
+  translation: TranslationLogic | null;
+} {
+  return { executed: identity?.executed ?? null, translation: identity?.translation ?? null };
 }
 
 /** The measure filter the client actually supplied (measureId or measureName), or null if none. */
@@ -210,10 +228,11 @@ async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
   const directory = directoryForSubjects(deps, [c.employeeId]);
   if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
-  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId);
+  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
   const evidence = detail.evidenceJson ?? {};
   const whyFlagged = (evidence as JsonRecord).why_flagged ?? {};
+  // `detail` carries the cited row's `measureVersion` and `logic` (#769), as the case page does.
   return { ...detail, evidence_payload: evidence, why_flagged: whyFlagged };
 }
 
@@ -236,13 +255,20 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
   if (summaries.some((s) => s.closure === "STAFF")) {
     summaries = await withLiveStatus({ outcomeStore: deps.outcomeStore, cellCache: rosterCellCache }, summaries);
   }
+  // What scored each case's CITED outcome (#769): one bounded read per (run, measure), never today's
+  // routing. On a person-closed row it describes the frozen status, not the `live_*` fields. Read for
+  // exactly the summaries returned below — this tool has no page, so that is every row it answers with —
+  // each carrying its period, so a run holding a subject's rows for two years cites the case's year's.
+  const scoring = await scoringForCases(deps.outcomeStore, summaries);
+  const scoredFor = (s: (typeof summaries)[number]) => scoring.get(caseLogicKey(s));
   const results = summaries.map((s) => ({
     case_id: s.caseId,
     employee_id: s.employeeId,
     employee_name: s.employeeName,
     site: s.site,
     measure_name: s.measureName,
-    measure_version: s.measureVersion,
+    measure_version: scoredFor(s)?.version ?? "",
+    logic: scoredFor(s)?.logic ?? null,
     measure_version_id: s.measureVersionId,
     evaluation_period: s.evaluationPeriod,
     status: s.status,
@@ -301,6 +327,7 @@ async function listMeasures(args: JsonRecord, deps: McpToolDeps): Promise<unknow
   const results = records.map((r) => ({
     measureId: r.measureId,
     measureName: r.name,
+    // The CATALOG record: its QDM lineage and its own version, never the executed artifact's (#769).
     policyRef: r.policyRef,
     version: r.version,
     status: r.status,
@@ -308,6 +335,7 @@ async function listMeasures(args: JsonRecord, deps: McpToolDeps): Promise<unknow
     testFixtureCount: r.spec.testFixtures?.length ?? 0,
     valueSetCount: 0, // value-set governance not ported
     lastUpdated: r.activatedAt ?? r.createdAt ?? r.updatedAt,
+    ...executedFor(toMeasure(r).identity),
   }));
   return { results, returned: results.length, status };
 }
@@ -324,8 +352,11 @@ async function getMeasureVersion(args: JsonRecord, deps: McpToolDeps): Promise<u
   return {
     measureId: detail.id,
     measureName: detail.name,
+    // The CATALOG record (policyRef, version, specJson, cqlText); `executed`/`translation` name what
+    // this deployment runs (#769).
     policyRef: detail.policyRef,
     version: detail.version,
+    ...executedFor(detail.identity),
     lifecycleStatus: detail.status,
     compileStatus: detail.compileStatus,
     specJson: {
@@ -379,7 +410,10 @@ async function listRuns(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
       return {
         run_id: run.id,
         measure_name: item.measureName,
-        measure_version: measureVersionOf(run.scopeId ?? ""),
+        // The run read model's version — the one the run detail and the runs CSV (§6.1) carry — so the
+        // three cannot disagree; a hand-rolled authored-library lookup here printed "2.0.0" for runs
+        // CMS's artifact scored (#769).
+        measure_version: toRunSummaryFromCounts(run, statusCounts).measureVersion,
         status: run.status,
         scope_type: run.scopeType,
         trigger_type: item.triggerType,
@@ -402,7 +436,7 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
   if (!c) return safeError("CASE_NOT_FOUND", "Case not found");
   const directory = directoryForSubjects(deps, [c.employeeId]);
   if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
-  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId);
+  const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
   const wf = ((detail.evidenceJson ?? {}) as JsonRecord).why_flagged as JsonRecord | undefined;
   const val = (k: string, fb: string): string => (wf && wf[k] != null ? String(wf[k]) : fb);
@@ -411,6 +445,8 @@ async function explainOutcome(args: JsonRecord, deps: McpToolDeps): Promise<unkn
     case_id: caseId,
     employee_name: detail.employeeName,
     measure_name: detail.measureName,
+    // The logic that scored the outcome being explained (#769).
+    logic: scoringLogicOf(outcome?.evidence),
     status: detail.currentOutcomeStatus,
     explanation,
     why_flagged: wf ?? {},
@@ -432,7 +468,10 @@ async function getEmployee(args: JsonRecord, deps: McpToolDeps): Promise<unknown
     .slice(0, 5);
   const latestOutcomes = outcomes.map((o) => ({
     measureName: measureDisplayName(o.measureId),
-    version: measureVersionOf(o.measureId),
+    // The version and logic that scored THIS row (#769), never the authored library's for a row CMS's
+    // artifact scored.
+    version: measureVersionOf(o.measureId, o.evidence),
+    logic: scoringLogicOf(o.evidence),
     status: o.status,
     evaluationPeriod: o.evaluationPeriod,
     evaluatedAt: o.evaluatedAt,
@@ -484,7 +523,9 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
     evaluationPeriod: latest.evaluationPeriod,
     evaluatedAt: latest.evaluatedAt,
     measureName: rec.name,
-    measureVersion: measureVersionOf(rec.measureId),
+    // What scored the served row (#769).
+    measureVersion: measureVersionOf(rec.measureId, latest.evidence),
+    logic: scoringLogicOf(latest.evidence),
     caseId: openCase?.id ?? null,
     employeeExternalId: externalId,
     source: mode,
@@ -558,15 +599,20 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
   }
   rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   rows = rows.slice(0, limit);
+  // The cited outcome's logic and version for the returned page only (at most 100 cases) — AFTER the
+  // slice, never over the whole non-compliant set — each case's own period choosing its cited row.
+  const scoring = await scoringForCases(deps.outcomeStore, rows);
   const results = rows.map((c) => {
     const emp = directory.employeeById(c.employeeId);
+    const scored = scoring.get(caseLogicKey(c));
     return {
       caseId: c.id,
       employeeExternalId: c.employeeId,
       employeeName: emp?.name ?? c.employeeId,
       site: emp?.site ?? null,
       measureName: measureDisplayName(c.measureId),
-      measureVersion: measureVersionOf(c.measureId),
+      measureVersion: scored?.version ?? "",
+      logic: scored?.logic ?? null,
       evaluationPeriod: c.evaluationPeriod,
       outcomeStatus: c.currentOutcomeStatus,
       priority: c.priority,
@@ -594,18 +640,42 @@ async function explainRule(args: JsonRecord, deps: McpToolDeps): Promise<unknown
   const detail = toMeasureDetail(rec);
   const cqlText = detail.cqlText ?? "";
   const cqlDefines = [...cqlText.matchAll(/define\s+"([^"]+)"\s*:/gi)].map((m) => m[1]!);
+  // **An official-routed measure does not run the record's CQL** (#769). Its authored defines are
+  // OMITTED rather than relabelled: a client asked "explain the rule" and handed a define list will read
+  // it as the logic that scores patients, and a caveat field beside it is the part a summary drops.
+  // `logicNote` says what runs and why the list is empty. The routing decision is the one
+  // `/api/measures` makes (`classifyRunnable`), so the two surfaces cannot name different logic.
+  const officialRouted = classifyRunnable(rec.measureId, process.env).kind === "official";
+  const { executed, translation } = executedFor(detail.identity);
   return {
     measureName: detail.name,
+    // The catalog's QDM lineage, not what runs; `executed` names that.
     policyRef: detail.policyRef,
     description: detail.description,
     eligibility: detail.eligibilityCriteria,
     exclusions: detail.exclusions,
     complianceWindow: detail.complianceWindow,
     requiredDataElements: detail.requiredDataElements,
-    cqlDefines,
+    cqlDefines: officialRouted ? [] : cqlDefines,
+    executed,
+    translation,
+    ...(officialRouted ? { logicNote: officialLogicNote(executed, translation) } : {}),
     attachedValueSets: [],
     source: "deterministic_metadata",
   };
+}
+
+/** Why `explain_rule` lists no defines for an official-routed measure, and what runs instead. */
+export function officialLogicNote(executed: ExecutedLogic | null, translation: TranslationLogic | null): string {
+  const artifact = executed ? formatScoringLogic({ kind: "cms-artifact", ...executed }) : "CMS's FHIR artifact vendored for it";
+  const lineage = executed?.derivedFrom ? ` (derived from ${executed.derivedFrom})` : "";
+  const translated = translation
+    ? ` Measurement year ${translation.year} is scored by ${translation.label} (${translation.version}), which is not a CMS measure; CMS's artifact scores every other year.`
+    : "";
+  return (
+    `This deployment scores this measure with ${artifact}${lineage}.${translated} ` +
+    `The catalog record's authored CQL is not what runs here, so its defines are omitted.`
+  );
 }
 
 async function getMeasureTraceability(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
@@ -729,7 +799,7 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: "explain_rule",
     description:
-      "Explain measure rule logic from deterministic measure metadata: policy ref, description, eligibility, compliance window, required data elements, CQL defines, and value sets. Does not use AI.",
+      "Explain measure rule logic from deterministic measure metadata: policy ref (the catalog's QDM lineage), description, eligibility, compliance window, required data elements, CQL defines, and value sets, plus `executed`/`translation` naming the logic this deployment runs. For a measure routed to CMS's FHIR artifact the authored CQL defines are omitted (it is not what runs) and `logicNote` says why. Does not use AI.",
     inputSchema: { type: "object", properties: { measureName: { type: "string" }, measureId: { type: "string" } }, required: [] },
     roles: [AUTHOR, APPROVER, CM, ADMIN],
     sensitivity: "internal",

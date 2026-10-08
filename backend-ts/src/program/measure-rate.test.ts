@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
-import { officialMeasureRate, resetMeasureRateMemo } from "./measure-rate.ts";
+import { officialMeasureRate, officialMeasureRateResult, resetMeasureRateMemo } from "./measure-rate.ts";
 
 const official = (populationResults: Record<string, boolean>) => ({ official: { populationResults } });
 let n = 0;
@@ -106,8 +106,9 @@ test("an ALL_PROGRAMS run is read PER MEASURE — each measure's rate is its own
   const b = await officialMeasureRate(os, "run-mixed", "cms125");
   assert.deepEqual(a?.rates.map((r) => [r.ipp, r.numer]), [[2, 1]], "cms122 sees only its own two rows");
   assert.deepEqual(b?.rates.map((r) => [r.ipp, r.numer]), [[3, 3]], "cms125 sees only its own three rows");
-  assert.equal(a?.official?.ecqmId, "122FHIR");
-  assert.equal(b?.official?.ecqmId, "125FHIR", "the artifact identity is the measure's, not the first row of the run");
+  // The evidence stores the manifest's BARE id; `/api/programs` serves the one spelling (#769).
+  assert.equal(a?.official?.ecqmId, "CMS122FHIR");
+  assert.equal(b?.official?.ecqmId, "CMS125FHIR", "the artifact identity is the measure's, not the first row of the run");
 });
 
 test("ONE read per (run, measure), unordered — the shape the statement timeout forced (2026-09-21)", async () => {
@@ -182,5 +183,81 @@ test("a run a WorkWell translation scored is labelled as one; a run mixing two l
   // And CMS's own rows still read exactly as before.
   const plain = await officialMeasureRate(membershipStore([rec("COMPLIANT", cms, "cms137")]), "run-cms", "cms137");
   assert.equal(plain?.source, "official-evidence");
-  assert.deepEqual(plain?.official, { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: "sha256:c" }, "no kind, label or derivedFrom key on a CMS-scored rate");
+  assert.deepEqual(plain?.official, { ecqmId: "CMS137FHIR", version: "1.0.000", artifactSha256: "sha256:c" }, "no kind, label or derivedFrom key on a CMS-scored rate");
+});
+
+// ---- #769: which logics scored the rows, and a conflict memoized as itself ----------------------
+
+/** CMS's committed cms137 artifact (its manifest's sha), so the lineage resolves from the evidence. */
+const CMS137_SHA = "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24";
+const pops = (numer: boolean) => ({ ipp: true, denom: true, numer, denex: false, denexcep: false });
+const cms137 = (numer: boolean, measurementPeriod = { start: "2026-01-01", end: "2026-12-31" }) => ({
+  official: { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: CMS137_SHA, measurementPeriod, populationResults: pops(numer) },
+});
+const translation137 = (numer: boolean) => ({
+  official: {
+    kind: "derived", label: "WorkWell translation of CMS137v15", derivedFrom: "CMS137v15", url: "urn:workwell:measure:cms137:translation",
+    ecqmId: null, version: "ww-2027.1", artifactSha256: "sha256:t", measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+    populationResults: pops(numer),
+  },
+});
+const CMS_LOGIC = {
+  kind: "cms-artifact", ecqmId: "CMS137FHIR", version: "1.0.000", derivedFrom: "CMS137v14",
+  status: "draft", statusNote: "posted for public comment Jan–Feb 2026",
+};
+const TRANSLATION_LOGIC = {
+  kind: "workwell-translation", label: "WorkWell translation of CMS137v15", version: "ww-2027.1",
+  url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15",
+};
+
+test("a rate names the ONE logic behind it, from the rows' evidence: CMS's artifact with its lineage, or the translation", async () => {
+  resetMeasureRateMemo();
+  const cms = await officialMeasureRateResult(membershipStore([rec("COMPLIANT", cms137(true), "cms137"), rec("OVERDUE", cms137(false), "cms137")]), "run-logic-cms", "cms137");
+  assert.equal(cms.conflict, false);
+  assert.deepEqual(cms.scoringLogics, [CMS_LOGIC]);
+  assert.deepEqual(cms.rate?.logic, CMS_LOGIC, "the bare evidence id is served as CMS137FHIR, the lineage read off the artifact's sha");
+  const tr = await officialMeasureRateResult(membershipStore([rec("COMPLIANT", translation137(true), "cms137")]), "run-logic-t", "cms137");
+  assert.deepEqual(tr.scoringLogics, [TRANSLATION_LOGIC]);
+  assert.deepEqual(tr.rate?.logic, TRANSLATION_LOGIC);
+  assert.equal(tr.rate?.official?.ecqmId, null, "a translation never carries a CMS eCQM id");
+  assert.doesNotMatch(JSON.stringify(tr), /CMS137FHIR|137FHIR/, "nowhere in the answer");
+  // Authored rows: no logic to name, no rate, and no conflict.
+  const authored = await officialMeasureRateResult(membershipStore([rec("COMPLIANT", { expressionResults: [] }, "audiogram")]), "run-logic-a", "audiogram");
+  assert.deepEqual(authored, { rate: null, scoringLogics: [], conflict: false });
+});
+
+test("CMS's row and a translated row for ONE measure: two logics listed and no rate — and the conflict is memoized as itself, not as 'authored'", async () => {
+  resetMeasureRateMemo();
+  const os = membershipStore([rec("COMPLIANT", cms137(true), "cms137"), rec("OVERDUE", translation137(false), "cms137"), rec("COMPLIANT", cms137(false), "cms137")]);
+  const first = await officialMeasureRateResult(os, "run-conflict", "cms137");
+  assert.equal(first.rate, null, "a sum over two logics names neither");
+  assert.equal(first.conflict, true);
+  assert.equal(first.scoringLogics.length, 2);
+  assert.deepEqual(first.scoringLogics, [CMS_LOGIC, TRANSLATION_LOGIC], "sorted by name, so any row order gives this list");
+  const reads = os.calls;
+  const again = await officialMeasureRateResult(os, "run-conflict", "cms137");
+  assert.equal(os.calls, reads, "the memo answered");
+  assert.equal(again.conflict, true, "a memoized conflict still reads as a conflict");
+  assert.deepEqual(again.scoringLogics, [CMS_LOGIC, TRANSLATION_LOGIC], "and still names both logics, not the empty list an authored run has");
+  assert.equal(await officialMeasureRate(os, "run-conflict", "cms137"), null, "the rate-only reader is unchanged");
+});
+
+test("one artifact over two measurement periods is two answers: listed twice, no rate", async () => {
+  resetMeasureRateMemo();
+  const os = membershipStore([rec("COMPLIANT", cms137(true), "cms137"), rec("COMPLIANT", cms137(true, { start: "2027-01-01", end: "2027-12-31" }), "cms137")]);
+  const result = await officialMeasureRateResult(os, "run-two-years", "cms137");
+  assert.equal(result.rate, null);
+  assert.equal(result.scoringLogics.length, 2);
+});
+
+test("an errored row is no second logic, and rows that differ only in populations are one", async () => {
+  resetMeasureRateMemo();
+  const os = membershipStore([
+    rec("MISSING_DATA", { evaluationError: "CQL engine failure", message: "boom" }, "cms137"),
+    rec("COMPLIANT", cms137(true), "cms137"),
+    rec("OVERDUE", cms137(false), "cms137"),
+  ]);
+  const result = await officialMeasureRateResult(os, "run-err-one-logic", "cms137");
+  assert.ok(result.rate);
+  assert.deepEqual(result.scoringLogics, [CMS_LOGIC]);
 });

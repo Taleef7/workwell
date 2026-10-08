@@ -22,11 +22,44 @@ import type { HydratedSegment } from "../stores/segment-store.ts";
 import { isPanelId, ACTIVE_CATALOG_MEASURE_IDS, AVAILABLE_PANELS, PROFILE_DEFAULT_PANEL, RUNNABLE_PANELS, type PanelId } from "./panels.ts";
 import { deriveCell, liveStateOfCell, type Cell } from "./roster-vocabulary.ts";
 import { hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters } from "./subject-filters.ts";
+import { scoringOfRows } from "../fhir/run-aggregate.ts";
+import type { ScoringLogic } from "../measure/measure-identity.ts";
 
 export interface RosterColumn {
   measureId: string;
   name: string;
   complianceClass: "PERMANENT" | "RECURRING";
+  /**
+   * The logic that scored the column measure's winning run (#769) — read from that run's rows' own
+   * evidence while their cells are derived, never from today's routing. Null when authored CQL scored
+   * them, the measure has no winning run, every row errored, or the rows disagree (`logicConflict`).
+   */
+  logic: ScoringLogic | null;
+  /**
+   * True when the winning run's evaluated rows for the measure were scored by more than one logic (CMS's
+   * artifact and a translation, or either beside authored CQL): no one label describes the column, and
+   * `logic` is null rather than whichever row came first.
+   */
+  logicConflict: boolean;
+}
+
+/** What one (measure, run)'s rows were scored by, collected while their cells are derived. */
+export interface ColumnScoring {
+  logic: ScoringLogic | null;
+  conflict: boolean;
+}
+
+/**
+ * The one logic a run's rows for a measure were scored by, by the rule the run detail and the programs
+ * card use (`scoringOfRows`), so the three cannot disagree. An errored row names none and is skipped —
+ * it counts as no logic, as the exporters' `mixed_logic` refusal reads it — while authored CQL IS a
+ * logic, so authored rows beside official ones are a conflict rather than a CMS column. Two periods or
+ * two artifact digests under one printed name are a conflict too: the key is the evidence's scoring
+ * identity, not the display object, which carries neither.
+ */
+export function columnScoringOf(evidences: Iterable<unknown>): ColumnScoring {
+  const { logics, conflict } = scoringOfRows(evidences);
+  return conflict ? { logic: null, conflict: true } : { logic: logics[0] ?? null, conflict: false };
 }
 /** The person who closed the case behind a cell CQL still counts (#569) — display only. */
 export interface StaffClosure {
@@ -89,9 +122,10 @@ export interface Roster {
  * evaluation time), so the derived cell map for a measure's latest run is stable. Keyed by
  * `measureId` and superseded when a newer run appears (a Recalculate mints a new runId), so it holds
  * one entry per measure — the repeat roster load then skips the ~1.3MB `evidence_json` fetch +
- * derive entirely.
+ * derive entirely. `scoring` is the column's logic (#769), collected from the same rows; an entry
+ * without it (only a test writes one) is re-derived by the roster rather than served unnamed.
  */
-export type RosterCellCache = Map<string, { runId: string; cells: Map<string, RosterCell> }>;
+export type RosterCellCache = Map<string, { runId: string; cells: Map<string, RosterCell>; scoring?: ColumnScoring }>;
 
 /**
  * Process-lifetime roster cell cache (the route passes this shared instance; the worker is a
@@ -160,14 +194,6 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   const measureIds = activeSegment
     ? activeSegment.measureIds.filter((m) => ACTIVE_CATALOG_MEASURE_IDS.has(m) && isRunnableMeasure(m))
     : RUNNABLE_PANELS[resolvedPanel];
-  const columns: RosterColumn[] = measureIds.map((id) => ({
-    measureId: id,
-    // An official-only column (cms2, cms130, cms165, cms137 on the pilot) has no authored entry in
-    // `MEASURES`; its name is the catalog's. Until 2026-09-10 those headers read as raw ids.
-    name: MEASURES[id]?.name ?? MEASURE_CATALOG.find((m) => m.id === id)?.name ?? id,
-    complianceClass: MEASURE_BINDINGS[id]?.complianceClass ?? "RECURRING",
-  }));
-
   // 1) latest population run per panel measure → its run id, from the RUNS table (O(measures) rows;
   //    `listLatestPopulationRuns`). Excludes single-subject CASE/EMPLOYEE reruns AND in-flight RUNNING
   //    runs — an async ALL_PROGRAMS/SITE run persists each outcome before it finalizes, so without the
@@ -191,6 +217,7 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
   //    holds every measure, and the old read took the whole run — every measure's evidence, 120,000
   //    rows on the pilot — once, to serve the panel's columns; that was the roster's cold cost.
   const cellByMeasureSubject = new Map<string, Map<string, RosterCell>>();
+  const scoringByMeasure = new Map<string, ColumnScoring>();
   for (const m of measureIds) {
     const runId = runByMeasure.get(m);
     if (!runId) {
@@ -201,22 +228,37 @@ export async function buildRoster(deps: RosterDeps, filters: RosterFilters): Pro
     // derive on repeat requests. The cached cells are read-only downstream (assembled by reference
     // into rows, never mutated), so sharing the map across requests is safe.
     const cached = deps.cellCache?.get(m);
-    if (cached && cached.runId === runId) {
+    if (cached && cached.runId === runId && cached.scoring) {
       cellByMeasureSubject.set(m, cached.cells);
+      scoringByMeasure.set(m, cached.scoring);
       continue;
     }
     const cells = new Map<string, RosterCell>();
-    for (const o of await deps.outcomeStore.listOutcomes(runId, { measureId: m })) {
-      if (o.measureId !== m) continue; // a fake that ignores the filter still yields the right cells
+    // A fake that ignores the filter still yields the right cells.
+    const rows = (await deps.outcomeStore.listOutcomes(runId, { measureId: m })).filter((o) => o.measureId === m);
+    for (const o of rows) {
       // Freeze the cell: cached cells are shared BY REFERENCE across requests (and assembled by
       // reference into each response's rows), so any accidental post-build mutation would silently
       // corrupt another request's view. Freezing makes that a loud throw instead — enforcing the
       // read-only invariant this cache relies on.
       cells.set(o.subjectId, cellFromOutcome(o, m, runId));
     }
-    deps.cellCache?.set(m, { runId, cells }); // supersedes any older run's entry for this measure (bounded to #measures)
+    // The column's logic, from the rows already in hand (#769): no read of its own, and cached with the
+    // cells so a warm roster names it without the evidence.
+    const scoring = columnScoringOf(rows.map((o) => o.evidence));
+    deps.cellCache?.set(m, { runId, cells, scoring }); // supersedes any older run's entry for this measure (bounded to #measures)
     cellByMeasureSubject.set(m, cells);
+    scoringByMeasure.set(m, scoring);
   }
+  const columns: RosterColumn[] = measureIds.map((id) => ({
+    measureId: id,
+    // An official-only column (cms2, cms130, cms165, cms137 on the pilot) has no authored entry in
+    // `MEASURES`; its name is the catalog's. Until 2026-09-10 those headers read as raw ids.
+    name: MEASURES[id]?.name ?? MEASURE_CATALOG.find((m) => m.id === id)?.name ?? id,
+    complianceClass: MEASURE_BINDINGS[id]?.complianceClass ?? "RECURRING",
+    logic: scoringByMeasure.get(id)?.logic ?? null,
+    logicConflict: scoringByMeasure.get(id)?.conflict ?? false,
+  }));
   // The request-local directory: the static one, plus (seam on) the live subjects seen in the
   // columns' winning runs — the cell maps' keys, cached or freshly derived, so no extra read. The
   // rehydration used to draw on every measure's winning rows; it now draws on the columns shown,

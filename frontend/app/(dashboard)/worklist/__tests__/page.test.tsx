@@ -27,6 +27,7 @@ vi.mock("@/components/auth-provider", () => ({
 }));
 
 import WorklistPage from "../page";
+import { CMS125_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 const TWO_GAP_PATIENT = {
   employeeId: "maui-pat-00001",
@@ -96,25 +97,70 @@ describe("WorklistPage", () => {
     expect(screen.getByText(/1 (patient|employee) with open gaps/i)).toBeInTheDocument();
   });
 
-  it("names each gap chip by its short identity, with the full label as its accessible name (#648)", async () => {
+  function withMeasures(rows: unknown[]) {
     get.mockImplementation((url: string) => {
-      if (url.startsWith("/api/measures")) {
-        return Promise.resolve([
-          { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112" } },
-          { id: "cms122", name: "Diabetes HbA1c", identity: null },
-        ]);
-      }
+      if (url.startsWith("/api/measures")) return Promise.resolve(rows);
       if (url.startsWith("/api/users/assignable")) return Promise.resolve(ASSIGNABLE);
       if (url.startsWith("/api/providers")) return Promise.resolve(PROVIDERS);
       if (url.startsWith("/api/payers")) return Promise.resolve(PAYERS);
       return Promise.resolve([]);
     });
+  }
+
+  it("names each gap chip by its short identity, with the full label as its accessible name (#648)", async () => {
+    withMeasures([
+      { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112" } },
+      { id: "cms122", name: "Diabetes HbA1c", identity: null },
+    ]);
     render(<WorklistPage />);
     const chip = await screen.findByRole("link", { name: /^MIPS 112 · CMS125 · Breast Cancer Screening — Overdue/ });
-    expect(chip).toHaveTextContent(/^MIPS 112 · CMS125$/);
+    expect(chip.textContent).toBe(LABELS.cms125Plain);
     expect(chip).toHaveAttribute("title", expect.stringMatching(/^MIPS 112 · CMS125 · Breast Cancer Screening — /));
     // A measure with no published identity keeps its name on the chip.
     expect(screen.getByRole("link", { name: /^Diabetes HbA1c — / })).toHaveTextContent(/^Diabetes HbA1c$/);
+  });
+
+  it("names the logic that scored each gap's case on its chip, never today's routing (#769)", async () => {
+    // Routing says CMS's artifact runs both measures. The cms125 gap's row names CMS's artifact; the
+    // cms137 gap's row names the translation; a third (cms125) gap's row names nothing.
+    withMeasures([
+      { id: "cms125", name: "Breast Cancer Screening", identity: ROUTED_IDENTITIES.cms125 },
+      { id: "cms137", name: "Substance Use Treatment", identity: ROUTED_IDENTITIES.cms137 },
+    ]);
+    getWithHeaders.mockResolvedValue({
+      data: [{
+        ...TWO_GAP_PATIENT,
+        gapCount: 3,
+        openGaps: [
+          { ...TWO_GAP_PATIENT.openGaps[0], logic: CMS125_ARTIFACT },
+          { ...TWO_GAP_PATIENT.openGaps[1], caseId: "case-137", measureId: "cms137", measureName: "Substance Use Treatment", logic: CMS137_TRANSLATION },
+          { ...TWO_GAP_PATIENT.openGaps[0], caseId: "case-125b", outcomeStatus: "MISSING_DATA", nextAction: null, logic: null },
+        ],
+      }],
+      headers: new Headers({ "X-Total-Count": "1" }),
+    });
+    render(<WorklistPage />);
+
+    const artifact = await screen.findByRole("link", { name: `${LABELS.cms125Title} · Breast Cancer Screening — Overdue: Order a mammogram` });
+    expect(artifact.textContent).toBe(LABELS.cms125Short);
+    expect(artifact).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening — Overdue: Order a mammogram`);
+
+    const translated = screen.getByRole("link", { name: /^MIPS 305 · WorkWell translation of CMS137v15 \(ww-2027\.1\), not a CMS measure · Substance Use Treatment — / });
+    expect(translated.textContent).toBe(LABELS.cms137TranslationShort);
+    expect(translated).not.toHaveTextContent(/FHIR/);
+
+    // No row logic: the unversioned crosswalk, though routing names an executed artifact.
+    const unnamed = screen.getByRole("link", { name: `${LABELS.cms125Plain} · Breast Cancer Screening — Missing Data` });
+    expect(unnamed.textContent).toBe(LABELS.cms125Plain);
+  });
+
+  it("keeps the Measure filter chip unversioned: a filter selects a measure across years (#769)", async () => {
+    navHolder.current.setUrl("/worklist?measureId=cms125");
+    withMeasures([{ id: "cms125", name: "Breast Cancer Screening", identity: ROUTED_IDENTITIES.cms125 }]);
+    render(<WorklistPage />);
+    // The measure's name after the crosswalk, never its id ("… · cms125" was the old fallback).
+    const chips = await screen.findAllByText(`Measure: ${LABELS.cms125Plain} · Breast Cancer Screening`);
+    for (const chip of chips) expect(chip.textContent).not.toMatch(/FHIR|from CMS|v\d/);
   });
 
   it("assigns every open gap of the selected PATIENTS in one call, and says so on the button", async () => {

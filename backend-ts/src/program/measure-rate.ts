@@ -9,6 +9,7 @@
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { aggregateOfficialRun } from "../fhir/run-aggregate.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
+import { ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
 
 export interface MeasureRateGroup {
   /** The reviewed rate label (`OFFICIAL_MEASURE_SEMANTICS[id].rateLabels`); null for a single-rate measure. */
@@ -29,8 +30,16 @@ export interface MeasureRate {
   source: "official-evidence" | "translation-evidence";
   runId: string;
   /**
+   * The logic that scored the rows behind this rate, named from their own evidence (`scoringLogicOf`);
+   * null when the evidence did not name it. A rate exists only for rows scored by ONE logic, so this is
+   * that logic.
+   */
+  logic: ScoringLogic | null;
+  /**
    * The artifact the evidence names, when a row carried it. `kind: "derived"` with its `label` when a
-   * WorkWell translation scored the run; its `ecqmId` is then always null (LOCKED §4.3).
+   * WorkWell translation scored the run; its `ecqmId` is then always null (LOCKED §4.3). CMS's id is
+   * spelled as every served surface spells it (`ecqmIdOf`: "CMS125FHIR", where the evidence stores the
+   * manifest's bare "125FHIR").
    */
   official: {
     ecqmId: string | null;
@@ -55,7 +64,7 @@ export interface MeasureRate {
  * reportable run (`isCompletedRun`), and the reconciliation route gates on `isReportableRunStatus`.
  */
 /**
- * `null` is memoized too, and it has to be (review of #610).
+ * The no-rate answer is memoized too, and it has to be (review of #610).
  *
  * The negative used to cost one row — `runProducedOfficialEvidence` with `LIMIT 1` — so not caching it
  * was free. Since provenance and aggregation share ONE read it costs the measure's whole evidence, and
@@ -65,24 +74,53 @@ export interface MeasureRate {
  * `/api/programs/overview` call, for the life of the process. That is the statement-timeout cliff this
  * change exists to remove, reintroduced by the change itself.
  */
-const memo = new Map<string, MeasureRate | null>();
+/**
+ * What one (run, measure) answers: the rate, or why there is none, and the logics that scored it.
+ *
+ * Memoized AS THIS OBJECT, never as a bare `null` (#769). A bare `null` stood for three different
+ * answers — authored rows, no evaluated row, and rows scored by more than one logic — and a reader that
+ * has to NAME the logics of a conflicted run (the programs card, the measure page) read a memoized
+ * conflict back as "authored", which has none. `conflict` and `scoringLogics` keep them apart.
+ */
+export interface MeasureRateResult {
+  /** Null for authored rows, for a run with no evaluated official row, and for a conflict. */
+  rate: MeasureRate | null;
+  /**
+   * The distinct named logics of the run's evaluated rows for the measure, sorted
+   * (`distinctScoringLogics`). Empty for authored rows; more than one entry is a conflict.
+   */
+  scoringLogics: ScoringLogic[];
+  /** The rows were scored by more than one logic or measurement period (authored rows count as one). */
+  conflict: boolean;
+}
+
+const memo = new Map<string, MeasureRateResult>();
 const MEMO_LIMIT = 32;
 export function resetMeasureRateMemo(): void {
   memo.clear();
 }
 
+/** The rate alone — null for authored rows, no evaluated official row, or a conflict. */
 export async function officialMeasureRate(
   os: Pick<OutcomeStore, "listOutcomeMembershipsForRun">,
   runId: string,
   measureId: string,
 ): Promise<MeasureRate | null> {
+  return (await officialMeasureRateResult(os, runId, measureId)).rate;
+}
+
+export async function officialMeasureRateResult(
+  os: Pick<OutcomeStore, "listOutcomeMembershipsForRun">,
+  runId: string,
+  measureId: string,
+): Promise<MeasureRateResult> {
   const key = `${runId}|${measureId}`;
-  // `has`, not a truthy check: `null` is a real cached answer and the whole point of caching it.
-  if (memo.has(key)) return memo.get(key) ?? null;
-  const remember = (rate: MeasureRate | null): MeasureRate | null => {
+  const cached = memo.get(key);
+  if (cached) return cached;
+  const remember = (result: MeasureRateResult): MeasureRateResult => {
     if (memo.size >= MEMO_LIMIT) memo.delete(memo.keys().next().value as string);
-    memo.set(key, rate);
-    return rate;
+    memo.set(key, result);
+    return result;
   };
   // ONE read of the measure's rows, which also answers whether there was official evidence to reduce
   // (`producedOfficialEvidence`). It used to ask `runProducedOfficialEvidence` first and then
@@ -95,18 +133,24 @@ export async function officialMeasureRate(
   // the right way round: on the pilot every routed measure is official, so the authored case is TWH's
   // small occupational rosters, while the official case is the 20,000-patient one that was timing out.
   const aggregate = await aggregateOfficialRun(os, runId, measureId);
-  if (!aggregate.producedOfficialEvidence) return remember(null);
+  const scoringLogics = aggregate.scoringLogics;
   // Rows scored by two different logics (an ad-hoc evaluation spanning a year boundary) have no one
   // rate: summing CMS's 2026 counts with a translation's 2027 counts names neither. The exporters refuse
-  // the same run (`mixed_logic`).
-  if (aggregate.identityConflict) return remember(null);
+  // the same run (`mixed_logic`). Two NAMED logics are a conflict even where the exporters' coarser key
+  // agrees (rows recorded before the digest was), so that "more than one logic listed" and "no rate"
+  // always say the same thing.
+  const conflict = aggregate.identityConflict || scoringLogics.length > 1;
+  if (!aggregate.producedOfficialEvidence || conflict) return remember({ rate: null, scoringLogics, conflict });
   const labels = officialMeasureSemantics(measureId)?.rateLabels;
+  const derived = aggregate.official?.kind === "derived";
   const rate: MeasureRate = {
-    source: aggregate.official?.kind === "derived" ? "translation-evidence" : "official-evidence",
+    source: derived ? "translation-evidence" : "official-evidence",
     runId,
+    logic: scoringLogics[0] ?? null,
     official: aggregate.official
       ? {
-          ecqmId: aggregate.official.ecqmId ?? null,
+          // One spelling on every served id; a translation never carries one, whatever a row held.
+          ecqmId: !derived && aggregate.official.ecqmId ? ecqmIdOf(aggregate.official.ecqmId) : null,
           version: aggregate.official.version ?? null,
           artifactSha256: aggregate.official.artifactSha256 ?? null,
           ...(aggregate.official.kind === "derived"
@@ -130,5 +174,5 @@ export async function officialMeasureRate(
     unmeasured: aggregate.unmeasured,
     evaluationErrors: aggregate.evaluationErrors,
   };
-  return remember(rate);
+  return remember({ rate, scoringLogics, conflict: false });
 }

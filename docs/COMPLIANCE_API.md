@@ -63,6 +63,11 @@ GET /api/v1/compliance/{subjectId}/{measureId}?start=YYYY-MM-DD&end=YYYY-MM-DD&m
 }
 ```
 
+**`measure.ecqmId` is always CMS-prefixed (`CMS125FHIR`).** This is a v1 value correction (#769), not a
+new field: the vendored manifests and the stored evidence keep CMS's bare `125FHIR`, and this API served
+that bare value until #769, although the example above has always shown the prefixed one. The published
+`@work-well/measure-engine` package and QRDA output are unchanged.
+
 ### `status` is the answer
 
 | value | meaning |

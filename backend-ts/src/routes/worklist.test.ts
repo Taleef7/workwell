@@ -16,6 +16,7 @@ import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
+import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { handleWorklist, BULK_ASSIGN_MAX } from "./worklist.ts";
 import { SqlitePanelStore } from "../stores/sqlite/panel-store-sqlite.ts";
 import type { CloudDatabase } from "@mieweb/cloud";
@@ -415,3 +416,23 @@ test("?panel=me composes with the other filters rather than replacing them", asy
     await panels.removePanelAssignment("prov-002");
   }
 });
+
+test("each gap names the logic its case's cited outcome was scored by, and nothing where there is no row (#769)", async () => {
+  // The audiogram gap cites an outcome a WorkWell translation scored (the evidence shape the official
+  // executor writes); the hazwoper gap's case cites a run row that was never recorded.
+  await new SqliteOutcomeStore(env.DB as never).recordOutcome({
+    runId,
+    subjectId: "emp-006",
+    measureId: "audiogram",
+    evaluationPeriod: CYCLE,
+    status: "OVERDUE",
+    evidence: { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } },
+  });
+  const omar = (await rowsOf((await get())!)).find((r) => r.employeeId === "emp-006")!;
+  const audiogram = omar.openGaps.find((g) => g.measureId === "audiogram")!;
+  const hazwoper = omar.openGaps.find((g) => g.measureId === "hazwoper")!;
+  assert.equal(audiogram.logic?.kind, "workwell-translation");
+  assert.equal(audiogram.logic && audiogram.logic.kind === "workwell-translation" ? audiogram.logic.version : null, "ww-2027.1");
+  assert.equal(hazwoper.logic, null);
+});
+

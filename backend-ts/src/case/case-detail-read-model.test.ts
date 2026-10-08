@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { toCaseDetail, deriveWhyFlagged, overdueDays } from "./case-detail-read-model.ts";
 import type { ImmunizationForecast } from "../engine/immunization/immunization-forecast.ts";
 import type { CaseRecord } from "../stores/case-store.ts";
+import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 
 const CASE: CaseRecord = {
@@ -54,6 +55,37 @@ test("the case page names every pilot measure, the four official-only ones inclu
 test("toCaseDetail includes measureId matching the case record", () => {
   const detail = toCaseDetail(CASE, null);
   assert.equal(detail.measureId, "adult_immunization");
+});
+
+test("the case page names the logic and version of the row it shows, from that row's evidence (#769)", () => {
+  const outcomeWith = (measureId: string, evidence: unknown): OutcomeRecord =>
+    ({ id: "o-1", runId: "run-001", subjectId: "emp-006", measureId, evaluationPeriod: "2026-01-01", status: "OVERDUE", evidence, evaluatedAt: "2026-10-01T00:00:00Z" }) as OutcomeRecord;
+  const detailOf = (measureId: string, evidence: unknown) => toCaseDetail({ ...CASE, measureId }, outcomeWith(measureId, evidence));
+
+  // CMS137's vendored artifact is what the manifest names; this row was scored by the translation.
+  const translated = detailOf("cms137", {
+    official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" },
+  });
+  assert.deepEqual(translated.logic, { kind: "workwell-translation", label: "WorkWell translation of CMS137v15", version: "ww-2027.1", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15" });
+  assert.equal(translated.measureVersion, "ww-2027.1");
+
+  const cms = detailOf("cms125", { official: { ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8" } });
+  assert.equal(cms.logic?.kind, "cms-artifact");
+  assert.equal(cms.logic?.kind === "cms-artifact" ? `${cms.logic.ecqmId} v${cms.logic.version} (from ${cms.logic.derivedFrom})` : null, "CMS125FHIR v1.0.000 (from CMS125v14)");
+  assert.equal(cms.measureVersion, "1.0.000", "the artifact's version, not the authored library's 2.0.0");
+
+  const errored = detailOf("cms125", { evaluationError: "CQL engine failure", message: "boom" });
+  assert.equal(errored.logic, null);
+  assert.equal(errored.measureVersion, "", "an errored row names no version — never 2.0.0");
+
+  const audiogram = detailOf("audiogram", { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] });
+  assert.equal(audiogram.logic, null, "authored CQL has no CMS or translation identity");
+  assert.equal(audiogram.measureVersion, "1.0.0");
+  assert.equal(detailOf("cms125", { expressionResults: [] }).measureVersion, "2.0.0", "a pre-flip authored cms125 row is authored CQL's");
+
+  const noRow = toCaseDetail({ ...CASE, measureId: "cms125" }, null);
+  assert.equal(noRow.logic, null);
+  assert.equal(noRow.measureVersion, "", "no row: blank, as the case list says for the same case");
 });
 
 test("toCaseDetail omits immunizationForecast key when param is not provided", () => {

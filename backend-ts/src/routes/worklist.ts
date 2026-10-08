@@ -12,7 +12,7 @@ import { listNotFoundBody, withListFilter } from "../compliance/subject-list-fil
 import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
 import { loadWorklistCases, withLiveStatus, STAFF_CLOSED_TOKEN } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
-import { groupIntoPatients } from "../case/worklist-patients.ts";
+import { groupIntoPatients, withGapLogic } from "../case/worklist-patients.ts";
 import { employeeById, employees, providerById, profileSubjectMatcher, DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
@@ -120,7 +120,8 @@ export async function handleWorklist(req: Request, env: WorklistEnv, actor = "sy
   // a surface that could not fire: nothing read it, and `config/cors.ts` exposes only X-Total-Count,
   // so on a split-origin deployment a browser could not have read it even if something did. The page
   // names the panels from the mapping list it already loads.
-  return json(rows.slice(offset, offset + limit), 200, { "X-Total-Count": String(rows.length) });
+  // Each gap names the logic that scored its case (#769): one bounded read per (run, measure) on the page.
+  return json(await withGapLogic(stores.outcomes, rows.slice(offset, offset + limit)), 200, { "X-Total-Count": String(rows.length) });
 }
 
 /**

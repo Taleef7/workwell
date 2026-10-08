@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import CaseDetailPage from "../page";
+import { CMS125_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 const get = vi.fn();
 const post = vi.fn();
@@ -128,6 +129,43 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     const year = screen.getByText("Measurement year", { selector: "dt" });
     expect(year.nextElementSibling).toHaveTextContent(/^2026$/);
     expect(screen.queryByText("2026-01-01", { exact: true })).not.toBeInTheDocument();
+  });
+
+  describe("names the logic that scored the case's outcome, never today's routing (#769)", () => {
+    function withCase(measure: { id: string; name: string }, identity: unknown, logic: unknown) {
+      get.mockImplementation((url: string) => {
+        if (url === "/api/measures") return Promise.resolve([{ id: measure.id, name: measure.name, identity }]);
+        if (url === "/api/cases/case-001") {
+          return Promise.resolve(makeCaseDetail({ measureId: measure.id, measureVersionId: measure.id, measureName: measure.name, logic }));
+        }
+        return Promise.resolve([]);
+      });
+    }
+    const CMS125 = { id: "cms125", name: "Breast Cancer Screening" };
+    const CMS137 = { id: "cms137", name: "Substance Use Treatment" };
+
+    it("CMS's artifact scored it: the full form, and 'a CMS draft' in its title", async () => {
+      withCase(CMS125, ROUTED_IDENTITIES.cms125, CMS125_ARTIFACT);
+      render(<CaseDetailPage />);
+      const label = await screen.findByText(`${LABELS.cms125Full} · Breast Cancer Screening`, { exact: true });
+      expect(label).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+      expect(screen.getAllByText(/MIPS 112/)).toHaveLength(1);
+    });
+
+    it("routing names CMS's artifact but the row names the translation: the translation", async () => {
+      withCase(CMS137, ROUTED_IDENTITIES.cms137, CMS137_TRANSLATION);
+      render(<CaseDetailPage />);
+      const label = await screen.findByText(`${LABELS.cms137TranslationFull} · Substance Use Treatment`, { exact: true });
+      expect(label).toHaveAttribute("title", `${LABELS.cms137TranslationTitle} · Substance Use Treatment`);
+      expect(screen.queryByText(/CMS137FHIR/)).toBeNull();
+    });
+
+    it("routing names CMS's artifact but the row names no logic: the unversioned crosswalk", async () => {
+      withCase(CMS125, ROUTED_IDENTITIES.cms125, null);
+      render(<CaseDetailPage />);
+      expect(await screen.findByText(`${LABELS.cms125Plain} · Breast Cancer Screening`, { exact: true })).toBeInTheDocument();
+      expect(screen.queryByText(/CMS125FHIR|v1\.0\.000/)).toBeNull();
+    });
   });
 
   it("renders plain name for an OSHA measure without identity crosswalk", async () => {

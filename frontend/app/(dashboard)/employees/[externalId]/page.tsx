@@ -103,7 +103,9 @@ export default function EmployeeProfilePage() {
   const canManageThisCase = canManageCases(user?.role);
   // One fetch for the page, not one per open gap.
   const { options: assignableOptions, canonicalFor } = useAssignableUsers(canManageThisCase);
-  const { labelFor: measureLabelFor } = useMeasureIdentities();
+  // Every result here names the logic that scored it (#769): the full form in Measure Details, the chip
+  // form with the full form as its title elsewhere. The simulation is not a result and stays unversioned.
+  const { labelFor: measureLabelFor, compactLabelFor, titleFor } = useMeasureIdentities();
   const isPatientTerm = SUBJECT.singular === 'patient';
 
   // Skeletons on the first load of THIS patient only. A refresh (after Recalculate or any finished run)
@@ -167,14 +169,14 @@ export default function EmployeeProfilePage() {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400 pb-2">
           Compliance Posture
         </p>
-        <ComplianceSummaryBar outcomes={profile.measureOutcomes} labelFor={measureLabelFor} />
+        <ComplianceSummaryBar outcomes={profile.measureOutcomes} labelFor={compactLabelFor} titleFor={titleFor} />
       </div>
 
       {/* Two columns only at xl: at lg the sidebar squeezed the main column's tables into a sideways scroll. */}
       <div className="grid gap-6 xl:grid-cols-3">
       <div className="min-w-0 space-y-6 xl:col-span-2">
-      <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} labelFor={measureLabelFor} />
-      <SimulateComplianceHistory key={externalId} externalId={externalId} labelFor={measureLabelFor} />
+      <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} labelFor={compactLabelFor} titleFor={titleFor} />
+      <SimulateComplianceHistory key={externalId} externalId={externalId} labelFor={(id, name) => measureLabelFor(id, name)} />
       {/* Open cases */}
       {profile.openCases.length > 0 && (
         <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
@@ -195,9 +197,10 @@ export default function EmployeeProfilePage() {
                   <td className="py-2">
                     <Link
                       href={`/cases/${c.caseId}`}
+                      title={titleFor(c.measureId, c.measureName, c.logic)}
                       className="text-primary-600 dark:text-primary-400 hover:underline font-medium"
                     >
-                      {measureLabelFor(c.measureId, c.measureName)}
+                      {compactLabelFor(c.measureId, c.measureName, c.logic)}
                     </Link>
                   </td>
                   <td className="py-2">
@@ -242,9 +245,22 @@ export default function EmployeeProfilePage() {
               className="rounded-lg border border-neutral-200 dark:border-neutral-800 p-4"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="min-w-0 font-medium text-neutral-900 dark:text-neutral-100">
-                  <span>{measureLabelFor(o.measureId, o.measureName)}</span>{' '}
-                  <span className="text-xs font-normal text-neutral-600 dark:text-neutral-400">{o.measureVersion}</span>
+                {/* A row a named logic scored: the full form carries its version (#769), so nothing is
+                    printed beside it. A row with no logic prints the version the server read off the row
+                    itself: the authored library's for authored CQL (TWH, occupational), "" for an official
+                    row that named no artifact. It is the row's fact, so it shows whether or not the
+                    measure identities have loaded. */}
+                <span
+                  className="min-w-0 font-medium text-neutral-900 dark:text-neutral-100"
+                  title={titleFor(o.measureId, o.measureName, o.logic)}
+                >
+                  <span>{measureLabelFor(o.measureId, o.measureName, o.logic)}</span>
+                  {!o.logic && o.measureVersion ? (
+                    <>
+                      {' '}
+                      <span className="text-xs font-normal text-neutral-600 dark:text-neutral-400">{o.measureVersion}</span>
+                    </>
+                  ) : null}
                 </span>
                 <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${complianceStatusClass(shownStatusOf(o))}`}>
                   {labelFor(COMPLIANCE_STATUS_LABELS, shownStatusOf(o))}

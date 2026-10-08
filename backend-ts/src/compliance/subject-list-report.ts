@@ -49,12 +49,13 @@ import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { SubjectListStore, SubjectList } from "../stores/subject-list-store.ts";
 import { createRateAggregator, membershipRatesFor, officialReportIdentity, reportingPeriod, type OfficialReportIdentity } from "../fhir/measure-report.ts";
 import { isEvaluationErrorEvidence } from "../fhir/measure-report.ts";
-import { scoringIdentityKey } from "../fhir/run-aggregate.ts";
+import { scoringOfRows } from "../fhir/run-aggregate.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { isPopulationRun } from "../program/rollup-shared.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
+import { ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
 
 /** One page of outcome rows per read. Matches `fhir/run-aggregate.ts`'s page so the two agree. */
 const PAGE = 2000;
@@ -108,6 +109,12 @@ export interface MeasureReportEntry {
    * translation's label (`WorkWell translation of CMS137v15`), whose `ecqmId` is null (LOCKED §4.3).
    */
   executedLogic: string | null;
+  /**
+   * The same logic, structured (`scoringLogicOf` over the rows' own evidence, #769): CMS's artifact with
+   * its eCQM id, version and lineage, or a translation by its label and version (never an eCQM id).
+   * Null where nothing was counted or nothing named the logic. `executedLogic` stays the §6.6 string.
+   */
+  logic: ScoringLogic | null;
   runId: string | null;
   runStartedAt: string | null;
   measurementPeriod: { start: string; end: string } | null;
@@ -254,9 +261,11 @@ export async function subjectListReport(
 
     entries.push({
       measureId,
-      ecqmId: read.identity?.ecqmId ?? null,
+      // One spelling on every served eCQM id, and none for a translation, whatever its rows carried.
+      ecqmId: read.identity?.ecqmId && read.identity.kind !== "derived" ? ecqmIdOf(read.identity.ecqmId) : null,
       version: read.identity?.version ?? null,
       executedLogic: executedLogicOf(read.identity ?? null),
+      logic: read.logic,
       runId: winner.runId,
       runStartedAt: winner.startedAt,
       measurementPeriod: reportingPeriod(winner, read.identity ?? null),
@@ -347,7 +356,7 @@ export function executedLogicOf(identity: OfficialReportIdentity | null): string
   if (!identity) return null;
   if (identity.kind === "derived") return identity.label ?? null;
   if (!identity.ecqmId || !identity.version) return null;
-  return `${/^CMS/i.test(identity.ecqmId) ? identity.ecqmId : `CMS${identity.ecqmId}`} v${identity.version}`;
+  return `${ecqmIdOf(identity.ecqmId)} v${identity.version}`;
 }
 
 const emptyEntry = (
@@ -360,6 +369,7 @@ const emptyEntry = (
   ecqmId: null,
   version: null,
   executedLogic: null,
+  logic: null,
   runId: null,
   runStartedAt: null,
   measurementPeriod: null,
@@ -438,8 +448,10 @@ interface MeasureRead {
   buckets: { scored: number; unmeasured: number; evaluationErrors: number; outOfPopulation: number };
   duplicateRowsCollapsed: number;
   periodMismatch: boolean;
-  /** The counted rows were scored by more than one logic (`scoringIdentityKey`), e.g. CMS's draft and a translation. */
+  /** The counted rows were scored by more than one logic (`scoringOfRows`), e.g. CMS's draft and a translation. */
   mixedLogic: boolean;
+  /** The one logic the non-errored counted rows were scored by; null when mixed, authored, or none named. */
+  logic: ScoringLogic | null;
 }
 
 /** Page a run's outcomes for one measure, keeping only the list's members. */
@@ -496,18 +508,23 @@ async function readMeasure(
   let identity: ReturnType<typeof officialReportIdentity> = null;
   // Every counted row's logic, compared: an import-driven run evaluated before and after a routing change
   // for the SAME year can hold CMS's draft and a translation, and one `executedLogic` cannot name both.
-  const logics = new Set<string>();
+  // Compared by the rule the run detail and the programs card use (`scoringOfRows`): kind, digest and
+  // period, AND the eCQM id, version and label, so legacy rows without a digest that name different
+  // versions are a mix too. Errored rows name no logic and are skipped there.
+  const evidences: unknown[] = [];
   for (const row of newest.values()) {
     aggregator.add(row);
-    identity ??= officialReportIdentity(row.evidence);
     const errored = isEvaluationErrorEvidence(row.evidence);
-    if (!errored) logics.add(scoringIdentityKey(officialReportIdentity(row.evidence)));
+    // An errored row scored nothing, so it never names the report's artifact, even if it kept a block.
+    if (!errored) identity ??= officialReportIdentity(row.evidence);
+    evidences.push(row.evidence);
     // Memberships are read ONCE per row and reused for the row's flags and its bucket. The first cut
     // built a whole `createRateAggregator` per row for the flags alone — 300,000 stateful aggregators
     // at the 50,000-member cap across six measures, each re-parsing the evidence.
     kept.push({ row, errored, memberships: errored ? [] : membershipRatesFor(row, measureId) });
   }
   const aggregate = aggregator.finish();
+  const scoring = scoringOfRows(evidences);
   // How many rates this run DECLARES, which is what makes a row with fewer of them unmeasured. Read
   // off the finished aggregate so a single row cannot decide it — the rule is about the run.
   const declaredRates = aggregate.rates.length;
@@ -550,7 +567,8 @@ async function readMeasure(
     buckets,
     duplicateRowsCollapsed,
     periodMismatch,
-    mixedLogic: logics.size > 1,
+    mixedLogic: scoring.conflict,
+    logic: scoring.conflict ? null : (scoring.logics[0] ?? null),
   };
 }
 

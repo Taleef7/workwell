@@ -22,6 +22,7 @@
 import { csvCell, csvTextCell } from "../export/csv.ts";
 import { subjectHeaders } from "../export/export-csv.ts";
 import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
+import { ecqmIdOf } from "../measure/measure-identity.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { MeasureReportEntry, ReportRow, SubjectListReport } from "./subject-list-report.ts";
 
@@ -91,7 +92,8 @@ function rowCells(
   ];
   const measureCells = [
     csvCell(row.measureId ?? ""),
-    csvCell(measure?.ecqmId ?? ""),
+    // One spelling on every served eCQM id ("CMS125FHIR"), whoever built the entry.
+    csvCell(measure?.ecqmId ? ecqmIdOf(measure.ecqmId) : ""),
     csvCell(measure?.version ?? ""),
     csvCell(measure?.runId ?? ""),
     csvCell(measure?.measurementPeriod?.start ?? ""),

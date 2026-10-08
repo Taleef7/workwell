@@ -337,7 +337,7 @@ export function openApiDocument(): OpenApiDocument {
               properties: {
                 id: str("WorkWell catalog id.", "cms125"),
                 name: str("Display name."),
-                ecqmId: str("Present only when an official CMS artifact produced this outcome. Never present for a WorkWell translation.", "CMS125FHIR"),
+                ecqmId: str("CMS's eCQM id for the FHIR artifact that produced this outcome, always spelled with its `CMS` prefix (`CMS125FHIR`). Present only when an official CMS artifact produced this outcome. Never present for a WorkWell translation.", "CMS125FHIR"),
                 version: str("The executed artifact's version, when applicable: CMS's (`1.0.000`) or a WorkWell translation's (`ww-2027.1`).", "1.0.000"),
                 logic: {
                   type: "object",
@@ -458,7 +458,7 @@ export function openApiDocument(): OpenApiDocument {
             summary: str("At most 140 characters, per the CDS Hooks specification."),
             indicator: {
               type: "string",
-              description: "`critical` is never emitted: it means the user must not proceed, and WorkWell is supplementary to WebChart.",
+              description: "`critical` is never emitted: it is the specification's highest urgency, and WorkWell is supplementary to WebChart.",
               enum: ["info", "warning"],
             },
             source: {

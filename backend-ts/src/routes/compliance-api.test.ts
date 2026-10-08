@@ -29,10 +29,14 @@ let env: Record<string, unknown>;
 let run: RunRecord;
 let officialOutcome: OutcomeRecord;
 
-/** The executor's own population vector, in the shape ADR-031 pins. */
+/**
+ * The executor's own population vector, in the shape ADR-031 pins. `ecqmId` is the BARE value the
+ * committed manifest and so the stored evidence really carry (`measures/official/cms125/manifest.json`
+ * `cmsId`), so the response's `CMS125FHIR` below is the normalisation, not the fixture echoed (#769).
+ */
 const OFFICIAL_EVIDENCE = {
   official: {
-    ecqmId: "CMS125FHIR",
+    ecqmId: "125FHIR",
     version: "1.0.000",
     engine: "fqm-execution",
     artifactSha256: "abc123",
@@ -103,7 +107,7 @@ test("GET latest → status, populations and provenance", async () => {
   assert.equal(prov["artifactSha256"], "abc123");
   // Identity comes from the outcome's OWN evidence (ADR-046), never a config flag.
   const measure = b["measure"] as unknown as Record<string, unknown>;
-  assert.equal(measure["ecqmId"], "CMS125FHIR");
+  assert.equal(measure["ecqmId"], "CMS125FHIR", "the stored bare `125FHIR`, served in the one spelling every surface uses");
   assert.equal(measure["version"], "1.0.000");
 });
 
@@ -387,4 +391,12 @@ test("a WorkWell translation's outcome: translation-evidence, measure.logic name
   // CMS's row carries no `logic` key at all: every existing response is byte-identical.
   const cms = (await (await call("/api/v1/compliance/emp-006/cms125"))!.json()) as { measure: Record<string, unknown> };
   assert.equal("logic" in cms.measure, false);
+
+  // A translated row that wrongly carried a CMS id still serves none (#769): the prefixing never turns a
+  // stray `125FHIR` on a translation into a CMS identity.
+  const stray = { ...translated, official: { ...translated.official, ecqmId: "125FHIR" } };
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-009", measureId: "cms125", status: "OVERDUE", evaluationPeriod: "2027-03-01", evidence: stray });
+  const strayBody = (await (await call("/api/v1/compliance/emp-009/cms125"))!.json()) as { measure: Record<string, unknown> };
+  assert.equal("ecqmId" in strayBody.measure, false);
+  assert.doesNotMatch(JSON.stringify(strayBody.measure), /125FHIR/);
 });

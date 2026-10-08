@@ -17,12 +17,12 @@ import { liveAnswerForCase, liveCellsFor } from "../compliance/live-cell.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { measureIdentityFor } from "../measure/measure-identity.ts";
+import { measureIdentityFor, type ScoringLogic } from "../measure/measure-identity.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { STAFF_CLOSED_STATUSES } from "../case/worklist-read-model.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
-import { officialMeasureRate, type MeasureRate } from "./measure-rate.ts";
+import { officialMeasureRateResult, type MeasureRate } from "./measure-rate.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -82,6 +82,23 @@ export interface ProgramSummary {
    * separate metric from `complianceRate`, which is the workflow-status rate (ADR-077 d5).
    */
   measureRate: MeasureRate | null;
+  /**
+   * The distinct logics that scored `latestRunId`'s evaluated rows for this measure, each named from the
+   * rows' own evidence (`scoringLogicOf`), never from today's routing; sorted. Empty for authored rows
+   * or no winning run. More than one entry means the rows were scored by more than one logic or
+   * measurement period, and `measureRate` is then null: there is no one rate to name (#769).
+   *
+   * Always empty when `includesAuthoredScaleCounts`: those counts are not one artifact's, so no logic
+   * names them.
+   */
+  scoringLogics: ScoringLogic[];
+  /**
+   * The winning run's rows for this measure were scored by more than one logic or measurement period —
+   * two named logics, or authored rows beside named ones (`officialMeasureRateResult(...).conflict`),
+   * which `scoringLogics` alone cannot show because authored rows carry no name. `measureRate` is null
+   * whenever this is true. False when `includesAuthoredScaleCounts` (no logic is named at all) (#769).
+   */
+  scoringConflict: boolean;
   /**
    * The year the winning run SCORED and the day its numbers describe (#637), read from the run's own
    * record rather than its start date — a rerun started in January that scores the year before is
@@ -530,6 +547,8 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       openCaseCount,
       staffClosedGapCount,
       measureRate: null,
+      scoringLogics: [],
+      scoringConflict: false,
       measurementYear: null,
       asOf: null,
       logicVintage: null,
@@ -554,7 +573,15 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // Deliberately NOT site/tenant-filtered: it is the run's whole population, which is what the export
   // reports; a filtered view keeps the status buckets only.
   for (const s of summaries) {
-    if (s.latestRunId) s.measureRate = await officialMeasureRate(deps.outcomeStore, s.latestRunId, s.measureId);
+    if (s.latestRunId) {
+      // The same memoized read answers both: the rate, and which logics scored the rows behind it.
+      const result = await officialMeasureRateResult(deps.outcomeStore, s.latestRunId, s.measureId);
+      s.measureRate = result.rate;
+      // A total that folds in the authored scale tenant's counts is not one artifact's (the contract on
+      // `includesAuthoredScaleCounts`): no logic names it, and there is no one-logic claim to conflict.
+      s.scoringLogics = s.includesAuthoredScaleCounts ? [] : result.scoringLogics;
+      s.scoringConflict = s.includesAuthoredScaleCounts ? false : result.conflict;
+    }
     const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
     s.measurementYear = period?.measurementYear ?? null;
     s.asOf = period?.asOf ?? null;

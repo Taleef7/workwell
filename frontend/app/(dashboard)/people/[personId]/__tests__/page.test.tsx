@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import PersonDetailPage from "../page";
+import { CMS125_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 const entry = (evaluatedAt: string, runKind: string, overrides: Record<string, unknown> = {}) => ({
   measureId: "cms125",
@@ -92,5 +93,45 @@ describe("Person history (#655)", () => {
     });
     render(<PersonDetailPage />);
     expect(await screen.findByText("MIPS 112 · CMS125 · Breast Cancer Screening", { selector: "td" })).toBeInTheDocument();
+  });
+
+  it("names the logic that scored each row's outcome, never today's routing (#769)", async () => {
+    setSubject("patient");
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", identity: ROUTED_IDENTITIES.cms125 },
+          { id: "cms137", name: "Substance Use Treatment", identity: ROUTED_IDENTITIES.cms137 },
+        ]);
+      }
+      return Promise.resolve({
+        person: {
+          personId: "person-40c16184",
+          displayName: "Adriana Aoki",
+          nationalId: null,
+          dateOfBirth: "1996-09-24",
+          crossSystem: false,
+          sources: [{ tenantId: "maui", tenantName: "Maui Pilot Clinic", externalId: "pat-04403", name: "Adriana Aoki", role: "", site: "Kahului", status: "ACTIVE" }],
+        },
+        timeline: {
+          entries: [
+            entry("2027-02-01T12:05:00.000Z", "SUBJECT", { measureId: "cms137", measureName: "Substance Use Treatment", logic: CMS137_TRANSLATION }),
+            entry("2026-09-24T12:05:00.000Z", "SCHEDULED", { logic: CMS125_ARTIFACT }),
+            // Routing names CMS's artifact; this row named no logic.
+            entry("2026-09-23T12:05:00.000Z", "MANUAL", { logic: null }),
+          ],
+          move: null,
+        },
+      });
+    });
+    render(<PersonDetailPage />);
+    const artifact = await screen.findByText(`${LABELS.cms125Short} · Breast Cancer Screening`, { selector: "td" });
+    expect(artifact).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+    expect(screen.getByText(`${LABELS.cms137TranslationShort} · Substance Use Treatment`, { selector: "td" })).toHaveAttribute(
+      "title",
+      `${LABELS.cms137TranslationTitle} · Substance Use Treatment`,
+    );
+    expect(screen.getByText(`${LABELS.cms125Plain} · Breast Cancer Screening`, { selector: "td" })).toBeInTheDocument();
+    expect(screen.queryByText(/CMS137FHIR/)).toBeNull();
   });
 });

@@ -27,7 +27,20 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - Live cards are paused until MIE says how a WebChart client would call them.
   - No 2027 run on live Maui: it would close and reopen every 2026 case. The 2027 label is proven in CI
     (#654).
-- Next: #769.
+- **Every result names the logic that scored it (#769).** The labels read each result's own evidence, never
+  today's routing:
+  - CMS's artifact: "MIPS 112 · CMS125FHIR v1.0.000 (from CMS125v14)" on wide surfaces, and the
+    "(from CMS125v14)" chip form on narrow ones.
+  - A translation: "WorkWell translation of CMS137v15 (ww-2027.1)".
+  - A run, card or roster column that mixed logics or periods says so.
+  - Fixes: the patient page's authored "2.0.0", "v1.0" on the Run dropdown and the measure page, MCP pairing
+    "CMS125v14" with "v1.0", and the compliance API's bare "125FHIR".
+  - The cases and outcomes CSVs append `executedLogic`.
+  - The QDM lineage is pinned per artifact sha, so a catalog move to 2027 cannot relabel 2026 rows.
+  - Measured: the run-detail read is 250–400 ms for a 120,000-row run on a local Postgres 16; a finished run's
+    answer is memoized.
+  - CI proves the translated label on a one-patient 2027 run on its throwaway stack.
+- Next: #768.
 
 ## 2026-10-05
 

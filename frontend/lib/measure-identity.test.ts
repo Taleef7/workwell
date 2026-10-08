@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   formatMeasureIdentity,
   formatMeasureLabel,
+  formatVersionedIdentity,
   type MeasureIdentity,
+  type ScoringLogic,
 } from "./measure-identity";
 
 describe("formatMeasureIdentity", () => {
@@ -52,3 +54,70 @@ describe("formatMeasureLabel", () => {
     );
   });
 });
+
+describe("formatVersionedIdentity (#769)", () => {
+  const cms137: MeasureIdentity = {
+    cmsId: "CMS137",
+    mipsQualityId: "305",
+    // Today's routing names CMS's artifact; the label must never read it in place of the row's logic.
+    executed: { ecqmId: "CMS137FHIR", version: "1.0.000", status: "draft", statusNote: null, derivedFrom: "CMS137v14" },
+  };
+  const cmsLogic: ScoringLogic = {
+    kind: "cms-artifact",
+    ecqmId: "CMS137FHIR",
+    version: "1.0.000",
+    derivedFrom: "CMS137v14",
+    status: "draft",
+    statusNote: "posted for public comment Jan–Feb 2026",
+  };
+  const translation: ScoringLogic = {
+    kind: "workwell-translation",
+    label: "WorkWell translation of CMS137v15",
+    version: "ww-2027.1",
+    url: "urn:workwell:measure:cms137:translation",
+    derivedFrom: "CMS137v15",
+  };
+
+  it("names CMS's artifact with its version and the QDM measure it came from", () => {
+    expect(formatVersionedIdentity(cms137, cmsLogic)).toEqual({
+      short: "MIPS 305 · CMS137FHIR (from CMS137v14)",
+      full: "MIPS 305 · CMS137FHIR v1.0.000 (from CMS137v14)",
+      title: "MIPS 305 · CMS137FHIR v1.0.000 (from CMS137v14), a CMS draft",
+    });
+  });
+
+  it("names a translated result by the translation, even where today's routing says CMS's artifact", () => {
+    expect(formatVersionedIdentity(cms137, translation)).toEqual({
+      short: "MIPS 305 · WW translation of CMS137v15",
+      full: "MIPS 305 · WorkWell translation of CMS137v15 (ww-2027.1)",
+      title: "MIPS 305 · WorkWell translation of CMS137v15 (ww-2027.1), not a CMS measure",
+    });
+    expect(formatVersionedIdentity(cms137, translation)?.full).not.toContain("CMS137FHIR");
+  });
+
+  it("without the row's logic it is the unversioned crosswalk, never a version taken from routing", () => {
+    expect(formatVersionedIdentity(cms137, null)).toEqual({ short: "MIPS 305 · CMS137", full: "MIPS 305 · CMS137", title: "MIPS 305 · CMS137" });
+    expect(formatVersionedIdentity(cms137, undefined)?.full).toBe("MIPS 305 · CMS137");
+  });
+
+  it("an artifact with no pinned lineage keeps its own version on the chip", () => {
+    expect(formatVersionedIdentity(cms137, { ...cmsLogic, derivedFrom: null, status: "unknown" })).toEqual({
+      short: "MIPS 305 · CMS137FHIR v1.0.000",
+      full: "MIPS 305 · CMS137FHIR v1.0.000",
+      title: "MIPS 305 · CMS137FHIR v1.0.000",
+    });
+  });
+
+  it("with no crosswalk entry the row's logic is still named, without the MIPS id; with neither, nothing", () => {
+    // /api/measures not loaded yet, failed, or no longer listing the measure: the result's own logic stands.
+    expect(formatVersionedIdentity(undefined, cmsLogic)).toEqual({
+      short: "CMS137FHIR (from CMS137v14)",
+      full: "CMS137FHIR v1.0.000 (from CMS137v14)",
+      title: "CMS137FHIR v1.0.000 (from CMS137v14), a CMS draft",
+    });
+    expect(formatVersionedIdentity(null, translation)?.full).toBe("WorkWell translation of CMS137v15 (ww-2027.1)");
+    expect(formatVersionedIdentity(undefined, null)).toBeNull();
+    expect(formatVersionedIdentity(null, null)).toBeNull();
+  });
+});
+

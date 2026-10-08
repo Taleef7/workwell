@@ -1,7 +1,7 @@
 /**
  * Case read models (#107) — the worklist `CaseSummary` the frontend consumes,
  * resolving each case row to its employee (name/site, from the synthetic directory)
- * and measure (name/version, from the registry).
+ * and measure (name from the catalog; logic and version from the case's cited outcome, #769).
  *
  * SLA + waiver/exclusion fields are surfaced as neutral defaults for this slice
  * (exclusionReason/waiver* land with the actions
@@ -12,8 +12,9 @@ import { closureKindOf, type ClosureKind } from "./case-logic.ts";
 import type { LiveState } from "../compliance/roster-vocabulary.ts";
 import { employeeById, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
-import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
+import type { ScoringLogic } from "../measure/measure-identity.ts";
+import { caseLogicKey, scoringForCases, type CaseScoringReader } from "./case-scoring-logic.ts";
 
 /**
  * **SLA was REMOVED here, not forgotten (#600).** `slaRemainingDays: null` and `slaBreached: false`
@@ -50,7 +51,21 @@ export interface CaseSummary {
   measureId: string;
   measureVersionId: string;
   measureName: string;
+  /**
+   * The version of the logic that scored the case's CITED outcome (#769) — the artifact's or the
+   * translation's own version, the authored library's only for a row authored CQL scored, "" for an
+   * errored row or no row. Never the authored library's version for a measure CMS's artifact scores
+   * (it read "2.0.0" there). Filled with `logic` by `withScoringLogic`; "" until then.
+   */
   measureVersion: string;
+  /**
+   * The logic that scored the outcome this case cites, `(lastRunId, employeeId, measureId)`, read from
+   * that row's own evidence (#769) — never from today's routing, which would relabel a 2026 row the day a
+   * translation is routed. Null when nothing named scored it (authored CQL, an errored row, no row).
+   * `toCaseSummary` holds no outcome, so it leaves null; a surface fills the rows it SERVES with
+   * `withScoringLogic`. On a staff-closed row it names the FROZEN status's logic, not the live one.
+   */
+  logic: ScoringLogic | null;
   evaluationPeriod: string;
   status: string;
   priority: string;
@@ -105,12 +120,6 @@ export interface CaseSummary {
   liveOutcomeRunId?: string | null;
 }
 
-function measureVersion(measureId: string): string {
-  const lib = MEASURES[measureId]?.library ?? "";
-  const dash = lib.lastIndexOf("-");
-  return dash >= 0 ? lib.slice(dash + 1) : "";
-}
-
 export function toCaseSummary(
   c: CaseRecord,
   outreachRecordCount = 0,
@@ -135,7 +144,9 @@ export function toCaseSummary(
     // Any runnable measure's name: the authored registry alone left the four official-only measures
     // as raw ids on the work list and case pages (#659).
     measureName: measureDisplayName(c.measureId),
-    measureVersion: measureVersion(c.measureId),
+    // Unknown until the cited row is read (`withScoringLogic`): blank, never a guessed version.
+    measureVersion: "",
+    logic: null,
     evaluationPeriod: c.evaluationPeriod,
     status: c.status,
     priority: c.priority,
@@ -153,4 +164,23 @@ export function toCaseSummary(
     closedBy: c.closedBy,
     closure: closureKindOf(c),
   };
+}
+
+/**
+ * `logic` and `measureVersion` for the summaries a surface SERVES (#769), from each case's cited
+ * outcome: one `scoringForCases` call, so one bounded read per (run, measure) on the set — never a read
+ * per row. Call it on a PAGE: the filtered set behind a page can be the whole practice (15,309 open
+ * cases on the pilot), and only the rows shown need naming.
+ */
+export async function withScoringLogic<T extends CaseSummary>(
+  outcomes: CaseScoringReader,
+  summaries: readonly T[],
+): Promise<T[]> {
+  if (summaries.length === 0) return [];
+  // Each summary is its own ref, `evaluationPeriod` included, so the row cited is the case's period's.
+  const scoring = await scoringForCases(outcomes, summaries);
+  return summaries.map((s) => {
+    const found = scoring.get(caseLogicKey(s));
+    return { ...s, logic: found?.logic ?? null, measureVersion: found?.version ?? "" };
+  });
 }

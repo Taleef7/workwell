@@ -5,7 +5,7 @@
  */
 import { isUuid, withStatementTimeoutDisabled, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
+import { LATEST_RUN_PROBE_BUDGET, SCORING_IDENTITY_KEYS, normalizeScoringIdentityRows, scoringIdentityOf } from "../outcome-store.ts";
 import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
 import type {
   OutcomeRecord,
@@ -19,6 +19,7 @@ import type {
   ScaleGroupCount,
   OutcomeStatusCount,
   MeasureScanOptions,
+  ScoringIdentityRow,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -235,6 +236,109 @@ export class PgOutcomeStore implements OutcomeStore {
       [runId, Math.max(1, limit)],
     );
     return rows.map((r) => r.measure_id);
+  }
+
+  async distinctScoringLogicForRun(runId: string): Promise<Array<{ measureId: string; official: unknown }>> {
+    if (!isUuid(runId)) return [];
+    // The identity keys only, as JSON values (types kept), and DISTINCT over THEM — never over the whole
+    // `official` block, whose per-row populations would make every row its own group (#769).
+    //
+    // `OFFSET 0` fences the subquery so `evidence_json -> 'official'` is computed ONCE per row: pulled
+    // up, each of the references below would detoast and walk the whole evidence again. Two passes over
+    // `evidence_json` per row remain (the error test and the extraction); everything after reads the
+    // small extracted object. `run_id` alone is the predicate, so either `(run_id)` index serves it.
+    const { rows } = await this.pool.query<{
+      measure_id: string;
+      official_type: string | null;
+      kind: unknown;
+      ecqm_id: unknown;
+      version: unknown;
+      label: unknown;
+      url: unknown;
+      derived_from: unknown;
+      artifact_sha256: unknown;
+      period_type: string | null;
+      period_start: unknown;
+      period_end: unknown;
+    }>(
+      `SELECT DISTINCT measure_id,
+              jsonb_typeof(official) AS official_type,
+              official -> 'kind' AS kind,
+              official -> 'ecqmId' AS ecqm_id,
+              official -> 'version' AS version,
+              official -> 'label' AS label,
+              official -> 'url' AS url,
+              official -> 'derivedFrom' AS derived_from,
+              official -> 'artifactSha256' AS artifact_sha256,
+              jsonb_typeof(official -> 'measurementPeriod') AS period_type,
+              official -> 'measurementPeriod' -> 'start' AS period_start,
+              official -> 'measurementPeriod' -> 'end' AS period_end
+         FROM (SELECT measure_id, evidence_json -> 'official' AS official
+                 FROM ${T}
+                WHERE run_id = $1 AND NOT (evidence_json ? 'evaluationError')
+               OFFSET 0) AS scored`,
+      [runId],
+    );
+    return normalizeScoringIdentityRows(
+      rows.map((r) => ({
+        measureId: r.measure_id,
+        official:
+          r.official_type === "object"
+            ? {
+                kind: r.kind,
+                ecqmId: r.ecqm_id,
+                version: r.version,
+                label: r.label,
+                url: r.url,
+                derivedFrom: r.derived_from,
+                artifactSha256: r.artifact_sha256,
+                ...(r.period_type === "object" ? { measurementPeriod: { start: r.period_start, end: r.period_end } } : {}),
+              }
+            : null,
+      })),
+    );
+  }
+
+  async listScoringIdentities(
+    runId: string,
+    opts: { measureId: string; subjectIds: readonly string[] },
+  ): Promise<ScoringIdentityRow[]> {
+    if (!isUuid(runId) || opts.subjectIds.length === 0) return [];
+    // The identity keys only, built into one small object IN SQL, so a row's populations, rates, strata
+    // and expressionResults never cross the wire (#769). `OFFSET 0` fences the subquery so
+    // `evidence_json -> 'official'` is extracted once per row rather than once per key below.
+    // One array bind for the subjects; `run_id` + `measure_id` ride the `(run_id, measure_id)` index.
+    const { rows } = await this.pool.query<{
+      subject_id: string;
+      measure_id: string;
+      evaluation_period: string;
+      errored: boolean;
+      official: Record<string, unknown> | null;
+    }>(
+      `SELECT subject_id, measure_id, evaluation_period, errored,
+              CASE WHEN jsonb_typeof(official) = 'object' THEN jsonb_build_object(
+                ${SCORING_IDENTITY_KEYS.map((k) => `'${k}', official -> '${k}'`).join(", ")},
+                'measurementPeriod', CASE WHEN jsonb_typeof(official -> 'measurementPeriod') = 'object'
+                  THEN jsonb_build_object('start', official -> 'measurementPeriod' -> 'start', 'end', official -> 'measurementPeriod' -> 'end')
+                END
+              ) END AS official
+         FROM (SELECT id, subject_id, measure_id, evaluation_period, evaluated_at,
+                      evidence_json -> 'official' AS official,
+                      evidence_json ? 'evaluationError' AS errored
+                 FROM ${T}
+                WHERE run_id = $1 AND measure_id = $2 AND subject_id = ANY($3::text[])
+               OFFSET 0) AS cited
+        ORDER BY evaluated_at ASC, id ASC`,
+      [runId, opts.measureId, [...opts.subjectIds]],
+    );
+    return rows.map((r) => ({
+      subjectId: r.subject_id,
+      measureId: r.measure_id,
+      evaluationPeriod: r.evaluation_period,
+      // Re-projected: drops the JSON nulls `jsonb_build_object` wrote for absent keys and fixes key order.
+      official: scoringIdentityOf(r.official),
+      errored: r.errored === true,
+    }));
   }
 
   async getOutcomeById(id: string): Promise<OutcomeRecord | null> {

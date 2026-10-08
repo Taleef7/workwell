@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import CasesPage from "../page";
+import { CMS125_ARTIFACT, CMS137_TRANSLATION, LABELS, ROUTED_IDENTITIES } from "@/test/fixtures/scoring-logic";
 
 const getWithHeaders = vi.fn();
 const get = vi.fn();
@@ -139,6 +140,52 @@ describe("CasesPage crosswalk identity rendering", () => {
     expect(oshaCell).toBeInTheDocument();
     expect(oshaCell.tagName).toBe("TD");
     expect(within(bobRow).queryByText(/^MIPS/)).not.toBeInTheDocument();
+  });
+
+  it("names the logic that scored each case's outcome, in the cards and the table, never today's routing (#769)", async () => {
+    // Routing says CMS's artifact runs both. Alice's row names CMS's artifact, Carol's the translation,
+    // Dan's nothing: only Alice and Carol carry a version, each its own row's.
+    get.mockImplementation((url: string) => {
+      if (url === "/api/measures") {
+        return Promise.resolve([
+          { id: "cms125", name: "Breast Cancer Screening", status: "Active", identity: ROUTED_IDENTITIES.cms125 },
+          { id: "cms137", name: "Substance Use Treatment", status: "Active", identity: ROUTED_IDENTITIES.cms137 },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    getWithHeaders.mockImplementation(() => Promise.resolve({
+      data: [
+        { ...mockCases[0], logic: CMS125_ARTIFACT },
+        { ...mockCases[0], caseId: "case-137", employeeId: "emp-103", employeeName: "Carol Diaz", measureId: "cms137", measureVersionId: "cms137", measureName: "Substance Use Treatment", logic: CMS137_TRANSLATION },
+        { ...mockCases[0], caseId: "case-125b", employeeId: "emp-104", employeeName: "Dan Ito", logic: null },
+      ],
+      headers: new Headers({ "X-Total-Count": "3" }),
+    }));
+    render(<CasesPage />);
+    await screen.findByRole("heading", { name: "Carol Diaz" });
+
+    const card = (name: string) => screen.getByRole("heading", { name }).closest<HTMLElement>("div.rounded-2xl")!;
+    const alice = within(card("Alice Walker")).getByText(`${LABELS.cms125Short} · Breast Cancer Screening`, { exact: true });
+    expect(alice).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+    const carol = within(card("Carol Diaz")).getByText(`${LABELS.cms137TranslationShort} · Substance Use Treatment`, { exact: true });
+    expect(carol).toHaveAttribute("title", `${LABELS.cms137TranslationTitle} · Substance Use Treatment`);
+    expect(within(card("Carol Diaz")).queryByText(/FHIR/)).toBeNull();
+    // No row logic: unversioned, though routing names an executed artifact.
+    expect(within(card("Dan Ito")).getByText(`${LABELS.cms125Plain} · Breast Cancer Screening`, { exact: true })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "table" }));
+    const row = (name: string) => screen.getByRole("link", { name }).closest<HTMLTableRowElement>("tr")!;
+    const aliceCell = within(row("Alice Walker")).getByText(`${LABELS.cms125Short} · Breast Cancer Screening`, { exact: true });
+    expect(aliceCell.tagName).toBe("TD");
+    expect(aliceCell).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
+    expect(within(row("Carol Diaz")).getByText(`${LABELS.cms137TranslationShort} · Substance Use Treatment`, { exact: true }).tagName).toBe("TD");
+    expect(within(row("Dan Ito")).getByText(`${LABELS.cms125Plain} · Breast Cancer Screening`, { exact: true }).tagName).toBe("TD");
+
+    // The Measure filter selects a measure across years: unversioned.
+    await userEvent.click(screen.getByRole("combobox", { name: /measure/i }));
+    expect(await screen.findByRole("option", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: `${LABELS.cms137Plain} · Substance Use Treatment` })).toBeInTheDocument();
   });
 
   it("labels evaluation periods as measurement years and preserves non-year values", async () => {

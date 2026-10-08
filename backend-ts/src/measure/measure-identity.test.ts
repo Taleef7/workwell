@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { MEASURE_CATALOG } from "./measure-catalog.ts";
 import { readFileSync } from "node:fs";
 import {
+  CMS_ARTIFACT_LINEAGE_FOR_TEST,
   MEASURE_IDENTITY,
+  ecqmIdOf,
   executedLogicFor,
+  formatScoringLogic,
+  measureVersionOf,
+  scoringLogicOf,
   executedLogicFromManifest,
   measureIdentityFor,
   measureIdentityPayloadFor,
@@ -196,3 +201,98 @@ test("measureIdentityPayloadFor names a translation only when it is routed besid
   assert.equal("translation" in measureIdentityPayloadFor("cms137", false, true, of)!, false, "not official-routed: CMS's artifact is not running, so neither is its translation");
   assert.equal("translation" in measureIdentityPayloadFor("cms137", true, false, of)!, false, "not allowlisted");
 });
+
+import { readdirSync } from "node:fs";
+
+const OFFICIAL_DIR = new URL("../../measures/official/", import.meta.url);
+const committedManifests = () =>
+  readdirSync(OFFICIAL_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => ({ id: d.name, manifest: JSON.parse(readFileSync(new URL(`${d.name}/manifest.json`, OFFICIAL_DIR), "utf8")) as { cmsId: string; version: string; sha256: string; source: { repo: string } } }));
+
+test("every committed CMS artifact has a pinned lineage, keyed by its own sha", () => {
+  const manifests = committedManifests();
+  assert.ok(manifests.length >= 9, `expected the nine vendored artifacts, found ${manifests.length}`);
+  for (const { id, manifest } of manifests) {
+    const pinned = CMS_ARTIFACT_LINEAGE_FOR_TEST[manifest.sha256];
+    assert.ok(pinned, `${id}: no pinned lineage for ${manifest.sha256}; a re-vendor must name what the new artifact derives from`);
+    assert.equal(pinned.measureId, id);
+    assert.equal(pinned.ecqmId, ecqmIdOf(manifest.cmsId));
+    assert.equal(pinned.version, manifest.version);
+    assert.equal(pinned.contentRepo, manifest.source.repo);
+    assert.match(pinned.derivedFrom, /^CMS\d+v\d+$/);
+  }
+  assert.equal(Object.keys(CMS_ARTIFACT_LINEAGE_FOR_TEST).length, manifests.length, "a pinned entry with no committed artifact is stale");
+});
+
+test("ecqmIdOf spells every served eCQM id with its CMS prefix, once", () => {
+  assert.equal(ecqmIdOf("125FHIR"), "CMS125FHIR");
+  assert.equal(ecqmIdOf("CMS125FHIR"), "CMS125FHIR");
+  assert.equal(ecqmIdOf(" 2FHIR "), "CMS2FHIR");
+});
+
+const cms125Sha = "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8";
+const cmsRow = (extra: Record<string, unknown> = {}) => ({ official: { ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: cms125Sha, ...extra } });
+const translatedRow = { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1", engine: "fqm-execution", artifactSha256: "sha256:t" } };
+
+test("scoringLogicOf names CMS's artifact from the row's own evidence, with its pinned lineage", () => {
+  assert.deepEqual(scoringLogicOf(cmsRow()), {
+    kind: "cms-artifact",
+    ecqmId: "CMS125FHIR",
+    version: "1.0.000",
+    derivedFrom: "CMS125v14",
+    status: "draft",
+    statusNote: "posted for public comment Jan–Feb 2026",
+  });
+  // A row written before artifactSha256 was recorded falls back to the one artifact with that id and version.
+  assert.equal(scoringLogicOf({ official: { ecqmId: "125FHIR", version: "1.0.000" } })?.derivedFrom, "CMS125v14");
+  // An artifact this table does not pin is named, but no lineage or release state is invented for it.
+  const unknown = scoringLogicOf(cmsRow({ artifactSha256: "sha256:not-vendored", version: "2.0.000" }));
+  assert.equal(unknown?.kind, "cms-artifact");
+  assert.equal(unknown && unknown.kind === "cms-artifact" ? unknown.derivedFrom : "x", null);
+  assert.equal(unknown && unknown.kind === "cms-artifact" ? unknown.status : "x", "unknown");
+});
+
+test("scoringLogicOf names a translation by its label and never gives it a CMS eCQM id", () => {
+  const logic = scoringLogicOf(translatedRow);
+  assert.deepEqual(logic, {
+    kind: "workwell-translation",
+    label: "WorkWell translation of CMS137v15",
+    version: "ww-2027.1",
+    url: "urn:workwell:measure:cms137:translation",
+    derivedFrom: "CMS137v15",
+  });
+  assert.equal("ecqmId" in (logic as object), false);
+  // Even a corrupted translated row carrying an id stays a translation.
+  const forged = scoringLogicOf({ official: { ...translatedRow.official, ecqmId: "137FHIR" } });
+  assert.equal(forged?.kind, "workwell-translation");
+  assert.equal(scoringLogicOf({ official: { ...translatedRow.official, label: "" } }), null, "no label: nothing to name it by");
+});
+
+test("scoringLogicOf is null where nothing named scored the row", () => {
+  assert.equal(scoringLogicOf(null), null);
+  assert.equal(scoringLogicOf({ expressionResults: [] }), null, "authored CQL");
+  assert.equal(scoringLogicOf({ evaluationError: "CQL engine failure", message: "boom" }), null, "errored");
+  assert.equal(scoringLogicOf({ official: { ecqmId: "125FHIR" } }), null, "no version");
+  assert.equal(scoringLogicOf({ official: { version: "1.0.000" } }), null, "no id");
+});
+
+test("formatScoringLogic spells the executed identity, never the QDM id", () => {
+  assert.equal(formatScoringLogic(scoringLogicOf(cmsRow())), "CMS125FHIR v1.0.000");
+  assert.equal(formatScoringLogic(scoringLogicOf(translatedRow)), "WorkWell translation of CMS137v15 (ww-2027.1)");
+  assert.equal(formatScoringLogic(null), null);
+});
+
+test("measureVersionOf is the version that scored the row, never the catalog record's or a library that did not run", () => {
+  assert.equal(measureVersionOf("cms125", cmsRow()), "1.0.000");
+  assert.equal(measureVersionOf("cms137", translatedRow), "ww-2027.1");
+  // An errored official row printed the authored library's "2.0.0" before; nothing scored it.
+  assert.equal(measureVersionOf("cms125", { evaluationError: "CQL engine failure", message: "boom" }), "");
+  assert.equal(measureVersionOf("cms125", { official: { ecqmId: "125FHIR" } }), "", "a malformed official block");
+  // A row authored CQL scored keeps the authored library's version: true on TWH, and on rows from before routing.
+  assert.equal(measureVersionOf("cms125", { expressionResults: [] }), "2.0.0");
+  assert.equal(measureVersionOf("audiogram", { expressionResults: [] }), "1.0.0");
+  // An official-only measure has no authored library: no version, not the catalog's "v1.0".
+  assert.equal(measureVersionOf("cms2", { expressionResults: [] }), "");
+});
+

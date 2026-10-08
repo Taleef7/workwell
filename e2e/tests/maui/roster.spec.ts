@@ -39,9 +39,13 @@ test.describe("Maui compliance roster", () => {
     });
 
     for (const m of ROUTED_MEASURES) {
+      // The header names the logic that scored the column's winning run, in the chip form (#769): CMS's
+      // artifact with its lineage, or (for the year a translation covers) the translation. Anchored, so
+      // the unversioned "MIPS 112 · CMS125 · …" — which an older substring match also accepted — fails.
+      const named = new RegExp(`^MIPS ${m.mips} · (${m.cms}FHIR \\(from ${m.cms}v\\d+\\)|WW translation of ${m.cms}v\\d+) · `);
       await expect(
-        page.getByRole("columnheader", { name: new RegExp(`MIPS ${m.mips} · ${m.cms}`) }),
-        `${m.cms} is routed on this stack, so it is a roster column`,
+        page.getByRole("columnheader", { name: named }),
+        `${m.cms} is routed on this stack, so it is a roster column named by the logic that scored it`,
       ).toBeVisible({ timeout: 20_000 });
     }
 

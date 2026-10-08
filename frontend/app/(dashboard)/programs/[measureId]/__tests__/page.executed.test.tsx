@@ -4,11 +4,12 @@
  * year is scored with logic written for another year.
  */
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 import ProgramDetailPage from "../page";
+import { CMS125_ARTIFACT, LABELS } from "@/test/fixtures/scoring-logic";
 
 const get = vi.fn();
 const apiMock = { get };
@@ -32,6 +33,7 @@ const EXECUTED = {
   derivedFrom: "CMS125v14",
 };
 
+// The run's own evidence: CMS's artifact scored it, named by the server CMS-prefixed (#769).
 const program = (over: Record<string, unknown> = {}) => ({
   measureId: "cms125",
   measureName: "Breast Cancer Screening",
@@ -52,12 +54,22 @@ const program = (over: Record<string, unknown> = {}) => ({
   asOf: "2027-01-06",
   logicVintage: null,
   measureRate: {
+    official: { ecqmId: "CMS125FHIR", version: "1.0.000" },
     rates: [{ label: null, ipp: 10, denom: 10, denex: 0, denexcep: 0, numer: 7, effectiveDenominator: 10, score: 0.7 }],
     unmeasured: 0,
     evaluationErrors: 0,
   },
+  scoringLogics: [CMS125_ARTIFACT] as unknown[],
   ...over,
 });
+
+const CMS125_TRANSLATION = {
+  kind: "workwell-translation",
+  label: "WorkWell translation of CMS125v15",
+  version: "ww-2027.1",
+  url: "urn:workwell:measure:cms125:translation",
+  derivedFrom: "CMS125v15",
+};
 
 // The official outcome has no forecast (#617): the outlook's note is where the page names the logic again.
 let riskOutlook: unknown = null;
@@ -71,11 +83,23 @@ const TRANSLATION = {
   year: "2027",
 };
 
-function mockApi({ executed = true, translation = false, summary = program() }: { executed?: boolean; translation?: boolean; summary?: ReturnType<typeof program> } = {}) {
+function mockApi({
+  executed = true,
+  translation = false,
+  cmsIdentity = true,
+  summary = program(),
+}: { executed?: boolean; translation?: boolean; cmsIdentity?: boolean; summary?: ReturnType<typeof program> } = {}) {
   get.mockReset().mockImplementation((url: string) => {
     if (url === "/api/measures") {
       return Promise.resolve([
-        { id: "cms125", name: "Breast Cancer Screening", identity: { cmsId: "CMS125", mipsQualityId: "112", ...(executed ? { executed: EXECUTED } : {}), ...(translation ? { translation: TRANSLATION } : {}) } },
+        {
+          id: "cms125",
+          name: "Breast Cancer Screening",
+          // `cmsIdentity: false`: a measure with no CMS identity at all (authored, occupational).
+          identity: cmsIdentity
+            ? { cmsId: "CMS125", mipsQualityId: "112", ...(executed ? { executed: EXECUTED } : {}), ...(translation ? { translation: TRANSLATION } : {}) }
+            : null,
+        },
       ]);
     }
     if (url === "/api/programs") return Promise.resolve([summary]);
@@ -90,13 +114,14 @@ const ESTIMATE = "WorkWell's estimate from CMS's FHIR logic. WebChart calculates
 describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => {
   beforeEach(() => setSubject("patient"));
 
-  it("names the executed FHIR draft and its version, and keeps the identity heading", async () => {
+  it("names the executed FHIR draft and its version, and the heading names the logic that scored the numbers", async () => {
     mockApi();
     render(<ProgramDetailPage />);
     expect(await screen.findByTestId("executed-logic")).toHaveTextContent(
       "Runs CMS125FHIR v1.0.000, a CMS FHIR draft (posted for public comment Jan–Feb 2026), derived from CMS125v14.",
     );
-    expect(screen.getByRole("heading", { name: "MIPS 112 · CMS125 · Breast Cancer Screening" })).toBeInTheDocument();
+    const heading = await screen.findByRole("heading", { name: `${LABELS.cms125Full} · Breast Cancer Screening` });
+    expect(heading).toHaveAttribute("title", `${LABELS.cms125Title} · Breast Cancer Screening`);
     expect(screen.getByText(/^Version 1\.0\.000/)).toBeInTheDocument();
     expect(screen.queryByText(/^Version v1\.0/)).toBeNull();
     // The eyebrow names the executed artifact, not the QDM measure.
@@ -106,39 +131,86 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
 
   it("labels the numbers with the artifact the run's evidence names, even when today's routing differs", async () => {
     const base = program();
-    mockApi({ summary: program({ measureRate: { ...base.measureRate, official: { ecqmId: "125FHIR", version: "0.9.000" } } }) });
+    mockApi({
+      summary: program({
+        measureRate: { ...base.measureRate, official: { ecqmId: "CMS125FHIR", version: "0.9.000" } },
+        scoringLogics: [{ ...CMS125_ARTIFACT, version: "0.9.000", derivedFrom: null, status: "unknown", statusNote: null }],
+      }),
+    });
     render(<ProgramDetailPage />);
     // The present-tense line describes today's routing; the version beside the numbers is the run's.
     expect(await screen.findByTestId("executed-logic")).toHaveTextContent(/^Runs CMS125FHIR v1\.0\.000/);
+    expect(screen.getByRole("heading", { name: "MIPS 112 · CMS125FHIR v0.9.000 · Breast Cancer Screening" })).toBeInTheDocument();
     expect(screen.getByText(/^Version 0\.9\.000/)).toBeInTheDocument();
     expect(screen.queryByText(/^Version 1\.0\.000/)).toBeNull();
     expect(screen.getByText("CMS125FHIR")).toBeInTheDocument();
   });
 
-  it("a run with no official evidence is not labelled with today's FHIR artifact", async () => {
-    // Routed now (executed present), but the winning run was scored by authored CQL (no measureRate).
-    mockApi({ summary: program({ measureRate: null }) });
+  it("routing names CMS's artifact but the run's evidence names none: no artifact, no version, unversioned heading", async () => {
+    const base = program();
+    // Official evidence that recorded no artifact; today's routing must not fill the gap (#769).
+    mockApi({ summary: program({ measureRate: { ...base.measureRate, official: null }, scoringLogics: [] }) });
     render(<ProgramDetailPage />);
     await screen.findByTestId("executed-logic"); // the present-tense routing line may stay
-    expect(screen.getByText(/^Version v1\.0/)).toBeInTheDocument();
-    expect(screen.queryByText(/^Version 1\.0\.000/)).toBeNull();
+    expect(await screen.findByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
+    expect(screen.queryByText("CMS125FHIR")).toBeNull();
+    expect(screen.queryByTestId("measure-top-label")).toBeNull();
+    expect(screen.queryByText(/^Version /)).toBeNull();
+    // Nor the catalog's "v1.0" in the breakdown row.
+    expect(screen.queryByRole("cell", { name: "v1.0" })).toBeNull();
+    expect(screen.queryByRole("cell", { name: "1.0.000" })).toBeNull();
+  });
+
+  it("a run scored by more than one logic or measurement period names none of them as the measure's", async () => {
+    // The server's shape for it: no one rate to name (`measureRate` null) — which must not read as an
+    // authored run and borrow the catalog's "v1.0".
+    mockApi({ summary: program({ measureRate: null, scoringLogics: [CMS125_ARTIFACT, CMS125_TRANSLATION] }) });
+    render(<ProgramDetailPage />);
+    expect(await screen.findByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
+    expect(screen.getByTestId("mixed-logics").textContent).toBe(
+      "Scored by more than one logic or measurement period: CMS125FHIR v1.0.000 (from CMS125v14); WorkWell translation of CMS125v15 (ww-2027.1).",
+    );
+    expect(screen.queryByTestId("measure-top-label")).toBeNull();
+    // Neither the catalog's "v1.0" nor either logic's version stands for the run.
+    expect(screen.queryByText(/^Version /)).toBeNull();
+    expect(screen.queryByRole("cell", { name: "v1.0" })).toBeNull();
+  });
+
+  it("a run with no official evidence is not labelled with today's FHIR artifact", async () => {
+    // Routed now (executed present), but the winning run was scored by authored CQL (no measureRate).
+    mockApi({ summary: program({ measureRate: null, scoringLogics: [] }) });
+    render(<ProgramDetailPage />);
+    await screen.findByTestId("executed-logic"); // the present-tense routing line may stay
+    expect(screen.getByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
+    // No version line: the catalog's "v1.0" is not what scored a CMS measure's numbers, and the run named
+    // nothing else.
+    expect(screen.queryByText(/^Version /)).toBeNull();
+    expect(screen.queryByText(/Version v1\.0/)).toBeNull();
     expect(screen.queryByText("CMS125FHIR")).toBeNull();
     // Nor with the QDM measure version the catalog cites: authored CQL is not CMS125v14 either.
     expect(screen.queryByTestId("measure-top-label")).toBeNull();
-    // The outcome-by-version row carries the same version as the header.
-    expect(screen.getByRole("cell", { name: "v1.0" })).toBeInTheDocument();
+    // The outcome-by-version row says it does not know, as the header does.
+    const breakdown = screen.getByRole("region", { name: "Outcome breakdown by version table" });
+    expect(within(breakdown).queryByRole("cell", { name: "v1.0" })).toBeNull();
+    expect(within(breakdown).getByRole("cell", { name: "—" })).toBeInTheDocument();
     // Still an estimate, but no claim that CMS's FHIR logic produced it.
     expect(screen.getByText("WorkWell's estimate. WebChart calculates and submits the reported rate.")).toBeInTheDocument();
     expect(screen.queryByText(ESTIMATE)).toBeNull();
   });
 
   it("counts that fold in the authored scale tenant's are not labelled with the live run's artifact", async () => {
-    const base = program();
-    mockApi({ summary: program({ includesAuthoredScaleCounts: true, measureRate: { ...base.measureRate, official: { ecqmId: "125FHIR", version: "1.0.000" } } }) });
+    // The live run's rows name CMS's artifact (scoringLogics), but the totals also hold the scale tenant's.
+    mockApi({ summary: program({ includesAuthoredScaleCounts: true }) });
     render(<ProgramDetailPage />);
     await screen.findByTestId("executed-logic");
-    expect(screen.getByText(/^Version v1\.0/)).toBeInTheDocument();
+    // No version at all: not the artifact's, and not the catalog's "v1.0" over a CMS measure's numbers.
+    expect(screen.queryByText(/^Version /)).toBeNull();
+    expect(screen.queryByText(/Version v1\.0/)).toBeNull();
+    const breakdown = screen.getByRole("region", { name: "Outcome breakdown by version table" });
+    expect(within(breakdown).queryByRole("cell", { name: "v1.0" })).toBeNull();
+    expect(within(breakdown).getByRole("cell", { name: "—" })).toBeInTheDocument();
     expect(screen.queryByText("CMS125FHIR")).toBeNull();
+    expect(screen.getByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` })).toBeInTheDocument();
     // Mixed totals carry no single measure identity: not the artifact, and not the QDM version either.
     expect(screen.queryByTestId("measure-top-label")).toBeNull();
   });
@@ -150,16 +222,34 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
   });
 
   it("a measure whose policy reference is not a CMS measure version keeps it as the label", async () => {
-    mockApi({ executed: false, summary: program({ measureRate: null, policyRef: "OSHA 29 CFR 1910.95" }) });
+    mockApi({ executed: false, summary: program({ measureRate: null, scoringLogics: [], policyRef: "OSHA 29 CFR 1910.95" }) });
     render(<ProgramDetailPage />);
     expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("OSHA 29 CFR 1910.95");
   });
 
-  it("an authored measure keeps its catalog version and shows no executed-logic line", async () => {
-    mockApi({ executed: false });
+  it("an authored measure (no CMS identity) keeps its catalog version and shows no executed-logic line", async () => {
+    mockApi({ cmsIdentity: false, summary: program({ measureRate: null, scoringLogics: [], policyRef: "OSHA 29 CFR 1910.95" }) });
     render(<ProgramDetailPage />);
     expect(await screen.findByText(/^Version v1\.0/)).toBeInTheDocument();
+    const breakdown = screen.getByRole("region", { name: "Outcome breakdown by version table" });
+    expect(within(breakdown).getByRole("cell", { name: "v1.0" })).toBeInTheDocument();
     expect(screen.queryByTestId("executed-logic")).toBeNull();
+  });
+
+  it("a run the server marks mixed names no logic as the measure's, though it lists one", async () => {
+    // Authored rows beside CMS's artifact: only the artifact names itself, so one logic is served.
+    mockApi({ summary: program({ scoringConflict: true, scoringLogics: [CMS125_ARTIFACT] }) });
+    render(<ProgramDetailPage />);
+    const heading = await screen.findByRole("heading", { name: `${LABELS.cms125Plain} · Breast Cancer Screening` });
+    expect(heading).toHaveAttribute("title", `${LABELS.cms125Plain} · Breast Cancer Screening`);
+    expect(screen.getByTestId("mixed-logics").textContent).toBe(
+      "Scored by more than one logic or measurement period: CMS125FHIR v1.0.000 (from CMS125v14).",
+    );
+    expect(screen.queryByTestId("measure-top-label")).toBeNull();
+    expect(screen.queryByText(/^Version /)).toBeNull();
+    const breakdown = screen.getByRole("region", { name: "Outcome breakdown by version table" });
+    expect(within(breakdown).queryByRole("cell", { name: "1.0.000" })).toBeNull();
+    expect(within(breakdown).getByRole("cell", { name: "—" })).toBeInTheDocument();
   });
 
   it("says beside the rates that they are WorkWell's estimate, on the patient deployment", async () => {
@@ -207,10 +297,14 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
           source: "translation-evidence",
           official: { ecqmId: null, version: "ww-2027.1", kind: "derived", label: "WorkWell translation of CMS125v15", derivedFrom: "CMS125v15" },
         },
+        // Routing (identity.executed) says CMS125FHIR; the run's rows say the translation.
+        scoringLogics: [CMS125_TRANSLATION],
       }),
     });
     render(<ProgramDetailPage />);
     expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("WorkWell translation of CMS125v15");
+    const heading = await screen.findByRole("heading", { name: "MIPS 112 · WorkWell translation of CMS125v15 (ww-2027.1) · Breast Cancer Screening" });
+    expect(heading).toHaveAttribute("title", "MIPS 112 · WorkWell translation of CMS125v15 (ww-2027.1), not a CMS measure · Breast Cancer Screening");
     expect(screen.getByText(/^Version ww-2027\.1/)).toBeInTheDocument();
     // The run's evidence carries no eCQM id; today's CMS artifact must not fill the gap.
     expect(screen.queryByText("CMS125FHIR")).toBeNull();
@@ -232,9 +326,10 @@ describe("ProgramDetailPage executed logic, estimate caveat and vintage", () => 
 
   it("a translation routed for next year changes nothing on a run CMS's draft scored, but the translation line", async () => {
     const base = program();
-    mockApi({ translation: true, summary: program({ measureRate: { ...base.measureRate, official: { ecqmId: "125FHIR", version: "1.0.000" } } }) });
+    mockApi({ translation: true, summary: program({ measureRate: { ...base.measureRate, official: { ecqmId: "CMS125FHIR", version: "1.0.000" } } }) });
     render(<ProgramDetailPage />);
     expect(await screen.findByTestId("measure-top-label")).toHaveTextContent("CMS125FHIR");
+    expect(await screen.findByRole("heading", { name: `${LABELS.cms125Full} · Breast Cancer Screening` })).toBeInTheDocument();
     expect(screen.getByTestId("translation-logic")).toHaveTextContent(/^For 2027: WorkWell translation of CMS125v15/);
     expect(screen.getByText("CMS measure rate")).toBeInTheDocument();
     expect(screen.getByText(/^Scored the way CMS reports it:/)).toBeInTheDocument();

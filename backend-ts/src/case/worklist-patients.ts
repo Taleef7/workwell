@@ -15,6 +15,8 @@
 import type { CaseSummary } from "./case-read-models.ts";
 import { priorityRankOf, type ClosureKind } from "./case-logic.ts";
 import type { LiveState } from "../compliance/roster-vocabulary.ts";
+import type { ScoringLogic } from "../measure/measure-identity.ts";
+import { caseLogicKey, scoringLogicForCases, type CaseScoringReader } from "./case-scoring-logic.ts";
 
 /** One patient, with every open gap they have. */
 export interface WorklistPatientRow {
@@ -55,6 +57,13 @@ export interface WorklistGap {
   nextAction: string | null;
   evaluationPeriod: string;
   updatedAt: string;
+  /** The run whose outcome this gap's case cites — what `withGapLogic` reads the logic from. */
+  lastRunId: string;
+  /**
+   * The logic that scored the gap's cited outcome (#769), as on `CaseSummary.logic`: filled for the
+   * served page by `withGapLogic`, null until then and wherever nothing named scored the row.
+   */
+  logic: ScoringLogic | null;
   /**
    * True when this gap does NOT itself satisfy the assignee filter — it is shown because the patient
    * matched on another gap. Without it a row filtered to "assigned to me" would look like four of my
@@ -123,6 +132,8 @@ export function groupIntoPatients(
         nextAction: c.nextAction ?? null,
         evaluationPeriod: c.evaluationPeriod,
         updatedAt: c.updatedAt,
+        lastRunId: c.lastRunId,
+        logic: c.logic,
         // Marked only when an assignee filter is active AND this gap is not the reason the row is here.
         ...(wanted.kind !== "none" && !gapMatchesAssignee(c, wanted) ? { otherAssignee: true } : {}),
         closure: c.closure,
@@ -156,6 +167,27 @@ export function groupIntoPatients(
       a.employeeId.localeCompare(b.employeeId),
   );
   return rows;
+}
+
+/**
+ * `logic` on every gap of the patient rows a surface SERVES (#769): one `scoringLogicForCases` call over
+ * the page's gaps, so one bounded read per (run, measure) — never per gap, and never for the whole
+ * grouped list, which is every active case behind the filters. Call it after paging.
+ */
+export async function withGapLogic(
+  outcomes: CaseScoringReader,
+  rows: readonly WorklistPatientRow[],
+): Promise<WorklistPatientRow[]> {
+  // The gap's period travels with its ref, so a run holding the patient's rows for two years cites the
+  // row of the gap's year (`citedRow`), as the case page does.
+  const refOf = (r: WorklistPatientRow, g: WorklistGap) => ({ lastRunId: g.lastRunId, employeeId: r.employeeId, measureId: g.measureId, evaluationPeriod: g.evaluationPeriod });
+  const refs = rows.flatMap((r) => r.openGaps.map((g) => refOf(r, g)));
+  if (refs.length === 0) return [...rows];
+  const logic = await scoringLogicForCases(outcomes, refs);
+  return rows.map((r) => ({
+    ...r,
+    openGaps: r.openGaps.map((g) => ({ ...g, logic: logic.get(caseLogicKey(refOf(r, g))) ?? null })),
+  }));
 }
 
 /**

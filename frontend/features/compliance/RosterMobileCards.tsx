@@ -3,7 +3,10 @@ import Link from "next/link";
 import { ComplianceChip } from "./ComplianceChip";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
-import type { RosterColumn, RosterRow, RosterCell } from "./types";
+import type { ScoringLogic } from "@/lib/measure-identity";
+import { COLUMN_MIXED_LOGICS, columnLogic, columnTitle, type RosterColumn, type RosterRow, type RosterCell } from "./types";
+
+type MeasureLabel = (measureId: string, fallbackName: string, logic?: ScoringLogic | null) => string;
 
 const NA_FALLBACK: RosterCell = { status: "NA", method: "Not evaluated" };
 
@@ -29,12 +32,16 @@ export function RosterMobileCards({
   rows,
   loading,
   labelFor,
+  titleFor,
   selection,
 }: {
   columns: RosterColumn[];
   rows: RosterRow[];
   loading: boolean;
-  labelFor?: (measureId: string, fallbackName: string) => string;
+  /** Names a column's measure, given the logic that scored its winning run (#769). */
+  labelFor?: MeasureLabel;
+  /** The term's tooltip (the full form), when given. */
+  titleFor?: MeasureLabel;
   selection?: RosterCardSelection;
 }) {
   const isPatientTerm = SUBJECT.singular === "patient";
@@ -80,11 +87,19 @@ export function RosterMobileCards({
           <dl className="mt-2 divide-y divide-neutral-100 dark:divide-neutral-800/70">
             {columns.map((c) => (
               <div key={c.measureId} className="flex items-start justify-between gap-3 py-1.5">
-                <dt className="text-sm text-neutral-700 dark:text-neutral-300">
-                  {labelFor ? labelFor(c.measureId, c.name) : c.name}
+                <dt
+                  className="text-sm text-neutral-700 dark:text-neutral-300"
+                  title={titleFor ? columnTitle(titleFor(c.measureId, c.name, columnLogic(c)), c) : undefined}
+                >
+                  {labelFor ? labelFor(c.measureId, c.name, columnLogic(c)) : c.name}
                   <span className="ml-1 text-[10px] font-normal uppercase text-neutral-400">
                     {c.complianceClass === "PERMANENT" ? "perm" : "rec"}
                   </span>
+                  {c.logicConflict ? (
+                    <span data-testid={`roster-mobile-mixed-${c.measureId}`} className="block text-[10px] font-normal text-amber-700 dark:text-amber-400">
+                      {COLUMN_MIXED_LOGICS}
+                    </span>
+                  ) : null}
                 </dt>
                 <dd className="text-right">
                   <ComplianceChip cell={r.cells[c.measureId] ?? NA_FALLBACK} className="items-end" />

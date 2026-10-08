@@ -20,7 +20,8 @@
  * ADR-074 d5 counts in NO rate — and `evaluationErrors` — the subjects no engine spoke for (ADR-077 d6)
  * — travel with the counts so a consumer can SAY how many rows the denominators leave out.
  */
-import type { OutcomeStore } from "../stores/outcome-store.ts";
+import { scoringIdentityOf, type OutcomeStore } from "../stores/outcome-store.ts";
+import { formatScoringLogic, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
 import {
   createRateAggregator,
   isEvaluationErrorEvidence,
@@ -51,6 +52,47 @@ export interface OfficialRunAggregate extends RateAggregate {
    * how one open run can hold more than one year.
    */
   identityConflict: boolean;
+  /**
+   * The distinct logics that scored this measure's evaluated rows, named (`scoringLogicOf`), one entry
+   * per distinct {@link scoringLogicKeyOf} and sorted ({@link distinctScoringLogics}). More than one entry
+   * means the rows were scored by more than one logic or measurement period, so there is no one rate.
+   * Errored rows were scored by nothing; authored rows have no name to list (they still set
+   * `identityConflict` when they sit beside official rows).
+   */
+  scoringLogics: ScoringLogic[];
+}
+
+/**
+ * Which logic scored one row, and the key that tells two rows' logics apart: the named logic itself,
+ * the artifact digest and the measurement period counted (the period is not part of `ScoringLogic`, but
+ * two periods are two answers, exactly as {@link scoringIdentityKey} treats them). Null for a row nothing
+ * named: authored, errored, or an `official` block missing the fields that name it.
+ */
+export function scoringLogicKeyOf(evidence: unknown): { key: string; logic: ScoringLogic } | null {
+  const logic = scoringLogicOf(evidence);
+  if (!logic) return null;
+  const identity: Record<string, unknown> = scoringIdentityOf((evidence as { official?: unknown }).official) ?? {};
+  const period = (identity.measurementPeriod ?? {}) as Record<string, unknown>;
+  return { key: JSON.stringify([logic, identity.artifactSha256 ?? null, period.start ?? null, period.end ?? null]), logic };
+}
+
+/**
+ * The distinct named logics among rows' evidence, in a fixed order (by their printed name, then by key),
+ * so a list built from rows read in any order is the same list.
+ */
+export function distinctScoringLogics(evidences: Iterable<unknown>): ScoringLogic[] {
+  const byKey = new Map<string, ScoringLogic>();
+  for (const evidence of evidences) {
+    const entry = scoringLogicKeyOf(evidence);
+    if (entry && !byKey.has(entry.key)) byKey.set(entry.key, entry.logic);
+  }
+  return [...byKey.entries()]
+    .sort(([ka, a], [kb, b]) => {
+      const na = formatScoringLogic(a) ?? "";
+      const nb = formatScoringLogic(b) ?? "";
+      return na < nb ? -1 : na > nb ? 1 : ka < kb ? -1 : ka > kb ? 1 : 0;
+    })
+    .map(([, logic]) => logic);
 }
 
 /**
@@ -62,6 +104,39 @@ export interface OfficialRunAggregate extends RateAggregate {
 export function scoringIdentityKey(identity: OfficialReportIdentity | null): string {
   if (!identity) return "authored";
   return JSON.stringify([identity.kind ?? "official", identity.artifactSha256 ?? null, identity.measurementPeriod?.start ?? null, identity.measurementPeriod?.end ?? null]);
+}
+
+/**
+ * A memo key that decides {@link scoringLogicKeyOf}'s answer for a row, built from what the row loop
+ * already holds: its {@link scoringIdentityKey} (kind, digest, period) plus every field `scoringLogicOf`
+ * reads that the identity key leaves out (eCQM id, version and, for a translation, its label, url and
+ * source). Two rows with the same memo key are named by the same logic. Plain concatenation, not
+ * `JSON.stringify`: it runs once per row, and the fields are trimmed strings that never hold a NUL.
+ */
+function namingMemoKey(identityKey: string, identity: OfficialReportIdentity | null): string {
+  if (!identity) return identityKey;
+  return `${identityKey}\u0000${identity.ecqmId ?? ""}\u0000${identity.version ?? ""}\u0000${identity.label ?? ""}\u0000${identity.url ?? ""}\u0000${identity.derivedFrom ?? ""}`;
+}
+
+/**
+ * The named logics of a set of rows and whether they CONFLICT, by the rule `officialMeasureRateResult`
+ * applies to the programs card (`identityConflict || scoringLogics.length > 1`), so the run detail, the
+ * run packet and the programs card cannot disagree about the same rows (#769).
+ *
+ * A conflict is two scoring identities ({@link scoringIdentityKey}: authored rows are one identity of
+ * their own, so authored rows beside official ones conflict) or two named logics (which catches two
+ * artifacts recorded before the digest was). Errored rows were scored by nothing and are skipped.
+ */
+export function scoringOfRows(evidences: Iterable<unknown>): { logics: ScoringLogic[]; conflict: boolean } {
+  const identities = new Set<string>();
+  const evaluated: unknown[] = [];
+  for (const evidence of evidences) {
+    if (isEvaluationErrorEvidence(evidence)) continue;
+    identities.add(scoringIdentityKey(officialReportIdentity(evidence)));
+    evaluated.push(evidence);
+  }
+  const logics = distinctScoringLogics(evaluated);
+  return { logics, conflict: identities.size > 1 || logics.length > 1 };
 }
 
 export async function aggregateOfficialRun(
@@ -107,6 +182,13 @@ export async function aggregateOfficialRun(
   let producedOfficialEvidence = false;
   let identityConflict = false;
   let firstKey: string | null = null;
+  // COLLECTED, not only compared: a reader that has to say WHICH logics scored a conflicted run (the
+  // programs card, the run detail) needs the list, and a boolean cannot carry it. One evidence per
+  // distinct logic is kept, so the cost stays O(logics), never O(rows).
+  const logicEvidence = new Map<string, unknown>();
+  // `scoringLogicKeyOf` once per distinct identity, not once per row: it names the logic and stringifies
+  // it, and a cold programs overview walks ~120,000 rows that carry a handful of identities between them.
+  const namedByIdentity = new Map<string, ReturnType<typeof scoringLogicKeyOf>>();
   for (const row of await os.listOutcomeMembershipsForRun(runId, measureId)) {
     aggregator.add(row);
     if (isEvaluationErrorEvidence(row.evidence)) continue;
@@ -117,7 +199,20 @@ export async function aggregateOfficialRun(
     const key = scoringIdentityKey(rowIdentity);
     if (firstKey === null) firstKey = key;
     else if (key !== firstKey) identityConflict = true;
+    const memoKey = namingMemoKey(key, rowIdentity);
+    let named = namedByIdentity.get(memoKey);
+    if (named === undefined) {
+      named = scoringLogicKeyOf(row.evidence);
+      namedByIdentity.set(memoKey, named);
+    }
+    if (named && !logicEvidence.has(named.key)) logicEvidence.set(named.key, row.evidence);
     producedOfficialEvidence ||= officialMembership(row.evidence) !== null;
   }
-  return { ...aggregator.finish(), official: identity, producedOfficialEvidence, identityConflict };
+  return {
+    ...aggregator.finish(),
+    official: identity,
+    producedOfficialEvidence,
+    identityConflict,
+    scoringLogics: distinctScoringLogics(logicEvidence.values()),
+  };
 }

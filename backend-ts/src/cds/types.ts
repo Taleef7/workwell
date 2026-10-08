@@ -85,9 +85,11 @@ export interface CdsLink {
 
 /**
  * A card. `indicator` is `info | warning | critical` in the spec; **`critical` is deliberately
- * unrepresentable here** — in CDS Hooks it means the user must not proceed, which WorkWell is not
- * entitled to say about a WebChart encounter (locked decision 1). Making it a type error rather than a
- * convention means the refusal cannot be forgotten.
+ * unrepresentable here**. The specification defines it only as the top of its urgency ordering
+ * (`info` < `warning` < `critical`), not as "the user must not proceed" (AI_GUARDRAILS §1.1); the
+ * refusal rests on WorkWell being supplementary to WebChart (locked decision 1) and not entitled to
+ * raise the loudest available signal inside someone else's encounter. Making it a type error rather
+ * than a convention means the refusal cannot be forgotten.
  */
 export interface CdsCard {
   /** REQUIRED, and the spec caps it at 140 characters. */

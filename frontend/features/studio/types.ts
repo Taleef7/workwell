@@ -1,4 +1,5 @@
 import type { OshaReferenceOption } from "@/components/osha-reference-combobox";
+import type { MeasureIdentity } from "@/lib/measure-identity";
 
 export interface SeriesAlternative {
   label: string;
@@ -41,6 +42,11 @@ export type MeasureDetail = {
   testFixtures: TestFixture[];
   rule?: RuleParams;
   ruleBindings?: RuleBindings;
+  /**
+   * The crosswalk, plus `executed` (and `translation`) when this deployment routes the measure to
+   * CMS's artifact: what runs, as distinct from this authoring record (#769). Null for an authored measure.
+   */
+  identity?: MeasureIdentity | null;
 };
 
 export type ValueSetRef = {

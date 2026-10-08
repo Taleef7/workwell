@@ -16,9 +16,11 @@ import type {
   ScaleGroupCount,
   OutcomeStatusCount,
   MeasureScanOptions,
+  ScoringIdentityRow,
 } from "../outcome-store.ts";
-import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
+import { LATEST_RUN_PROBE_BUDGET, SCORING_IDENTITY_KEYS, normalizeScoringIdentityRows, scoringIdentityOf } from "../outcome-store.ts";
 import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
+import { SQLITE_ID_CHUNK } from "./case-event-store-sqlite.ts";
 
 interface OutcomeRow {
   id: string;
@@ -30,6 +32,36 @@ interface OutcomeRow {
   evidence_json: string;
   evaluated_at: string;
   out_of_population: number | null;
+}
+
+/**
+ * The scoring-identity projection's columns (#769), shared by `distinctScoringLogicForRun` and
+ * `listScoringIdentities`. A multi-path `json_extract` returns ONE JSON array of the values (a missing
+ * path is `null`), which keeps each value's JSON type — a single-path `json_extract` would turn `true`
+ * into 1 — and is canonical text, so a DISTINCT over it compares exactly.
+ */
+const IDENTITY_COLUMNS = `json_type(evidence_json, '$.official') AS official_type,
+                json_type(evidence_json, '$.official.measurementPeriod') AS period_type,
+                json_extract(evidence_json, ${[...SCORING_IDENTITY_KEYS.map((k) => `'$.official.${k}'`), "'$.official.measurementPeriod.start'", "'$.official.measurementPeriod.end'"].join(", ")}) AS identity`;
+
+interface IdentityColumns {
+  official_type: string | null;
+  period_type: string | null;
+  identity: string;
+}
+
+/** The `official` object the {@link IDENTITY_COLUMNS} describe (keys in order, nulls kept); null when there is none. */
+function officialFromColumns(r: IdentityColumns): Record<string, unknown> | null {
+  if (r.official_type !== "object") return null;
+  const values = JSON.parse(r.identity) as unknown[];
+  const official: Record<string, unknown> = {};
+  SCORING_IDENTITY_KEYS.forEach((key, i) => {
+    official[key] = values[i];
+  });
+  if (r.period_type === "object") {
+    official.measurementPeriod = { start: values[SCORING_IDENTITY_KEYS.length], end: values[SCORING_IDENTITY_KEYS.length + 1] };
+  }
+  return official;
 }
 
 /** Undefined stays NULL — "this run did not record it" is not the same statement as "false" (ADR-079). */
@@ -230,6 +262,65 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .bind(runId, Math.max(1, limit))
       .all<{ measure_id: string }>();
     return (results ?? []).map((r) => r.measure_id);
+  }
+
+  async distinctScoringLogicForRun(runId: string): Promise<Array<{ measureId: string; official: unknown }>> {
+    // The ceiling's projection, in SQL here too so the DISTINCT collapses rows before they leave the
+    // database. A multi-path `json_extract` returns ONE JSON array of the values (a missing path is
+    // `null`), which keeps each value's JSON type — a single-path `json_extract` would turn `true` into
+    // 1 — and is canonical text, so DISTINCT compares it exactly. `json_type`, not `json_extract`, for the
+    // error marker: a key present with a JSON null is still the marker, as the ceiling's `?` says.
+    const { results } = await this.db
+      .prepare(
+        `SELECT DISTINCT measure_id, ${IDENTITY_COLUMNS}
+           FROM outcomes
+          WHERE run_id = ? AND json_type(evidence_json, '$.evaluationError') IS NULL`,
+      )
+      .bind(runId)
+      .all<{ measure_id: string } & IdentityColumns>();
+    return normalizeScoringIdentityRows((results ?? []).map((r) => ({ measureId: r.measure_id, official: officialFromColumns(r) })));
+  }
+
+  async listScoringIdentities(
+    runId: string,
+    opts: { measureId: string; subjectIds: readonly string[] },
+  ): Promise<ScoringIdentityRow[]> {
+    // The ceiling's projection (#769): the identity keys extracted in SQL, the evidence never returned.
+    // The subject set is bound as an `IN` list, so it is sliced to the floor's bind budget and the slices'
+    // rows merged back into the one `evaluated_at, id` order the ceiling returns in a single statement.
+    const rows: Array<ScoringIdentityRow & { at: string; id: string }> = [];
+    for (let start = 0; start < opts.subjectIds.length; start += SQLITE_ID_CHUNK) {
+      const slice = opts.subjectIds.slice(start, start + SQLITE_ID_CHUNK);
+      const { results } = await this.db
+        .prepare(
+          `SELECT id, subject_id, measure_id, evaluation_period, evaluated_at,
+                  json_type(evidence_json, '$.evaluationError') IS NOT NULL AS errored,
+                  ${IDENTITY_COLUMNS}
+             FROM outcomes
+            WHERE run_id = ? AND measure_id = ? AND subject_id IN (${slice.map(() => "?").join(", ")})
+            ORDER BY evaluated_at ASC, id ASC`,
+        )
+        .bind(runId, opts.measureId, ...slice)
+        .all<{ id: string; subject_id: string; measure_id: string; evaluation_period: string; evaluated_at: string; errored: number } & IdentityColumns>();
+      for (const r of results ?? []) {
+        const official = officialFromColumns(r);
+        rows.push({
+          subjectId: r.subject_id,
+          measureId: r.measure_id,
+          evaluationPeriod: r.evaluation_period,
+          official: official === null ? null : scoringIdentityOf(official),
+          errored: r.errored === 1,
+          at: r.evaluated_at,
+          id: r.id,
+        });
+      }
+    }
+    // One slice is already in order; several are merged by the same key SQLite sorted each by (BINARY
+    // collation compares the ASCII timestamp and id text exactly as these comparisons do).
+    if (opts.subjectIds.length > SQLITE_ID_CHUNK) {
+      rows.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    }
+    return rows.map(({ at: _at, id: _id, ...row }) => row);
   }
 
   async getOutcomeById(id: string): Promise<OutcomeRecord | null> {
