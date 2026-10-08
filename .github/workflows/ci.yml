@@ -988,6 +988,57 @@ jobs:
             }
             echo "${id} on ${DATE}: $(jq -c '.status as $s | .evidence.official | {status: $s, kind, label, version, ecqmId}' "$RUNNER_TEMP/probe-outcome.json")"
           done
+      # The label follows the result (#769): a case a translation scored names the translation, although
+      # today's routing names CMS's artifact for the measure. The case comes from a one-patient manual run
+      # dated in the translation's year, on this throwaway stack only — on the live sandbox a run dated
+      # 2027 closes and reopens every 2026 case (#654). Candidates hold an open case today, so they sit in
+      # the measure's population; mid-December puts the year's facts in the corpus.
+      - name: A case a translation scored is labelled as the translation
+        id: translated-case
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
+        run: |
+          API=http://localhost:8080
+          TOKEN="$(curl -fsS --max-time 60 -X POST "$API/api/auth/login" -H 'content-type: application/json' \
+            -d '{"email":"admin@maui.workwell.dev","password":"Workwell123!"}' | jq -er .token)"
+          auth=(-H "Authorization: Bearer $TOKEN")
+          IFS=',' read -ra TRANSLATIONS <<< "$ROUTED_TRANSLATIONS"
+          for id in "${TRANSLATIONS[@]}"; do
+            YEAR="$(jq -er '.effectivePeriod.start[0:4]' "backend-ts/measures/derived/${id}/manifest.json")"
+            LABEL="$(jq -er '.derived.label' "backend-ts/measures/derived/${id}/manifest.json")"
+            CANDIDATES="$(curl -fsS --max-time 120 "$API/api/cases?measureId=${id}&limit=8" "${auth[@]}" | jq -r '.[].employeeId')"
+            FOUND=""
+            for pid in $CANDIDATES; do
+              RUN_ID="$(curl -fsS --max-time 300 -X POST "$API/api/runs/manual" "${auth[@]}" -H 'content-type: application/json' \
+                -d "{\"scopeType\":\"EMPLOYEE\",\"employeeExternalId\":\"${pid}\",\"evaluationDate\":\"${YEAR}-12-15\"}" | jq -er '.runId')"
+              for i in $(seq 1 90); do
+                STATUS="$(curl -fsS --max-time 60 "$API/api/runs/${RUN_ID}" "${auth[@]}" | jq -r .status)"
+                case "$STATUS" in RUNNING|QUEUED|REQUESTED) sleep 2 ;; *) break ;; esac
+              done
+              CASE="$(curl -fsS --max-time 120 "$API/api/cases?measureId=${id}&period=${YEAR}-01-01&status=all&search=${pid}" "${auth[@]}" \
+                | jq -c --arg pid "$pid" '[.[] | select(.employeeId == $pid)][0] // empty')"
+              [ -n "$CASE" ] || { echo "${pid}: run ${RUN_ID} (${STATUS}) opened no ${YEAR} ${id} case; next"; continue; }
+              printf '%s' "$CASE" | jq -e --arg label "$LABEL" \
+                '.logic.kind == "workwell-translation" and .logic.label == $label and (.logic | has("ecqmId") | not)' > /dev/null || {
+                echo "::error::the ${YEAR} ${id} case of ${pid} is not labelled as the translation. Its logic:"
+                printf '%s' "$CASE" | jq '.logic'
+                exit 1
+              }
+              echo "${id}: case $(printf '%s' "$CASE" | jq -r .caseId) of ${pid} names $(printf '%s' "$CASE" | jq -c '.logic | {label, version}')"
+              echo "TRANSLATED_CASE_ID=$(printf '%s' "$CASE" | jq -r .caseId)" >> "$GITHUB_ENV"
+              echo "TRANSLATED_CASE_LABEL=${LABEL}" >> "$GITHUB_ENV"
+              FOUND="$pid"
+              break
+            done
+            [ -n "$FOUND" ] || { echo "::error::no candidate opened a ${YEAR} ${id} case, so the translated label went unchecked"; exit 1; }
+          done
+      - name: The translated case's page names the translation
+        if: ${{ !cancelled() && steps.translated-case.outcome == 'success' }}
+        working-directory: e2e
+        env:
+          PLAYWRIGHT_PROFILE: maui
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          PLAYWRIGHT_API_BASE_URL: http://localhost:8080
+        run: npx playwright test tests/maui/translated-label.spec.ts --project=maui --reporter=list
       - name: Upload Playwright report and server logs
         uses: actions/upload-artifact@v7
         if: always()

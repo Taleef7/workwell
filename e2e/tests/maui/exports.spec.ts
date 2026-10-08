@@ -10,12 +10,50 @@ test.beforeEach(() => {
 // `patientExternalId`/`patientName` and every other header and the column order are unchanged. This
 // list said `employeeExternalId` — the DEFAULT profile's spelling — so the assertion contradicted the
 // contract the export is written to, and the Maui stack was right and the test was wrong.
+//
+// The WHOLE row, in order, compared exactly: the contract is positional (columns are only APPENDED), so
+// a `toContain` check per name passed against an inserted or reordered column.
 const EXPECTED_HEADERS = [
   "caseId", "patientExternalId", "patientName", "role", "site",
   "measureName", "measureVersion", "evaluationPeriod", "status", "priority",
   "assignee", "currentOutcomeStatus", "nextAction", "lastRunId",
   "createdAt", "updatedAt", "closedAt", "latestOutreachDeliveryStatus",
+  "providerId", "payer",
+  "closedReason", "closedBy", "liveState", "liveOutcomeStatus", "liveOutcomeRunId",
+  "executedLogic",
 ];
+
+// §6.2, patient spelling (`lastResultDate`, `exclusionStatus`), with #769's `executedLogic` last.
+const EXPECTED_OUTCOME_HEADERS = [
+  "outcomeId", "runId", "patientExternalId", "patientName", "role", "site",
+  "measureName", "measureVersion", "evaluationPeriod", "status",
+  "lastResultDate", "complianceWindowDays", "daysOverdue", "roleEligible", "siteEligible", "exclusionStatus", "evaluatedAt",
+  "providerId", "payer",
+  "executedLogic",
+];
+
+/** Quote-aware, so a comma inside a cell (a next action, a name) cannot shift the column read. */
+function cells(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { out.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/** The version an `executedLogic` cell names: "CMS125FHIR v1.0.000" or "WorkWell translation of CMS137v15 (ww-2027.1)". */
+const versionNamedBy = (logic: string): string | null =>
+  logic.match(/^CMS\d+FHIR v(\S+)$/)?.[1] ?? logic.match(/^WorkWell translation of CMS\d+v\d+ \((\S+)\)$/)?.[1] ?? null;
 
 test.describe("Maui case CSV export", () => {
   test("CSV export has correct header and only Maui patient names", async ({ request }) => {
@@ -52,11 +90,38 @@ test.describe("Maui case CSV export", () => {
     const lines = csv.trim().split("\n");
     expect(lines.length).toBeGreaterThan(1);
 
-    // Header row check
+    // Header row check: exact, in order.
     const headers = lines[0].split(",").map((h) => h.trim());
-    for (const expected of EXPECTED_HEADERS) {
-      expect(headers, `CSV header should include '${expected}'`).toContain(expected);
+    expect(headers, "the §6.3 header, patient spelling, columns only appended").toEqual(EXPECTED_HEADERS);
+
+    // #769: each row names the logic that scored its cited outcome, and `measureVersion` is THAT logic's
+    // version — never the authored library's "2.0.0" beside a CMS artifact, never the catalog's "v1.0".
+    const versionIdx = headers.indexOf("measureVersion");
+    const logicIdx = headers.indexOf("executedLogic");
+    let named = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const row = cells(lines[i].replace(/\r$/, ""));
+      expect(row.length, `row ${i}: one cell per header`).toBe(headers.length);
+      const version = row[versionIdx] ?? "";
+      const logic = row[logicIdx] ?? "";
+      expect(version, `row ${i}: never the catalog record's version`).not.toBe("v1.0");
+      if (!logic) continue;
+      named++;
+      const fromLogic = versionNamedBy(logic);
+      expect(fromLogic, `row ${i}: '${logic}' is a CMS artifact or a WorkWell translation by name`).not.toBeNull();
+      expect(version, `row ${i}: measureVersion is the version '${logic}' names`).toBe(fromLogic);
     }
+    // All six measures are routed on this stack, so the cases its runs opened cite rows a named logic scored.
+    expect(named, "at least one case names the logic that scored it").toBeGreaterThan(0);
+
+    // §6.2's header, exactly. A run id no run has returns the header alone, which keeps this a header
+    // check at any corpus size (the latest run on the pilot holds 120,000 rows).
+    const outcomes = await request.get(`${API_BASE}/api/exports/outcomes?format=csv&runId=00000000-0000-4000-8000-000000000000`, {
+      headers: authHeaders,
+    });
+    expect(outcomes.status()).toBe(200);
+    const outcomeHeader = (await outcomes.text()).trim().split("\n")[0]!.split(",").map((h) => h.trim());
+    expect(outcomeHeader, "the §6.2 header, patient spelling, columns only appended").toEqual(EXPECTED_OUTCOME_HEADERS);
 
     // All patient names should be Maui roster names (no emp-/twh identifiers)
     const nameIdx = headers.indexOf("patientName");
