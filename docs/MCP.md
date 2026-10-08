@@ -62,6 +62,29 @@ answering 401, mint a fresh JWT from `/api/auth/login` and update the environmen
   and says so (#491).
 - `explain_rule` returns deterministic metadata from measure spec and CQL; no AI is used.
 
+## Which logic a response names (#769)
+
+- **Measure tools describe the catalog record.** On `list_measures`, `get_measure_version` and
+  `explain_rule`, `policyRef` is the catalog's QDM lineage (`CMS125v14`), **not what runs**, and `version`
+  is the record's own (`v1.0`). Each adds `executed` (the CMS FHIR artifact this deployment routes the
+  measure to: `ecqmId` `CMS125FHIR`, `version` `1.0.000`, `derivedFrom`, `status`, `statusNote`) and
+  `translation` (a routed WorkWell translation: `label`, `version`, `url`, `derivedFrom`, `year`), computed
+  exactly as `/api/measures` computes `identity.executed`/`identity.translation`; both `null` when nothing
+  official is routed. The executed version appears only inside those objects, beside its own id: no
+  response pairs a QDM id with it (LOCKED §4.3).
+- **`explain_rule` on a measure routed to CMS's artifact returns `cqlDefines: []`** and a `logicNote`
+  naming the logic that runs: the record's authored CQL is not what the deployment executes, so its
+  defines are omitted rather than offered as the rule.
+- **Case and outcome tools name the row's logic.** `get_case`, `list_cases`, `list_noncompliant`,
+  `check_compliance`, `explain_outcome` and each `get_employee` `latestOutcomes[]` entry carry `logic`,
+  read from the evidence of the outcome the answer is about (a case's cited outcome: `lastRunId`, subject,
+  measure), never from today's routing: `{ kind: "cms-artifact", ecqmId, version, derivedFrom, status,
+  statusNote }`, `{ kind: "workwell-translation", label, version, url, derivedFrom }` (never an eCQM id),
+  or `null` for authored CQL, an errored row or no row. Their `measureVersion` / `measure_version` /
+  `version` is that row's version: `""` for an errored or missing row, never the authored library's for a
+  row CMS's artifact scored. On a `staff_closed` row `logic` describes the frozen status, not `live_*`.
+- `list_runs` `measure_version` is the run read model's, as on the run detail and the runs CSV.
+
 ## Tool inventory (v2.0.0)
 
 ### Tool role matrix
@@ -92,7 +115,7 @@ The table below shows **tool-execution** roles (transport access is separate —
 ```json
 { "employeeExternalId": "emp-006" }
 ```
-Returns: `employeeExternalId`, `name`, `role`, `site`, `active`, `latestOutcomes[]`
+Returns: `employeeExternalId`, `name`, `role`, `site`, `active`, `latestOutcomes[]` (each with the row's `version` and `logic`)
 
 ### `check_compliance`
 ```json
@@ -147,7 +170,7 @@ Coverage code the display table has not been taught.
 ```json
 { "measureName": "Annual Audiogram" }
 ```
-Returns: `measureName`, `policyRef`, `description`, `eligibility`, `complianceWindow`, `requiredDataElements`, `cqlDefines[]`, `attachedValueSets[]`, `source: "deterministic_metadata"`
+Returns: `measureName`, `policyRef`, `description`, `eligibility`, `complianceWindow`, `requiredDataElements`, `cqlDefines[]`, `executed`, `translation`, `logicNote` (official-routed only), `attachedValueSets[]`, `source: "deterministic_metadata"`
 
 ### `get_measure_traceability`
 ```json

@@ -137,17 +137,28 @@ Columns:
 population. `missingData` still counts every persisted MISSING_DATA row and `passRate` is still
 `compliant / totalEvaluated`.
 
+`measureVersion` (#769) is only what a run row can know, since it carries no evidence: an authored-only
+measure's library version on a MEASURE/CASE run; empty for a measure with a CMS artifact (its rows may be
+the artifact's, a translation's or authored CQL's; the run's reconciliation names them) and for every
+multi-measure run. Never the catalog record's `v1.0`.
+
 ### 6.2 `GET /api/exports/outcomes?format=csv&runId={optional}`
 Filters: `runId`, `site`, `providerId`, `ageBand`, `sex`, `payer`.
 
 Columns:
-`outcomeId, runId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, lastExamDate, complianceWindowDays, daysOverdue, roleEligible, siteEligible, waiverStatus, evaluatedAt, providerId, payer`
+`outcomeId, runId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, lastExamDate, complianceWindowDays, daysOverdue, roleEligible, siteEligible, waiverStatus, evaluatedAt, providerId, payer, executedLogic`
 
 `complianceWindowDays` is empty on an official outcome (#650), as in `why_flagged`.
 
+`executedLogic` was appended, never inserted (#769): the logic that scored the row, from its own
+evidence (`scoringLogicOf`): `CMS125FHIR v1.0.000`, or `WorkWell translation of CMS137v15 (ww-2027.1)`
+(§6.6's string plus the translation's version); empty for an authored or errored row. `measureVersion`
+is the same row's (`measureVersionOf`): the artifact's or translation's own version, the authored
+library's for an authored row, empty for an errored row; never the catalog record's `v1.0`.
+
 ### 6.3 `GET /api/exports/cases?format=csv`
 Columns:
-`caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus, providerId, payer, closedReason, closedBy, liveState, liveOutcomeStatus, liveOutcomeRunId`
+`caseId, employeeExternalId, employeeName, role, site, measureName, measureVersion, evaluationPeriod, status, priority, assignee, currentOutcomeStatus, nextAction, lastRunId, createdAt, updatedAt, closedAt, latestOutreachDeliveryStatus, providerId, payer, closedReason, closedBy, liveState, liveOutcomeStatus, liveOutcomeRunId, executedLogic`
 
 Filters: `status`, `measureId`, `priority`, `assignee`, `site`, `caseIds`, `providerId`, `ageBand`,
 `sex`, `payer`, `from`/`to`, `outcome`, `search`, `period`. **The export returns exactly the rows of the
@@ -169,6 +180,10 @@ run describing another `evaluationPeriod` = `UNKNOWN`/`UNKNOWN`, run id filled. 
 (`GAP|CLEAR|UNKNOWN`) is the reconciliation column (out-of-population is not a gap).
 - `latestOutreachDeliveryStatus`: `deliveryStatus` of the newest `OUTREACH_DELIVERY_UPDATED`/`OUTREACH_SENT`
 action (empty if none, never an older one), read in one batch.
+- `executedLogic` was appended, never inserted, and `measureVersion` changed meaning in place (#769): both
+describe the case's CITED outcome (`lastRunId`, subject, measure) as §6.2 does, read once per (run,
+measure) for the exported rows (`scoringForCases`), never from today's routing; empty when that run holds
+no row for the case. On a person-closed row they describe the frozen `currentOutcomeStatus`, not `live*`.
 
 **Subject headers** (§6.2/§6.3, `subjectHeaders`): a patient deployment (`WORKWELL_INSTANCE=maui`,
 `subjectTerm === "patient"`) names the subject columns `patientExternalId`/`patientName`, and in §6.2
@@ -224,6 +239,7 @@ the CORS-exposed `X-WorkWell-Compacted-Measures`; **409 `run_compacted`** only w
 never a truncated 200.
 - `rawIdentifier`, subject name and rate label pass through `csvTextCell` (defuses a leading `=`, `+`,
 `-`, `@`, tab, CR).
+- `ecqmId` is CMS-prefixed (`CMS137FHIR`, `ecqmIdOf`) since #769; it was the evidence's bare `137FHIR`.
 - `executedLogic` was appended, never inserted: `CMS137FHIR v1.0.000` for CMS's artifact, a WorkWell
 translation's label (its `ecqmId` empty) otherwise; filled wherever the measure columns are. A selected
 run whose counted rows were scored by more than one logic answers **409 `mixed_logic`**, as a run mixing
