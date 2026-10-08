@@ -1153,6 +1153,9 @@ test("#768: a deploy promotes or keeps an image only once its new build serves t
   const promote = maui.findIndex((line) => /imagetools create .*maui-latest/.test(line));
   assert.ok(promote >= 0, "deploy-maui-mieweb.yml: no maui-latest promotion this test can find");
   assert.ok(gate < promote, "deploy-maui-mieweb.yml: maui-latest is promoted before the routing gate runs");
+  // ...and the promotion runs only when every step before it passed: an `if: always()` or `!cancelled()`
+  // on it would move the tag after a refused gate with the order above intact.
+  assert.deepEqual(stepFailSoft(maui, promote), [], "deploy-maui-mieweb.yml: the maui-latest promotion must run only on success");
 });
 
 test("#768: the hand-copied Maui lists match the image's build arg", () => {

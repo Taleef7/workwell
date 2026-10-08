@@ -19,5 +19,7 @@ test("#768: /health names what this process routes and how many problems the rou
   const { routing } = (await res.json()) as { routing: { official: string[]; derived: string[]; problems: number } };
   assert.deepEqual(routing.official, ["cms122", "cms999"], "the routed ids, as the router reads them, sorted");
   assert.deepEqual(routing.derived, ["cms2"], "the translations, read from their own list");
-  assert.ok(routing.problems >= 2, `the router refuses both, so a deploy must not promote this image (got ${routing.problems})`);
+  // cms999 alone is 2 (not gated, not vendored) and the stray translation is a 3rd; at least, because a
+  // context without the VSAC sidecar adds a terminology problem for cms122.
+  assert.ok(routing.problems >= 3, `the router refuses both, so a deploy must not promote this image (got ${routing.problems})`);
 });

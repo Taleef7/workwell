@@ -141,9 +141,10 @@ jobs:
           file: ./backend-ts/Dockerfile
           push: true
           # The commit, baked into the image and served on /health (#625). The routing lists are baked in
-          # too (#768): the image serves only the artifacts committed in it, so a self-heal that recreates
-          # an older image can never start it with a list it cannot serve. Each id here must be vendored
-          # above (translations with --verify-pin), and official-flip-config.test.ts holds the rest.
+          # too (#768): the image serves only the artifacts committed in it. Once the container env stops
+          # setting them (#768's second half), a self-heal that recreates an older image starts it with the
+          # list it was built with, never one it cannot serve. Each id here must be vendored above
+          # (translations with --verify-pin), and official-flip-config.test.ts holds the rest.
           build-args: |
             WORKWELL_BUILD_SHA=${{ github.sha }}
             WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137
@@ -368,10 +369,10 @@ jobs:
           EXPECTED_DERIVED: cms137
         run: bash .github/scripts/verify-routing-health.sh
 
-      # The recovery tag is promoted ONLY here, after the container above came up and served its routing. `maui-latest` is what
-      # reconcile-maui-mieweb.yml recreates from, so its whole value is that it names an image that was
-      # actually deployed and served traffic. `imagetools create` re-points the tag at the existing
-      # manifest by digest — no pull, no rebuild, so the promoted bytes are exactly the deployed bytes.
+      # The recovery tag is promoted ONLY here, after the container above came up and served its routing.
+      # `maui-latest` is what reconcile-maui-mieweb.yml recreates from, so its whole value is that it names
+      # an image that was actually deployed and served traffic. `imagetools create` re-points the tag at the
+      # existing manifest by digest — no pull, no rebuild, so the promoted bytes are exactly the deployed bytes.
       - name: Promote maui-latest to the image that just deployed
         run: |
           docker buildx imagetools create             --tag "${{ env.BACKEND_TS_IMAGE }}:maui-latest"             "${{ env.BACKEND_TS_IMAGE }}:maui-sha-${{ github.sha }}"

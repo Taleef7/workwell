@@ -41,9 +41,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
     answer is memoized.
   - CI proves the translated label on a one-patient 2027 run on its throwaway stack.
 - **#768, first half: the image carries its routing lists.**
-  - Each deploy bakes `WORKWELL_OFFICIAL_MEASURES` and `WORKWELL_DERIVED_MEASURES` into the backend image
-    as build args. The container env still sets the same values, and a test holds the two equal. Nothing
-    changes at runtime.
+  - Each deploy bakes its routing lists into the backend image as build args: Maui both lists, TWH the
+    official one, staging neither. The container env still sets the same values, and a test holds the
+    two equal. Nothing changes at runtime.
   - `/health` now reports `routing` (the routed ids and the router's problem count).
   - A new gate waits for the deployed build on `/health`. Maui promotes `maui-latest` only if that build
     routes exactly its build args with 0 problems; on TWH a failed gate fails the deploy.

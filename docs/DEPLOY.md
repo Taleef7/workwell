@@ -154,8 +154,9 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
 
 4. **Edit the workflows, never the container**: in the deploy workflow, the `build-backend-ts` build args,
    the routing gate's `EXPECTED_*` and the container env array; in the reconcile workflow, its env array
-   (until the env keys go, #768). For Maui also `flip-gate.yml`'s `routed` default and
-   `rebuild-quality-snapshots-maui.yml`. `official-flip-config.test.ts` fails the build if any of them
+   (until the env keys go, #768). For Maui also `flip-gate.yml`'s `routed` default,
+   `rebuild-quality-snapshots-maui.yml` and CI's `e2e-maui` `ROUTED_MEASURES`/`ROUTED_TRANSLATIONS`.
+   `official-flip-config.test.ts` fails the build if any of them
    disagree or a measure lacks its gate (ADR-045).
 
 5. **Redeploy and check the signals.** A misconfiguration does not fail boot: grep
