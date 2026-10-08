@@ -96,8 +96,8 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
     name: string;
     site: string;
     active: boolean;
-    measureOutcomes: Array<{ measureId: string; measureName: string; outcomeStatus: string; daysSinceLastExam: number | null; daysUntilDue: number | null; openCaseId: string | null }>;
-    openCases: Array<{ caseId: string; measureId: string; outcomeStatus: string }>;
+    measureOutcomes: Array<{ measureId: string; measureName: string; measureVersion: string; logic: unknown; outcomeStatus: string; daysSinceLastExam: number | null; daysUntilDue: number | null; openCaseId: string | null }>;
+    openCases: Array<{ caseId: string; measureId: string; outcomeStatus: string; logic: unknown }>;
     recentAuditEvents: Array<{ eventType: string; summary: string }>;
   };
   assert.equal(p.externalId, "emp-006");
@@ -122,6 +122,14 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
   const cmsCase = p.openCases.find((c) => c.caseId === cmsCaseId);
   assert.ok(cmsCase);
   assert.equal(cmsCase.measureId, "cms125");
+  // Authored CQL scored both rows (TWH's occupational measure, and a cms125 row with no `official`
+  // block): no CMS or translation identity, and the authored library's own version (#769).
+  assert.equal(audiogram.logic, null);
+  assert.equal(audiogram.measureVersion, "1.0.0");
+  assert.equal(cms125.logic, null);
+  assert.equal(cms125.measureVersion, "2.0.0", "an authored row keeps the authored version");
+  assert.equal(audiogramCase.logic, null);
+  assert.equal(cmsCase.logic, null);
   assert.ok(p.recentAuditEvents.some((e) => e.eventType === "CASE_CREATED" && /opened a case/.test(e.summary)));
 });
 

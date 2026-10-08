@@ -8,7 +8,8 @@
  *   - nonCompliant = DUE_SOON | OVERDUE | MISSING_DATA  (EXCLUDED is neither)
  *   - dataFreshAsOf = MAX(evaluated_at); dataFreshnessMinutes = -1 when no outcomes
  *   - measureName/Version: the run's own scope — the measure's name for a MEASURE/CASE run, the site
- *     or subject for a SITE/EMPLOYEE run, "All Programs" only for an ALL_PROGRAMS run (#668)
+ *     or subject for a SITE/EMPLOYEE run, "All Programs" only for an ALL_PROGRAMS run (#668); the
+ *     version only where the run row can know it (`runMeasureVersion`, #769)
  *
  * Note: `totalCases` is supplied by the caller (COUNT of cases with last_run_id = runId,
  * matching Java); it defaults to 0 for callers that don't compute it. `triggerType` is
@@ -20,7 +21,7 @@ import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { DEPLOYMENT_PROFILE, employeeById, profileSubjectMatcher, subjectNoun } from "../config/deployment-profile.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
-import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { loadOfficialManifest } from "../wiring/official-artifacts.ts";
 
 export interface RunListItem {
   runId: string;
@@ -106,17 +107,26 @@ function runMeasureId(run: Pick<RunRecord, "scopeType" | "scopeId" | "requestedS
  */
 function measureLabel(run: Pick<RunRecord, "scopeType" | "scopeId" | "site" | "requestedScope">): { name: string; version: string } {
   const measureId = runMeasureId(run);
-  if (measureId) {
-    const authored = MEASURES[measureId];
-    const dash = authored ? authored.library.lastIndexOf("-") : -1;
-    const version = authored
-      ? (dash >= 0 ? authored.library.slice(dash + 1) : "")
-      : (MEASURE_CATALOG.find((m) => m.id === measureId)?.version ?? "");
-    return { name: measureDisplayName(measureId), version };
-  }
+  if (measureId) return { name: measureDisplayName(measureId), version: runMeasureVersion(measureId) };
   if (run.scopeType === "SITE" && run.site) return { name: `Site: ${run.site}`, version: "" };
   if (run.scopeType === "EMPLOYEE") return { name: `Single ${SUBJECT_SINGULAR}`, version: "" };
   return { name: "All Programs", version: "" };
+}
+
+/**
+ * The version a run row may print (#769). A run row carries no evidence, so it cannot say which logic
+ * scored it: a measure with a committed CMS artifact may have been scored by that artifact, a WorkWell
+ * translation, or (before its routing flip) authored CQL, and only the rows know. So such a measure
+ * prints NO version here — never the authored library's "2.0.0", which names logic that may not have
+ * run, and never the catalog record's "v1.0", which names no logic at all. The run detail's
+ * `scoringLogic` (`/reconciliation`) names what actually ran, from the rows. An authored-only measure
+ * has one logic, so its library version is the truth; a measure with neither prints nothing.
+ */
+function runMeasureVersion(measureId: string): string {
+  if (loadOfficialManifest(measureId)) return "";
+  const authored = MEASURES[measureId];
+  const dash = authored ? authored.library.lastIndexOf("-") : -1;
+  return authored && dash >= 0 ? authored.library.slice(dash + 1) : "";
 }
 
 function tally(outcomes: OutcomeRecord[]) {

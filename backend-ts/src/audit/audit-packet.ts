@@ -30,6 +30,8 @@ import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
+import { distinctScoringLogics } from "../fhir/run-aggregate.ts";
+import type { ScoringLogic } from "../measure/measure-identity.ts";
 
 export type PacketFormat = "json" | "html";
 
@@ -115,6 +117,22 @@ async function runOutcomeRowsWithCases(caseStore: CaseStore, outcomes: OutcomeRe
     .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
 }
 
+/**
+ * The distinct logics that scored each measure's rows in this run (#769), in the shape and order the
+ * run reconciliation serves (`{ measureId, logics }`, `distinctScoringLogics`), computed from the rows
+ * the packet already holds. More than one entry for a measure means its rows were scored by more than
+ * one logic or measurement period; an authored or errored row has no name to list.
+ */
+function scoringLogicByMeasure(outcomes: OutcomeRecord[]): Array<{ measureId: string; logics: ScoringLogic[] }> {
+  const byMeasure = new Map<string, unknown[]>();
+  for (const o of outcomes) {
+    const evidences = byMeasure.get(o.measureId) ?? [];
+    evidences.push(o.evidence);
+    byMeasure.set(o.measureId, evidences);
+  }
+  return [...byMeasure.keys()].sort().map((measureId) => ({ measureId, logics: distinctScoringLogics(byMeasure.get(measureId)!) }));
+}
+
 /** A merged-timeline entry as stored by CaseEventStore (payload carries a timelineSource tag). */
 interface TimelineEntry {
   eventType: string;
@@ -184,7 +202,10 @@ export async function buildCasePacket(
     measure: {
       measureVersionId: detail.measureVersionId,
       name: detail.measureName,
+      // The cited outcome's own version and logic (#769, `toCaseDetail`): the artifact's "1.0.000" for a
+      // row CMS's artifact scored, "" for an errored row, never the authored library's.
       version: detail.measureVersion,
+      logic: detail.logic,
       outcomeSummary: detail.outcomeSummary,
     },
     decisionEvidence: {
@@ -236,7 +257,10 @@ export async function buildRunPacket(
     run: {
       runId: summary.runId,
       measureName: summary.measureName,
+      // The run read model's (#769): a run row carries no evidence, so a measure with a CMS artifact
+      // prints no version here; `scoringLogic` below names what scored the rows.
       measureVersion: summary.measureVersion,
+      scoringLogic: scoringLogicByMeasure(outcomes),
       status: summary.status,
       triggerType: summary.triggerType,
       scopeType: summary.scopeType,

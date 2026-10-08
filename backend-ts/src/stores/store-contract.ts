@@ -1204,6 +1204,71 @@ export function outcomeStoreContract(
     assert.deepEqual(await outcomeStore.listOutcomeMembershipsForRun(run.id, "never-run"), []);
     assert.deepEqual(await outcomeStore.listOutcomeMembershipsForRun("00000000-0000-4000-8000-000000000000", "audiogram"), []);
   });
+
+  /**
+   * The run detail's identity-only read (#769): which logics scored each measure's evaluated rows.
+   *
+   * What is contract: one entry per distinct (measure, identity) — so rows that differ only in their
+   * POPULATIONS collapse, which a DISTINCT over the whole `official` block would not do — the identity
+   * keys and nothing else (no `populationResults`, no `engine`), JSON types kept, absent and null keys
+   * dropped, a period that differs is a different entry, an authored row is `official: null`, an errored
+   * row is not there at all (even one that still carries an `official` block), and another run's rows
+   * never leak in. Both stores return the same sorted list.
+   */
+  test(`[${label}] distinctScoringLogicForRun returns each measure's distinct scoring identities, and only those`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const other = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const pops = (numer: boolean) => ({ ipp: true, denom: true, denex: false, numer });
+    const y2026 = { start: "2026-01-01", end: "2026-12-31" };
+    const y2027 = { start: "2027-01-01", end: "2027-12-31" };
+    const cms = (numer: boolean, measurementPeriod = y2026) => ({
+      official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:c", measurementPeriod, populationResults: pops(numer), rates: [pops(numer)] },
+      expressionResults: [{ define: "official:numerator", result: numer }],
+    });
+    const translated = {
+      official: {
+        kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15",
+        ecqmId: null, version: "ww-2027.1", engine: "fqm-execution", artifactSha256: "sha256:t", measurementPeriod: y2027, populationResults: pops(true),
+      },
+    };
+    const row = (subjectId: string, measureId: string, evidence: unknown) => ({ runId: run.id, subjectId, measureId, status: "COMPLIANT", evidence });
+    await outcomeStore.recordOutcomes([
+      // Three cms137 rows CMS's 2026 artifact scored, with different populations: ONE identity.
+      row("p-1", "cms137", cms(true)),
+      row("p-2", "cms137", cms(false)),
+      row("p-3", "cms137", cms(true)),
+      // The translation scored another: a second identity for the same measure.
+      row("p-4", "cms137", translated),
+      // CMS's artifact over another period: a third (the period is part of the identity).
+      row("p-5", "cms137", cms(true, y2027)),
+      // Errored rows were scored by nothing — even one that kept an `official` block, and one whose
+      // marker is a JSON null (the key's presence is the marker).
+      row("p-6", "cms137", { evaluationError: "CQL engine failure", message: "boom" }),
+      row("p-7", "cms137", { evaluationError: "CQL engine failure", official: { ecqmId: "999FHIR", version: "9" } }),
+      row("p-8", "cms137", { evaluationError: null, official: { ecqmId: "998FHIR", version: "9" } }),
+      // An authored measure: official null, once however many rows.
+      row("p-9", "audiogram", { expressionResults: [{ define: "Outcome Status", result: "COMPLIANT" }] }),
+      row("p-10", "audiogram", { expressionResults: [] }),
+      // JSON types survive (a boolean stays a boolean), and null keys are dropped.
+      row("p-11", "cms122", { official: { ecqmId: "122FHIR", version: "1.0.000", label: null, kind: true, measurementPeriod: { start: "2026-01-01", end: null } } }),
+    ]);
+    await outcomeStore.recordOutcomes([{ runId: other.id, subjectId: "p-1", measureId: "cms137", status: "COMPLIANT", evidence: { official: { ecqmId: "000FHIR", version: "0" } } }]);
+
+    assert.deepEqual(await outcomeStore.distinctScoringLogicForRun(run.id), [
+      { measureId: "audiogram", official: null },
+      { measureId: "cms122", official: { kind: true, ecqmId: "122FHIR", version: "1.0.000", measurementPeriod: { start: "2026-01-01" } } },
+      { measureId: "cms137", official: { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: "sha256:c", measurementPeriod: y2026 } },
+      { measureId: "cms137", official: { ecqmId: "137FHIR", version: "1.0.000", artifactSha256: "sha256:c", measurementPeriod: y2027 } },
+      {
+        measureId: "cms137",
+        official: { kind: "derived", version: "ww-2027.1", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", artifactSha256: "sha256:t", measurementPeriod: y2027 },
+      },
+    ]);
+    // An unknown or malformed run id is empty, never everything.
+    assert.deepEqual(await outcomeStore.distinctScoringLogicForRun("00000000-0000-4000-8000-000000000000"), []);
+    assert.deepEqual(await outcomeStore.distinctScoringLogicForRun("not-a-run"), []);
+  });
 }
 
 /** Registers the CaseStore contract — the idempotency invariant is the headline case. */

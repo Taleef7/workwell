@@ -143,6 +143,37 @@ test("the person history keeps finished runs and runnable measures, reads status
   assert.equal(entries.find((e) => e.runId === seeded.id)?.runKind, "SEED");
 });
 
+test("each history entry names the logic that scored ITS row, so a year boundary reads as two logics (#769)", async () => {
+  const db = env.DB as never;
+  const runStore = new SqliteRunStore(db);
+  const outcomes = new SqliteOutcomeStore(db);
+  const scored = async (evidence: unknown, evaluatedAt: string) => {
+    const run = await runStore.createRun({ scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler", requestedScope: {}, measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-12-31T23:59:59.999Z" });
+    await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-006", measureId: "cms125", evaluationPeriod: evaluatedAt.slice(0, 4) + "-01-01", status: "OVERDUE", evidence, evaluatedAt });
+    await runStore.finalizeRun(run.id, "COMPLETED");
+    return run.id;
+  };
+  const cmsRun = await scored({ official: { ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8" } }, "2026-12-01T12:00:00.000Z");
+  // The manifest vendored under cms125 is CMS's artifact; this row's own evidence names a translation.
+  const translatedRun = await scored({ official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } }, "2027-02-01T12:00:00.000Z");
+  const erroredRun = await scored({ evaluationError: "CQL engine failure", message: "boom" }, "2027-02-02T12:00:00.000Z");
+
+  const omar = ((await (await get("/api/identity/people?q=omar"))!.json()) as Person[])[0]!;
+  const body = (await (await get(`/api/identity/people/${encodeURIComponent(omar.personId)}`))!.json()) as {
+    timeline: { entries: { measureId: string; runId?: string; logic?: { kind: string; ecqmId?: string; label?: string; version: string } | null }[] };
+  };
+  const logicOf = (runId: string) => body.timeline.entries.find((e) => e.runId === runId)!.logic;
+  assert.equal(logicOf(cmsRun)?.ecqmId, "CMS125FHIR");
+  assert.equal(logicOf(cmsRun)?.version, "1.0.000");
+  assert.equal(logicOf(translatedRun)?.kind, "workwell-translation", "the row's evidence, not the measure's vendored manifest");
+  assert.equal(logicOf(translatedRun)?.ecqmId, undefined, "a translation carries no CMS eCQM id");
+  assert.equal(logicOf(erroredRun), null, "an errored row names no logic");
+  // Authored rows (the audiogram the suite seeded) name none either — and the field is there, not absent.
+  const authored = body.timeline.entries.find((e) => e.measureId === "audiogram")!;
+  assert.ok("logic" in authored);
+  assert.equal(authored.logic, null);
+});
+
 test("unknown person → 404; unrelated path/method → null", async () => {
   assert.equal((await get("/api/identity/people/person-deadbeef"))?.status, 404);
   assert.equal(await get("/api/other"), null);

@@ -31,6 +31,8 @@ let runId: string;
 // Minimal CQL so explain_rule has defines to extract.
 const CQL_BY_ID: Record<string, string> = {
   audiogram: 'define "In Hearing Conservation Program": true\ndefine "Has Active Waiver": false\ndefine "Outcome Status": \'OVERDUE\'',
+  // The authored subset cms125's catalog record carries — NOT what runs once CMS's artifact is routed (#769).
+  cms125: 'define "Initial Population": true\ndefine "Numerator": false',
 };
 
 function ctx(role: string | null = null, enforce = false): DispatchCtx {
@@ -537,4 +539,161 @@ test("#492 get_employee orders same-timestamp measures deterministically by meas
     ["Audiogram", "HAZWOPER Surveillance"],
     "equal timestamps order by measureId",
   );
+});
+
+// ---- #769: versioned identity ------------------------------------------------------------------
+//
+// LOCKED §4.3: a QDM identity ("CMS125v14", the catalog's `policyRef`) is never paired with the version
+// of the FHIR artifact that executes ("1.0.000"), which would read as "CMS125v14 version 1.0.000 ran".
+// The executed version travels only inside `executed`/`logic`, beside its own eCQM id ("CMS125FHIR").
+
+const CMS125_EVIDENCE = {
+  official: { ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8" },
+  expressionResults: [{ define: "official:numerator", result: false }],
+};
+const TRANSLATION_EVIDENCE = {
+  official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" },
+  expressionResults: [{ define: "official:Initiation:numerator", result: false }],
+};
+const EXECUTED_VERSIONS = new Set(["1.0.000", "ww-2027.1"]);
+const QDM_ID = /^CMS\d+v\d+$/;
+/** "CMS125v14 1.0.000", "CMS125v14 v1.0.000", "CMS125v14@1.0.000" inside one string. */
+const QDM_WITH_EXECUTED = /CMS\d+v\d+[\s:@,-]*v?(?:1\.0\.000|ww-2027\.1)/;
+
+/**
+ * Every place a response pairs a QDM id with an executed version: an object carrying `policyRef` (or a
+ * QDM id under any key but `derivedFrom`, which is lineage inside a logic object) whose own fields hold
+ * the executed version, or one string joining the two.
+ */
+function qdmPairings(node: unknown, path = "$", out: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    node.forEach((n, i) => qdmPairings(n, `${path}[${i}]`, out));
+  } else if (node && typeof node === "object") {
+    const entries = Object.entries(node as Record<string, unknown>);
+    const qdm = entries.filter(([k, v]) => typeof v === "string" && QDM_ID.test(v) && k !== "derivedFrom").map(([k]) => k);
+    if ("policyRef" in (node as object) || qdm.length > 0) {
+      for (const [k, v] of entries) {
+        if (typeof v === "string" && EXECUTED_VERSIONS.has(v.replace(/^v/, ""))) out.push(`${path}.${k}=${v} beside ${qdm.join(",") || "policyRef"}`);
+      }
+    }
+    for (const [k, v] of entries) qdmPairings(v, `${path}.${k}`, out);
+  } else if (typeof node === "string" && QDM_WITH_EXECUTED.test(node)) {
+    out.push(`${path}="${node}"`);
+  }
+  return out;
+}
+
+test("the QDM-pairing matcher fires on the shapes it exists to catch (not a vacuous guard)", () => {
+  assert.ok(qdmPairings({ policyRef: "CMS125v14", version: "1.0.000" }).length > 0);
+  assert.ok(qdmPairings({ policyRef: "CMS125v14", measureVersion: "v1.0.000" }).length > 0);
+  assert.ok(qdmPairings({ results: [{ cmsId: "CMS137v15", version: "ww-2027.1" }] }).length > 0);
+  assert.ok(qdmPairings({ label: "CMS125v14 1.0.000" }).length > 0);
+  // Lineage inside a logic object, and the catalog record's own version, are not pairings.
+  assert.deepEqual(qdmPairings({ policyRef: "CMS125v14", version: "v1.0", executed: { ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14" } }), []);
+});
+
+test("#769: no MCP response pairs policyRef (or any QDM id) with the executed version; case tools name the row's logic", async () => {
+  const run = await deps.runStore.createRun({
+    scopeType: "ALL_PROGRAMS",
+    triggeredBy: "test",
+    requestedScope: {},
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await deps.runStore.finalizeRun(run.id, "COMPLETED");
+  await deps.outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-020", measureId: "cms125", evaluationPeriod: "2026-06-13", status: "OVERDUE", evidence: CMS125_EVIDENCE });
+  await deps.outcomeStore.recordOutcome({ runId: run.id, subjectId: "emp-021", measureId: "cms137", evaluationPeriod: "2026-06-13", status: "OVERDUE", evidence: TRANSLATION_EVIDENCE });
+  const cmsCase = (await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "emp-020", measureId: "cms125", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }))!;
+  const translatedCase = (await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "emp-021", measureId: "cms137", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }))!;
+
+  const responses: Record<string, unknown> = {};
+  const record = async (label: string, name: string, args: JsonRecord): Promise<JsonRecord> => {
+    const { payload, isError } = await call(name, args);
+    assert.equal(isError, false, `${label} answered`);
+    responses[label] = payload;
+    return payload;
+  };
+
+  // Case and outcome tools read the ROW's evidence, with no routing configured at all: what scored a
+  // row does not depend on today's flags.
+  const cmsLogic = { kind: "cms-artifact", ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14", status: "draft", statusNote: "posted for public comment Jan–Feb 2026" };
+  const getCase = await record("get_case", "get_case", { caseId: cmsCase.id });
+  assert.deepEqual(getCase.logic, cmsLogic);
+  assert.equal(getCase.measureVersion, "1.0.000", "the artifact's version, never the authored 2.0.0");
+  const translated = await record("get_case translation", "get_case", { caseId: translatedCase.id });
+  assert.equal((translated.logic as JsonRecord).kind, "workwell-translation");
+  assert.equal(translated.measureVersion, "ww-2027.1");
+  assert.ok(!("ecqmId" in (translated.logic as JsonRecord)), "a translation never carries a CMS eCQM id");
+
+  const listed = ((await record("list_cases", "list_cases", { status: "open", measureId: "cms137" })).results as JsonRecord[])
+    .find((r) => r.case_id === translatedCase.id)!;
+  assert.equal(listed.measure_version, "ww-2027.1");
+  assert.equal((listed.logic as JsonRecord).label, "WorkWell translation of CMS137v15");
+
+  const noncompliant = ((await record("list_noncompliant", "list_noncompliant", { measureName: "Breast Cancer Screening" })).results as JsonRecord[])
+    .find((r) => r.caseId === cmsCase.id)!;
+  assert.equal(noncompliant.measureVersion, "1.0.000");
+  assert.deepEqual(noncompliant.logic, cmsLogic);
+
+  const compliance = await record("check_compliance", "check_compliance", { employeeExternalId: "emp-020", measureName: "Breast Cancer Screening" });
+  assert.equal(compliance.measureVersion, "1.0.000");
+  assert.deepEqual(compliance.logic, cmsLogic);
+
+  const employee = await record("get_employee", "get_employee", { employeeExternalId: "emp-020" });
+  const row = (employee.latestOutcomes as JsonRecord[]).find((o) => o.measureName === "Breast Cancer Screening")!;
+  assert.equal(row.version, "1.0.000");
+  assert.deepEqual(row.logic, cmsLogic);
+
+  const explained = await record("explain_outcome", "explain_outcome", { caseId: cmsCase.id });
+  assert.deepEqual(explained.logic, cmsLogic);
+
+  // Measure tools without routing: the catalog record, nothing executed, the authored defines intact.
+  const unrouted = await record("explain_rule unrouted", "explain_rule", { measureId: "cms125" });
+  assert.deepEqual(unrouted.cqlDefines, ["Initial Population", "Numerator"], "authored CQL is what runs when nothing is routed");
+  assert.equal(unrouted.executed, null);
+  assert.ok(!("logicNote" in unrouted));
+
+  // Now route cms125 to CMS's artifact and cms137's 2027 to the translation, as Maui does.
+  const saved = { official: process.env.WORKWELL_OFFICIAL_MEASURES, derived: process.env.WORKWELL_DERIVED_MEASURES };
+  process.env.WORKWELL_OFFICIAL_MEASURES = "cms125,cms137";
+  process.env.WORKWELL_DERIVED_MEASURES = "cms137";
+  try {
+    const measures = (await record("list_measures", "list_measures", {})).results as JsonRecord[];
+    const cms125 = measures.find((m) => m.measureId === "cms125")!;
+    assert.equal(cms125.policyRef, "CMS125v14", "the catalog's QDM lineage is kept");
+    assert.equal(cms125.version, "v1.0", "the catalog record's own version is kept");
+    assert.deepEqual(
+      { ecqmId: (cms125.executed as JsonRecord).ecqmId, version: (cms125.executed as JsonRecord).version, derivedFrom: (cms125.executed as JsonRecord).derivedFrom },
+      { ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14" },
+      "the executed version only inside `executed`, beside its own eCQM id",
+    );
+    assert.equal(cms125.translation, null);
+    const cms137 = measures.find((m) => m.measureId === "cms137")!;
+    assert.equal((cms137.translation as JsonRecord).label, "WorkWell translation of CMS137v15");
+    assert.equal((cms137.translation as JsonRecord).version, "ww-2027.1");
+    assert.ok(!("ecqmId" in (cms137.translation as JsonRecord)));
+    const audiogram = measures.find((m) => m.measureId === "audiogram")!;
+    assert.equal(audiogram.executed, null, "an authored measure names nothing executed");
+
+    const version = await record("get_measure_version", "get_measure_version", { measureId: "cms125" });
+    assert.equal(version.policyRef, "CMS125v14");
+    assert.equal(version.version, "v1.0");
+    assert.equal((version.executed as JsonRecord).ecqmId, "CMS125FHIR");
+
+    // explain_rule no longer presents the authored defines as what runs: omitted, and the note says why.
+    const rule = await record("explain_rule", "explain_rule", { measureId: "cms125" });
+    assert.deepEqual(rule.cqlDefines, [], "the authored CQL's defines are not what this deployment runs");
+    assert.match(String(rule.logicNote), /scores this measure with CMS125FHIR v1\.0\.000 \(derived from CMS125v14\)/);
+    assert.match(String(rule.logicNote), /authored CQL is not what runs here/);
+    assert.equal((rule.executed as JsonRecord).version, "1.0.000");
+    const rule137 = await record("explain_rule cms137", "explain_rule", { measureId: "cms137" });
+    assert.match(String(rule137.logicNote), /Measurement year 2027 is scored by WorkWell translation of CMS137v15 \(ww-2027\.1\), which is not a CMS measure/);
+  } finally {
+    if (saved.official === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
+    else process.env.WORKWELL_OFFICIAL_MEASURES = saved.official;
+    if (saved.derived === undefined) delete process.env.WORKWELL_DERIVED_MEASURES;
+    else process.env.WORKWELL_DERIVED_MEASURES = saved.derived;
+  }
+
+  assert.deepEqual(qdmPairings(responses), [], "no response pairs a QDM id with the executed version");
 });

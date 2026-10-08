@@ -317,6 +317,21 @@ test("scoped profile (Maui) — outcomes and cases CSV headers use patient subje
   assert.ok(!outcomesHeader.includes("waiverStatus"), "Maui outcomes header must not carry waiver terminology");
   assert.match(casesHeader, /^caseId,patientExternalId,patientName,role,site,/u, "cases header must use patient terminology on Maui");
   assert.ok(!casesHeader.includes("employeeExternalId"), "cases header must not carry employee terminology on Maui");
+
+  // The whole patient-spelled rows, exactly (§6.2/§6.3 subject headers): only the renamed columns
+  // differ from the default profile, and #769's `executedLogic` is the LAST column on both.
+  assert.equal(
+    outcomesHeader,
+    "outcomeId,runId,patientExternalId,patientName,role,site,measureName,measureVersion,evaluationPeriod,status," +
+      "lastResultDate,complianceWindowDays,daysOverdue,roleEligible,siteEligible,exclusionStatus,evaluatedAt," +
+      "providerId,payer,executedLogic",
+  );
+  assert.equal(
+    casesHeader,
+    "caseId,patientExternalId,patientName,role,site,measureName,measureVersion,evaluationPeriod,status,priority," +
+      "assignee,currentOutcomeStatus,nextAction,lastRunId,createdAt,updatedAt,closedAt,latestOutreachDeliveryStatus," +
+      "providerId,payer,closedReason,closedBy,liveState,liveOutcomeStatus,liveOutcomeRunId,executedLogic",
+  );
 });
 
 test("scoped profile (Maui) — audit CSV header uses patient subject terminology", () => {

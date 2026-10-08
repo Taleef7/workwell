@@ -22,6 +22,7 @@ import { employeeById } from "../config/deployment-profile.ts";
 import { normalizePair, type PersonLinkRef } from "../stores/person-link-store.ts";
 import { isCatalogActiveRunnable } from "../compliance/panels.ts";
 import { deriveCell } from "../compliance/roster-vocabulary.ts";
+import { scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
 import { triggerTypeOf } from "../run/read-models.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { EmployeeOutcomeRow } from "../stores/outcome-store.ts";
@@ -127,7 +128,8 @@ export async function handleIdentity(req: Request, env: IdentityEnv, actor: stri
     );
     const outcomesByExternalId = new Map<string, TimelineOutcome[]>();
     for (const [externalId, rows] of rowsBySource) {
-      const entries: TimelineOutcome[] = [];
+      // `logic` rides through `mergedComplianceTimeline`'s spread onto each entry.
+      const entries: Array<TimelineOutcome & { logic: ScoringLogic | null }> = [];
       for (const r of rows) {
         // Only finished runs, the compliance API's rule: a running run's row is a partial answer, and a
         // failed or cancelled run's is not an answer at all.
@@ -141,6 +143,9 @@ export async function handleIdentity(req: Request, env: IdentityEnv, actor: stri
           // out-of-population MISSING_DATA reads OUT_OF_POPULATION. Not today's cohort overlay: that
           // would rewrite every past row whenever a segment or a role changes.
           displayStatus: deriveCell(r.status, r.evidence, r.measureId, r.evaluationPeriod).status,
+          // The logic that scored THIS row, from its own evidence (#769): a history spanning a year
+          // boundary names CMS's artifact on the 2026 rows and the translation on the 2027 ones.
+          logic: scoringLogicOf(r.evidence),
           evaluatedAt: r.evaluatedAt,
           runId: r.runId,
           runKind: runKindOf(run),

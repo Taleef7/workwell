@@ -125,7 +125,7 @@ test("a run is titled by what it covered, never 'All Programs' for one measure, 
   const measureRun = toRunSummary(run({ scopeType: "MEASURE", scopeId: "cms130" }), []);
   assert.equal(measureRun.measureName, "Colorectal Cancer Screening");
   assert.equal(measureRun.measureId, "cms130");
-  assert.equal(measureRun.measureVersion, "v1.0", "the catalog's version when there is no authored library");
+  assert.equal(measureRun.measureVersion, "", "a committed CMS artifact: the run row cannot know which logic ran, so no version (#769)");
   // An authored measure keeps its registry name and library version.
   assert.equal(toRunSummary(run(), []).measureName, "Audiogram");
   // A CASE rerun names its measure too.
@@ -141,6 +141,23 @@ test("a run is titled by what it covered, never 'All Programs' for one measure, 
   const all = toRunListItem(run({ scopeType: "ALL_PROGRAMS", scopeId: null }), []);
   assert.equal(all.measureName, "All Programs");
   assert.equal(all.measureId, null);
+});
+
+test("a run row prints a version only where it can know it: never the authored '2.0.0' or the catalog 'v1.0' for a measure with a CMS artifact (#769)", () => {
+  // cms125 has BOTH an authored library (2.0.0) and a committed CMS artifact. A run row carries no
+  // evidence, so it cannot say which of them — or a translation — scored the run.
+  for (const scopeType of ["MEASURE", "CASE"] as const) {
+    const s = toRunSummary(run({ scopeType, scopeId: "cms125" }), []);
+    assert.equal(s.measureName, "Breast Cancer Screening");
+    assert.equal(s.measureVersion, "", `${scopeType}: not "2.0.0", not "v1.0"`);
+    assert.equal(toRunSummaryFromCounts(run({ scopeType, scopeId: "cms125" }), []).measureVersion, "", `${scopeType}: the counts path, which the run list and the runs CSV read`);
+  }
+  assert.equal(toRunSummary(run({ scopeId: "cms122" }), []).measureVersion, "", "cms122: authored 2.0.0 and a CMS artifact");
+  // An authored-only measure has one logic, so its library version is the truth.
+  assert.equal(toRunSummary(run({ scopeId: "audiogram" }), []).measureVersion, "1.0.0");
+  assert.equal(toRunSummary(run({ scopeId: "tb_surveillance" }), []).measureVersion, "1.3.0");
+  // Neither an artifact nor an authored library: nothing, never the catalog record's "v1.0".
+  assert.equal(toRunSummary(run({ scopeId: "cms128v14" }), []).measureVersion, "");
 });
 
 test("an outcome row outside the population shows OUT_OF_POPULATION; the stored status stays (#668)", () => {

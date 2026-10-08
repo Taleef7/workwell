@@ -41,7 +41,8 @@ import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRun
 import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
-import { aggregateOfficialRun, scoringIdentityKey } from "../fhir/run-aggregate.ts";
+import { aggregateOfficialRun, distinctScoringLogics, scoringIdentityKey } from "../fhir/run-aggregate.ts";
+import type { ScoringLogic } from "../measure/measure-identity.ts";
 import { officialMeasureRate } from "../program/measure-rate.ts";
 import { resolveAlertChannels } from "../run/alert-channel.ts";
 import {
@@ -346,6 +347,28 @@ function rowScoring(rows: ReadonlyArray<{ evidence: unknown }>): { derived: bool
   const identities = rows.filter((r) => !isEvaluationErrorEvidence(r.evidence)).map((r) => officialReportIdentity(r.evidence));
   const keys = new Set(identities.map(scoringIdentityKey));
   return { derived: identities.some((i) => i?.kind === "derived"), mixed: keys.size > 1 };
+}
+
+/**
+ * Per measure of a run, the distinct logics that scored its evaluated rows (#769), named from the rows'
+ * own evidence: one identity-only store read, then `distinctScoringLogics` — the function the programs
+ * card's list comes from — so the two screens name the same logics for the same rows. More than one
+ * entry is a run scored by more than one logic or measurement period. A measure with only authored rows
+ * is listed with no logics; errored rows were scored by nothing and are not read. Sorted by measure.
+ */
+export async function scoringLogicByMeasure(
+  os: Pick<OutcomeStore, "distinctScoringLogicForRun">,
+  runId: string,
+): Promise<Array<{ measureId: string; logics: ScoringLogic[] }>> {
+  const byMeasure = new Map<string, unknown[]>();
+  for (const row of await os.distinctScoringLogicForRun(runId)) {
+    const evidences = byMeasure.get(row.measureId) ?? [];
+    evidences.push({ official: row.official });
+    byMeasure.set(row.measureId, evidences);
+  }
+  return [...byMeasure.keys()]
+    .sort()
+    .map((measureId) => ({ measureId, logics: distinctScoringLogics(byMeasure.get(measureId)!) }));
 }
 
 /** Subjects counted in no rate (ADR-074 d5/d11), on the summary MeasureReport and QRDA III responses. */
@@ -1434,6 +1457,10 @@ export async function handleRuns(
         evaluationErrors = rate.evaluationErrors;
       }
     }
+    // Which logic scored each measure's rows — for EVERY run, an ALL_PROGRAMS nightly included, where
+    // `official` above stays null because it describes one measure's rate. Read from the rows' own
+    // evidence by one identity-only DISTINCT, never from today's routing (#769).
+    const scoringLogic = await scoringLogicByMeasure(stores.outcomes, reconId);
     return json({
       runId: reconId,
       status: run.status,
@@ -1452,6 +1479,7 @@ export async function handleRuns(
         .reduce((sum, c) => sum + c.count, 0),
       evaluationErrors,
       official,
+      scoringLogic,
       casesCiting: await stores.cases.countByLastRun(reconId),
       compaction: await compactionExposure(run, stores.events),
       notes: [

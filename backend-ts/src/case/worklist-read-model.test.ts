@@ -22,6 +22,9 @@ import { loadWorklistCases, loadWorklistPage, panelSubjectIds, statusesForWorkli
 import { ACTIVE_CASE_STATUSES } from "./case-logic.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { CaseQuery, CaseRecord, CaseStore } from "../stores/case-store.ts";
+import type { OutcomeRecord, OutcomeStore } from "../stores/outcome-store.ts";
+import { toCaseSummary } from "./case-read-models.ts";
+import { groupIntoPatients, withGapLogic } from "./worklist-patients.ts";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const CYCLE = bucketPeriodForMeasure("audiogram", TODAY);
@@ -326,3 +329,59 @@ test("under `outreach=none` the page statement's own answer is served, not a sec
   assert.equal(calls, 1, "`any` still reads the count");
   for (const row of any.rows) assert.ok((row.outreachRecordCount ?? 0) > 0, "and shows a real number");
 });
+
+// ---- #769: the patient work list's gaps name their cited rows' logic, for the page alone --------
+for (const honourFilters of [true, false]) {
+  test(`withGapLogic names every gap from its case's cited row, one bounded read per (run, measure)${honourFilters ? "" : " (fake ignoring the filters)"}`, async () => {
+    const translation = { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } };
+    const cms137 = { official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24" } };
+    const row = (runId: string, subjectId: string, measureId: string, evidence: unknown): OutcomeRecord =>
+      ({ id: `${runId}-${subjectId}-${measureId}`, runId, subjectId, measureId, evaluationPeriod: "2027-01-01", status: "OVERDUE", evidence, evaluatedAt: "2027-02-01T00:00:00Z" }) as OutcomeRecord;
+    const rows = [
+      // p-1's cms137 case cites the 2027 run (the translation); p-2's still cites the 2026 one (CMS's artifact).
+      row("run-2027", "p-1", "cms137", translation),
+      row("run-2027", "p-4", "cms137", translation),
+      row("run-2026", "p-2", "cms137", cms137),
+      row("run-2027", "p-1", "cms122", { evaluationError: "CQL engine failure", message: "boom" }),
+      row("run-2027", "p-3", "audiogram", { expressionResults: [] }),
+    ];
+    const calls: Array<{ runId: string; measureId?: string; subjectIds?: readonly string[] }> = [];
+    const outcomes: Pick<OutcomeStore, "listOutcomes"> = {
+      async listOutcomes(runId, opts) {
+        calls.push({ runId, measureId: opts?.measureId, subjectIds: opts?.subjectIds });
+        return rows.filter((r) => r.runId === runId && (!honourFilters || ((!opts?.measureId || r.measureId === opts.measureId) && (!opts?.subjectIds || opts.subjectIds.includes(r.subjectId)))));
+      },
+    };
+    const record = (id: string, employeeId: string, measureId: string, lastRunId: string): CaseRecord => ({
+      id, employeeId, measureId, lastRunId, evaluationPeriod: "2027-01-01", status: "OPEN", priority: "HIGH", assignee: null,
+      nextAction: null, nextActionSource: "SYSTEM", assignmentSource: null, currentOutcomeStatus: "OVERDUE",
+      createdAt: "2027-02-01T00:00:00Z", updatedAt: "2027-02-01T00:00:00Z", closedAt: null, closedReason: null, closedBy: null,
+    });
+    const grouped = groupIntoPatients([
+      toCaseSummary(record("c-1", "p-1", "cms137", "run-2027"), 0, lookup),
+      toCaseSummary(record("c-2", "p-2", "cms137", "run-2026"), 0, lookup),
+      toCaseSummary(record("c-3", "p-1", "cms122", "run-2027"), 0, lookup),
+      toCaseSummary(record("c-4", "p-3", "audiogram", "run-2027"), 0, lookup),
+      toCaseSummary(record("c-5", "p-4", "cms137", "run-2027"), 0, lookup),
+    ]);
+    assert.ok(grouped.every((r) => r.openGaps.every((g) => g.logic === null)), "grouping alone reads nothing and names nothing");
+
+    const served = await withGapLogic(outcomes, grouped);
+    const gap = (caseId: string) => served.flatMap((r) => r.openGaps).find((g) => g.caseId === caseId)!;
+    assert.equal(gap("c-1").logic?.kind, "workwell-translation", "the cited row's logic, not CMS137FHIR from the manifest");
+    assert.equal("ecqmId" in (gap("c-1").logic ?? {}), false, "a translation carries no CMS eCQM id");
+    const c2 = gap("c-2").logic;
+    assert.equal(c2?.kind === "cms-artifact" ? c2.ecqmId : null, "CMS137FHIR", "the 2026 case keeps the logic that scored it");
+    assert.equal(gap("c-3").logic, null, "an errored row names no logic");
+    assert.equal(gap("c-4").logic, null, "authored CQL has no identity");
+    assert.equal(gap("c-5").logic?.kind, "workwell-translation");
+    assert.deepEqual(
+      calls.map((c) => `${c.runId}/${c.measureId}`).sort(),
+      ["run-2026/cms137", "run-2027/audiogram", "run-2027/cms122", "run-2027/cms137"],
+      "one read per (run, measure), never per gap",
+    );
+    const shared = calls.find((c) => c.runId === "run-2027" && c.measureId === "cms137")!;
+    assert.deepEqual([...(shared.subjectIds ?? [])].sort(), ["p-1", "p-4"], "two patients' gaps, one read bounded to them");
+    for (const c of calls) assert.ok(c.subjectIds, "every read is bounded to the page's subjects");
+  });
+}

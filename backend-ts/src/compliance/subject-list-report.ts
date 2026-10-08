@@ -55,6 +55,7 @@ import { isPopulationRun } from "../program/rollup-shared.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
+import { ecqmIdOf, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
 
 /** One page of outcome rows per read. Matches `fhir/run-aggregate.ts`'s page so the two agree. */
 const PAGE = 2000;
@@ -108,6 +109,12 @@ export interface MeasureReportEntry {
    * translation's label (`WorkWell translation of CMS137v15`), whose `ecqmId` is null (LOCKED §4.3).
    */
   executedLogic: string | null;
+  /**
+   * The same logic, structured (`scoringLogicOf` over the rows' own evidence, #769): CMS's artifact with
+   * its eCQM id, version and lineage, or a translation by its label and version (never an eCQM id).
+   * Null where nothing was counted or nothing named the logic. `executedLogic` stays the §6.6 string.
+   */
+  logic: ScoringLogic | null;
   runId: string | null;
   runStartedAt: string | null;
   measurementPeriod: { start: string; end: string } | null;
@@ -254,9 +261,11 @@ export async function subjectListReport(
 
     entries.push({
       measureId,
-      ecqmId: read.identity?.ecqmId ?? null,
+      // One spelling on every served eCQM id, and none for a translation, whatever its rows carried.
+      ecqmId: read.identity?.ecqmId && read.identity.kind !== "derived" ? ecqmIdOf(read.identity.ecqmId) : null,
       version: read.identity?.version ?? null,
       executedLogic: executedLogicOf(read.identity ?? null),
+      logic: read.identity ? scoringLogicOf({ official: read.identity }) : null,
       runId: winner.runId,
       runStartedAt: winner.startedAt,
       measurementPeriod: reportingPeriod(winner, read.identity ?? null),
@@ -347,7 +356,7 @@ export function executedLogicOf(identity: OfficialReportIdentity | null): string
   if (!identity) return null;
   if (identity.kind === "derived") return identity.label ?? null;
   if (!identity.ecqmId || !identity.version) return null;
-  return `${/^CMS/i.test(identity.ecqmId) ? identity.ecqmId : `CMS${identity.ecqmId}`} v${identity.version}`;
+  return `${ecqmIdOf(identity.ecqmId)} v${identity.version}`;
 }
 
 const emptyEntry = (
@@ -360,6 +369,7 @@ const emptyEntry = (
   ecqmId: null,
   version: null,
   executedLogic: null,
+  logic: null,
   runId: null,
   runStartedAt: null,
   measurementPeriod: null,

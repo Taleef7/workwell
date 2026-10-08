@@ -23,9 +23,38 @@ let env: { DB: unknown };
 let runId: string;
 let latestRunId: string;
 let caseId: string;
+let officialCaseId: string;
 
 const get = (path: string) => handleExports(new Request(`http://x${path}`, { method: "GET" }), env as never);
 const text = async (path: string) => (await get(path).then((r) => r!.text())).split("\r\n");
+
+/** Quote-aware, so a comma inside a cell cannot shift the column this reads. */
+const cells = (line: string): string[] => {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { out.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+};
+/** The `name` cell of the first data row containing `needle`, located by header name. */
+const column = (lines: string[], needle: string, name: string): string => {
+  const header = cells(lines[0]!);
+  const row = lines.slice(1).find((l) => l.includes(needle));
+  assert.ok(row, `a row containing ${needle}`);
+  const i = header.indexOf(name);
+  assert.ok(i >= 0, `the header has ${name}`);
+  return cells(row!)[i]!;
+};
 
 before(async () => {
   const db = await createSqliteD1(dbPath);
@@ -49,7 +78,8 @@ before(async () => {
     status: "OVERDUE",
     evidence: { expressionResults: [{ define: "Most Recent Audiogram Date", result: "2025-04-19" }, { define: "Days Since Last Audiogram", result: 420 }] },
   });
-  // #650: an official outcome in the same run, whose complianceWindowDays must be empty.
+  // #650: an official outcome in the same run, whose complianceWindowDays must be empty. The evidence
+  // is the real shape CMS's artifact writes, so #769's version and logic columns read it as they would live.
   await oc.recordOutcome({
     runId,
     subjectId: "emp-007",
@@ -57,12 +87,29 @@ before(async () => {
     evaluationPeriod: "2026-06-13",
     status: "OVERDUE",
     evidence: {
-      official: { measurementPeriod: { start: "2026-01-01", end: "2026-12-31" }, populationResults: [] },
+      official: {
+        ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution",
+        artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8",
+        measurementPeriod: { start: "2026-01-01", end: "2026-12-31" }, populationResults: [],
+      },
       expressionResults: [{ define: "official:numerator", result: false }],
+    },
+  });
+  // #769: an errored row (nothing scored it) and a row a WorkWell translation scored.
+  await oc.recordOutcome({
+    runId, subjectId: "emp-008", measureId: "cms125", evaluationPeriod: "2026-06-13", status: "MISSING_DATA",
+    evidence: { evaluationError: "CQL engine failure", message: "x" },
+  });
+  await oc.recordOutcome({
+    runId, subjectId: "emp-009", measureId: "cms137", evaluationPeriod: "2026-06-13", status: "OVERDUE",
+    evidence: {
+      official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" },
+      expressionResults: [{ define: "official:Initiation:numerator", result: false }],
     },
   });
   const caseRec = await new SqliteCaseStore(db).upsertFromOutcome({ runId, subjectId: "emp-006", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
   caseId = caseRec!.id;
+  officialCaseId = (await new SqliteCaseStore(db).upsertFromOutcome({ runId, subjectId: "emp-007", measureId: "cms125", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }))!.id;
   const events = new SqliteCaseEventStore(db);
   // A case-action audit WITHOUT subjectId in the payload — employeeId must come from the case.
   await events.appendAudit({
@@ -102,9 +149,14 @@ test("GET /api/exports/runs?format=csv → run summary CSV", async () => {
   assert.equal(res!.headers.get("content-type"), "text/csv");
   assert.match(res!.headers.get("content-disposition") ?? "", /attachment; filename="runs\.csv"/);
   const lines = (await res!.text()).split("\r\n");
-  // `notInPopulation` is APPENDED (ADR-079), so the documented prefix through `dataFreshAsOf` is
-  // byte-identical and a consumer reading by position keeps every column it had.
-  assert.match(lines[0]!, /^runId,measureName,measureVersion,.*passRate,dataFreshAsOf,notInPopulation$/);
+  // The WHOLE header, exactly. It was a regex with `.*` in the middle, which an INSERTED column
+  // satisfies while shifting every consumer reading by index. `notInPopulation` is APPENDED
+  // (ADR-079); #769 changed what `measureVersion` holds, in place, and added no column here.
+  assert.equal(
+    lines[0],
+    "runId,measureName,measureVersion,scopeType,triggerType,status,startedAt,completedAt,durationMs," +
+      "totalEvaluated,compliant,dueSoon,overdue,missingData,excluded,passRate,dataFreshAsOf,notInPopulation",
+  );
   assert.ok(lines.some((l) => l.startsWith(runId)), "the run is a row");
   assert.ok(lines.some((l) => l.includes("Audiogram")));
 });
@@ -118,7 +170,9 @@ test("GET /api/exports/outcomes?runId carries derived why_flagged columns", asyn
     lines[0],
     "outcomeId,runId,employeeExternalId,employeeName,role,site,measureName,measureVersion,evaluationPeriod," +
       "status,lastExamDate,complianceWindowDays,daysOverdue,roleEligible,siteEligible,waiverStatus,evaluatedAt," +
-      "providerId,payer",
+      "providerId,payer," +
+      // APPENDED (#769), never inserted.
+      "executedLogic",
   );
   const row = lines.find((l) => l.includes("emp-006"))!;
   assert.ok(row, "the outcome row is present");
@@ -139,6 +193,20 @@ test("GET /api/exports/outcomes?runId carries derived why_flagged columns", asyn
   assert.equal(officialCells[col], "", "no window for an official outcome");
 });
 
+test("§6.2: measureVersion and executedLogic are read from each row's own evidence (#769)", async () => {
+  const lines = await text(`/api/exports/outcomes?format=csv&runId=${runId}`);
+  const pair = (subject: string) => [column(lines, subject, "measureVersion"), column(lines, subject, "executedLogic")];
+  assert.deepEqual(pair("emp-006"), ["1.0.0", ""], "an authored row: the authored library's version, no named logic");
+  assert.deepEqual(pair("emp-007"), ["1.0.000", "CMS125FHIR v1.0.000"], "CMS's artifact, never the authored 2.0.0");
+  assert.deepEqual(pair("emp-008"), ["", ""], "an errored row: nothing scored it");
+  assert.deepEqual(
+    pair("emp-009"),
+    ["ww-2027.1", "WorkWell translation of CMS137v15 (ww-2027.1)"],
+    "a translation by its own name and version, never a CMS id",
+  );
+  assert.ok(!lines.slice(1).some((l) => /,v1\.0,/.test(l)), "never the catalog record's v1.0");
+});
+
 test("GET /api/exports/cases carries the case + latestOutreachDeliveryStatus column", async () => {
   const lines = await text("/api/exports/cases?format=csv&status=open");
   // Exact, for the same reason as §6.2 above.
@@ -150,9 +218,21 @@ test("GET /api/exports/cases carries the case + latestOutreachDeliveryStatus col
       // APPENDED (#569, ADR-083), never inserted — every column a consumer reads by position keeps
       // its index. The two `live*` cells are filled only for rows a PERSON closed, whose
       // `currentOutcomeStatus` froze at closure.
-      "closedReason,closedBy,liveState,liveOutcomeStatus,liveOutcomeRunId",
+      "closedReason,closedBy,liveState,liveOutcomeStatus,liveOutcomeRunId," +
+      // APPENDED (#769), never inserted.
+      "executedLogic",
   );
   assert.ok(lines.some((l) => l.includes("Omar Siddiq") && l.includes("OVERDUE")));
+});
+
+test("§6.3: measureVersion and executedLogic name the logic that scored each case's cited outcome (#769)", async () => {
+  // Through the route and the real SQLite outcome read, so the bounded per-(run, measure) query is
+  // exercised, not a fake.
+  const lines = await text("/api/exports/cases?format=csv&status=open");
+  assert.equal(column(lines, caseId, "measureVersion"), "1.0.0", "the authored audiogram row");
+  assert.equal(column(lines, caseId, "executedLogic"), "");
+  assert.equal(column(lines, officialCaseId, "measureVersion"), "1.0.000", "the artifact's version, not the authored 2.0.0");
+  assert.equal(column(lines, officialCaseId, "executedLogic"), "CMS125FHIR v1.0.000");
 });
 
 test("?status=open exports the ACTIVE set, so a case someone started is not missing from the CSV", async () => {

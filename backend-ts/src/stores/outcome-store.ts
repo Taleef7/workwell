@@ -144,6 +144,54 @@ export interface OutcomeMeasureFilter {
 export const LATEST_RUN_PROBE_BUDGET = 25;
 
 /**
+ * The keys of `evidence_json.official` that say WHICH logic scored a row, and nothing else: never
+ * `populationResults`, `rates` or `strata`, which differ per row (#769).
+ */
+export const SCORING_IDENTITY_KEYS = ["kind", "ecqmId", "version", "label", "url", "derivedFrom", "artifactSha256"] as const;
+
+/**
+ * The scoring-identity projection of an `official` block: the {@link SCORING_IDENTITY_KEYS} that are
+ * present and not null, plus `measurementPeriod` reduced to its non-null `start`/`end` when it is an
+ * object. Null when there is no `official` object. The one shape both stores'
+ * {@link OutcomeStore.distinctScoringLogicForRun} return (the ceiling builds it in SQL, the floor here)
+ * and that `fhir/run-aggregate.ts` reads, so the run detail and the programs card cannot list
+ * different logics for the same rows. Values keep their JSON types; keys come out in a fixed order, so
+ * `JSON.stringify` of the result is a stable key.
+ */
+export function scoringIdentityOf(official: unknown): Record<string, unknown> | null {
+  if (!official || typeof official !== "object" || Array.isArray(official)) return null;
+  const o = official as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of SCORING_IDENTITY_KEYS) if (o[key] !== undefined && o[key] !== null) out[key] = o[key];
+  const p = o.measurementPeriod;
+  if (p && typeof p === "object" && !Array.isArray(p)) {
+    const period = p as Record<string, unknown>;
+    const kept: Record<string, unknown> = {};
+    if (period.start !== undefined && period.start !== null) kept.start = period.start;
+    if (period.end !== undefined && period.end !== null) kept.end = period.end;
+    out.measurementPeriod = kept;
+  }
+  return out;
+}
+
+/**
+ * Normalise a store's distinct-identity rows to the contract's answer: each `official` re-projected
+ * through {@link scoringIdentityOf} (fixed key order, so the two stores' rows compare equal), duplicates
+ * that only the projection makes equal collapsed, sorted by measure then by the identity's JSON.
+ */
+export function normalizeScoringIdentityRows(
+  rows: Iterable<{ measureId: string; official: unknown }>,
+): Array<{ measureId: string; official: Record<string, unknown> | null }> {
+  const byKey = new Map<string, { measureId: string; official: Record<string, unknown> | null }>();
+  for (const row of rows) {
+    const official = scoringIdentityOf(row.official);
+    const key = JSON.stringify([row.measureId, official]);
+    if (!byKey.has(key)) byKey.set(key, { measureId: row.measureId, official });
+  }
+  return [...byKey.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, row]) => row);
+}
+
+/**
  * One (measure, run) winner from {@link OutcomeStore.listLatestPopulationRuns}: the run carries the same
  * projection `OutcomeWithRun` does, so a caller can apply `isPopulationRun`/`isCompletedRun` as
  * defense-in-depth without a second read.
@@ -301,6 +349,24 @@ export interface OutcomeStore {
    * distinguish "single measure" from "multi-measure".
    */
   distinctMeasuresForRun(runId: string, limit?: number): Promise<string[]>;
+  /**
+   * Which logics scored a run's evaluated rows, per measure (#769): one entry per distinct
+   * (measure, scoring identity), where the identity is ONLY the keys of `evidence_json.official` that
+   * name the logic — `kind`, `ecqmId`, `version`, `label`, `url`, `derivedFrom`, `artifactSha256` and
+   * `measurementPeriod.{start,end}` — in the shape `scoringIdentityOf` (`fhir/run-aggregate.ts`)
+   * builds: absent and JSON-null keys dropped, `measurementPeriod` kept only when it is an object.
+   * `official` is null for a row with no `official` object (authored logic). Errored rows
+   * (`evaluationError` key present, the ceiling's `?` and the floor's `json_type`) are excluded: nothing
+   * scored them.
+   *
+   * **Never the whole `official` block.** It holds `populationResults`, `rates` and `strata`, which
+   * differ per row, so a DISTINCT over it is one group per row — the run's whole evidence returned to
+   * the worker for a handful of answers. The projection is what makes the DISTINCT collapse to O(logics).
+   *
+   * Read by `run_id` (the `(run_id)` / `(run_id, measure_id)` indexes); unordered in SQL, returned sorted
+   * by measure then by the identity's JSON so both stores answer identically.
+   */
+  distinctScoringLogicForRun(runId: string): Promise<Array<{ measureId: string; official: unknown }>>;
   /**
    * Outcomes joined to their run (started_at), filtered by measure + run period in SQL —
    * bounds the scan to the selected measure/date range instead of all run history. Used by

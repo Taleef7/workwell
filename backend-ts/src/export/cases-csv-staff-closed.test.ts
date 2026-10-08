@@ -104,7 +104,7 @@ const parse = (csv: string) => {
   return { header, rows };
 };
 
-test("the cases CSV header carries the five closure columns, APPENDED (§6.3)", async () => {
+test("the cases CSV header carries the five closure columns and then executedLogic, APPENDED (§6.3)", async () => {
   const csv = await casesCsv(caseStore(), eventStore(), {}, {}, liveDeps());
   const { header } = parse(csv);
 
@@ -114,8 +114,11 @@ test("the cases CSV header carries the five closure columns, APPENDED (§6.3)", 
   assert.deepEqual(header.slice(0, PRE_569_HEADERS.length), PRE_569_HEADERS, "every pre-#569 column keeps its NAME and its INDEX");
   assert.deepEqual(header.slice(PRE_569_HEADERS.length), [
     "closedReason", "closedBy", "liveState", "liveOutcomeStatus", "liveOutcomeRunId",
+    // #769: after every column that existed before it.
+    "executedLogic",
   ]);
   assert.equal(header.indexOf("payer"), 19, "and the last pre-#569 column is still at 19");
+  assert.equal(header.indexOf("measureVersion"), 6, "measureVersion changed meaning in place, not position");
 });
 
 test("the live columns are filled for the rows a PERSON closed, and empty for every other row", async () => {
@@ -166,15 +169,17 @@ test("a staff-closed row the winning run never evaluated says UNKNOWN, not an em
   assert.equal(rows[0]!.closedBy, "nurse@example.org", "and the closure is still reported");
 });
 
-test("without the live dependency the header is UNCHANGED and only the three live cells are empty", async () => {
+test("without the live dependency the header is UNCHANGED and only the cells it feeds are empty", async () => {
   // The dependency is optional so every existing caller keeps working. The header must not change
   // shape depending on how the route was wired — a consumer's parser would break on the difference —
   // and the two closure columns are read off the case row, so they are filled either way.
   const csv = await casesCsv(caseStore(), eventStore(), {}, {});
   const { header, rows } = parse(csv);
   assert.deepEqual(header.slice(0, PRE_569_HEADERS.length), PRE_569_HEADERS);
-  assert.equal(header.length, PRE_569_HEADERS.length + 5);
+  assert.equal(header.length, PRE_569_HEADERS.length + 6);
   assert.ok(rows.every((r) => r.liveState === "" && r.liveOutcomeStatus === "" && r.liveOutcomeRunId === ""));
+  // No outcome store, no cited row read: the version and logic cells are empty rather than a guess.
+  assert.ok(rows.every((r) => r.measureVersion === "" && r.executedLogic === ""));
   assert.equal(rows.find((r) => r.caseId === "case-gap")!.closedBy, "nurse@example.org", "the closure columns do not depend on it");
   assert.equal(rows.find((r) => r.caseId === "case-gap")!.closedReason, "MANUAL_RESOLVE");
 });
@@ -370,6 +375,101 @@ test("liveOrFrozenStatus prefers the display status, then the bucket, then the f
  * the bug — the vacuous shape this codebase keeps finding. The number itself is the contract, so the
  * number is what is pinned.
  */
+/**
+ * `measureVersion` and `executedLogic` name the logic that scored each case's CITED outcome (#769).
+ *
+ * The real evidence shapes, one per kind of row. cms137 appears scored by CMS's artifact for one case
+ * and by the WorkWell translation for another in the same run: no single per-measure answer (today's
+ * routing, the catalog) can produce both, so a reader that consulted either fails here.
+ */
+const CITED_RUN = "cited-1";
+const CMS125 = { official: { ecqmId: "125FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8" } };
+const CMS137 = { official: { ecqmId: "137FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24" } };
+const TRANSLATION = { official: { kind: "derived", label: "WorkWell translation of CMS137v15", url: "urn:workwell:measure:cms137:translation", derivedFrom: "CMS137v15", ecqmId: null, version: "ww-2027.1" } };
+const ERRORED = { evaluationError: "CQL engine failure", message: "x" };
+const cited = (id: string, subjectId: string, measureId: string, evidence: unknown): OutcomeRecord => ({
+  id, runId: CITED_RUN, subjectId, measureId, evaluationPeriod: PERIOD, status: "OVERDUE", evidence, evaluatedAt: "2026-06-13T00:00:00Z",
+});
+const CITED_ROWS: OutcomeRecord[] = [
+  cited("c-1", "emp-020", "cms125", CMS125),
+  // The same subject in the same run under another measure: the read is per (run, measure).
+  cited("c-2", "emp-020", "cms137", TRANSLATION),
+  cited("c-3", "emp-021", "cms137", CMS137),
+  cited("c-4", "emp-022", "cms125", ERRORED),
+  // An authored row of a measure that is official-routed today (scored before the flip).
+  cited("c-5", "emp-023", "cms125", ev("OVERDUE")),
+  cited("c-6", "emp-024", "audiogram", ev("OVERDUE")),
+];
+const openCited = (id: string, employeeId: string, measureId: string): CaseRecord =>
+  caseRow({ id, employeeId, measureId, status: "OPEN", lastRunId: CITED_RUN, closedAt: null, closedReason: null, closedBy: null });
+const CITED_CASES: CaseRecord[] = [
+  openCited("k-cms125", "emp-020", "cms125"),
+  openCited("k-translation", "emp-020", "cms137"),
+  openCited("k-cms137", "emp-021", "cms137"),
+  openCited("k-errored", "emp-022", "cms125"),
+  openCited("k-authored-cms125", "emp-023", "cms125"),
+  openCited("k-authored", "emp-024", "audiogram"),
+  // The run never wrote this subject's row (or retention removed it): nothing to name.
+  openCited("k-missing", "emp-025", "cms125"),
+];
+
+test("measureVersion and executedLogic name the logic that scored each case's cited outcome (#769)", async () => {
+  const reads: Array<{ runId: string; measureId?: string }> = [];
+  const deps = {
+    outcomeStore: {
+      listLatestPopulationRuns: latestRunsFromRows([]),
+      listOutcomes: async (runId: string, opts?: { measureId?: string; subjectIds?: readonly string[] }) => {
+        reads.push({ runId, measureId: opts?.measureId });
+        let out = runId === CITED_RUN ? CITED_ROWS : [];
+        if (opts?.measureId != null) out = out.filter((o) => o.measureId === opts.measureId);
+        if (opts?.subjectIds !== undefined) {
+          const wanted = new Set(opts.subjectIds);
+          out = out.filter((o) => wanted.has(o.subjectId));
+        }
+        return out;
+      },
+    },
+  } as unknown as LiveCellDeps;
+  const store = { listCases: async () => CITED_CASES } as unknown as CaseStore;
+  const { rows } = parse(await casesCsv(store, eventStore(), {}, {}, deps));
+  const cell = (caseId: string) => {
+    const r = rows.find((x) => x.caseId === caseId)!;
+    return [r.measureVersion, r.executedLogic];
+  };
+
+  assert.deepEqual(cell("k-cms125"), ["1.0.000", "CMS125FHIR v1.0.000"], "CMS's artifact, never the authored 2.0.0");
+  assert.deepEqual(cell("k-translation"), ["ww-2027.1", "WorkWell translation of CMS137v15 (ww-2027.1)"], "the translation by its own name; never a CMS id");
+  assert.deepEqual(cell("k-cms137"), ["1.0.000", "CMS137FHIR v1.0.000"], "the same measure, scored by CMS's artifact, in the same run");
+  assert.deepEqual(cell("k-errored"), ["", ""], "nothing scored an errored row");
+  assert.deepEqual(cell("k-authored-cms125"), ["2.0.0", ""], "an authored row keeps the authored library's version");
+  assert.deepEqual(cell("k-authored"), ["1.0.0", ""]);
+  assert.deepEqual(cell("k-missing"), ["", ""], "no cited row, no claim");
+  assert.ok(!rows.some((r) => r.measureVersion === "v1.0"), "never the catalog record's version");
+
+  // Batched: one read per (run, measure), never one per case — 7 cases, 3 groups.
+  assert.equal(reads.length, 3, "one bounded read per (run, measure)");
+  assert.deepEqual(new Set(reads.map((r) => `${r.runId}/${r.measureId}`)), new Set([`${CITED_RUN}/cms125`, `${CITED_RUN}/cms137`, `${CITED_RUN}/audiogram`]));
+});
+
+test("the cited-row read covers only the rows the export keeps", async () => {
+  // Filters apply first; a case the export drops costs no outcome read.
+  const asked: string[] = [];
+  const deps = {
+    outcomeStore: {
+      listLatestPopulationRuns: latestRunsFromRows([]),
+      listOutcomes: async (_runId: string, opts?: { measureId?: string; subjectIds?: readonly string[] }) => {
+        asked.push(...(opts?.subjectIds ?? []));
+        return CITED_ROWS.filter((o) => o.measureId === opts?.measureId && (opts?.subjectIds ?? []).includes(o.subjectId));
+      },
+    },
+  } as unknown as LiveCellDeps;
+  const store = { listCases: async () => CITED_CASES } as unknown as CaseStore;
+  const { rows } = parse(await casesCsv(store, eventStore(), { caseIds: ["k-cms137"] }, {}, deps));
+  assert.deepEqual(rows.map((r) => r.caseId), ["k-cms137"]);
+  assert.equal(rows[0]!.executedLogic, "CMS137FHIR v1.0.000");
+  assert.deepEqual(asked, ["emp-021"], "only the kept case's subject was read");
+});
+
 test("the cases CSV reads the same unbounded candidate set the work list does", async () => {
   const queries: CaseQuery[] = [];
   await casesCsv(caseStore((q) => queries.push(q)), eventStore(), { search: "omar" }, {}, liveDeps());

@@ -22,7 +22,7 @@ import { listNotFoundBody, withListFilter } from "../compliance/subject-list-fil
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { routedEngineForEnv } from "../wiring/executor-router.ts";
-import type { CaseSummary } from "../case/case-read-models.ts";
+import { withScoringLogic, type CaseSummary } from "../case/case-read-models.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import { loadWorklistCases, loadWorklistPage, withLiveStatus, staffClosedCounts, STAFF_CLOSED_TOKEN } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
@@ -416,7 +416,10 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   if ((q.get("status") ?? "").trim().toLowerCase() === STAFF_CLOSED_TOKEN) {
     const summaries = await loadWorklistCases(worklistDeps, worklistFilters);
     const counts = staffClosedCounts(summaries);
-    return json(summaries.slice(offset, offset + limit), 200, {
+    // The logic behind each FROZEN status (#769), for the page only: the whole list is resolved for its
+    // counts, but only the rows shown are named.
+    const pageRows = await withScoringLogic(await outcomeStore(env), summaries.slice(offset, offset + limit));
+    return json(pageRows, 200, {
       "X-Total-Count": String(summaries.length),
       "X-Staff-Closed-Gap": String(counts.gap),
       "X-Staff-Closed-Verified": String(counts.verified),
@@ -428,7 +431,9 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // a SQL form, and through the uncapped pipeline where one does not. The badge this endpoint serves
   // on every navigation is the first shape: `?status=open&outreach=none&limit=1`.
   const page = await loadWorklistPage(worklistDeps, worklistFilters, { limit, offset });
-  // What CQL says today for the PAGE's staff-closed rows — they appear on the `closed` and `all` tabs.
+  // What CQL says today for the PAGE's staff-closed rows — they appear on the `closed` and `all` tabs —
+  // and the logic that scored each row's cited outcome (#769), both for the page alone.
   const live = { outcomeStore: await outcomeStore(env), cellCache: rosterCellCache };
-  return json(await withLiveStatus(live, page.rows), 200, { "X-Total-Count": String(page.total) });
+  const rows = await withScoringLogic(live.outcomeStore, await withLiveStatus(live, page.rows));
+  return json(rows, 200, { "X-Total-Count": String(page.total) });
 }

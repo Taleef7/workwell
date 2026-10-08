@@ -12,8 +12,9 @@ import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters } from "../compliance/subject-filters.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
-import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
+import { formatScoringLogic, measureVersionOf, scoringLogicOf } from "../measure/measure-identity.ts";
+import { caseLogicKey, scoringForCases } from "../case/case-scoring-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell } from "./csv.ts";
 import { closureKindOf } from "../case/case-logic.ts";
@@ -23,28 +24,16 @@ import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { liveAnswerForCase, liveCellsFor, liveFieldsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
 
 const measureName = (measureId: string) => measureDisplayName(measureId);
-const authoredVersion = (measureId: string) => {
-  const lib = MEASURES[measureId]?.library ?? "";
-  const dash = lib.lastIndexOf("-");
-  return dash >= 0 ? lib.slice(dash + 1) : "-";
-};
 
-/**
- * The version that ACTUALLY computed the row (review, #357).
- *
- * `measureVersion` answers "what computed this", and the CSV is the artifact people mail around. Deriving
- * it from `MEASURES[id].library` stamps WorkWell's authored library version — `2.0.0` for cms122 — on a
- * row that CMS122FHIR **v1.0.000** produced. An official outcome carries its own version in
- * `evidence.official.version`, so read it from the record rather than from a static table: the same
- * evidence-first rule ADR-046 applied to MeasureReport and QRDA, for the same reason (a run's provenance
- * does not change because a flag moved later).
+/*
+ * `measureVersion` and `executedLogic` (§6.2, §6.3) answer "what computed this row", read from the row's
+ * OWN evidence (`measureVersionOf`, `scoringLogicOf`), never from a static table or today's routing:
+ * the CSV is the artifact people mail around, and a row's provenance does not change because a flag or
+ * the catalog moved later (the evidence-first rule ADR-046 applied to MeasureReport and QRDA). Deriving
+ * the version from `MEASURES[id].library` stamped the authored `2.0.0` on rows CMS125FHIR v1.0.000
+ * scored, and on errored rows nothing scored at all.
  */
-const measureVersionFor = (measureId: string, evidence: unknown): string => {
-  const official = (evidence as { official?: { version?: unknown } } | null | undefined)?.official;
-  const version = official?.version;
-  if (typeof version === "string" && version.trim()) return version.trim();
-  return authoredVersion(measureId);
-};
+const executedLogicCell = (evidence: unknown): string => formatScoringLogic(scoringLogicOf(evidence)) ?? "";
 
 // ---- runs (DATA_MODEL §6.1) --------------------------------------------------
 const RUN_HEADERS = [
@@ -117,6 +106,10 @@ const OUTCOME_HEADERS = [
   // APPENDED (MM-2), never inserted, so a consumer reading by position keeps every column it had.
   // The two panel facts the practice filters by; empty where the directory records none.
   "providerId", "payer",
+  // APPENDED (#769), same rule: the logic that scored the row, by name and version
+  // ("CMS125FHIR v1.0.000", "WorkWell translation of CMS137v15 (ww-2027.1)"); empty for an authored or
+  // errored row, which no named logic scored.
+  "executedLogic",
 ] as const;
 
 interface ExprResult {
@@ -175,9 +168,9 @@ function outcomeRowCells(
   const wf = whyFlagged(o.evidence, o.measureId);
   return [
     o.id, o.runId, o.subjectId, emp?.name ?? o.subjectId, emp?.role ?? "—", emp?.site ?? "—",
-    measureName(o.measureId), measureVersionFor(o.measureId, o.evidence), o.evaluationPeriod, o.status,
+    measureName(o.measureId), measureVersionOf(o.measureId, o.evidence), o.evaluationPeriod, o.status,
     wf.lastExamDate, wf.complianceWindowDays, wf.daysOverdue, true, true, wf.waiverStatus, o.evaluatedAt,
-    emp?.providerId ?? "", emp?.payer ?? "",
+    emp?.providerId ?? "", emp?.payer ?? "", executedLogicCell(o.evidence),
   ];
 }
 
@@ -302,6 +295,10 @@ const CASE_HEADERS = [
   // an out-of-population row (canonical MISSING_DATA) as a gap, which is exactly what the programs
   // chip, the staff-closed tab and the roster all do NOT do. This column is what those surfaces use.
   "closedReason", "closedBy", "liveState", "liveOutcomeStatus", "liveOutcomeRunId",
+  // APPENDED (#769): the logic that scored the case's CITED outcome (`lastRunId`, subject, measure),
+  // as §6.2 names it. On a person-closed row it describes the frozen `currentOutcomeStatus`, not the
+  // `live*` columns, which come from the winning run.
+  "executedLogic",
 ] as const;
 
 export interface CaseExportFilter extends CaseQuery, SubjectFilters {
@@ -332,7 +329,11 @@ export async function casesCsv(
   eventStore: CaseEventStore,
   filter: CaseExportFilter,
   webChartEnv?: DataSourceEnv,
-  /** Where the two live columns come from (#569); without it they are empty and the row says so by being empty. */
+  /**
+   * Where the two live columns come from (#569), and where each case's cited outcome is read for
+   * `measureVersion` and `executedLogic` (#769). Without it those cells are empty and the row says so
+   * by being empty: nothing was read, so nothing is claimed.
+   */
   liveDeps?: LiveCellDeps,
 ): Promise<string> {
   // **`outcome` is withheld from the STORE on the staff-closed list, and only there** (2026-09-20).
@@ -428,8 +429,13 @@ export async function casesCsv(
   // answered 504 at 60 s and held every connection while it did, so the deployment's other pages
   // timed out for the minute it ran (measured 2026-09-13).
   const deliveryStatuses = await eventStore.latestOutreachDeliveryStatuses(cases.map((c) => c.id));
+  // What scored each case's CITED outcome, over the surviving rows only, batched the same way: one
+  // bounded read per (run, measure), never one per case and never today's routing — a row scored
+  // before a translation was routed, or by authored CQL before the flip, keeps its own name (#769).
+  const scoring = liveDeps ? await scoringForCases(liveDeps.outcomeStore, cases) : null;
   const rows = cases.map((c) => {
     const emp = directory.employeeById(c.employeeId);
+    const scored = scoring?.get(caseLogicKey(c));
     // Absent key ⇒ no outreach action ⇒ null, the same cell the per-case call wrote.
     const latest = deliveryStatuses[c.id] ?? null;
     // This export applies no period filter by DEFAULT (§6.3; `?period=current` narrows it since #603), so it carries more
@@ -442,13 +448,13 @@ export async function casesCsv(
     const liveState = fields ? fields.state : "";
     return [
       c.id, c.employeeId, emp?.name ?? c.employeeId, emp?.role ?? "—", emp?.site ?? "—",
-      // A case row carries no evidence, so this is the AUTHORED version even for a routed measure.
-      // Stated rather than silently wrong: the case CSV is an operational worklist keyed on
-      // `lastRunId`, and the outcomes CSV is the one that answers "what computed this" per row.
-      measureName(c.measureId), authoredVersion(c.measureId), c.evaluationPeriod, c.status, c.priority, c.assignee,
+      // The cited row's version (`measureVersionOf` on it), in place: "" when there is no row or
+      // nothing named scored it, never the authored library's version for a row CMS's artifact scored.
+      measureName(c.measureId), scored?.version ?? "", c.evaluationPeriod, c.status, c.priority, c.assignee,
       c.currentOutcomeStatus, c.nextAction, c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
       emp?.providerId ?? "", emp?.payer ?? "",
       c.closedReason ?? "", c.closedBy ?? "", liveState, liveStatus, fields?.runId ?? "",
+      formatScoringLogic(scored?.logic) ?? "",
     ];
   });
   return toCsv(CASE_HEADERS, rows);

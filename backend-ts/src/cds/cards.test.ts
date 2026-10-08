@@ -112,8 +112,9 @@ test("an open gap becomes one card carrying the answer, its provenance and a lin
 });
 
 test("`critical` is never emitted: OVERDUE is the ceiling, and it is `warning`", async () => {
-  // In CDS Hooks `critical` means the user must not proceed. WorkWell is SUPPLEMENTARY to WebChart
-  // (locked decision 1) and is not entitled to say that about someone else's encounter.
+  // In CDS Hooks `critical` is the specification's highest urgency (`info` < `warning` < `critical`;
+  // AI_GUARDRAILS §1.1). WorkWell is SUPPLEMENTARY to WebChart (locked decision 1) and is not entitled
+  // to raise the loudest available signal inside someone else's encounter.
   //
   // **The type is the enforcement, not this test.** `CdsCard.indicator` is `"info" | "warning"`, so an
   // assertion that the value is one of those two cannot fail for any implementation — a first version of

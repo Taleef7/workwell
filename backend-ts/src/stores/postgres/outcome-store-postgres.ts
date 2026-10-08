@@ -5,7 +5,7 @@
  */
 import { isUuid, withStatementTimeoutDisabled, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
-import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
+import { LATEST_RUN_PROBE_BUDGET, normalizeScoringIdentityRows } from "../outcome-store.ts";
 import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
 import type {
   OutcomeRecord,
@@ -235,6 +235,67 @@ export class PgOutcomeStore implements OutcomeStore {
       [runId, Math.max(1, limit)],
     );
     return rows.map((r) => r.measure_id);
+  }
+
+  async distinctScoringLogicForRun(runId: string): Promise<Array<{ measureId: string; official: unknown }>> {
+    if (!isUuid(runId)) return [];
+    // The identity keys only, as JSON values (types kept), and DISTINCT over THEM — never over the whole
+    // `official` block, whose per-row populations would make every row its own group (#769).
+    //
+    // `OFFSET 0` fences the subquery so `evidence_json -> 'official'` is computed ONCE per row: pulled
+    // up, each of the references below would detoast and walk the whole evidence again. Two passes over
+    // `evidence_json` per row remain (the error test and the extraction); everything after reads the
+    // small extracted object. `run_id` alone is the predicate, so either `(run_id)` index serves it.
+    const { rows } = await this.pool.query<{
+      measure_id: string;
+      official_type: string | null;
+      kind: unknown;
+      ecqm_id: unknown;
+      version: unknown;
+      label: unknown;
+      url: unknown;
+      derived_from: unknown;
+      artifact_sha256: unknown;
+      period_type: string | null;
+      period_start: unknown;
+      period_end: unknown;
+    }>(
+      `SELECT DISTINCT measure_id,
+              jsonb_typeof(official) AS official_type,
+              official -> 'kind' AS kind,
+              official -> 'ecqmId' AS ecqm_id,
+              official -> 'version' AS version,
+              official -> 'label' AS label,
+              official -> 'url' AS url,
+              official -> 'derivedFrom' AS derived_from,
+              official -> 'artifactSha256' AS artifact_sha256,
+              jsonb_typeof(official -> 'measurementPeriod') AS period_type,
+              official -> 'measurementPeriod' -> 'start' AS period_start,
+              official -> 'measurementPeriod' -> 'end' AS period_end
+         FROM (SELECT measure_id, evidence_json -> 'official' AS official
+                 FROM ${T}
+                WHERE run_id = $1 AND NOT (evidence_json ? 'evaluationError')
+               OFFSET 0) AS scored`,
+      [runId],
+    );
+    return normalizeScoringIdentityRows(
+      rows.map((r) => ({
+        measureId: r.measure_id,
+        official:
+          r.official_type === "object"
+            ? {
+                kind: r.kind,
+                ecqmId: r.ecqm_id,
+                version: r.version,
+                label: r.label,
+                url: r.url,
+                derivedFrom: r.derived_from,
+                artifactSha256: r.artifact_sha256,
+                ...(r.period_type === "object" ? { measurementPeriod: { start: r.period_start, end: r.period_end } } : {}),
+              }
+            : null,
+      })),
+    );
   }
 
   async getOutcomeById(id: string): Promise<OutcomeRecord | null> {

@@ -707,8 +707,60 @@ test("a run scored by a WorkWell translation: QRDA refuses it (no CMS identity t
   assert.equal((await get(`/api/runs/${runId}/measure-report?type=bundle`))!.status, 200, "a bundle of one logic is still exported");
   assert.doesNotMatch(JSON.stringify(report), /madie\.cms\.gov|:official:|137FHIR/, "and nothing in it claims CMS's measure");
   // The reconciliation ladder says which logic its rates came from.
-  const recon = (await (await get(`/api/runs/${runId}/reconciliation`))!.json()) as { official: { logic?: unknown; rates: unknown[] } | null };
+  const recon = (await (await get(`/api/runs/${runId}/reconciliation`))!.json()) as {
+    official: { logic?: unknown; rates: unknown[] } | null;
+    scoringLogic: Array<{ measureId: string; logics: unknown[] }>;
+  };
   assert.deepEqual(recon.official?.logic, { kind: "workwell-translation", label: "WorkWell translation of CMS137v15" });
+  // #769: the run detail names the logic from the rows, never from routing — cms137 routes to CMS's
+  // artifact wherever it is routed at all, and these rows say the translation scored them.
+  assert.deepEqual(recon.scoringLogic, [{
+    measureId: "cms137",
+    logics: [{ kind: "workwell-translation", label: "WorkWell translation of CMS137v15", version: "ww-2027.1", url: "urn:workwell:measure:cms137:translation-2027", derivedFrom: "CMS137v15" }],
+  }]);
+  assert.doesNotMatch(JSON.stringify(recon.scoringLogic), /137FHIR/, "a translation never carries a CMS eCQM id");
+});
+
+test("reconciliation names every measure's scoring logics on an ALL_PROGRAMS run, a mixed measure's all of them (#769)", async () => {
+  await get("/api/runs");
+  const runStore = new SqliteRunStore(env.DB as never);
+  const outcomeStore = new SqliteOutcomeStore(env.DB as never);
+  const run = await runStore.createRun({
+    status: "COMPLETED", scopeType: "ALL_PROGRAMS", triggeredBy: "test", requestedScope: {},
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
+  });
+  // The committed cms122 artifact's digest, so the lineage comes off the evidence; the id is the BARE
+  // manifest value the evidence really stores.
+  const cms122 = { expressionResults: [], official: { ecqmId: "122FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552", populationResults: populations, measurementPeriod: { start: "2026-01-01", end: "2026-12-31" } } };
+  const row = (subjectId: string, measureId: string, evidence: unknown) => ({ runId: run.id, subjectId, measureId, evaluationPeriod: "2026", status: "OVERDUE", evidence });
+  await outcomeStore.recordOutcomes([
+    row("p-1", "cms122", cms122),
+    row("p-2", "cms122", cms122),
+    row("p-3", "cms137", officialEvidence({ start: "2026-01-01", end: "2026-12-31" })),
+    row("p-4", "cms137", derivedEvidence()),
+    row("p-5", "cms137", { evaluationError: "CQL engine failure", message: "boom" }),
+    row("p-6", "audiogram", { expressionResults: [{ define: "Outcome Status", result: "OVERDUE" }] }),
+  ]);
+  const body = (await (await get(`/api/runs/${run.id}/reconciliation`))!.json()) as {
+    official: unknown;
+    scoringLogic: Array<{ measureId: string; logics: Array<Record<string, unknown>> }>;
+  };
+  assert.equal(body.official, null, "`official` describes ONE measure's rate and stays null on a multi-measure run");
+  assert.deepEqual(body.scoringLogic, [
+    { measureId: "audiogram", logics: [] },
+    {
+      measureId: "cms122",
+      logics: [{ kind: "cms-artifact", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14", status: "draft", statusNote: "posted for public comment Jan–Feb 2026" }],
+    },
+    {
+      measureId: "cms137",
+      logics: [
+        // A digest no committed manifest has: named, but no lineage is invented for it.
+        { kind: "cms-artifact", ecqmId: "CMS137FHIR", version: "1.0.000", derivedFrom: null, status: "unknown", statusNote: null },
+        { kind: "workwell-translation", label: "WorkWell translation of CMS137v15", version: "ww-2027.1", url: "urn:workwell:measure:cms137:translation-2027", derivedFrom: "CMS137v15" },
+      ],
+    },
+  ]);
 });
 
 test("a run whose rows were scored for two different years is refused rather than labelled with the first row", async () => {

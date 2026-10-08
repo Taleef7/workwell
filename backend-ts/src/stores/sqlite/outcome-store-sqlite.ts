@@ -17,7 +17,7 @@ import type {
   OutcomeStatusCount,
   MeasureScanOptions,
 } from "../outcome-store.ts";
-import { LATEST_RUN_PROBE_BUDGET } from "../outcome-store.ts";
+import { LATEST_RUN_PROBE_BUDGET, SCORING_IDENTITY_KEYS, normalizeScoringIdentityRows } from "../outcome-store.ts";
 import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
 
 interface OutcomeRow {
@@ -230,6 +230,39 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .bind(runId, Math.max(1, limit))
       .all<{ measure_id: string }>();
     return (results ?? []).map((r) => r.measure_id);
+  }
+
+  async distinctScoringLogicForRun(runId: string): Promise<Array<{ measureId: string; official: unknown }>> {
+    // The ceiling's projection, in SQL here too so the DISTINCT collapses rows before they leave the
+    // database. A multi-path `json_extract` returns ONE JSON array of the values (a missing path is
+    // `null`), which keeps each value's JSON type — a single-path `json_extract` would turn `true` into
+    // 1 — and is canonical text, so DISTINCT compares it exactly. `json_type`, not `json_extract`, for the
+    // error marker: a key present with a JSON null is still the marker, as the ceiling's `?` says.
+    const { results } = await this.db
+      .prepare(
+        `SELECT DISTINCT measure_id,
+                json_type(evidence_json, '$.official') AS official_type,
+                json_type(evidence_json, '$.official.measurementPeriod') AS period_type,
+                json_extract(evidence_json, ${[...SCORING_IDENTITY_KEYS.map((k) => `'$.official.${k}'`), "'$.official.measurementPeriod.start'", "'$.official.measurementPeriod.end'"].join(", ")}) AS identity
+           FROM outcomes
+          WHERE run_id = ? AND json_type(evidence_json, '$.evaluationError') IS NULL`,
+      )
+      .bind(runId)
+      .all<{ measure_id: string; official_type: string | null; period_type: string | null; identity: string }>();
+    return normalizeScoringIdentityRows(
+      (results ?? []).map((r) => {
+        if (r.official_type !== "object") return { measureId: r.measure_id, official: null };
+        const values = JSON.parse(r.identity) as unknown[];
+        const official: Record<string, unknown> = {};
+        SCORING_IDENTITY_KEYS.forEach((key, i) => {
+          official[key] = values[i];
+        });
+        if (r.period_type === "object") {
+          official.measurementPeriod = { start: values[SCORING_IDENTITY_KEYS.length], end: values[SCORING_IDENTITY_KEYS.length + 1] };
+        }
+        return { measureId: r.measure_id, official };
+      }),
+    );
   }
 
   async getOutcomeById(id: string): Promise<OutcomeRecord | null> {

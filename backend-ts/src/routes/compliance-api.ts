@@ -31,6 +31,7 @@
  * those ADRs exist to prevent.
  */
 import { measureDisplayName } from "../measure/measure-name.ts";
+import { ecqmIdOf } from "../measure/measure-identity.ts";
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
@@ -145,7 +146,9 @@ function body(
     measure: {
       id: measureId,
       name,
-      ...(identity?.ecqmId ? { ecqmId: identity.ecqmId } : {}),
+      // One spelling on every served eCQM id ("CMS125FHIR"; the evidence stores the manifest's bare
+      // "125FHIR"), and never on a translation's row, whatever that row carried (LOCKED §4.3).
+      ...(identity?.ecqmId && identity.kind !== "derived" ? { ecqmId: ecqmIdOf(identity.ecqmId) } : {}),
       ...(identity?.version ? { version: identity.version } : {}),
       ...logicBlock(identity),
     },

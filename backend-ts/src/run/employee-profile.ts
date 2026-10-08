@@ -17,7 +17,8 @@ import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { DIRECTORY } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
-import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { measureVersionOf, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import { caseLogicKey, scoringLogicForCases, type CaseOutcomeRef } from "../case/case-scoring-logic.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { deriveCell, type DisplayState } from "../compliance/roster-vocabulary.ts";
@@ -31,7 +32,13 @@ export interface MeasureOutcomeSummary {
   measureId: string;
   measureVersionId: string;
   measureName: string;
+  /** The winning row's scoring version (`measureVersionOf`, #769) — never "2.0.0" for a CMS-scored row. */
   measureVersion: string;
+  /**
+   * The logic that scored the winning row, from that row's evidence (#769): what the Measure Details row
+   * and the summary bar name. Null for authored CQL or an errored row.
+   */
+  logic: ScoringLogic | null;
   /** The stored bucket. `displayStatus` is what to SHOW (#671). */
   outcomeStatus: string;
   /**
@@ -52,6 +59,11 @@ export interface OpenCaseSummary {
   measureId: string;
   measureName: string;
   outcomeStatus: string;
+  /**
+   * The logic behind `outcomeStatus` (#769): the case's CITED outcome, as on the work list and the case
+   * page — which is not always the winning row (a one-patient rerun, or an older cycle's open case).
+   */
+  logic: ScoringLogic | null;
   priority: string;
   assignee: string | null;
   slaDueDate: string | null;
@@ -111,11 +123,6 @@ export interface EmployeeProfileDeps {
   segments?: HydratedSegment[];
 }
 
-const measureVersionOf = (measureId: string): string => {
-  const lib = MEASURES[measureId]?.library ?? "";
-  const dash = lib.lastIndexOf("-");
-  return dash >= 0 ? lib.slice(dash + 1) : "";
-};
 // The catalog carries a name for the official-only measures too; the authored registry alone left
 // cms2/cms130/cms165/cms137 named by their ids (#671).
 const measureNameOf = measureDisplayName;
@@ -196,13 +203,19 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     if (!runByMeasure.has(w.measureId)) runByMeasure.set(w.measureId, w.runId);
   }
   const winningRows: OutcomeRecord[] = [];
+  // The FIRST of this subject's rows in each winning run: the row a case citing that run names
+  // (`outcomeForCase` reads the same order with `limit: 1`), kept so an open case citing the winning run
+  // costs no second read for its logic below. Null records "read, and no row".
+  const citedInWinningRun = new Map<string, { runId: string; row: OutcomeRecord | null }>();
   // In turn, not `Promise.all`: one page view must not take a connection per measure at once.
   for (const measureId of measureIds) {
     const runId = runByMeasure.get(measureId);
     if (!runId) continue;
     // Rows arrive evaluated_at ASC, so the last is the one the roster's derivation keeps.
-    const rows = await deps.outcomes.listOutcomes(runId, { measureId, subjectId: externalId });
-    const row = rows.filter((r) => r.measureId === measureId && r.subjectId === externalId).at(-1);
+    const rows = (await deps.outcomes.listOutcomes(runId, { measureId, subjectId: externalId }))
+      .filter((r) => r.measureId === measureId && r.subjectId === externalId);
+    citedInWinningRun.set(measureId, { runId, row: rows[0] ?? null });
+    const row = rows.at(-1);
     if (row) winningRows.push(row);
   }
 
@@ -216,7 +229,10 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       measureId: o.measureId,
       measureVersionId: o.measureId,
       measureName: measureNameOf(o.measureId),
-      measureVersion: measureVersionOf(o.measureId),
+      // The row's own logic (#769). The authored library's version stood here, so a CMS-scored cms125
+      // row read "2.0.0" on the patient page.
+      measureVersion: measureVersionOf(o.measureId, o.evidence),
+      logic: scoringLogicOf(o.evidence),
       outcomeStatus: o.status,
       // The roster's overlay, in the roster's order: out of cohort wins over any real outcome (E11.3).
       displayStatus: isApplicable(emp, o.measureId, deps.segments ?? [])
@@ -229,6 +245,18 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     });
   }
 
+  // Each open case's logic from its CITED outcome (#769). A case citing the winning run reuses the row
+  // read above; the rest (a one-patient rerun, an older cycle's open case) take one bounded read per
+  // (run, measure) through the shared helper — never the winning row, which may be another logic's.
+  const caseLogic = new Map<string, ScoringLogic | null>();
+  const unread: CaseOutcomeRef[] = [];
+  for (const c of openCases) {
+    const winning = citedInWinningRun.get(c.measureId);
+    if (winning && c.lastRunId && winning.runId === c.lastRunId) caseLogic.set(caseLogicKey(c), scoringLogicOf(winning.row?.evidence));
+    else unread.push(c);
+  }
+  if (unread.length > 0) for (const [key, logic] of await scoringLogicForCases(deps.outcomes, unread)) caseLogic.set(key, logic);
+
   const openCaseSummaries: OpenCaseSummary[] = openCases
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((c) => ({
@@ -236,6 +264,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       measureId: c.measureId,
       measureName: measureNameOf(c.measureId),
       outcomeStatus: c.currentOutcomeStatus,
+      logic: caseLogic.get(caseLogicKey(c)) ?? null,
       priority: c.priority,
       assignee: c.assignee,
       slaDueDate: null, // SLA not modeled on the TS case row
