@@ -10,6 +10,7 @@ import {
   takePreviousStall,
   memoryLimitBytes,
   buildSha,
+  recordRoutingHealth,
   inFlightRequests,
   loggablePath,
   MAX_REPORTED_REQUESTS,
@@ -105,6 +106,18 @@ test("buildSha reads the baked-in commit, and absence is null rather than a plac
     if (prev === undefined) delete process.env.WORKWELL_BUILD_SHA;
     else process.env.WORKWELL_BUILD_SHA = prev;
   }
+});
+
+test("/health says what this process routes: measure ids and the router's problem count, sorted, null until checked (#768)", () => {
+  assert.equal(runtimeHealth().routing, null, "not checked yet: no claim either way");
+  recordRoutingHealth({ official: ["cms165", "cms122", "cms137"], derived: ["cms137"], problems: 0 });
+  assert.deepEqual(runtimeHealth().routing, { official: ["cms122", "cms137", "cms165"], derived: ["cms137"], problems: 0 });
+  recordRoutingHealth({ official: ["cms125"], derived: [], problems: 2 });
+  assert.equal(runtimeHealth().routing?.problems, 2);
+  // Ids only: nothing in it could name a patient or a request.
+  assert.deepEqual(Object.keys(runtimeHealth().routing!).sort(), ["derived", "official", "problems"]);
+  __resetRuntimeHealth();
+  assert.equal(runtimeHealth().routing, null);
 });
 
 test("uptime counts from process start", () => {

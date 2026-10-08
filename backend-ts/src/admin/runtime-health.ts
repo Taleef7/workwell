@@ -20,7 +20,8 @@
  * WHAT IS PUBLIC. `/health` is unauthenticated, so it carries counts and timings only. Request paths —
  * even masked — go to the operator log and to the ADMIN-gated `/api/admin/runtime`, never to `/health`:
  * a route like `/api/v1/compliance/{subject}/{measure}` pairs an identifier with health context, and in
- * the PHI phase that identifier is a real patient's.
+ * the PHI phase that identifier is a real patient's. The routed measure ids (`routing`) are catalog ids,
+ * the same for every patient, and say nothing about anyone.
  */
 import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
@@ -498,9 +499,29 @@ export function memoryLimitBytes(constrained: number | undefined, total: number)
 
 // ── Snapshots ──────────────────────────────────────────────────────────────────────────────────────
 
-/** The public `/health` view: counts and timings only (see WHAT IS PUBLIC above). */
+/**
+ * What this process routes (#768): measure ids only, and how many problems the router reported for them.
+ * Public because a deploy reads it before it promotes an image to the recovery tag: an image whose
+ * routing the router refuses must never become the image a self-heal recreates. Null until the worker
+ * has checked its routing (the first request does, before it is answered).
+ */
+export interface RoutingHealth {
+  official: string[];
+  derived: string[];
+  problems: number;
+}
+
+let routing: RoutingHealth | null = null;
+
+/** Recorded once per process by the worker's boot check, from the same check that raises the routing alert. */
+export function recordRoutingHealth(value: RoutingHealth): void {
+  routing = { official: [...value.official].sort(), derived: [...value.derived].sort(), problems: value.problems };
+}
+
+/** The public `/health` view: counts, timings and the routed measure ids only (see WHAT IS PUBLIC above). */
 export interface RuntimeHealth {
   build: { sha: string | null };
+  routing: RoutingHealth | null;
   startedAt: string;
   uptimeSeconds: number;
   eventLoop: {
@@ -523,6 +544,7 @@ export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
   const lastWarm = warms.at(-1);
   return {
     build: { sha: buildSha() },
+    routing,
     startedAt: PROCESS_STARTED_AT,
     uptimeSeconds: Math.round((now - Date.parse(PROCESS_STARTED_AT)) / 1000),
     eventLoop: {
@@ -574,4 +596,5 @@ export function __resetRuntimeHealth(): void {
   lastWindow = null;
   lastAlertAt = 0;
   suppressedAlerts = 0;
+  routing = null;
 }

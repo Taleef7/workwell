@@ -67,7 +67,7 @@ import { effectivePeriodWarning, officialMeasurementPeriod } from "./wiring/offi
 import { RUNNABLE_MEASURE_IDS, classifyRunnable } from "./config/deployment-profile.ts";
 import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
 import { classifyDbFailure } from "./stores/postgres/pg-database.ts";
-import { runtimeDetail, runtimeHealth, trackRequest } from "./admin/runtime-health.ts";
+import { recordRoutingHealth, runtimeDetail, runtimeHealth, trackRequest } from "./admin/runtime-health.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -498,6 +498,13 @@ function logSeamInventoryOnce(env: Env): void {
       `WORKWELL_ALERT ${JSON.stringify({ kind: "OFFICIAL_ROUTING_MISCONFIGURED", problems })}`,
     );
   }
+  // The same answer on /health (#768), so a deploy can refuse to promote an image whose routing the
+  // router refuses — the state the alert above only reports.
+  recordRoutingHealth({
+    official: [...officialMeasureIds(env as unknown as Record<string, unknown>)],
+    derived: [...derivedMeasureIds(env as unknown as Record<string, unknown>)],
+    problems: problems.length,
+  });
   // #473: the evidence bucket is CONFIGURED but only exercised on the first evidence operation, so a
   // dead one is silent. On 2026-08-24 the hosting AWS account lapsed and this stack went on booting
   // clean, logging `bucket-s3=on` and serving /actuator/health 200 for eighteen days while every

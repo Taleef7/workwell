@@ -48,6 +48,9 @@ test("#663/#625: health and version say which build is answering, since when, an
   assert.ok(!Number.isNaN(Date.parse(health.startedAt)));
   assert.equal(typeof health.uptimeSeconds, "number");
   assert.equal(typeof health.eventLoop.stallsSinceStart, "number");
+  // #768: what the process routes, from the boot check that already ran on the first request (this env
+  // routes nothing). A deploy reads this before promoting an image to the recovery tag.
+  assert.deepEqual(health.routing, { official: [], derived: [], problems: 0 });
 
   const version = (await (await call("/api/version")).json()) as Record<string, unknown>;
   assert.equal(version.build, "workwell-api-ts", "unchanged for existing readers");
