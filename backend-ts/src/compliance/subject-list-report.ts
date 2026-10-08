@@ -55,7 +55,7 @@ import { isPopulationRun } from "../program/rollup-shared.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
-import { ecqmIdOf, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import { ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
 
 /** One page of outcome rows per read. Matches `fhir/run-aggregate.ts`'s page so the two agree. */
 const PAGE = 2000;
@@ -265,7 +265,7 @@ export async function subjectListReport(
       ecqmId: read.identity?.ecqmId && read.identity.kind !== "derived" ? ecqmIdOf(read.identity.ecqmId) : null,
       version: read.identity?.version ?? null,
       executedLogic: executedLogicOf(read.identity ?? null),
-      logic: read.identity ? scoringLogicOf({ official: read.identity }) : null,
+      logic: read.logic,
       runId: winner.runId,
       runStartedAt: winner.startedAt,
       measurementPeriod: reportingPeriod(winner, read.identity ?? null),
@@ -448,8 +448,10 @@ interface MeasureRead {
   buckets: { scored: number; unmeasured: number; evaluationErrors: number; outOfPopulation: number };
   duplicateRowsCollapsed: number;
   periodMismatch: boolean;
-  /** The counted rows were scored by more than one logic (`scoringIdentityKey`), e.g. CMS's draft and a translation. */
+  /** The counted rows were scored by more than one logic (`scoringOfRows`), e.g. CMS's draft and a translation. */
   mixedLogic: boolean;
+  /** The one logic the non-errored counted rows were scored by; null when mixed, authored, or none named. */
+  logic: ScoringLogic | null;
 }
 
 /** Page a run's outcomes for one measure, keeping only the list's members. */
@@ -512,8 +514,9 @@ async function readMeasure(
   const evidences: unknown[] = [];
   for (const row of newest.values()) {
     aggregator.add(row);
-    identity ??= officialReportIdentity(row.evidence);
     const errored = isEvaluationErrorEvidence(row.evidence);
+    // An errored row scored nothing, so it never names the report's artifact, even if it kept a block.
+    if (!errored) identity ??= officialReportIdentity(row.evidence);
     evidences.push(row.evidence);
     // Memberships are read ONCE per row and reused for the row's flags and its bucket. The first cut
     // built a whole `createRateAggregator` per row for the flags alone — 300,000 stateful aggregators
@@ -521,6 +524,7 @@ async function readMeasure(
     kept.push({ row, errored, memberships: errored ? [] : membershipRatesFor(row, measureId) });
   }
   const aggregate = aggregator.finish();
+  const scoring = scoringOfRows(evidences);
   // How many rates this run DECLARES, which is what makes a row with fewer of them unmeasured. Read
   // off the finished aggregate so a single row cannot decide it — the rule is about the run.
   const declaredRates = aggregate.rates.length;
@@ -563,7 +567,8 @@ async function readMeasure(
     buckets,
     duplicateRowsCollapsed,
     periodMismatch,
-    mixedLogic: scoringOfRows(evidences).conflict,
+    mixedLogic: scoring.conflict,
+    logic: scoring.conflict ? null : (scoring.logics[0] ?? null),
   };
 }
 

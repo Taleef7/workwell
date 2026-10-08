@@ -726,6 +726,17 @@ test("a translation's rows that wrongly carried a CMS id still give no ecqmId an
   assert.doesNotMatch(subjectListReportCsv(report, profile, "patient"), /122FHIR/);
 });
 
+test("an errored row never names the report's logic, even when it kept an official block (#769)", async () => {
+  // An errored row scored nothing; if it came first, reading `logic` off the first identity labelled the
+  // authored rows' counts with the errored row's artifact.
+  const erroredWithBlock = { evaluationError: "CQL engine failure", message: "boom", official: { ecqmId: "122FHIR", version: "1.0.000" } };
+  const result = await runReport({ rows: [row("pat-001", erroredWithBlock), row("pat-002", { expressionResults: [] })] });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  assert.equal(report.measures[0]!.logic, null);
+  assert.equal(report.measures[0]!.ecqmId, null);
+  assert.equal(report.measures[0]!.executedLogic, null);
+});
+
 test("a measure with no run has no logic", async () => {
   const result = await runReport({ rows: [], runs: [] });
   const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
