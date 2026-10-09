@@ -11,10 +11,12 @@ export interface ServedResource {
   /** `population`: the patient list or a read by id; `fetched`: a per-patient search. */
   readonly how: "population" | "fetched";
   /**
-   * A server that answers 404 to this type's search (it does not support the type) skips it for the run,
-   * with one warning, instead of failing every patient: the measures then read none of it, which is where
-   * they stood before it was composed (#713). A type that is not optional keeps the strict rule: any failed
-   * search degrades the whole patient, because partial clinical data must never evaluate.
+   * A server that answers 404 to this type's search before it has ever answered one this run (it does not
+   * support the type) skips it for the run, with one warning in the log and the run's record, instead of
+   * failing every patient: the measures then read none of it, which is where they stood before it was
+   * composed (#713). Once the type has answered, a 404 is a failed search like any other. A type that is
+   * not optional keeps the strict rule: any failed search degrades the whole patient, because partial
+   * clinical data must never evaluate.
    */
   readonly optional: boolean;
   /** Anything ingest adds of this type from another resource (`normalize.ts`), or empty. */

@@ -276,7 +276,7 @@ enrolled in.
 
   WorkWell may not supply or replace a code. Until WebChart sends RxNorm on medications and a coded order
   (SNOMED CT, CPT or LOINC, as the value set needs), these do not count on WebChart data:
-  - the hospice and dementia-medication exclusions;
+  - the order path of the hospice exclusion, and the dementia-medication exclusion;
   - CMS2's referral and antidepressant follow-up;
   - CMS137's medication treatment.
 - How are a medication order's `status` and `intent` filled, and does it carry a dosage or days' supply?

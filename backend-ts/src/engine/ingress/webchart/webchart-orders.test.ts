@@ -37,11 +37,15 @@ function ordersFor(id: string): Json[] {
   ];
 }
 
+/** What a search answers instead of a normal page: a status for this (type, patient, page, has `_count`). */
+type Override = (search: { type: string; patient: string; page: number; counted: boolean }) => number | undefined;
+
 /**
- * A WebChart answering the population search and per-type patient searches over `PATIENTS`. `status` maps a
- * resource type to the HTTP status every search for it answers instead of 200. Counts every search per type.
+ * A WebChart answering the population search and per-type patient searches for p1 and p2. It pages like the
+ * real contract when `_count` is set (a `next` link per page), and `override` replaces any search's answer
+ * with a status. `status` is the shorthand: every search of that type answers that status. Counts searches.
  */
-function webChart(status: Record<string, number> = {}) {
+function webChart(status: Record<string, number> = {}, override?: Override, extra: (id: string) => Json[] = () => []) {
   const ids = ["p1", "p2"];
   const searches = new Map<string, number>();
   const fetch: FetchImpl = ((input: Parameters<FetchImpl>[0]) => {
@@ -53,11 +57,24 @@ function webChart(status: Record<string, number> = {}) {
     }
     const type = url.pathname.replace(/^\/fhir\//, "");
     const id = url.searchParams.get("patient")!;
+    const page = Number(url.searchParams.get("page") ?? "1");
+    const count = url.searchParams.get("_count");
     searches.set(type, (searches.get(type) ?? 0) + 1);
-    if (status[type]) return json({ resourceType: "OperationOutcome", issue: [{ severity: "error", code: "not-supported" }] }, status[type]);
+    const code = status[type] ?? override?.({ type, patient: id, page, counted: count !== null });
+    if (code) return json({ resourceType: "OperationOutcome", issue: [{ severity: "error", code: "not-supported" }] }, code);
     const observation = { resourceType: "Observation", id: `${id}-a1c`, status: "final", subject: ref(id), code: coding("http://loinc.org", "4548-4"), valueQuantity: { value: 7.1, unit: "%" } };
-    const resources = type === "Observation" ? [observation] : ordersFor(id).filter((resource) => resource["resourceType"] === type);
-    return json({ resourceType: "Bundle", type: "searchset", total: resources.length, entry: resources.map((resource) => ({ resource, search: { mode: "match" } })) });
+    const all = [...(type === "Observation" ? [observation] : ordersFor(id)), ...extra(id)].filter((resource) => resource["resourceType"] === type);
+    const size = count === null ? all.length : Math.max(1, Number(count));
+    const slice = all.slice((page - 1) * size, page * size);
+    const next = new URL(url);
+    next.searchParams.set("page", String(page + 1));
+    return json({
+      resourceType: "Bundle",
+      type: "searchset",
+      total: all.length,
+      entry: slice.map((resource) => ({ resource, search: { mode: "match" } })),
+      link: page * size < all.length ? [{ relation: "next", url: next.toString() }] : [],
+    });
   }) as FetchImpl;
   return { fetch, searches };
 }
@@ -118,4 +135,45 @@ test("#713: any other failure of an optional type still degrades the patient, as
   // The core five keep the strict rule even on a 404.
   const core = await payloadsWith(webChart({ Observation: 404 }));
   assert.ok(core.payloads.every(isFallback), "a core type's 404 is a failed patient, never a skipped type");
+});
+
+test("#713: once a type has answered this run, a later 404 for it is a failed search, never a skip", async () => {
+  // p1's MedicationRequest search answers; p2's 404s. Skipping then would leave p1 with medications and p2
+  // (and everyone after) without, while the warning claimed nobody had them.
+  const { payloads, warnings } = await payloadsWith(webChart({}, ({ type, patient }) => (type === "MedicationRequest" && patient === "p2" ? 404 : undefined)));
+  assert.ok(!isFallback(payloads[0]) && entriesOf(payloads[0]).some((resource) => resource["resourceType"] === "MedicationRequest"));
+  assert.ok(isFallback(payloads[1]), "p2 degrades: its search failed");
+  assert.ok(!warnings.some((warning) => warning.includes("answers 404 for MedicationRequest searches")), "no type was skipped");
+});
+
+test("#713: a 404 on a later page is a failed search, and a 404 on the _count retry is the same 'unsupported' answer", async () => {
+  // Paged at one resource a page, p1's three MedicationRequests take three pages; page 2 404s.
+  const paged = await payloadsWith(
+    webChart({}, ({ type, patient, page }) => (type === "MedicationRequest" && patient === "p1" && page === 2 ? 404 : undefined)),
+    { pageSize: 1 },
+  );
+  assert.ok(isFallback(paged.payloads[0]), "a 404 mid-search degrades the patient instead of dropping the type");
+  assert.ok(entriesOf(paged.payloads[1]).some((resource) => resource["resourceType"] === "MedicationRequest"), "p2 still gets its medications");
+
+  // The server refuses `_count` (the trial's quirk), and the retry without it 404s: the type is unsupported.
+  const server = webChart({}, ({ type, counted }) => (type === "Coverage" ? (counted ? 400 : 404) : undefined));
+  const retried = await payloadsWith(server);
+  assert.ok(retried.payloads.every((payload) => !isFallback(payload)), "no patient fails");
+  assert.ok(retried.warnings.includes("WebChart answers 404 for Coverage searches, so this run reads no Coverage for any patient (#713)."));
+});
+
+test("#713: a crosswalk-coded order keeps its own coding, and a Coverage for another patient degrades the patient", async () => {
+  // normalize.ts may ADD a coding to a code it recognises; it must never drop or replace WebChart's own.
+  const loincOrder = (id: string): Json[] => [
+    { resourceType: "ServiceRequest", id: `${id}-a1c-order`, status: "active", intent: "order", subject: ref(id), code: coding("http://loinc.org", "4548-4"), authoredOn: "2026-03-01" },
+  ];
+  const { payloads } = await payloadsWith(webChart({}, undefined, loincOrder));
+  const order = entriesOf(normalizeWebChartBundle(payloads[0])).find((resource) => resource["id"] === "p1-a1c-order")!;
+  const codings = (order["code"] as { coding: Json[] }).coding;
+  assert.ok(codings.some((c) => c["system"] === "http://loinc.org" && c["code"] === "4548-4"), "WebChart's LOINC coding is kept");
+
+  // Coverage names its patient as `beneficiary`; one naming someone else is mis-attributed data.
+  const stray = (id: string): Json[] => (id === "p1" ? [{ resourceType: "Coverage", id: "stray", status: "active", beneficiary: ref("p2") }] : []);
+  const misattributed = await payloadsWith(webChart({}, undefined, stray));
+  assert.ok(isFallback(misattributed.payloads[0]), "a Coverage for another patient degrades the patient it was served for");
 });
