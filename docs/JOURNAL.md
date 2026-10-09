@@ -7,6 +7,20 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-09
 
+- **WebChart ingest now composes medication orders, referrals and coverage (#713).**
+  - Checked read-only on the trial first: each answered 200 for all 36 patients.
+  - If a server 404s one of these three types, the type is skipped for the run with one warning; no
+    patient fails. Any other failure, and any failure of the original five types, still degrades the
+    patient.
+  - The coverage report now shows them served, each with what limits it:
+    - the trial codes medications in FDDC, never RxNorm;
+    - 125 of 134 orders carry no code;
+    - Coverage has no type.
+  - So the CMS exclusions and follow-ups these feed still cannot count on WebChart data until WebChart
+    sends standard codes. That is a new question for MIE (OPEN_QUESTIONS §4.9).
+  - Composition is now 8 searches a patient, which caps the 15,000-calls-a-day terms at under 1,900
+    patients.
+
 - **#768's first half is live (#772).** Both deploys passed the routing gate, `maui-latest` was promoted,
   and `/health` shows Maui's six measures plus the cms137 translation and TWH's two, each with 0 problems.
 - **#768's second half: the routing lists are set only in the image.**

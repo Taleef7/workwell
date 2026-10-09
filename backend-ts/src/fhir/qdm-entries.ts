@@ -458,11 +458,10 @@ function entryFor(item: unknown, i: number, pad: string): string[] {
  * Resource types the EXPORT knows how to turn into a QDM entry — and therefore the only ones whose
  * omission it can report.
  *
- * `ServiceRequest`, `DeviceRequest` and `MedicationRequest` are deliberately absent: the export can only
- * emit what our own evaluated bundles carry, and those carry no frailty, hospice or palliative data
- * (ADR-055). They are listed here anyway so that re-exporting an IMPORTED document reports them as
- * untranslatable rather than dropping them in silence — the asymmetry is intended, the silence was not
- * (review, #388).
+ * `ServiceRequest`, `DeviceRequest` and `MedicationRequest` are deliberately absent: the export has no QDM
+ * mapping for them (ADR-055). Since #713 a live WebChart bundle can carry the first and the last, so an
+ * export of such a run reports them as untranslatable, as a re-exported IMPORTED document always did —
+ * reported, never dropped in silence (review, #388).
  */
 export const QDM_MAPPED_RESOURCE_TYPES = ["Encounter", "Condition", "Observation", "Procedure"] as const;
 

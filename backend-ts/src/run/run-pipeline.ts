@@ -268,6 +268,8 @@ interface LiveTenantMetadata {
   host: string;
   fetchedCount: number;
   degradedCount: number;
+  /** Optional resource types the tenant answered 404 for, so no subject in this run carries them (#713). */
+  unsupportedResourceTypes: string[];
   durationMs: number;
   status: "COMPLETED" | "FAILED";
 }
@@ -535,6 +537,7 @@ async function prepareLivePopulation(
   const started = Date.now();
   let fetchedCount = 0;
   let degradedCount = 0;
+  let unsupportedResourceTypes: string[] = [];
   try {
     const env = deps.webChartEnv ?? {};
     const cfg = webChartConfigFromEnv(env);
@@ -553,6 +556,7 @@ async function prepareLivePopulation(
     const bundles = await webChartDataSource(cfg, client).loadBundles();
     fetchedCount = bundles.length;
     degradedCount = bundles.filter(isDegradedBundle).length;
+    unsupportedResourceTypes = [...(client.unsupportedResourceTypes?.() ?? [])];
     const patientIds = bundles.map(patientIdOf).filter((id): id is string => id !== undefined);
     if (patientIds.length === 0) {
       throw new Error("WebChart returned zero usable Patient bundles");
@@ -574,6 +578,7 @@ async function prepareLivePopulation(
         host: descriptor.host,
         fetchedCount,
         degradedCount,
+        unsupportedResourceTypes,
         durationMs: Date.now() - started,
         status: "COMPLETED",
       },
@@ -585,6 +590,7 @@ async function prepareLivePopulation(
         host: descriptor.host,
         fetchedCount,
         degradedCount,
+        unsupportedResourceTypes,
         durationMs: Date.now() - started,
         status: "FAILED",
       },
@@ -621,7 +627,10 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     await deps.runStore.appendLog(
       runId,
       "INFO",
-      `WebChart ${liveTenant.host}: fetched ${liveTenant.fetchedCount} subject(s), ${liveTenant.degradedCount} degraded, ${liveTenant.durationMs}ms`,
+      `WebChart ${liveTenant.host}: fetched ${liveTenant.fetchedCount} subject(s), ${liveTenant.degradedCount} degraded, ${liveTenant.durationMs}ms` +
+        (liveTenant.unsupportedResourceTypes.length > 0
+          ? `; not supported by this tenant, so no subject carries them: ${liveTenant.unsupportedResourceTypes.join(", ")}`
+          : ""),
     );
   }
   // Audit actor = the authenticated user (never the caller-influenced triggeredBy label; Codex P1).

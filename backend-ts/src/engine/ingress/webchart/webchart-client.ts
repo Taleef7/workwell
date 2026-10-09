@@ -34,6 +34,11 @@ export interface WebChartClient {
    * "cannot scope" to callers, which fall back to the full fetchPatientPayloads().
    */
   fetchPatientPayloadsByIds?(patientIds: readonly string[]): Promise<unknown[]>;
+  /**
+   * The optional types this client skipped because the server answered 404 before it had ever answered
+   * them (#713), for the run's log and audit payload. Optional: a client that never skips omits it.
+   */
+  unsupportedResourceTypes?(): readonly string[];
 }
 
 /** In-memory client for tests + offline fixtures — the transport-agnostic core runs against this. */
@@ -73,6 +78,9 @@ interface PatientRef {
  */
 export const COMPOSED_RESOURCE_TYPES: readonly string[] = WEBCHART_SERVED_RESOURCES.filter((r) => r.how === "fetched").map((r) => r.type);
 
+/** The composed types a server may not support: a 404 for one skips it for the run (`ServedResource.optional`). */
+const OPTIONAL_RESOURCE_TYPES: ReadonlySet<string> = new Set(WEBCHART_SERVED_RESOURCES.filter((r) => r.optional).map((r) => r.type));
+
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_RETRY_DELAYS_MS = [50, 100] as const;
@@ -83,6 +91,15 @@ class WebChartNonRetryableError extends Error {
   constructor(message: string, status?: number) {
     super(message);
     this.status = status;
+  }
+}
+
+/** An optional type's first search page answered 404: the server does not support the type (#713). */
+class UnsupportedResourceTypeError extends Error {
+  readonly resourceType: string;
+  constructor(resourceType: string) {
+    super(`WebChart does not support ${resourceType} searches (404)`);
+    this.resourceType = resourceType;
   }
 }
 
@@ -152,7 +169,14 @@ function patientsFromSearchset(bundle: unknown): PatientRef[] {
 
 /** `Patient/{id}` reference match — accepts relative and absolute reference forms. */
 function referencesPatient(resource: Json, patientId: string): boolean | undefined {
-  const holder = isObject(resource.subject) ? resource.subject : isObject(resource.patient) ? resource.patient : undefined;
+  // Coverage names its patient as `beneficiary` (#713).
+  const holder = isObject(resource.subject)
+    ? resource.subject
+    : isObject(resource.patient)
+      ? resource.patient
+      : isObject(resource.beneficiary)
+        ? resource.beneficiary
+        : undefined;
   if (!holder || typeof holder.reference !== "string") return undefined; // unverifiable — caller keeps it
   return holder.reference === `Patient/${patientId}` || holder.reference.endsWith(`/Patient/${patientId}`);
 }
@@ -256,6 +280,17 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
   let countDisabled = cfg.disableCount ?? false;
   let patientEnumeration = cfg.patientSearch?.trim() || undefined;
   let countQuirkLogged = false;
+  // Optional types this server answered 404 for, skipped for the rest of the run (`ServedResource.optional`).
+  const unsupportedTypes = new Set<string>();
+  // Types whose first search page has answered at least once this run. A server that has served a type
+  // supports it, so a later 404 for it is a failed search under the strict rule, never a skip: skipping
+  // then would drop the type for every later patient while earlier ones kept it.
+  const answeredTypes = new Set<string>();
+  const isUnsupported = (resourceType: string, e: unknown): boolean =>
+    OPTIONAL_RESOURCE_TYPES.has(resourceType) &&
+    !answeredTypes.has(resourceType) &&
+    e instanceof WebChartNonRetryableError &&
+    e.status === 404;
 
   function logCountFallback(scope: string): void {
     if (countQuirkLogged) return;
@@ -450,6 +485,8 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
       try {
         page = await fetchJson(url);
       } catch (e) {
+        // Only before the type has ever answered: on a later page it has (`answeredTypes`), so a 404 there fails.
+        if (isUnsupported(resourceType, e)) throw new UnsupportedResourceTypeError(resourceType);
         if (!firstPage || countDisabled || !isCapabilityQuirk(e)) throw e;
         countDisabled = true;
         logCountFallback(`${resourceType} search`);
@@ -457,9 +494,16 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
         retryUrl.searchParams.delete("_count");
         url = retryUrl.toString();
         // A second quirk response is deliberately not handled here: it is a real failure for this
-        // search and must propagate to fetchPatient's per-subject degradation path.
-        page = await fetchJson(url);
+        // search and must propagate to fetchPatient's per-subject degradation path. A 404 on the retry is
+        // the same "does not support the type" answer as one on the first try.
+        try {
+          page = await fetchJson(url);
+        } catch (retryError) {
+          if (isUnsupported(resourceType, retryError)) throw new UnsupportedResourceTypeError(resourceType);
+          throw retryError;
+        }
       }
+      if (firstPage) answeredTypes.add(resourceType);
       firstPage = false;
       resources.push(...resourcesFromSearchset(page, patientId));
       url = resolveNext(page, url);
@@ -475,7 +519,23 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
       // series-completion measure to falsely COMPLIANT. Resources without a string id are kept as-is.
       const seenIds = new Set<string>();
       for (const resourceType of resourceTypes) {
-        for (const resource of await searchResources(resourceType, patient.id)) {
+        if (unsupportedTypes.has(resourceType)) continue;
+        let found: Json[];
+        try {
+          found = await searchResources(resourceType, patient.id);
+        } catch (e) {
+          if (!(e instanceof UnsupportedResourceTypeError)) throw e;
+          // Not a failed patient: the type is missing for everyone, exactly as before it was composed. Said
+          // once, loudly, so a tenant without it is visible in the log rather than in the numbers alone.
+          if (!unsupportedTypes.has(resourceType)) {
+            unsupportedTypes.add(resourceType);
+            console.warn(
+              `WebChart answers 404 for ${resourceType} searches, so this run reads no ${resourceType} for any patient (#713).`,
+            );
+          }
+          continue;
+        }
+        for (const resource of found) {
           if (typeof resource.id === "string" && resource.id) {
             const key = `${String(resource.resourceType)}/${resource.id}`;
             if (seenIds.has(key)) continue;
@@ -516,6 +576,7 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
 
   return {
     kind: "http",
+    unsupportedResourceTypes: () => [...unsupportedTypes].sort(),
     async fetchPatientPayloads(): Promise<unknown[]> {
       const patients = await listPopulation();
       const payloads: unknown[] = [];

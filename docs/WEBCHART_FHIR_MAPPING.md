@@ -48,9 +48,13 @@ ADR-017). The engine derives each subject id from its bundle's `Patient`. Resour
 That table is the authored measures'. **What each routed CMS measure reads, and which of it ingest
 supplies, is computed from the committed artifacts by `pnpm data-coverage` (#776)**, with a reason for
 every gap. As of 2026-10-09:
-- Ingest supplies Patient, Observation, Condition, Procedure, Immunization and Encounter.
-- It does not supply MedicationRequest, Medication, ServiceRequest or DeviceRequest, which the measures
-  score with (#713), or Coverage, which feeds only the payer supplemental data element.
+- Ingest supplies Patient, Observation, Condition, Procedure, Immunization and Encounter, plus (since
+  #713) MedicationRequest, ServiceRequest and Coverage.
+  - On WebChart's trial the medications are coded in FDDC, not RxNorm.
+  - Most orders carry no code.
+  - So the CMS medication and order value sets cannot match them yet.
+- It does not supply Medication (the trial names every drug inline) or DeviceRequest (not in WebChart's
+  FHIR API).
 - cms165 retrieves by profile, and ingest stamps only `us-core-blood-pressure` (#591).
 
 The CQL matches events by **inline code filters** on `code.coding.system`/`code`. Today those are

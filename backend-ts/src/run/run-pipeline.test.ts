@@ -432,6 +432,37 @@ test("a degraded Patient-only WebChart bundle evaluates MISSING_DATA and reports
   }
 });
 
+test("#713: a resource type the tenant does not support is named on the run, in its log and its audit payload", async () => {
+  // A skipped type leaves every subject without it, so the run says so where a reader of the run looks,
+  // not only in the container log.
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  const audits: unknown[] = [];
+  try {
+    const client = { ...fixtureWebChartClient([patientOnly("no-orders", false)]), unsupportedResourceTypes: () => ["ServiceRequest"] };
+    const result = await executeManualRun({
+      runStore,
+      outcomeStore,
+      engine: createWorkwellEngine(),
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: client,
+      events: { async appendAudit(input) { audits.push(input); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); }, async recordCaseEvents() {} },
+    }, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-01" });
+
+    const logs = await runStore.listLogs(result.runId, 100);
+    assert.ok(
+      logs.some((log) => log.message.includes("not supported by this tenant, so no subject carries them: ServiceRequest")),
+      "the run log names the skipped type",
+    );
+    const terminal = audits.find((entry) => (entry as { eventType?: string }).eventType === "RUN_COMPLETED") as
+      | { payload: { liveTenant?: { unsupportedResourceTypes?: string[] } } }
+      | undefined;
+    assert.deepEqual(terminal?.payload.liveTenant?.unsupportedResourceTypes, ["ServiceRequest"]);
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 test("live enrollment uses explicit raw Patient ids when set and enroll-all when unset", async () => {
   const { p, runStore, outcomeStore } = await freshPipelineDb();
   const seen = new Map<string, unknown>();

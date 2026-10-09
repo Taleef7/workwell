@@ -23,13 +23,10 @@ import { PROFILES_STAMPED_AT_PREPARATION } from "./qicore-preparation.ts";
 
 /** Why ingest does not supply a type some routed measure reads. One entry per such type, no more. */
 export const NOT_SERVED_REASONS: Readonly<Record<string, string>> = {
-  MedicationRequest: "WebChart ingest does not compose it yet (#713). WebChart's FHIR API lists it.",
   Medication:
-    "Read through MedicationRequest.medication: it needs MedicationRequest first, then a way to fetch the Medication it references, and WebChart declares no _include for that (#713).",
-  ServiceRequest: "WebChart ingest does not compose it yet (#713).",
+    "Read only where a MedicationRequest references a Medication. WebChart's trial names every drug inline instead (checked 2026-10-09) and declares no _include to fetch one.",
   DeviceRequest:
-    "WebChart's FHIR CapabilityStatement does not list it (checked 2026-10-08); where device orders live is an open question to MIE (#713).",
-  Coverage: "WebChart ingest does not compose it yet (#713). WebChart serves it for few patients, and without Coverage.type.",
+    "WebChart's FHIR CapabilityStatement does not list it (checked 2026-10-09); where device orders live is an open question to MIE.",
 };
 
 /** A type ingest fetches, read by a measure that retrieves by profile, in a profile ingest never stamps. */
@@ -52,6 +49,8 @@ export interface CoverageRow {
   readonly how: "population" | "fetched" | null;
   /** What ingest derives of this type from other resources, or empty. */
   readonly derived: string;
+  /** What is known about WebChart's data for this type that limits what a measure can count, or empty. */
+  readonly caveat: string;
   readonly profiles: readonly string[];
   /** For a profile-sensitive measure, the profiles it retrieves by that ingest stamps, and those it does not. */
   readonly stampedProfiles: readonly string[];
@@ -107,6 +106,7 @@ export function coverageOf(measureId: string, kind: MeasureCoverage["kind"], art
       status,
       how: served?.how ?? null,
       derived: served?.derived ?? "",
+      caveat: served?.caveat ?? "",
       profiles: requirement.profiles,
       stampedProfiles,
       unstampedProfiles,
