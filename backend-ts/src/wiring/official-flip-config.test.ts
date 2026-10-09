@@ -76,12 +76,13 @@ test("workflow discovery finds every WorkWell app deployment", () => {
 
 
 /**
- * Workflows that recreate the SAME container and must therefore ship the same routing configuration.
+ * Workflows that recreate the SAME container and must therefore give it the same container env.
  *
  * `reconcile-twh-mieweb.yml` rebuilds twh-api-ts from `:latest` during a self-heal using its own mirrored
  * env array. A key present in the deploy and missing here is **silently dropped** the first time the
- * reconciler fires: the container returns healthy, the image is unchanged, and the routed measures revert
- * to authored CQL with no signal at any layer. Codex caught exactly that on #356.
+ * reconciler fires: the container returns healthy, the image is unchanged, and the setting reverts with no
+ * signal at any layer. Codex caught exactly that on #356, for the routing list, which since #768 is no
+ * longer container env at all.
  */
 const MUST_AGREE: ReadonlyArray<readonly [string, string]> = [
   ["deploy-twh-mieweb.yml", "reconcile-twh-mieweb.yml"],
@@ -89,11 +90,10 @@ const MUST_AGREE: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
- * The value each deploy workflow ships, or `null` where the seam is deliberately unset.
+ * The official measures a workflow's image routes, or `null` where it routes none.
  *
- * Parsed out of the `jq` env array rather than imported, because the workflow IS the source of truth —
- * a constant in TypeScript that the workflow was supposed to match would be exactly the kind of
- * second copy that drifts.
+ * Read from the workflow rather than imported, because the workflow IS the source of truth — a constant in
+ * TypeScript that the workflow was supposed to match would be exactly the kind of second copy that drifts.
  */
 function shippedMeasures(workflow: string): string[] | null {
   return shippedIdList(workflow, "WORKWELL_OFFICIAL_MEASURES");
@@ -101,40 +101,23 @@ function shippedMeasures(workflow: string): string[] | null {
 
 /**
  * The translations a workflow lets score the year they cover (`WORKWELL_DERIVED_MEASURES`, decision 3),
- * read by the SAME pattern as the official list — one parser, so the two lists cannot be read two ways.
+ * read by the SAME reader as the official list — one parser, so the two lists cannot be read two ways.
  */
 function shippedDerived(workflow: string): string[] | null {
   return shippedIdList(workflow, "WORKWELL_DERIVED_MEASURES");
 }
 
+/** A workflow that builds the backend image. */
+const BUILDS_BACKEND_IMAGE = /file:\s*\.\/backend-ts\/Dockerfile/;
+
+/**
+ * Since #768 the lists are build args of the image a deploy builds, and set nowhere else (a test below
+ * holds that). A reconciler builds nothing: it recreates the deploy's image, which carries the deploy's
+ * lists, so it reads as `null` here and its deploy is what every check examines.
+ */
 function shippedIdList(workflow: string, key: string): string[] | null {
-  const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
-  return idListIn(readFileSync(path, "utf8"), key, workflow);
-}
-
-/** `shippedIdList` over workflow TEXT, so its stale-pattern refusal can be proved on a fixture. */
-function idListIn(yaml: string, key: string, workflow: string): string[] | null {
-  const match = yaml.match(new RegExp(String.raw`\{key:\s*"` + key + String.raw`",\s*value:\s*"([^"]*)"\}`));
-  if (match) return match[1]!.split(",").map((s) => s.trim()).filter(Boolean);
-
-  // `null` means "this workflow does not route officially" (or ships no translation), which every test
-  // below treats as legal — so a regex that MISSED a present flag would make all of them pass
-  // vacuously. Review (#356) measured that hole: `{ key: … }` with inner spaces, jq single-quoted
-  // strings, `value: $official_measures` (the `--arg` style every secret in these files uses), or a
-  // swapped key/value order all returned null and sailed through. The literal appears exactly once per
-  // workflow when the flag is set, so its presence is a cheap, reliable discriminator between "absent"
-  // and "my pattern is stale".
-  //
-  // `\bkey:` excludes this very sentence and the surrounding prose comments, which mention the name
-  // without setting it.
-  if (new RegExp(String.raw`\bkey:\s*"` + key + `"`).test(yaml)) {
-    throw new Error(
-      `${workflow} sets ${key} but this test's pattern did not match it. The guard ` +
-        `is stale, not the workflow — fix the pattern rather than letting every assertion below pass ` +
-        `vacuously.`,
-    );
-  }
-  return null;
+  const yaml = readFileSync(fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url)), "utf8");
+  return BUILDS_BACKEND_IMAGE.test(yaml) ? buildArgIn(yaml, key, "build-backend-ts") : null;
 }
 
 test("PR-9c: every officially-routed measure a deploy workflow ships is gated and vendored", () => {
@@ -289,17 +272,68 @@ test("the Maui deployment actually ships the corpus size, and it is the 20,000-p
   assert.equal(shippedValue("deploy-twh-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null);
 });
 
-test("PR-9c: a container recreated by SELF-HEAL routes exactly what the deploy routes", () => {
-  // The silent-revert case. Not "both files mention the flag" — the same VALUE, because a reconciler
-  // shipping a different subset would flip measures on or off on a health event nobody initiated.
-  for (const [a, b] of MUST_AGREE) {
+/**
+ * Every non-comment line naming a routing key outside a `build-args: |` block, from workflow TEXT. Since
+ * #768 the build args are the only place a deploy sets the lists: container env overrides the image's ENV,
+ * so a key back in an env array (in any spelling: quoted, unquoted, a jq `--arg`, a step `env:`) would put
+ * a list on the container that its image may not be able to serve. The self-heal case is the sharp one: a
+ * reconciler recreating an older image with `main`'s list is a router that refuses, behind a green health
+ * check.
+ */
+function routingKeysOutsideBuildArgs(yaml: string): string[] {
+  const found: string[] = [];
+  let block = -1; // the indent of `build-args:` while inside its block scalar
+  yaml.split(/\r?\n/).forEach((line, index) => {
+    const text = line.trim();
+    if (block >= 0 && (text === "" || indentOf(line) > block)) return;
+    block = -1;
+    if (/^build-args:\s*\|\s*$/.test(text)) {
+      block = indentOf(line);
+      return;
+    }
+    if (text.startsWith("#")) return;
+    if (text.includes("WORKWELL_OFFICIAL_MEASURES") || text.includes("WORKWELL_DERIVED_MEASURES")) found.push(`line ${index + 1}: ${text}`);
+  });
+  return found;
+}
+
+test("#768: a deploy or self-heal sets the routing lists nowhere but the image's build args", () => {
+  // The reconcilers read as routing nothing because they build nothing, not because a reader missed them.
+  assert.deepEqual(
+    WORKFLOWS.filter((workflow) => BUILDS_BACKEND_IMAGE.test(readFileSync(join(WORKFLOW_DIR, workflow), "utf8"))),
+    ["deploy-maui-mieweb.yml", "deploy-staging-mieweb.yml", "deploy-twh-mieweb.yml"],
+  );
+  for (const workflow of WORKFLOWS) {
     assert.deepEqual(
-      shippedMeasures(b),
-      shippedMeasures(a),
-      `${b} must ship the same WORKWELL_OFFICIAL_MEASURES as ${a} — it recreates the same container, ` +
-        `so a mismatch silently changes which measures are officially routed on a self-heal`,
+      routingKeysOutsideBuildArgs(readFileSync(join(WORKFLOW_DIR, workflow), "utf8")),
+      [],
+      `${workflow} sets a routing list outside the image's build args; container env would override the image's own`,
     );
   }
+});
+
+test("#768: the routing-key detector finds a key in any spelling outside the build args", () => {
+  const program = (entry: string) =>
+    ["      - run: |", "          jq -nc \\", "            '[", `              ${entry}`, '              {key: "WORKWELL_INSTANCE", value: "maui"}', "            ]'"].join("\n");
+  for (const entry of [
+    '{key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122"},',
+    '{ "key": "WORKWELL_DERIVED_MEASURES", "value": "cms137" },',
+    "{key: 'WORKWELL_OFFICIAL_MEASURES', value: $routed},",
+  ]) {
+    assert.equal(routingKeysOutsideBuildArgs(program(entry)).length, 1, entry);
+  }
+  assert.equal(routingKeysOutsideBuildArgs("              --arg k WORKWELL_OFFICIAL_MEASURES \\").length, 1, "a jq --arg naming the key");
+  assert.equal(routingKeysOutsideBuildArgs("        env:\n          WORKWELL_DERIVED_MEASURES: cms137").length, 1, "a step env");
+  assert.deepEqual(routingKeysOutsideBuildArgs(program("# WORKWELL_OFFICIAL_MEASURES is not set here")), [], "a comment sets nothing");
+  const build = [
+    "          build-args: |",
+    "            WORKWELL_OFFICIAL_MEASURES=cms122",
+    "",
+    "            WORKWELL_DERIVED_MEASURES=cms137",
+    "          tags: image:sha",
+    "      - run: echo WORKWELL_OFFICIAL_MEASURES",
+  ].join("\n");
+  assert.deepEqual(routingKeysOutsideBuildArgs(build), ["line 6: - run: echo WORKWELL_OFFICIAL_MEASURES"], "the block is allowed, and ends at its key's indent");
 });
 
 /**
@@ -412,18 +446,6 @@ function derivedShippingProblems(
   return problems;
 }
 
-test(`${DERIVED_KEY}: a self-healed container scores with the same translations as a deployed one`, () => {
-  // The silent-revert case again: a reconciler that dropped the key would put 2027 back on CMS's 2026
-  // draft on a health event nobody initiated, and one that added it would turn a translation on.
-  for (const [a, b] of MUST_AGREE) {
-    assert.deepEqual(
-      shippedDerived(b),
-      shippedDerived(a),
-      `${b} must ship the same ${DERIVED_KEY} as ${a} — it recreates the same container on a self-heal`,
-    );
-  }
-});
-
 test(`${DERIVED_KEY}: every translation a workflow ships is officially routed and committed (D1, D2)`, () => {
   for (const workflow of WORKFLOWS) {
     assert.deepEqual(derivedShippingProblems(workflow, shippedMeasures(workflow), shippedDerived(workflow), translationCommitted), []);
@@ -433,19 +455,23 @@ test(`${DERIVED_KEY}: every translation a workflow ships is officially routed an
 test(`${DERIVED_KEY}: the shipping rule and its parser refuse a fixture workflow that breaks them`, () => {
   const fixture = (official: string | null, derived: string | null) =>
     [
-      "            jq -nc \\",
-      "              '[",
-      ...(official === null ? [] : [`                {key: "${OFFICIAL_KEY}", value: "${official}"},`]),
-      ...(derived === null ? [] : [`                {key: "${DERIVED_KEY}", value: "${derived}"},`]),
-      `                {key: "WORKWELL_INSTANCE", value: "maui"}`,
-      "              ]'",
+      "jobs:",
+      "  build-backend-ts:",
+      "    steps:",
+      "      - uses: docker/build-push-action@v7",
+      "        with:",
+      "          build-args: |",
+      ...(official === null ? [] : [`            ${OFFICIAL_KEY}=${official}`]),
+      ...(derived === null ? [] : [`            ${DERIVED_KEY}=${derived}`]),
+      "          tags: image:sha",
     ].join("\n");
+  const read = (yaml: string, key: string) => buildArgIn(yaml, key, "build-backend-ts");
   const problemsFor = (yaml: string, committed: (id: string) => boolean = () => true) =>
-    derivedShippingProblems("fixture.yml", idListIn(yaml, OFFICIAL_KEY, "fixture.yml"), idListIn(yaml, DERIVED_KEY, "fixture.yml"), committed);
+    derivedShippingProblems("fixture.yml", read(yaml, OFFICIAL_KEY), read(yaml, DERIVED_KEY), committed);
 
   assert.deepEqual(problemsFor(fixture("cms137", "cms137")), []);
   assert.deepEqual(problemsFor(fixture("cms137", null)), [], "no translation shipped is legal");
-  assert.deepEqual(idListIn(fixture("cms137", null), DERIVED_KEY, "fixture.yml"), null, "the two keys are never read for each other");
+  assert.deepEqual(read(fixture("cms137", null), DERIVED_KEY), null, "the two keys are never read for each other");
   // D1 alone: cms2's translation is committed, but cms2 is not routed.
   assert.deepEqual(problemsFor(fixture("cms137", "cms137,cms2")), [
     "fixture.yml ships translation 'cms2' but does not route 'cms2' in WORKWELL_OFFICIAL_MEASURES (D1)",
@@ -456,28 +482,21 @@ test(`${DERIVED_KEY}: the shipping rule and its parser refuse a fixture workflow
     "fixture.yml ships translation 'cms2', but no translation of 'cms2' is committed under measures/derived/ (D2)",
   ]);
   assert.match(problemsFor(fixture("cms137", "")).join("\n"), /present but empty/);
-  // A spelling the pattern does not read must throw, never read as "absent".
-  assert.throws(
-    () => idListIn(`{ key: "${DERIVED_KEY}", value: "cms137" }`, DERIVED_KEY, "fixture.yml"),
-    /sets WORKWELL_DERIVED_MEASURES but this test's pattern did not match it/,
-  );
 });
 
 test(`${DERIVED_KEY}: TWH and staging ship no translation`, () => {
   // Translations exist for the pilot's performance year (decision 3). Turning one on for the occupational
   // stack or for staging is its own decision, so it must fail here rather than ride along with a Maui change.
-  for (const workflow of ["deploy-twh-mieweb.yml", "reconcile-twh-mieweb.yml", "deploy-staging-mieweb.yml"]) {
+  for (const workflow of ["deploy-twh-mieweb.yml", "deploy-staging-mieweb.yml"]) {
     assert.equal(shippedDerived(workflow), null, `${workflow} ships ${DERIVED_KEY}`);
   }
 });
 
 test(`${DERIVED_KEY}: the Maui deployment ships the cms137 translation`, () => {
-  // The agreement test above also passes when BOTH Maui files drop the key, which would put 2027 back on
-  // the CMS 2026 draft with every check green. So the value is pinned: turning the translation off, or on
-  // for another measure, has to be a deliberate edit of this line.
-  for (const workflow of ["deploy-maui-mieweb.yml", "reconcile-maui-mieweb.yml"]) {
-    assert.deepEqual(shippedDerived(workflow), ["cms137"], `${workflow} must ship ${DERIVED_KEY}=cms137`);
-  }
+  // Every check on the list also passes when it is absent, which would put 2027 back on the CMS 2026 draft
+  // with every check green. So the value is pinned: turning the translation off, or on for another
+  // measure, has to be a deliberate edit of this line.
+  assert.deepEqual(shippedDerived("deploy-maui-mieweb.yml"), ["cms137"], `deploy-maui-mieweb.yml must ship ${DERIVED_KEY}=cms137`);
 });
 
 /**
@@ -499,7 +518,9 @@ const VENDOR_TRANSLATION = /^\s*node scripts\/vendor-derived-terminology\.mjs --
 /** The image build, as a build-push-action step or a `docker build` / `docker buildx build` command. */
 const IMAGE_BUILD = /^\s*-?\s*uses:\s*docker\/build-push-action@|\bdocker\s+(?:buildx\s+)?build\b/;
 
-const indentOf = (line: string): number => line.length - line.trimStart().length;
+function indentOf(line: string): number {
+  return line.length - line.trimStart().length;
+}
 const STEP_KEY = /^\s*(?:-\s+)?([A-Za-z0-9_-]+):\s*(.*?)\s*$/;
 /** `set +e`, `set +xe`, `set +o errexit`: the run block stops failing on a failed command from there on. */
 const ERREXIT_OFF = /\bset\s+(?:\+[A-Za-z]*e[A-Za-z]*|\+o\s+errexit)\b/;
@@ -1014,9 +1035,8 @@ test("#473: the pilot has its OWN evidence bucket, and it is not the demo stack'
 // ---------------------------------------------------------------------------
 // #768: the routing lists travel with the image.
 //
-// An image serves only the artifacts committed in it, so the lists are build args baked into its ENV. Until
-// the container env arrays drop the keys (the second half of #768), container env still overrides the image,
-// so the two must agree; after that the build args are the one copy every other check reads.
+// An image serves only the artifacts committed in it, so the lists are build args baked into its ENV, and set
+// nowhere else (container env would override them). The build args are the one copy every check above reads.
 // ---------------------------------------------------------------------------
 
 const readWorkflow = (workflow: string): string =>
@@ -1027,8 +1047,8 @@ const asIds = (list: string[] | null): string[] | null => (list === null ? null 
 
 /**
  * One routing list from a job's `build-args: |` block, from workflow TEXT; `null` when the block does not
- * name the key, `[]` when it names it empty. Anything else that sets the key in that job THROWS, as
- * `idListIn` does on a stale pattern: a `--build-arg` on a docker command, a single-line `build-args:`, a
+ * name the key, `[]` when it names it empty. Anything else that sets the key in that job THROWS, so a stale
+ * reader can never pass as an absent list: a `--build-arg` on a docker command, a single-line `build-args:`, a
  * quoted or `${{ }}` value, a value with a space (a block scalar has no comments, so `x # note` IS the value),
  * or a second binding. Each would reach the image while this reader saw nothing, or saw something else.
  */
@@ -1058,10 +1078,6 @@ function buildArgIn(yaml: string, key: string, job: string): string[] | null {
   if (values.length === 0) return null;
   return values[0]!.split(",").map((s) => s.trim()).filter(Boolean);
 }
-
-/** The workflows that build the backend image, found by what they build rather than listed. */
-const IMAGE_BUILDS = WORKFLOWS.filter((workflow) => /file:\s*\.\/backend-ts\/Dockerfile/.test(readWorkflow(workflow)));
-const builtWith = (workflow: string, key: string) => buildArgIn(readWorkflow(workflow), key, "build-backend-ts");
 
 test("#768: the build-arg reader keeps to one job's build-args block and refuses what it cannot read", () => {
   const workflow = (...args: string[]) =>
@@ -1115,20 +1131,6 @@ test("#768: the backend image declares both routing lists as build args and bake
   }
 });
 
-test("#768 (until the env keys go): each image is built with exactly the routing its container env sets", () => {
-  // Container env overrides the image's ENV, so a list that differs between the two would build an image
-  // that claims one routing and serves another, and the promotion gate would refuse every deploy.
-  assert.deepEqual(IMAGE_BUILDS, ["deploy-maui-mieweb.yml", "deploy-staging-mieweb.yml", "deploy-twh-mieweb.yml"]);
-  for (const workflow of IMAGE_BUILDS) {
-    for (const key of [OFFICIAL_KEY, DERIVED_KEY]) {
-      assert.deepEqual(asIds(builtWith(workflow, key)), asIds(shippedIdList(workflow, key)), `${workflow}: the ${key} build arg and the container env must agree`);
-    }
-  }
-  // The anchor that keeps the loop from passing on two absent values: the pilot's image carries both lists.
-  assert.ok(builtWith("deploy-maui-mieweb.yml", OFFICIAL_KEY)?.length, "deploy-maui-mieweb.yml builds its image with no official routing");
-  assert.deepEqual(builtWith("deploy-maui-mieweb.yml", DERIVED_KEY), ["cms137"]);
-});
-
 test("#768: a deploy promotes or keeps an image only once its new build serves the routing it was built with", () => {
   for (const workflow of ["deploy-maui-mieweb.yml", "deploy-twh-mieweb.yml"]) {
     const yaml = readWorkflow(workflow);
@@ -1143,7 +1145,7 @@ test("#768: a deploy promotes or keeps an image only once its new build serves t
       const value = jobEnvIn(yaml, "deploy-backend-ts", expected);
       assert.notEqual(value, null, `${workflow}: the gate is given no ${expected}`);
       const ids = value!.split(",").map((s) => s.trim()).filter(Boolean);
-      assert.deepEqual(asIds(ids), asIds(builtWith(workflow, key) ?? []), `${workflow}: the gate's ${expected} must be the image's ${key} build arg`);
+      assert.deepEqual(asIds(ids), asIds(shippedIdList(workflow, key) ?? []), `${workflow}: the gate's ${expected} must be the image's ${key} build arg`);
     }
     assert.match(jobEnvIn(yaml, "deploy-backend-ts", "EXPECTED_SHA") ?? "", /^\$\{\{ github\.sha \}\}$/, `${workflow}: the gate must wait for this commit's build`);
   }
@@ -1161,7 +1163,8 @@ test("#768: a deploy promotes or keeps an image only once its new build serves t
 test("#768: the hand-copied Maui lists match the image's build arg", () => {
   // Two places still carry deploy-maui's official list by hand: the owner-run snapshot rebuild resolves
   // subjects with Maui's profile, and the flip gate appends the measure under test to the routed list.
-  const official = asIds(builtWith("deploy-maui-mieweb.yml", OFFICIAL_KEY));
+  const official = asIds(shippedMeasures("deploy-maui-mieweb.yml"));
+  assert.ok(official?.length, "deploy-maui-mieweb.yml routes nothing, so this comparison would prove nothing");
   const parse = (raw: string | null) => (raw === null ? null : raw.split(",").map((s) => s.trim()).filter(Boolean));
   assert.deepEqual(asIds(parse(jobEnvIn(readWorkflow("rebuild-quality-snapshots-maui.yml"), "rebuild", OFFICIAL_KEY))), official);
 

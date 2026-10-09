@@ -132,8 +132,14 @@ jobs:
           context: .
           file: ./backend-ts/Dockerfile
           push: true
-          # The commit, baked into the image and served on /health (#625), and the routing list (#768): an
-          # image serves only the artifacts committed in it, so the list travels with it.
+          # The commit, baked into the image and served on /health (#625), and the routing list, set nowhere
+          # else (#768): an image serves only the artifacts committed in it, so the list travels with it.
+          #
+          # PR-9c / ADR-045 — THE FLIP. cms122 and cms125 run CMS's published QI-Core artifacts instead of
+          # WorkWell's authored CQL. Safe on THIS stack because it carries zero WORKWELL_WEBCHART_*, so it
+          # evaluates the synthetic roster (docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md). Rollback is
+          # removing an id here and redeploying; logic_version carries the artifact's identity (ADR-040),
+          # so a flip in either direction invalidates eval_state by construction.
           build-args: |
             WORKWELL_BUILD_SHA=${{ github.sha }}
             WORKWELL_OFFICIAL_MEASURES=cms122,cms125
@@ -246,19 +252,10 @@ jobs:
           if [ "$db_url" != "$DATABASE_URL" ]; then
             echo "Normalized DATABASE_URL: stripped 'jdbc:' prefix for node-postgres (value not logged)."
           fi
-          # PR-9c / ADR-045 — THE FLIP. WORKWELL_OFFICIAL_MEASURES below routes cms122 and cms125 to
-          # CMS's published QI-Core artifacts instead of WorkWell's authored CQL. Set HERE rather than on
-          # the container because the deploy deletes-and-recreates it, so a hand-set value is wiped — and
-          # mirrored in reconcile-twh-mieweb.yml, which recreates the same container on a health event
-          # (official-flip-config.test.ts asserts the pair agrees).
-          #
-          # Safe on THIS stack because it carries zero WORKWELL_WEBCHART_*, so it evaluates the synthetic
-          # roster. Evidence: docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md.
-          #
-          # Rollback is removing that line and redeploying; logic_version carries the artifact's identity
-          # (ADR-040), so flip-on/flip-off/re-vendor each invalidate eval_state by construction. A missing
-          # terminology sidecar makes official routing REFUSE at engine construction — per request, not at
-          # boot, so grep the logs for OFFICIAL_ROUTING_MISCONFIGURED; /actuator/health stays 200.
+          # The routing list is a build arg of the image (#768), not container env, which would override
+          # it. A missing terminology sidecar makes official routing REFUSE at engine construction — per
+          # request, not at boot, so grep the logs for OFFICIAL_ROUTING_MISCONFIGURED; /actuator/health
+          # stays 200, and the routing gate after the deploy step fails the job.
           #
           # This prose lives OUTSIDE the jq program deliberately: that program is a single-quoted shell
           # string, and one apostrophe inside it closes the quote and breaks the whole step (review #356).
@@ -287,10 +284,11 @@ jobs:
                 {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
                 {key: "WORKWELL_INSTANCE", value: "twh"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
-                # PR-9c / ADR-045 — THE FLIP. See the note above this jq invocation.
                 # NO APOSTROPHES BELOW THIS LINE: everything here is inside a single-quoted shell
                 # string, and one apostrophe closes it (review, #356).
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                # The routing lists (WORKWELL_OFFICIAL_MEASURES, WORKWELL_DERIVED_MEASURES) are NOT set here.
+                # They are build args baked into the image (#768), and container env would override them.
+                # official-flip-config.test.ts fails if either key returns to a container env array.
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},

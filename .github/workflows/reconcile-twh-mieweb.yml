@@ -191,13 +191,10 @@ jobs:
                 {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
                 {key: "WORKWELL_INSTANCE", value: "twh"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
-                # MUST mirror deploy-twh-mieweb.yml (PR-9c / ADR-045). This array recreates the container
-                # from :latest during a self-heal, so anything missing here is SILENTLY DROPPED the first
-                # time the reconciler fires — the container comes back healthy, the image is unchanged,
-                # and cms122/cms125 quietly revert to authored CQL with no signal anywhere. Caught by
-                # Codex on #356 before it could happen; `official-flip-config.test.ts` now asserts the two
-                # workflows agree, so this pair cannot drift again.
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                # The routing lists (WORKWELL_OFFICIAL_MEASURES, WORKWELL_DERIVED_MEASURES) are NOT set here.
+                # The image carries them (#768), so a self-heal recreates the container with the lists its
+                # own image was built with and can serve. Container env would override them, so
+                # official-flip-config.test.ts fails if either key returns to a container env array.
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},
