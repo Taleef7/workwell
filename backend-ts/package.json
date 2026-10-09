@@ -24,6 +24,7 @@
     "test:compiled-cases": "tsx src/run/cli/compiled-cases-bin.ts",
     "build:derived": "tsx src/run/cli/build-derived-bin.ts",
     "derived:check": "tsx src/run/cli/derived-check-bin.ts",
+    "data-coverage": "tsx src/run/cli/data-coverage-bin.ts",
     "cql-tests": "tsx scripts/cql-tests/bin.ts",
     "cql-tests:fetch": "pwsh -NoProfile -File scripts/fetch-cql-tests.ps1",
     "flip-snapshot": "tsx src/run/cli/official-flip-snapshot-bin.ts",
