@@ -336,6 +336,28 @@ test("#768: the routing-key detector finds a key in any spelling outside the bui
   assert.deepEqual(routingKeysOutsideBuildArgs(build), ["line 6: - run: echo WORKWELL_OFFICIAL_MEASURES"], "the block is allowed, and ends at its key's indent");
 });
 
+test("#768: each reconciler recreates the backend from its own stack's recovery tag", () => {
+  // Since the image carries the lists, the tag a heal recreates from IS the routing a healed container runs.
+  // All three stacks push to one repository, so a Maui heal from TWH's `:latest` would route TWH's two
+  // measures and leave the other four pending, with every check above still green.
+  const backendImages = (yaml: string) =>
+    [...yaml.matchAll(/CONTAINER_IMAGE:\s*\$\{\{\s*env\.BACKEND_TS_IMAGE\s*\}\}:(\S+)/g)].map((match) => match[1]!);
+  for (const [deploy, reconcile, tag] of [
+    ["deploy-maui-mieweb.yml", "reconcile-maui-mieweb.yml", "maui-latest"],
+    ["deploy-twh-mieweb.yml", "reconcile-twh-mieweb.yml", "latest"],
+  ] as const) {
+    assert.ok(jobEnvValue(reconcile, "BACKEND_TS_IMAGE"), `${reconcile} names no backend image`);
+    assert.equal(jobEnvValue(reconcile, "BACKEND_TS_IMAGE"), jobEnvValue(deploy, "BACKEND_TS_IMAGE"), `${reconcile} heals from another repository than ${deploy} pushes to`);
+    assert.deepEqual(backendImages(readFileSync(join(WORKFLOW_DIR, reconcile), "utf8")), [tag], `${reconcile} must recreate the backend from :${tag}`);
+    // ...and the deploy is what moves that tag (Maui promotes it after the gate; TWH pushes it at build).
+    assert.match(
+      readFileSync(join(WORKFLOW_DIR, deploy), "utf8"),
+      new RegExp(String.raw`\$\{\{ env\.BACKEND_TS_IMAGE \}\}:` + tag + String.raw`(?![\w-])`),
+      `${deploy} never moves :${tag}, so a heal would recreate whatever last held it`,
+    );
+  }
+});
+
 /**
  * The full construction-time check against the REAL artifacts — the thing production runs.
  *

@@ -18,10 +18,11 @@ name: Reconcile TWH stack (self-heal)
 # deploy-twh-mieweb.yml, so a heal can never run while a push-to-main deploy is mid delete+recreate of
 # the same container (and vice-versa) — the queued run waits, then re-checks a now-healthy surface.
 #
-# Rollback interaction: a heal recreates from GHCR `:latest`. If you have done a FAST rollback by
-# redeploying an older `sha-<SHA>` via workflow_dispatch, a later heal will re-pull `:latest` (the newer
-# build) and undo it — so follow a fast rollback with a DURABLE one (revert the bad commit on main so
-# `:latest` rebuilds to the good image), or disable this workflow, before relying on it. See docs/DEPLOY.md.
+# Rollback interaction: a heal recreates from GHCR `:latest`. A FAST rollback (dispatching
+# deploy-twh-mieweb.yml at an older commit) rebuilds and pushes `:latest` from that commit, so a heal
+# keeps it; what undoes it is the next push to main. Follow it with a DURABLE one (revert the bad commit
+# on main). The image carries its routing list (#768), so a heal routes what that image was built with.
+# See docs/DEPLOY.md.
 
 # CADENCE, MEASURED — do not read the cron below as a recovery-time guarantee. Over 2026-08-30..09-01
 # the twelve most recent scheduled runs came 2.5-7.5 HOURS apart, never 15 minutes: GitHub queues

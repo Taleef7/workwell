@@ -373,7 +373,8 @@ Actions → the stack's deploy workflow → Run workflow, `replace_existing: tru
 ### Maui sandbox deployment
 
 The pilot group's sandbox (`deploy-maui-mieweb.yml`), with its own Neon project, JWT secret and R2 bucket
-(`workwell-evidence-maui`); env as above with `WORKWELL_INSTANCE=maui` and the six routed measures.
+(`workwell-evidence-maui`); env as above with `WORKWELL_INSTANCE=maui`, and an image that routes the six
+measures.
 
 - **Isolation guard:** deploy and reconcile refuse when `DATABASE_URL_MAUI` has the same host as
   `DATABASE_URL_TWH`.
@@ -634,20 +635,21 @@ Set a hard monthly usage limit and store the key only as the `OPENAI_API_KEY` se
 No migration to undo — the schema is additive. Roll back by redeploying an earlier image:
 
 - **TWH:** dispatch `deploy-twh-mieweb.yml` at the good SHA with `replace_existing: true`, or
-  `git revert <bad-merge-sha>` on `main`. The next TWH heal recreates from `:latest` and **undoes a
-  dispatch rollback** — revert on `main` too, or disable the reconciler meanwhile.
+  `git revert <bad-merge-sha>` on `main`. The dispatch rebuilds and pushes `:latest` from that commit, so a
+  heal keeps it, but the next push supersedes it, so revert on `main` too.
 - **Maui:** dispatch `deploy-maui-mieweb.yml` at the good SHA with `replace_existing: true`; the recovery tag
   follows it, but the next push supersedes it, so revert on `main`.
 - During an NLM VSAC outage only a pre-ADR-041 SHA can be rebuilt (Step 1a).
 - Routing: remove the measure from the deploy's build args (step 4 of the flip checklist) and redeploy.
   Data: `docs/BACKUP_DR_RUNBOOK.md`.
-- **The routing lists roll back with the image** (#768). An image routes the lists it was built with,
-  so a rollback, and every self-heal after it, routes what that commit routed.
+- **The routing lists roll back with the image** (#768). An image built since #768 routes the lists it
+  was built with, so a rollback to it, and every self-heal after, routes what that commit routed.
 - **Rolling back to an image built before #768 (before `0c81cfc2`, 2026-10-09):** that image carries no
-  lists. The dispatch itself serves, because it runs that commit's workflow, which still set them on
-  the container. The next self-heal does not: it recreates the container with `main`'s env, which no
-  longer carries them, so it routes nothing. `/health` shows `routing.official: []`, and the official
-  measures show as pending; measures with authored CQL fall back to it. Redeploy a current SHA to fix it.
+  lists, and its `/health` has no `routing` field. The dispatch itself serves, because it runs that
+  commit's workflow, which still set the lists on the container, and a heal that only restarts the
+  container keeps them. The first heal that has to RECREATE it uses `main`'s env, which no longer
+  carries them, so the stack routes nothing: official-only measures show as pending, measures with
+  authored CQL fall back to it, and `run_logs` has no `official batch` lines. Redeploy a current SHA.
 
 ## Cost monitoring
 
