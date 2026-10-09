@@ -296,6 +296,16 @@ the same patients would show in advance where the two systems' numbers will diff
 Part B of #663 (exiting on a stall, so the platform restarts the worker) is safe only if the platform
 restarts an exited process. Without that, exiting would leave Maui down until the next self-heal.
 
+### 4.12 May WorkWell's modified translations of NCQA measures be used beyond the sandbox?
+
+**Status:** new 2026-10-09 (#779); not yet asked.
+
+CMS130's 2027 translation changes one line of the measure steward's logic (the frailty look-back,
+`measures/derived/cms130/`), and CMS125's will do the same. The steward's notice, carried on each, allows
+internal, noncommercial use without its approval and requires approval for any other use. The sandbox is
+within the first; scoring a customer's patients with a modified measure may not be. Before the PHI phase,
+MIE's legal view is needed on whether its arrangement with NCQA covers modified logic.
+
 ---
 
 ## 5. Answered
