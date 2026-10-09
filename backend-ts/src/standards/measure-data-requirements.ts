@@ -104,9 +104,12 @@ export function measureDataRequirements(bundle: unknown): TypeRequirement[] {
   const main = libraries.get(mainName);
   if (!main) throw new Error(`the Measure's library ${mainName} is not in the bundle`);
 
+  // A multi-component stratifier keeps its criteria on each component instead of on itself.
+  const stratifiers = (group: Json) => (group["stratifier"] as Json[] | undefined) ?? [];
   const scoreRoots = (measure["group"] as Json[] | undefined ?? []).flatMap((group) => [
     ...criteriaOf(group["population"]),
-    ...criteriaOf(group["stratifier"]),
+    ...criteriaOf(stratifiers(group)),
+    ...stratifiers(group).flatMap((stratifier) => criteriaOf(stratifier["component"])),
   ]);
   const sdeRoots = criteriaOf(measure["supplementalData"]);
 

@@ -86,7 +86,12 @@ function fixtureBundle(libraries: Array<{ name: string; includes?: Record<string
         resource: {
           resourceType: "Measure",
           library: ["https://example.org/Library/Main|1.0.0"],
-          group: [{ population: [criteria("Initial Population")], stratifier: [criteria("Strat")] }],
+          group: [
+            {
+              population: [criteria("Initial Population")],
+              stratifier: [criteria("Strat"), { component: [criteria("By Procedure")] }],
+            },
+          ],
           supplementalData: [criteria("SDE Payer")],
         },
       },
@@ -105,6 +110,8 @@ test("#776: the walk follows criteria through expression and function references
       defs: [
         { name: "Initial Population", type: "ExpressionDef", expression: { type: "Exists", operand: { type: "Query", source: [{ expression: retrieve("Encounter") }], where: { type: "ExpressionRef", name: "Labs", libraryName: "Common" } } } },
         { name: "Strat", type: "ExpressionDef", expression: retrieve("Condition", "https://example.org/condition") },
+        // A multi-component stratifier's criteria sit on its components (#777 review).
+        { name: "By Procedure", type: "ExpressionDef", expression: retrieve("Procedure") },
         { name: "SDE Payer", type: "ExpressionDef", expression: retrieve("Coverage") },
         { name: "Never Reached", type: "ExpressionDef", expression: retrieve("DeviceRequest") },
       ],
@@ -124,6 +131,7 @@ test("#776: the walk follows criteria through expression and function references
     { type: "Encounter", forScore: true, forSde: false, profiles: [], untemplated: true },
     // Both overloads of a function are read: an overcount, never an undercount.
     { type: "Observation", forScore: true, forSde: false, profiles: ["https://example.org/lab", "https://example.org/vital"], untemplated: false },
+    { type: "Procedure", forScore: true, forSde: false, profiles: [], untemplated: true },
   ]);
 
   // A walk that cannot follow a reference refuses rather than reporting a measure as needing less.
@@ -242,6 +250,7 @@ test("#776: a profile-sensitive verdict follows cql-exec-fhir: the base type is 
             ],
           },
           { name: "Strat", expression: null },
+          { name: "By Procedure", expression: null },
           { name: "SDE Payer", expression: null },
         ],
       },
