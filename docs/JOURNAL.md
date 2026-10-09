@@ -20,7 +20,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **Per-measure data coverage (#776).** `pnpm data-coverage` reports, for each logic Maui scores with, which
   FHIR types it reads and whether WebChart ingest supplies them, with a reason for each gap.
   - What a measure reads is computed from the committed artifact's ELM. The result equals MADiE's
-    effective data requirements for every vendored CMS artifact, and it covers the translation too.
+    effective data requirements for every vendored CMS artifact (apart from one abstract-type element read in
+    cms138, which is not data), and it covers the translation too.
   - What ingest supplies is one table, which the WebChart client now fetches from.
   - Result on the WebChart path:
     - every routed measure scores with types ingest does not fetch: MedicationRequest, Medication and

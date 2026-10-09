@@ -5,15 +5,15 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { measureDataRequirements } from "../standards/measure-data-requirements.ts";
 import { COMPOSED_RESOURCE_TYPES } from "../engine/ingress/webchart/webchart-client.ts";
 import { WEBCHART_SERVED_RESOURCES } from "../engine/ingress/webchart/served-resources.ts";
-import { dataCoverage, NOT_SERVED_REASONS, UNSTAMPED_PROFILE_REASON } from "./data-coverage.ts";
-import { loadDerivedArtifact, loadOfficialArtifact } from "./official-artifacts.ts";
-import { PROFILES_STAMPED_AT_PREPARATION } from "./qicore-preparation.ts";
+import { coverageOf, dataCoverage, NO_PROFILE, NOT_SERVED_REASONS, UNSTAMPED_PROFILE_REASON } from "./data-coverage.ts";
+import { loadDerivedArtifact, loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
+import { prepareForQiCore, PROFILES_STAMPED_AT_PREPARATION } from "./qicore-preparation.ts";
 import { resolveDeploymentProfile } from "../config/deployment-profile.ts";
 
 const OFFICIAL_DIR = fileURLToPath(new URL("../../measures/official/", import.meta.url));
@@ -119,11 +119,11 @@ test("#776: the walk follows criteria through expression and function references
     },
   ]);
   assert.deepEqual(measureDataRequirements(bundle), [
-    { type: "Condition", forScore: true, forSde: false, profiles: ["https://example.org/condition"] },
-    { type: "Coverage", forScore: false, forSde: true, profiles: [] },
-    { type: "Encounter", forScore: true, forSde: false, profiles: [] },
+    { type: "Condition", forScore: true, forSde: false, profiles: ["https://example.org/condition"], untemplated: false },
+    { type: "Coverage", forScore: false, forSde: true, profiles: [], untemplated: true },
+    { type: "Encounter", forScore: true, forSde: false, profiles: [], untemplated: true },
     // Both overloads of a function are read: an overcount, never an undercount.
-    { type: "Observation", forScore: true, forSde: false, profiles: ["https://example.org/lab", "https://example.org/vital"] },
+    { type: "Observation", forScore: true, forSde: false, profiles: ["https://example.org/lab", "https://example.org/vital"], untemplated: false },
   ]);
 
   // A walk that cannot follow a reference refuses rather than reporting a measure as needing less.
@@ -200,16 +200,57 @@ test("#776: the client fetches exactly the served table's fetched types, in the 
   );
 });
 
-test("#776: the stamped-profile list names every profile preparation stamps", () => {
-  // Read from the source: a new `stampProfile(resource, X)` that is not in the list would make the report
-  // call a stamped type unserved, and one in the list with no call would claim a stamp that never happens.
-  const source = readFileSync(fileURLToPath(new URL("./qicore-preparation.ts", import.meta.url)), "utf8");
-  const constants = new Map([...source.matchAll(/^const ([A-Z_]+) = "([^"]+)";/gm)].map((match) => [match[1]!, match[2]!]));
-  const stamped = [...source.matchAll(/stampProfile\(\s*\w+\s*,\s*([A-Z_]+)\s*\)/g)].map((match) => {
-    const value = constants.get(match[1]!);
-    assert.ok(value, `stampProfile is called with ${match[1]}, which this test cannot resolve to a string`);
-    return value;
-  });
-  assert.ok(stamped.length > 0, "found no stampProfile call; the scan is stale");
-  assert.deepEqual([...new Set(stamped)].sort(), [...PROFILES_STAMPED_AT_PREPARATION].sort());
+test("#776: preparation stamps the listed profile on a blood pressure", () => {
+  // The other direction is the compiler's: `stampProfile` takes only this list's element type, so a new
+  // stamp cannot be written without listing it. This holds the list to a stamp that actually happens.
+  const loinc = (code: string) => ({ coding: [{ system: "http://loinc.org", code }] });
+  const bundle = {
+    resourceType: "Bundle",
+    entry: [
+      {
+        resource: {
+          resourceType: "Observation",
+          status: "final",
+          code: loinc("85354-9"),
+          component: [
+            { code: loinc("8480-6"), valueQuantity: { value: 128, unit: "mm[Hg]" } },
+            { code: loinc("8462-4"), valueQuantity: { value: 82, unit: "mm[Hg]" } },
+          ],
+        } as Record<string, unknown>,
+      },
+    ],
+  };
+  prepareForQiCore(bundle as never);
+  assert.deepEqual((bundle.entry[0]!.resource["meta"] as { profile?: unknown }).profile, [...PROFILES_STAMPED_AT_PREPARATION]);
+});
+
+test("#776: a profile-sensitive verdict follows cql-exec-fhir: the base type is exempt, a retrieve with no profile matches nothing", () => {
+  const bp = PROFILES_STAMPED_AT_PREPARATION[0];
+  const artifact = {
+    manifest: { catalogId: "cms165", measureName: "Fixture", version: "0.0.1", cmsId: "165FHIR" },
+    bundle: fixtureBundle([
+      {
+        name: "Main",
+        defs: [
+          {
+            name: "Initial Population",
+            expression: [
+              retrieve("Patient", "http://hl7.org/fhir/StructureDefinition/Patient"),
+              retrieve("Observation", bp),
+              retrieve("Observation"),
+              retrieve("Encounter", "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"),
+            ],
+          },
+          { name: "Strat", expression: null },
+          { name: "SDE Payer", expression: null },
+        ],
+      },
+    ]),
+  } as unknown as OfficialArtifact;
+  const table = coverageOf("cms165", "cms-artifact", artifact);
+  assert.equal(table.profileSensitive, true);
+  const row = (type: string) => table.rows.find((r) => r.type === type)!;
+  assert.equal(row("Patient").status, "served", "a retrieve by the base StructureDefinition is not profile-filtered");
+  assert.deepEqual([row("Observation").status, row("Observation").stampedProfiles, row("Observation").unstampedProfiles], ["partial", [bp], [NO_PROFILE]]);
+  assert.deepEqual([row("Encounter").status, row("Encounter").reason], ["not served", UNSTAMPED_PROFILE_REASON]);
 });

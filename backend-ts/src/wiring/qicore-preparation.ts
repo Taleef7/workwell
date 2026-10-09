@@ -170,11 +170,12 @@ const ENCOUNTER_CLASS_CODES: ReadonlySet<string> = new Set([
 
 const US_CORE_BLOOD_PRESSURE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
 /**
- * Every profile this file stamps (`stampProfile` below), for the data-coverage report (#776): a measure
- * that retrieves by profile reads only resources that carry one. A test holds every `stampProfile` call
- * here to this list.
+ * Every profile this file stamps, for the data-coverage report (#776): a measure that retrieves by profile
+ * reads only resources that carry one. `stampProfile` accepts nothing else (its parameter is this list's
+ * element type), so a new stamp cannot be added without adding it here.
  */
-export const PROFILES_STAMPED_AT_PREPARATION: readonly string[] = [US_CORE_BLOOD_PRESSURE];
+export const PROFILES_STAMPED_AT_PREPARATION = [US_CORE_BLOOD_PRESSURE] as const;
+type StampedProfile = (typeof PROFILES_STAMPED_AT_PREPARATION)[number];
 /** The two LOINC panel codes a blood pressure is recorded under. Same set `normalize.ts` verified
  *  against the live WebChart export; kept local because these layers must be able to move apart. */
 const LOINC_BP_PANEL = new Set(["85354-9", "55284-4"]);
@@ -240,7 +241,7 @@ function isBloodPressure(resource: Record<string, unknown>): boolean {
 }
 
 /** Add a profile to `meta.profile` without disturbing any already there. */
-function stampProfile(resource: Record<string, unknown>, profile: string): void {
+function stampProfile(resource: Record<string, unknown>, profile: StampedProfile): void {
   const meta = (resource.meta ??= {}) as { profile?: unknown };
   // A malformed scalar `meta.profile` is KEPT and appended to, never dropped: this function's job is to
   // add a profile, and silently discarding whatever a source already asserted is a different act

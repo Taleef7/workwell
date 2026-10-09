@@ -34,7 +34,10 @@ export const NOT_SERVED_REASONS: Readonly<Record<string, string>> = {
 
 /** A type ingest fetches, read by a measure that retrieves by profile, in a profile ingest never stamps. */
 export const UNSTAMPED_PROFILE_REASON =
-  "This measure retrieves by profile, and ingest stamps none of these QI-Core profiles; a resource without one is not retrieved (#591).";
+  "This measure retrieves by profile, and ingest stamps none of these QI-Core profiles; a resource without one is not retrieved. Running cms165 on WebChart data is #591.";
+
+/** What `unstampedProfiles` holds for a retrieve that names no profile: under profile filtering it matches nothing. */
+export const NO_PROFILE = "(a retrieve that names no profile)";
 
 export interface CoverageRow {
   readonly type: string;
@@ -68,7 +71,15 @@ export interface MeasureCoverage {
 }
 
 const SERVED = new Map(WEBCHART_SERVED_RESOURCES.map((resource) => [resource.type, resource]));
-const STAMPED = new Set(PROFILES_STAMPED_AT_PREPARATION);
+const STAMPED = new Set<string>(PROFILES_STAMPED_AT_PREPARATION);
+
+/**
+ * Whether a profile-filtered retrieve can match what ingest supplies, as `cql-exec-fhir` decides it
+ * (`requireProfileTagging`, lib/fhir.js): a retrieve by the type's base StructureDefinition is exempt from
+ * the filter; any other profile must be in `meta.profile`.
+ */
+const retrievable = (type: string, profile: string): boolean =>
+  STAMPED.has(profile) || profile === `http://hl7.org/fhir/StructureDefinition/${type}`;
 
 function logicOf(kind: MeasureCoverage["kind"], artifact: OfficialArtifact): string {
   const manifest = artifact.manifest as OfficialArtifact["manifest"] & { derived?: { label?: string } };
@@ -82,8 +93,11 @@ export function coverageOf(measureId: string, kind: MeasureCoverage["kind"], art
   const rows = measureDataRequirements(artifact.bundle).map((requirement): CoverageRow => {
     const served = SERVED.get(requirement.type);
     const byProfile = served !== undefined && profileSensitive;
-    const stampedProfiles = byProfile ? requirement.profiles.filter((profile) => STAMPED.has(profile)) : [];
-    const unstampedProfiles = byProfile ? requirement.profiles.filter((profile) => !STAMPED.has(profile)) : [];
+    const stampedProfiles = byProfile ? requirement.profiles.filter((profile) => retrievable(requirement.type, profile)) : [];
+    // A retrieve that names no profile is filtered on its type string, which no `meta.profile` carries.
+    const unstampedProfiles = byProfile
+      ? [...requirement.profiles.filter((profile) => !retrievable(requirement.type, profile)), ...(requirement.untemplated ? [NO_PROFILE] : [])]
+      : [];
     const status: CoverageRow["status"] =
       served === undefined ? "not served" : unstampedProfiles.length === 0 ? "served" : stampedProfiles.length > 0 ? "partial" : "not served";
     return {

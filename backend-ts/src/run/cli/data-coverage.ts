@@ -6,10 +6,13 @@
  *   pnpm data-coverage --measure cms165      one measure (repeatable)
  *   pnpm data-coverage --json                the same tables as JSON
  *
- * Exit 0 with the report, 2 on a usage error.
+ * Exit 0 with the report, 2 on a usage error (including a measure with no committed CMS artifact), 1 when a
+ * committed artifact cannot be walked.
  */
 import { resolveDeploymentProfile } from "../../config/deployment-profile.ts";
 import { dataCoverage, type CoverageRow, type MeasureCoverage } from "../../wiring/data-coverage.ts";
+import { WEBCHART_SERVED_RESOURCES } from "../../engine/ingress/webchart/served-resources.ts";
+import { loadOfficialArtifact } from "../../wiring/official-artifacts.ts";
 
 export interface DataCoverageArgs {
   readonly measures: readonly string[];
@@ -58,6 +61,9 @@ export function renderText(tables: readonly MeasureCoverage[]): string {
     "Data coverage (#776): what each measure's logic reads, and whether WebChart ingest supplies it.",
     "This is the WebChart live-tenant path. The Maui sandbox scores a synthetic corpus that carries most of",
     "the types marked NOT SERVED, so its rates are not what WebChart data would give.",
+    ...WEBCHART_SERVED_RESOURCES.filter((resource) => resource.derived).map(
+      (resource) => `Ingest also derives ${resource.type}: ${resource.derived}.`,
+    ),
   ];
   for (const table of tables) {
     const scored = table.rows.filter((row) => row.forScore);
@@ -76,7 +82,6 @@ export function renderText(tables: readonly MeasureCoverage[]): string {
     const width = Math.max(...table.rows.map((row) => row.type.length));
     for (const row of table.rows) {
       lines.push(`  ${row.type.padEnd(width)}  ${useOf(row).padEnd(10)}  ${statusOf(row)}`);
-      if (row.status === "served" && row.derived) lines.push(`  ${" ".repeat(width)}  ${" ".repeat(10)}  also derived: ${row.derived}`);
     }
   }
   return lines.join("\n");
@@ -89,13 +94,13 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
   const measures = args.measures.length > 0 ? args.measures : resolveDeploymentProfile("maui").runnableMeasureIds;
-  let tables: MeasureCoverage[];
-  try {
-    tables = dataCoverage(measures);
-  } catch (error) {
-    console.error(`${(error as Error).message}\n${USAGE}`);
+  const unknown = measures.filter((id) => !loadOfficialArtifact(id));
+  if (unknown.length > 0) {
+    console.error(`${unknown.join(", ")}: no committed CMS artifact under measures/official/\n${USAGE}`);
     return 2;
   }
+  // A committed artifact the walk cannot follow throws, and that is a failure (exit 1), not a usage error.
+  const tables = dataCoverage(measures);
   console.log(args.json ? JSON.stringify(tables, null, 2) : renderText(tables));
   return 0;
 }

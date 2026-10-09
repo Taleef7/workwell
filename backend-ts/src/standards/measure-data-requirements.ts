@@ -29,6 +29,8 @@ export interface TypeRequirement {
   readonly forSde: boolean;
   /** The profiles its retrieves name (`Retrieve.templateId`), sorted. */
   readonly profiles: readonly string[];
+  /** Some retrieve of this type names no profile. */
+  readonly untemplated: boolean;
 }
 
 interface ElmDef {
@@ -108,7 +110,7 @@ export function measureDataRequirements(bundle: unknown): TypeRequirement[] {
   ]);
   const sdeRoots = criteriaOf(measure["supplementalData"]);
 
-  const found = new Map<string, { forScore: boolean; forSde: boolean; profiles: Set<string> }>();
+  const found = new Map<string, { forScore: boolean; forSde: boolean; profiles: Set<string>; untemplated: boolean }>();
   const walk = (roots: string[], use: "forScore" | "forSde") => {
     const seen = new Set<string>();
     const visitDef = (library: ElmLibrary, name: string) => {
@@ -135,9 +137,10 @@ export function measureDataRequirements(bundle: unknown): TypeRequirement[] {
       const record = node as Json;
       if (record["type"] === "Retrieve" && typeof record["dataType"] === "string") {
         const type = (record["dataType"] as string).replace(/^\{[^}]*\}/, "");
-        const entry = found.get(type) ?? { forScore: false, forSde: false, profiles: new Set<string>() };
+        const entry = found.get(type) ?? { forScore: false, forSde: false, profiles: new Set<string>(), untemplated: false };
         entry[use] = true;
         if (typeof record["templateId"] === "string") entry.profiles.add(record["templateId"] as string);
+        else entry.untemplated = true;
         found.set(type, entry);
       }
       if ((record["type"] === "ExpressionRef" || record["type"] === "FunctionRef") && typeof record["name"] === "string") {
@@ -151,6 +154,12 @@ export function measureDataRequirements(bundle: unknown): TypeRequirement[] {
   walk(sdeRoots, "forSde");
 
   return [...found.entries()]
-    .map(([type, entry]) => ({ type, forScore: entry.forScore, forSde: entry.forSde, profiles: [...entry.profiles].sort() }))
+    .map(([type, entry]) => ({
+      type,
+      forScore: entry.forScore,
+      forSde: entry.forSde,
+      profiles: [...entry.profiles].sort(),
+      untemplated: entry.untemplated,
+    }))
     .sort((a, b) => a.type.localeCompare(b.type));
 }
