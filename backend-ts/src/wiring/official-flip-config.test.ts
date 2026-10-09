@@ -1010,3 +1010,168 @@ test("#473: the pilot has its OWN evidence bucket, and it is not the demo stack'
     /secrets\.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI/,
   );
 });
+
+// ---------------------------------------------------------------------------
+// #768: the routing lists travel with the image.
+//
+// An image serves only the artifacts committed in it, so the lists are build args baked into its ENV. Until
+// the container env arrays drop the keys (the second half of #768), container env still overrides the image,
+// so the two must agree; after that the build args are the one copy every other check reads.
+// ---------------------------------------------------------------------------
+
+const readWorkflow = (workflow: string): string =>
+  readFileSync(fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url)), "utf8");
+
+/** A list as a set, so that the order of an allowlist (which routes nothing) never fails a comparison. */
+const asIds = (list: string[] | null): string[] | null => (list === null ? null : [...new Set(list)].sort());
+
+/**
+ * One routing list from a job's `build-args: |` block, from workflow TEXT; `null` when the block does not
+ * name the key, `[]` when it names it empty. Anything else that sets the key in that job THROWS, as
+ * `idListIn` does on a stale pattern: a `--build-arg` on a docker command, a single-line `build-args:`, a
+ * quoted or `${{ }}` value, a value with a space (a block scalar has no comments, so `x # note` IS the value),
+ * or a second binding. Each would reach the image while this reader saw nothing, or saw something else.
+ */
+function buildArgIn(yaml: string, key: string, job: string): string[] | null {
+  const values: string[] = [];
+  let block = -1; // the indent of `build-args:` while inside its block scalar
+  for (const line of jobLines(yaml, job)) {
+    const text = line.trim();
+    if (block >= 0 && (text === "" || indentOf(line) > block)) {
+      if (!text.includes(key)) continue;
+      const match = text.match(new RegExp(`^${key}=([a-z0-9,]*)$`));
+      if (!match) throw new Error(`job '${job}' passes ${key} as "${text}", which this reader does not parse — fix the reader`);
+      values.push(match[1]!);
+      continue;
+    }
+    block = -1;
+    if (text.startsWith("#")) continue;
+    if (/^build-args:\s*\|\s*$/.test(text)) {
+      block = indentOf(line);
+      continue;
+    }
+    if (new RegExp(String.raw`\b` + key + String.raw`\s*[:=]`).test(line)) {
+      throw new Error(`job '${job}' sets ${key} outside its build-args block: "${text}" — fix the reader`);
+    }
+  }
+  if (values.length > 1) throw new Error(`job '${job}' passes ${key} ${values.length} times`);
+  if (values.length === 0) return null;
+  return values[0]!.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/** The workflows that build the backend image, found by what they build rather than listed. */
+const IMAGE_BUILDS = WORKFLOWS.filter((workflow) => /file:\s*\.\/backend-ts\/Dockerfile/.test(readWorkflow(workflow)));
+const builtWith = (workflow: string, key: string) => buildArgIn(readWorkflow(workflow), key, "build-backend-ts");
+
+test("#768: the build-arg reader keeps to one job's build-args block and refuses what it cannot read", () => {
+  const workflow = (...args: string[]) =>
+    [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      "      # WORKWELL_OFFICIAL_MEASURES=cms9 in a comment is not a build arg",
+      "      - uses: docker/build-push-action@v7",
+      "        with:",
+      "          build-args: |",
+      "            WORKWELL_BUILD_SHA=${{ github.sha }}",
+      ...args.map((arg) => `            ${arg}`),
+      "          tags: image:sha",
+      "  deploy:",
+      "    steps:",
+      `      - run: echo ${OFFICIAL_KEY}=cms2`,
+    ].join("\n");
+  const read = (yaml: string, key: string = OFFICIAL_KEY) => buildArgIn(yaml, key, "build");
+
+  assert.deepEqual(read(workflow(`${OFFICIAL_KEY}=cms122,cms125`, `${DERIVED_KEY}=cms137`)), ["cms122", "cms125"]);
+  assert.deepEqual(read(workflow(`${OFFICIAL_KEY}=cms122,cms125`, `${DERIVED_KEY}=cms137`), DERIVED_KEY), ["cms137"]);
+  assert.equal(read(workflow(`${OFFICIAL_KEY}=cms122`), DERIVED_KEY), null, "the two keys are never read for each other");
+  assert.equal(read(workflow()), null, "another job's line and a comment are not this job's build arg");
+  assert.deepEqual(read(workflow(`${OFFICIAL_KEY}=`)), [], "present but empty is not absent");
+  assert.throws(() => buildArgIn(workflow(), OFFICIAL_KEY, "build-backend-ts"), /no job 'build-backend-ts'/);
+  for (const unread of [`${OFFICIAL_KEY}="cms122"`, `${OFFICIAL_KEY}=\${{ vars.ROUTED }}`, `${OFFICIAL_KEY}=cms122 # the pilot`, `"${OFFICIAL_KEY}=cms122"`]) {
+    assert.throws(() => read(workflow(unread)), /which this reader does not parse/, unread);
+  }
+  assert.throws(() => read(workflow(`${OFFICIAL_KEY}=cms122`, `${OFFICIAL_KEY}=cms125`)), /passes WORKWELL_OFFICIAL_MEASURES 2 times/);
+  const cli = workflow().replace("          tags: image:sha", `          tags: image:sha\n      - run: docker build --build-arg ${OFFICIAL_KEY}=cms122 .`);
+  assert.throws(() => read(cli), /outside its build-args block/);
+  const oneLine = workflow().replace("          build-args: |", `          build-args: ${OFFICIAL_KEY}=cms122`);
+  assert.throws(() => read(oneLine), /outside its build-args block/);
+});
+
+test("#768: the backend image declares both routing lists as build args and bakes them into its ENV", () => {
+  const lines = readFileSync(fileURLToPath(new URL("../../Dockerfile", import.meta.url)), "utf8").split(/\r?\n/).map((line) => line.trim());
+  // An ARG declared before the last FROM is not in scope in the runtime stage, so only that stage counts.
+  let runtime = -1;
+  lines.forEach((line, index) => {
+    if (/^FROM\s/i.test(line)) runtime = index;
+  });
+  assert.ok(runtime >= 0, "the Dockerfile has no FROM this test can find");
+  const stage = lines.slice(runtime + 1);
+  for (const key of [OFFICIAL_KEY, DERIVED_KEY]) {
+    const arg = stage.findIndex((line) => new RegExp(`^ARG ${key}(=.*)?$`).test(line));
+    const env = stage.findIndex((line) => line === `ENV ${key}=\${${key}}`);
+    assert.ok(arg >= 0, `the runtime stage declares no ARG ${key}, so the build arg never reaches it`);
+    assert.ok(env > arg, `the runtime stage must set ENV ${key}=\${${key}} after its ARG, or the image does not carry the list`);
+  }
+});
+
+test("#768 (until the env keys go): each image is built with exactly the routing its container env sets", () => {
+  // Container env overrides the image's ENV, so a list that differs between the two would build an image
+  // that claims one routing and serves another, and the promotion gate would refuse every deploy.
+  assert.deepEqual(IMAGE_BUILDS, ["deploy-maui-mieweb.yml", "deploy-staging-mieweb.yml", "deploy-twh-mieweb.yml"]);
+  for (const workflow of IMAGE_BUILDS) {
+    for (const key of [OFFICIAL_KEY, DERIVED_KEY]) {
+      assert.deepEqual(asIds(builtWith(workflow, key)), asIds(shippedIdList(workflow, key)), `${workflow}: the ${key} build arg and the container env must agree`);
+    }
+  }
+  // The anchor that keeps the loop from passing on two absent values: the pilot's image carries both lists.
+  assert.ok(builtWith("deploy-maui-mieweb.yml", OFFICIAL_KEY)?.length, "deploy-maui-mieweb.yml builds its image with no official routing");
+  assert.deepEqual(builtWith("deploy-maui-mieweb.yml", DERIVED_KEY), ["cms137"]);
+});
+
+test("#768: a deploy promotes or keeps an image only once its new build serves the routing it was built with", () => {
+  for (const workflow of ["deploy-maui-mieweb.yml", "deploy-twh-mieweb.yml"]) {
+    const yaml = readWorkflow(workflow);
+    const lines = jobLines(yaml, "deploy-backend-ts");
+    const gate = lines.findIndex((line) => /^\s*(?:-\s+)?run:\s*bash \.github\/scripts\/verify-routing-health\.sh\s*$/.test(line));
+    const deploy = lines.findIndex((line) => line.includes("deploy-mieweb-container.sh"));
+    assert.ok(gate >= 0, `${workflow}: deploy-backend-ts runs no routing gate`);
+    assert.ok(deploy >= 0 && deploy < gate, `${workflow}: the gate must run after the container is deployed`);
+    assert.deepEqual(stepFailSoft(lines, gate), [], `${workflow}: a failed gate must fail the job`);
+    // The gate's expectations are a second copy of the build args, held to them here.
+    for (const [expected, key] of [["EXPECTED_OFFICIAL", OFFICIAL_KEY], ["EXPECTED_DERIVED", DERIVED_KEY]] as const) {
+      const value = jobEnvIn(yaml, "deploy-backend-ts", expected);
+      assert.notEqual(value, null, `${workflow}: the gate is given no ${expected}`);
+      const ids = value!.split(",").map((s) => s.trim()).filter(Boolean);
+      assert.deepEqual(asIds(ids), asIds(builtWith(workflow, key) ?? []), `${workflow}: the gate's ${expected} must be the image's ${key} build arg`);
+    }
+    assert.match(jobEnvIn(yaml, "deploy-backend-ts", "EXPECTED_SHA") ?? "", /^\$\{\{ github\.sha \}\}$/, `${workflow}: the gate must wait for this commit's build`);
+  }
+  // Maui's recovery tag moves only after the gate passed: a refused routing must never become what a self-heal recreates.
+  const maui = jobLines(readWorkflow("deploy-maui-mieweb.yml"), "deploy-backend-ts");
+  const gate = maui.findIndex((line) => line.includes("verify-routing-health.sh"));
+  const promote = maui.findIndex((line) => /imagetools create .*maui-latest/.test(line));
+  assert.ok(promote >= 0, "deploy-maui-mieweb.yml: no maui-latest promotion this test can find");
+  assert.ok(gate < promote, "deploy-maui-mieweb.yml: maui-latest is promoted before the routing gate runs");
+  // ...and the promotion runs only when every step before it passed: an `if: always()` or `!cancelled()`
+  // on it would move the tag after a refused gate with the order above intact.
+  assert.deepEqual(stepFailSoft(maui, promote), [], "deploy-maui-mieweb.yml: the maui-latest promotion must run only on success");
+});
+
+test("#768: the hand-copied Maui lists match the image's build arg", () => {
+  // Two places still carry deploy-maui's official list by hand: the owner-run snapshot rebuild resolves
+  // subjects with Maui's profile, and the flip gate appends the measure under test to the routed list.
+  const official = asIds(builtWith("deploy-maui-mieweb.yml", OFFICIAL_KEY));
+  const parse = (raw: string | null) => (raw === null ? null : raw.split(",").map((s) => s.trim()).filter(Boolean));
+  assert.deepEqual(asIds(parse(jobEnvIn(readWorkflow("rebuild-quality-snapshots-maui.yml"), "rebuild", OFFICIAL_KEY))), official);
+
+  const flipGate = readWorkflow("flip-gate.yml").split(/\r?\n/);
+  const input = flipGate.findIndex((line) => line.trimEnd() === "      routed:");
+  assert.ok(input >= 0, "flip-gate.yml has no `routed` input this test can find");
+  let fallback: string | null = null;
+  for (let i = input + 1; i < flipGate.length && indentOf(flipGate[i]!) > 6; i++) {
+    const match = flipGate[i]!.match(/^\s+default:\s*"([^"]*)"\s*$/);
+    if (match) fallback = match[1]!;
+  }
+  assert.deepEqual(asIds(parse(fallback)), official, "flip-gate.yml's `routed` default must be the list deploy-maui-mieweb.yml ships");
+});

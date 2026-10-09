@@ -40,7 +40,17 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - Measured: the run-detail read is 250–400 ms for a 120,000-row run on a local Postgres 16; a finished run's
     answer is memoized.
   - CI proves the translated label on a one-patient 2027 run on its throwaway stack.
-- Next: #768.
+- **#768, first half: the image carries its routing lists.**
+  - Each deploy bakes its routing lists into the backend image as build args: Maui both lists, TWH the
+    official one, staging neither. The container env still sets the same values, and a test holds the
+    two equal. Nothing changes at runtime.
+  - `/health` now reports `routing` (the routed ids and the router's problem count).
+  - A new gate waits for the deployed build on `/health`. Maui promotes `maui-latest` only if that build
+    routes exactly its build args with 0 problems; on TWH a failed gate fails the deploy.
+  - A shim-only merge no longer redeploys either stack. Dependabot no longer proposes Node 26 types for the
+    shim.
+  - Next: the second half, once this image is `maui-latest`. It drops the keys from the deploy and
+    reconcile env, so a self-heal can no longer pair an older image with `main`'s list.
 
 ## 2026-10-05
 

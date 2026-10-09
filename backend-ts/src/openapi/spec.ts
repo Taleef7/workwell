@@ -527,6 +527,17 @@ export function openApiDocument(): OpenApiDocument {
               description: "The build answering (#625).",
               properties: { sha: { type: ["string", "null"], description: "The commit the image was built from; null when built by hand." } },
             },
+            routing: {
+              type: ["object", "null"],
+              description:
+                "What this process routes (#768): catalog measure ids only, from the boot check that raises OFFICIAL_ROUTING_MISCONFIGURED. A deploy promotes an image only when problems is 0. Null if that check has not completed.",
+              required: ["official", "derived", "problems"],
+              properties: {
+                official: { type: "array", items: { type: "string" }, description: "Measures scored by CMS's artifact, sorted." },
+                derived: { type: "array", items: { type: "string" }, description: "Measures a WorkWell translation scores for the year it covers, sorted." },
+                problems: { type: "integer", description: "How many problems the router found with this routing; any is a refused configuration." },
+              },
+            },
             startedAt: { type: "string", format: "date-time", description: "When this process started." },
             uptimeSeconds: { type: "integer" },
             eventLoop: {

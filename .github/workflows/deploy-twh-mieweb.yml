@@ -11,8 +11,9 @@ on:
   push:
     branches: [main]
     # A docs-only merge ships nothing (no image contains docs/ or a root *.md), and a push deploy
-    # recreates the containers, so skipping it saves ~30-120 s of downtime per stack.
-    paths-ignore: ["docs/**", "*.md"]
+    # recreates the containers, so skipping it saves ~30-120 s of downtime per stack. The WebChart dev-DB
+    # shim is in no image either (it runs beside the dev database, never on a stack).
+    paths-ignore: ["docs/**", "*.md", "wcdb-fhir-shim/**"]
   workflow_dispatch:
     inputs:
       replace_existing:
@@ -131,9 +132,11 @@ jobs:
           context: .
           file: ./backend-ts/Dockerfile
           push: true
-          # The commit, baked into the image and served on /health (#625).
+          # The commit, baked into the image and served on /health (#625), and the routing list (#768): an
+          # image serves only the artifacts committed in it, so the list travels with it.
           build-args: |
             WORKWELL_BUILD_SHA=${{ github.sha }}
+            WORKWELL_OFFICIAL_MEASURES=cms122,cms125
           tags: |
             ${{ env.BACKEND_TS_IMAGE }}:latest
             ${{ env.BACKEND_TS_IMAGE }}:sha-${{ github.sha }}
@@ -305,6 +308,17 @@ jobs:
           INTERNAL_PORT: 8080
           CONTAINER_ENV_VARS_JSON: ${{ steps.backend-ts-env.outputs.json }}
         run: bash .github/scripts/deploy-mieweb-container.sh
+
+      # #768: the new build must serve exactly the routing its build args name, with no routing problem.
+      # TWH's `:latest` is pushed at build time, so this cannot hold it back; it makes a refused routing
+      # fail the deploy loudly instead of serving 500s behind a green health check.
+      - name: The new backend serves the routing its image was built with
+        env:
+          HEALTH_URL: ${{ env.BACKEND_TS_URL }}/health
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_OFFICIAL: cms122,cms125
+          EXPECTED_DERIVED: ""
+        run: bash .github/scripts/verify-routing-health.sh
 
   deploy-frontend:
     name: Deploy twh frontend container

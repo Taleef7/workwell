@@ -90,6 +90,16 @@ ENV WORKWELL_ENVIRONMENT=production
 ARG WORKWELL_BUILD_SHA=""
 ENV WORKWELL_BUILD_SHA=${WORKWELL_BUILD_SHA}
 
+# The measures this image routes to CMS's artifacts and to WorkWell translations (#768), baked in for the
+# same reason: an image can only serve the artifacts committed in it, so the list belongs to the image.
+# Set on the container instead, a self-heal that recreates from an older `*-latest` would start it with
+# `main`'s list, the router would refuse, and every evaluating route would answer 500. Empty reads as
+# unset (`official-routing.ts`): a stack that routes nothing passes nothing.
+ARG WORKWELL_OFFICIAL_MEASURES=""
+ENV WORKWELL_OFFICIAL_MEASURES=${WORKWELL_OFFICIAL_MEASURES}
+ARG WORKWELL_DERIVED_MEASURES=""
+ENV WORKWELL_DERIVED_MEASURES=${WORKWELL_DERIVED_MEASURES}
+
 EXPOSE 8082
 # Run node directly as PID 1 (not `pnpm start`) so SIGTERM/SIGINT reach the process and the graceful
 # shutdown in src/server.ts actually runs — a package-manager wrapper as PID 1 swallows the signal.

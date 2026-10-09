@@ -102,6 +102,11 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    # The shim runs on node:24-alpine (wcdb-fhir-shim/Dockerfile): newer major Node types would accept
+    # APIs Node 24 does not have. Move these with the base image, never ahead of it.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   # ---------------------------------------------------------------------------
   # e2e — Playwright only. The Maui suite runs on every push (not Dependabot's own,

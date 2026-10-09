@@ -10,8 +10,9 @@ on:
   push:
     branches: [main]
     # A docs-only merge ships nothing (no image contains docs/ or a root *.md), and a push deploy
-    # recreates the containers, so skipping it saves ~30-120 s of downtime per stack.
-    paths-ignore: ["docs/**", "*.md"]
+    # recreates the containers, so skipping it saves ~30-120 s of downtime per stack. The WebChart dev-DB
+    # shim is in no image either (it runs beside the dev database, never on a stack).
+    paths-ignore: ["docs/**", "*.md", "wcdb-fhir-shim/**"]
   workflow_dispatch:
     inputs:
       replace_existing:
@@ -139,9 +140,15 @@ jobs:
           context: .
           file: ./backend-ts/Dockerfile
           push: true
-          # The commit, baked into the image and served on /health (#625).
+          # The commit, baked into the image and served on /health (#625). The routing lists are baked in
+          # too (#768): the image serves only the artifacts committed in it. Once the container env stops
+          # setting them (#768's second half), a self-heal that recreates an older image starts it with the
+          # list it was built with, never one it cannot serve. Each id here must be vendored above
+          # (translations with --verify-pin), and official-flip-config.test.ts holds the rest.
           build-args: |
             WORKWELL_BUILD_SHA=${{ github.sha }}
+            WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137
+            WORKWELL_DERIVED_MEASURES=cms137
           # Only the IMMUTABLE tag is pushed here. `maui-latest` is the tag the self-heal reconciler
           # recreates from, so it must mean "the last image that DEPLOYED successfully", not "the last
           # image that BUILT" — otherwise a build that deploys badly poisons the recovery path, and the
@@ -349,10 +356,23 @@ jobs:
           CONTAINER_ENV_VARS_JSON: ${{ steps.backend-ts-env.outputs.json }}
         run: bash .github/scripts/deploy-mieweb-container.sh
 
-      # The recovery tag is promoted ONLY here, after the container above came up. `maui-latest` is what
-      # reconcile-maui-mieweb.yml recreates from, so its whole value is that it names an image that was
-      # actually deployed and served traffic. `imagetools create` re-points the tag at the existing
-      # manifest by digest — no pull, no rebuild, so the promoted bytes are exactly the deployed bytes.
+      # #768: the container reaching `running` is not the claim the recovery tag makes. A router that
+      # refuses its routing still boots and answers /actuator/health 200 while every evaluating route
+      # 500s, so the image is promoted only once the NEW build answers /health with exactly the routing
+      # its build args name and no routing problem. EXPECTED_* must equal the build args above
+      # (official-flip-config.test.ts holds them together).
+      - name: The new backend serves the routing its image was built with
+        env:
+          HEALTH_URL: ${{ env.BACKEND_TS_URL }}/health
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_OFFICIAL: cms122,cms125,cms2,cms130,cms165,cms137
+          EXPECTED_DERIVED: cms137
+        run: bash .github/scripts/verify-routing-health.sh
+
+      # The recovery tag is promoted ONLY here, after the container above came up and served its routing.
+      # `maui-latest` is what reconcile-maui-mieweb.yml recreates from, so its whole value is that it names
+      # an image that was actually deployed and served traffic. `imagetools create` re-points the tag at the
+      # existing manifest by digest — no pull, no rebuild, so the promoted bytes are exactly the deployed bytes.
       - name: Promote maui-latest to the image that just deployed
         run: |
           docker buildx imagetools create             --tag "${{ env.BACKEND_TS_IMAGE }}:maui-latest"             "${{ env.BACKEND_TS_IMAGE }}:maui-sha-${{ github.sha }}"
