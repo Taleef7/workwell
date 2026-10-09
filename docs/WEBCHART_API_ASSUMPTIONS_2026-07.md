@@ -76,8 +76,17 @@ differ. Open asks that follow from these are in `OPEN_QUESTIONS.md` §4.
   - `_since` is honoured; `_type` is ignored (other types come back too).
   - `Patient/$export` returns 404; system-level `$export` returns 400.
 - **Not in FHIR:** Appointment, Slot, Schedule, Task, Communication. Searches return 400 and reads 404.
-  DeviceRequest is not in the CapabilityStatement either (checked 2026-10-08), and MedicationRequest declares
-  no `searchInclude`.
+  DeviceRequest is not in the CapabilityStatement either (checked 2026-10-08 and 2026-10-09), and no type
+  declares a `searchInclude`.
+- **Orders and medications (checked 2026-10-09, read-only, all 36 patients; composed since #713):**
+  - MedicationRequest, ServiceRequest and Coverage each answer a per-patient search with 200, unpaged.
+  - **MedicationRequest:** 69 on 9 patients. Every one names the drug inline (`medicationCodeableConcept`),
+    coded only in `http://terminology.hl7.org/CodeSystem/FDDC`, never RxNorm. None references a
+    Medication.
+  - **ServiceRequest:** 134 on 13 patients. 125 carry no code; the rest are LOINC.
+  - **Coverage:** see below.
+  - So the CMS medication and order value sets match nothing on the trial yet, and nothing may supply a
+    code (OPEN_QUESTIONS §4.9).
 - **Writes:** create/update only on Patient, Condition and Claim. Everything else is read-only.
 - **The PCP is sparse.** `Patient.generalPractitioner` is on 3 of 36 patients, matching a CareTeam "Attending
   Physician". In the schema a patient's providers are `user_patients` roles. "Primary Care Physician" (role
@@ -94,6 +103,9 @@ differ. Open asks that follow from these are in `OPEN_QUESTIONS.md` §4.
   - Document references: mostly type `UNK` (406 of 530).
 - **API terms** (docs: "Terms of API Use"): no persistent storage of User Content beyond a session, and 15,000
   calls per app per day.
+  - Per-patient composition costs 8 searches a patient (more where a type pages), plus the population
+    pages (#713). That is under 1,900 patients a day.
+  - A practice of ~40,000 needs bulk export by partition Group, or terms that do not apply to WorkWell.
 
 ## Variant B — Proprietary REST over `wc_miehr_*` Shapes (documented fallback, not built)
 

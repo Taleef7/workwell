@@ -269,7 +269,16 @@ enrolled in.
 - `DeviceRequest` is not in the trial's CapabilityStatement. Where do device orders (walkers,
   wheelchairs, oxygen) live? Four measures read them for the frailty exclusion.
 - Is `_include=MedicationRequest:medication` supported? Without it, every referenced Medication is a
-  separate read.
+  separate read. (On the trial no MedicationRequest references one; each names its drug inline.)
+- **Can WebChart send standard codes?** On the trial (2026-10-09):
+  - every medication is coded only in FDDC, while the CMS medication value sets are RxNorm;
+  - 125 of 134 orders carry no code at all.
+
+  WorkWell may not supply or replace a code. Until WebChart sends RxNorm on medications and a coded order
+  (SNOMED CT, CPT or LOINC, as the value set needs), these do not count on WebChart data:
+  - the hospice and dementia-medication exclusions;
+  - CMS2's referral and antidepressant follow-up;
+  - CMS137's medication treatment.
 - How are a medication order's `status` and `intent` filled, and does it carry a dosage or days' supply?
   The measures' active-medication logic needs them.
 
