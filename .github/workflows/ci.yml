@@ -190,7 +190,10 @@ jobs:
     # drift silently skip, which is the failure this whole arrangement exists to prevent.
     services:
       postgres:
-        image: postgres:16
+        # The official postgres:16 image through AWS's public mirror of Docker Hub's library images: the
+        # runners pull anonymously, and Docker Hub's shared anonymous pull limit failed every job that
+        # needs this service before a test ran (2026-10-09, #780).
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: workwell
           POSTGRES_PASSWORD: workwell
@@ -299,7 +302,10 @@ jobs:
     # the read APIs on the Pg ceiling, which only this job can run because only it has the sidecars.
     services:
       postgres:
-        image: postgres:16
+        # The official postgres:16 image through AWS's public mirror of Docker Hub's library images: the
+        # runners pull anonymously, and Docker Hub's shared anonymous pull limit failed every job that
+        # needs this service before a test ran (2026-10-09, #780).
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: workwell
           POSTGRES_PASSWORD: workwell
