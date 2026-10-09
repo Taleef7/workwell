@@ -23,6 +23,13 @@ included.
 - `cms137/` — WorkWell translation of CMS137v15 (`ww-2027.1`), built from CMS's CMS137FHIR v1.0.000 CQL
   with no edit (v15 changes value sets only) and the eCQM Update 2026-05-14 value sets. Its `README.md`
   carries the hashes, the commands and what its checks proved.
+- `cms130/` — WorkWell translation of CMS130v15 (`ww-2027.1`), built from CMS's CMS130FHIR v1.0.000 CQL
+  with ONE edit, in CMS's shared AdvancedIllnessandFrailty library (carried under WorkWell's name), and
+  the eCQM Update 2026-05-14 value sets. Its logic is MODIFIED from the measure steward's (NCQA's). The
+  copyright notice on its Measure is the steward's, carried verbatim: it allows internal, noncommercial
+  use without NCQA's approval and requires that approval for any other use. Its `README.md` carries the
+  edit, the hashes, the commands and what its checks proved. `edit-cases.json` beside it holds synthetic
+  test patients written by WorkWell.
 
 ## What does not live here
 

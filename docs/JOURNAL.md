@@ -7,6 +7,19 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-09
 
+- **CMS130's 2027 translation (#779), the first with a logic edit.**
+  - v14 → v15 changes one line, in the shared frailty library: an advanced-illness diagnosis now counts
+    when it overlaps the year before or the measurement year, not only when it starts there.
+  - The edit lands where CMS made it, in a WorkWell-named copy of that library, and the builder, the
+    router's identity check and the MADiE check all learned changed libraries.
+  - The Cypress 2027 deck scores 269/269, but CMS's unchanged logic scores the same, so it does not
+    exercise the edit. 15 hand-built test patients do (6 tell the rules apart), run on every push.
+  - Routed on Maui for 2027 only.
+  - **Scope change from the plan:** its "builder recompute" became a guard. The builder refuses any edit
+    that changes what a library retrieves, and nothing needs a recompute yet. A dev-only QDM engine for
+    comparison was rejected (a new dependency); hand-built cases were chosen instead (owner, 2026-10-09).
+  - New question for MIE: may modified NCQA logic be used beyond the sandbox (OPEN_QUESTIONS §4.12)?
+
 - **WebChart ingest now composes medication orders, referrals and coverage (#713).**
   - Checked read-only on the trial first: each answered 200 for all 36 patients.
   - If a server 404s one of these three types, the type is skipped for the run with one warning; no

@@ -207,6 +207,20 @@ function stratifiersByPatient(output: FqmOutput | undefined): Map<string, string
   );
 }
 
+/**
+ * One define value that differs between the two runs, exactly as `statementsByPatient` compared it: the
+ * case, the key (`g<group>|<library>.<define>`) and each side's compared string (value, fqm's label and
+ * relevance), `null` where that side reported no such define. It is what a translation's
+ * `madie-expected-differences.json` lists entry for entry, so it is never capped or reworded.
+ */
+export interface StatementDifference {
+  /** The case's uuid. */
+  case: string;
+  key: string;
+  cms: string | null;
+  ours: string | null;
+}
+
 export interface MeasureComparison {
   measure: CompiledGateMeasure;
   cases: number;
@@ -216,6 +230,9 @@ export interface MeasureComparison {
   stratifiersEqual: number;
   statementsCompared: number;
   statementsDiffering: number;
+  /** Every differing define value, uncapped: exactly `statementsDiffering` entries, in the order compared. */
+  statementDifferences: StatementDifference[];
+  /** The first 15 differences of any kind, as readable lines — for a log, never for a decision. */
   samples: string[];
   defCountMismatches: string[];
   /** Defs whose structure (ignoring localId/locator/annotation) is identical to CMS's — informational. */
@@ -238,6 +255,7 @@ export function compareRuns(
   const upStrata = stratifiersByPatient(upstream.output);
   const ourStrata = stratifiersByPatient(compiled.output);
   const samples: string[] = [];
+  const statementDifferences: StatementDifference[] = [];
   let statusEqual = 0;
   let ratesEqual = 0;
   let stratifiersEqual = 0;
@@ -261,12 +279,14 @@ export function compareRuns(
       statementsCompared++;
       if (ourMap.get(key) !== value) {
         statementsDiffering++;
+        statementDifferences.push({ case: ours.uuid, key, cms: value, ours: ourMap.get(key) ?? null });
         if (samples.length < 15) samples.push(`${ours.uuid} ${key}: ${value} vs ours ${ourMap.get(key)}`);
       }
     }
-    for (const key of ourMap.keys()) {
+    for (const [key, value] of ourMap) {
       if (up.has(key)) continue;
       statementsDiffering++;
+      statementDifferences.push({ case: ours.uuid, key, cms: null, ours: value });
       if (samples.length < 15) samples.push(`${ours.uuid} ${key}: only in ours`);
     }
   }
@@ -278,6 +298,7 @@ export function compareRuns(
     stratifiersEqual,
     statementsCompared,
     statementsDiffering,
+    statementDifferences,
     samples,
     upstream: upstream.run.summary,
     compiled: compiled.run.summary,
@@ -428,7 +449,7 @@ export async function main(argv: string[], overrides: Partial<CompiledCasesDeps>
       r = comparison;
     } catch (error) {
       problems.push(error instanceof Error ? error.message : String(error));
-      r = { measure, cases: 0, statusEqual: 0, ratesEqual: 0, stratifiersEqual: 0, statementsCompared: 0, statementsDiffering: 0, samples: [], defCountMismatches: [], structurallyIdentical: 0, defs: 0, upstream: emptySummary(), compiled: emptySummary(), problems };
+      r = { measure, cases: 0, statusEqual: 0, ratesEqual: 0, stratifiersEqual: 0, statementsCompared: 0, statementsDiffering: 0, statementDifferences: [], samples: [], defCountMismatches: [], structurallyIdentical: 0, defs: 0, upstream: emptySummary(), compiled: emptySummary(), problems };
     }
     results.push(r);
     deps.log(

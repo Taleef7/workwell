@@ -185,6 +185,9 @@ test("#776: the coverage of every logic the Maui sandbox scores with is pinned",
     ],
     "cms137 cms-artifact": withoutDevices,
     "cms137 workwell-translation": withoutDevices,
+    // Its edit changes how a retrieved diagnosis is compared, not what is retrieved (#779), so it reads
+    // exactly what CMS's artifact reads.
+    "cms130 workwell-translation": cmsWithDevices,
   });
 });
 

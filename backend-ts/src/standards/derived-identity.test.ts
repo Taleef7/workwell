@@ -4,13 +4,14 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { derivedCms137, FIXTURE_URL } from "../test-support/derived-fixture.ts";
+import { CMS130_CHANGED, CMS130_CHANGED_FROM, derivedCms130Changed, derivedCms137, FIXTURE_URL } from "../test-support/derived-fixture.ts";
 import { loadOfficialArtifact, type OfficialManifest } from "../wiring/official-artifacts.ts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   derivedIdentityProblems,
   installedTranslatorVersion,
+  libraryElmSha256,
   QICORE_MODEL_INFO_SHA256,
   rewriteDerivedIdentity,
   translatorId,
@@ -147,12 +148,15 @@ test("a library WorkWell changed carries WorkWell identity in every field, not j
   assert.ok(renamed.some((p) => p.includes(sentence)), `expected "${sentence}" in ${JSON.stringify(renamed)}`);
   assert.ok(!renamed.some((p) => /keeps CMS's library name|not a ww- version/.test(p)), JSON.stringify(renamed));
 
-  // Identified as itself all the way down: nothing left to refuse about that library.
+  // Identified as itself all the way down: nothing left to refuse about that library's identity FIELDS.
+  // (A hand-renamed library is still unreachable, unrecorded and carries CMS's resource identifier; those
+  // rules are tested on the CMS130 fixture, where a changed library is built the way the builder builds one.)
   const content = (hospice["content"] as Array<{ contentType: string; data: string }>).find((c) => c.contentType === "application/elm+json")!;
   const elm = JSON.parse(Buffer.from(content.data, "base64").toString("utf8"));
   elm.library.identifier = { id: "WorkWellHospice2027", version: "ww-2027.1" };
   content.data = Buffer.from(JSON.stringify(elm), "utf8").toString("base64");
-  assert.deepEqual(problems(fresh(b), notUnchanged).filter((p) => p.includes("WorkWellHospice2027")), []);
+  const fieldRules = /changed library WorkWellHospice2027\|ww-2027\.1 (has url|keeps CMS's library name|has version|has no ELM identifier|still names)|WorkWellHospice2027\|ww-2027\.1's ELM is identified as/;
+  assert.deepEqual(problems(fresh(b), notUnchanged).filter((p) => fieldRules.test(p)), []);
 
   // A changed library with no ELM cannot be checked, so it is refused.
   hospice["content"] = [];
@@ -439,6 +443,257 @@ test("the verdict is computed once per artifact and served only to that artifact
   measureIn(edited)["id"] = String(cmsMeasure["id"]);
   expect(problems(edited), /Measure\.id/);
   assert.deepEqual(problems(fixture.bundle), [], "and the fixture's own verdict is unchanged by either");
+});
+
+// ---- a changed CMS shared library (#779): reachability, accounting, provenance, scan, copyright --------
+
+const fx130 = derivedCms130Changed();
+const cms130 = loadOfficialArtifact("cms130")!;
+const clone130 = () => fresh(fx130.bundle) as unknown as B;
+const problems130 = (bundle: unknown, manifest: OfficialManifest = fx130.manifest) => derivedIdentityProblems(bundle as never, manifest, cms130);
+const derived130With = (patch: Partial<NonNullable<OfficialManifest["derived"]>>): OfficialManifest => ({ ...fx130.manifest, derived: { ...fx130.manifest.derived!, ...patch } });
+const changedEntry = fx130.manifest.derived!.changedLibraries![0]!;
+type ChangedEntry = typeof changedEntry;
+const withChanged = (map: (entry: ChangedEntry) => unknown) => derived130With({ changedLibraries: [map(changedEntry) as ChangedEntry] });
+const CHANGED_KEY = `${CMS130_CHANGED.name}|${CMS130_CHANGED.version}`;
+const FROM_KEY = `${CMS130_CHANGED_FROM.name}|${CMS130_CHANGED_FROM.version}`;
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** The main library's include of the changed library, to edit in place; `save()` writes the ELM back. */
+const aifInclude = (b: B) => {
+  const main = elmOf(mainIn(b));
+  const def = (main.elm.library.includes.def as Array<Record<string, unknown>>).find((d) => d["localIdentifier"] === "AIFrailLTCF")!;
+  return { def, save: () => main.save(main.elm) };
+};
+const cmsLibraryIn = (name: string) => fresh(libraryIn(cms130.bundle as unknown as B, name));
+
+test("a translation carrying a changed CMS shared library passes, built as the builder builds one", () => {
+  assert.deepEqual(problems130(fx130.bundle), []);
+  const b = clone130();
+  // Non-vacuous: the changed library is there under WorkWell's identity, and CMS's is gone.
+  const changed = libraryIn(b, CMS130_CHANGED.name);
+  assert.equal(changed["url"], `urn:workwell:library:${CMS130_CHANGED.name}`);
+  assert.ok(!b.entry.some((e) => e.resource["name"] === CMS130_CHANGED_FROM.name), "CMS's library is replaced, not kept beside the copy");
+  // The main library includes it by the bare name and WorkWell's version, and depends on WorkWell's canonical.
+  const { def } = aifInclude(b);
+  assert.deepEqual([def["path"], def["version"]], [CMS130_CHANGED.name, "ww-2027.1"]);
+  assert.ok((mainIn(b)["relatedArtifact"] as Array<Record<string, unknown>>).some((r) => r["resource"] === `${CMS130_CHANGED.url}|ww-2027.1`));
+  // The changed library's depends-on still names CMS's unchanged libraries by CMS's canonical — exempt, as
+  // the main library's are — and its ELM includes them namespaced.
+  assert.ok((changed["relatedArtifact"] as Array<Record<string, unknown>>).some((r) => r["type"] === "depends-on" && String(r["resource"]).startsWith("https://madie.cms.gov/Library/")));
+  assert.ok((elmOf(changed).elm.library.includes.def as Array<{ path: string }>).some((d) => d.path.startsWith("https://madie.cms.gov/")));
+  // The manifest's record of it: listed as changed, not as unchanged, traced to CMS's committed ELM.
+  assert.ok(!fx130.manifest.derived!.unchangedLibraries.some((l) => l.name === CMS130_CHANGED.name));
+  assert.deepEqual([changedEntry.from.name, changedEntry.from.version], [CMS130_CHANGED_FROM.name, CMS130_CHANGED_FROM.version]);
+  assert.equal(changedEntry.from.elmSha256, libraryElmSha256(cmsLibraryIn(CMS130_CHANGED_FROM.name)));
+});
+
+test("a namespaced include in an unchanged library resolves, as fqm resolves it: by the name after the last '/'", () => {
+  // Non-vacuous: CMS's committed ELM really does write its includes namespaced, in both translations.
+  for (const bundle of [fixture.bundle, fx130.bundle] as unknown as B[]) {
+    const hospice = elmOf(libraryIn(bundle, "Hospice")).elm;
+    assert.ok((hospice.library.includes.def as Array<{ path: string }>).every((d) => d.path.startsWith("https://madie.cms.gov/")), "Hospice includes namespaced");
+  }
+  assert.deepEqual(problems(fixture.bundle), []);
+  assert.deepEqual(problems130(fx130.bundle), []);
+  // And a different namespace resolves the same way: only the segment after the last '/' is matched.
+  const b = clone130();
+  const hospice = elmOf(libraryIn(b, "Hospice"));
+  for (const d of hospice.elm.library.includes.def as Array<{ path: string }>) d.path = `https://example.org/elsewhere/${d.path.slice(d.path.lastIndexOf("/") + 1)}`;
+  hospice.save(hospice.elm);
+  // The edit breaks Hospice's pin (its bytes moved), and nothing else: every include still resolves.
+  assert.deepEqual(problems130(b), [`cms130: library Hospice|6.18.000 is listed as unchanged but its ELM does not match its pin`]);
+});
+
+test("an include left at CMS's library resolves to nothing, and WorkWell's copy is then never run", () => {
+  const b = clone130();
+  const include = aifInclude(b);
+  include.def["path"] = `https://madie.cms.gov/${CMS130_CHANGED_FROM.name}`;
+  include.def["version"] = CMS130_CHANGED_FROM.version;
+  include.save();
+  const list = problems130(b);
+  expect(
+    list,
+    new RegExp(`library ${esc(fx130.manifest.measureName)}\\|ww-2027\\.1 includes AIFrailLTCF as 'https://madie\\.cms\\.gov/AdvancedIllnessandFrailty' version 1\\.27\\.000, which resolves to no library in the bundle; the engine matches 'AdvancedIllnessandFrailty' \\(the path after its last '/'\\)`),
+  );
+  expect(list, new RegExp(`library ${esc(CHANGED_KEY)} is in the bundle, but nothing the main library includes, directly or through another library, resolves to it`));
+  // CumulativeMedicationDuration is included only through the changed library, so it is stranded too.
+  expect(list, /library CumulativeMedicationDuration\|6\.0\.000 is in the bundle, but nothing the main library includes/);
+
+  // The right name at CMS's version resolves to nothing either: the version is matched as well.
+  const versioned = clone130();
+  const atCmsVersion = aifInclude(versioned);
+  atCmsVersion.def["version"] = CMS130_CHANGED_FROM.version;
+  atCmsVersion.save();
+  expect(problems130(versioned), new RegExp(`includes AIFrailLTCF as '${esc(CMS130_CHANGED.name)}' version 1\\.27\\.000, which resolves to no library in the bundle`));
+});
+
+test("a urn: include path is refused: fqm keeps what follows the last '/', and a urn has none", () => {
+  const b = clone130();
+  const include = aifInclude(b);
+  include.def["path"] = CMS130_CHANGED.url;
+  include.save();
+  const list = problems130(b);
+  expect(list, new RegExp(`includes AIFrailLTCF as '${esc(CMS130_CHANGED.url)}' version ww-2027\\.1, which resolves to no library in the bundle; the engine matches '${esc(CMS130_CHANGED.url)}'`));
+  expect(list, new RegExp(`library ${esc(CHANGED_KEY)} is in the bundle, but nothing the main library includes`));
+});
+
+test("CMS's library left in the bundle beside WorkWell's copy is refused, listed or not", () => {
+  const cmsLibrary = cmsLibraryIn(CMS130_CHANGED_FROM.name);
+  const b = clone130();
+  b.entry.push({ resource: cmsLibrary });
+  // Pinned as carried unchanged, it passes its pin (it IS CMS's) — and is refused as never run, and as the
+  // library the changed one replaces.
+  const pinned = derived130With({
+    unchangedLibraries: [...fx130.manifest.derived!.unchangedLibraries, { name: CMS130_CHANGED_FROM.name, version: CMS130_CHANGED_FROM.version, elmSha256: changedEntry.from.elmSha256 }],
+  });
+  assert.deepEqual(problems130(b, pinned), [
+    `cms130: library ${FROM_KEY} is in the bundle, but nothing the main library includes, directly or through another library, resolves to it; a library the engine never runs is not part of the translation`,
+    `cms130: CMS's ${FROM_KEY}, which changed library ${CHANGED_KEY} replaces, is still in the bundle; a translation carries WorkWell's copy instead of CMS's library, never beside it`,
+  ]);
+  // Unlisted, it is also unaccounted for, and held to WorkWell's identity, which it fails.
+  const list = problems130(fresh(b));
+  expect(list, new RegExp(`library ${esc(FROM_KEY)} is neither listed as carried unchanged`));
+  expect(list, new RegExp(`library ${esc(FROM_KEY)} is in the bundle, but nothing the main library includes`));
+  expect(list, new RegExp(`CMS's ${esc(FROM_KEY)}, which changed library ${esc(CHANGED_KEY)} replaces, is still in the bundle`));
+  expect(list, new RegExp(`translated changed library ${esc(FROM_KEY)} still carries CMS's identity`));
+});
+
+test("an include more than one library answers to is refused: the engine would silently take the first", () => {
+  const b = clone130();
+  b.entry.push({ resource: fresh(libraryIn(b, "Status")) });
+  const list = problems130(b);
+  expect(list, /library WorkWellCMS130Translation2027\|ww-2027\.1 includes Status as 'https:\/\/madie\.cms\.gov\/Status' version 1\.15\.000, which 2 libraries in the bundle answer to \(Status\|1\.15\.000, Status\|1\.15\.000\); the engine takes the first in bundle order/);
+  expect(list, /library Status\|1\.15\.000 is in the bundle, but nothing the main library includes/);
+
+  // The Measure's own logic is resolved the same way, by the main library's ELM identifier.
+  const twin = clone130();
+  const copy = fresh(mainIn(twin));
+  copy["url"] = "urn:workwell:library:Twin";
+  twin.entry.push({ resource: copy });
+  expect(
+    problems130(twin),
+    /the main library WorkWellCMS130Translation2027\|ww-2027\.1's ELM is identified as 'WorkWellCMS130Translation2027\|ww-2027\.1', and so is another library in the bundle \(WorkWellCMS130Translation2027\|ww-2027\.1\); the engine runs the first of them/,
+  );
+});
+
+test("an include with no path is refused, not passed over", () => {
+  const b = clone130();
+  const main = elmOf(mainIn(b));
+  delete (main.elm.library.includes.def as Array<Record<string, unknown>>).find((d) => d["localIdentifier"] === "SDE")!["path"];
+  main.save(main.elm);
+  expect(problems130(b), /library WorkWellCMS130Translation2027\|ww-2027\.1 includes SDE with no path, which the engine cannot resolve/);
+});
+
+test("every library besides the main one is accounted for exactly once, and no record names a library the bundle lacks", () => {
+  // The changedLibraries record dropped: the copy is then accounted for by nothing.
+  assert.deepEqual(problems130(fx130.bundle, derived130With({ changedLibraries: undefined })), [
+    `cms130: library ${CHANGED_KEY} is neither listed as carried unchanged (unchangedLibraries) nor as changed (changedLibraries); every library besides the main one is accounted for in exactly one`,
+  ]);
+  assert.deepEqual(problems130(fx130.bundle, derived130With({ changedLibraries: [] })).length, 1);
+
+  // Listed in both.
+  const both = derived130With({
+    unchangedLibraries: [
+      ...fx130.manifest.derived!.unchangedLibraries,
+      { name: CMS130_CHANGED.name, version: CMS130_CHANGED.version, elmSha256: libraryElmSha256(libraryIn(clone130(), CMS130_CHANGED.name))! },
+    ],
+  });
+  expect(problems130(fx130.bundle, both), new RegExp(`library ${esc(CHANGED_KEY)} is listed both as carried unchanged and as changed; it is one or the other`));
+
+  // A record of a library that is not there.
+  const ghost = derived130With({ unchangedLibraries: [...fx130.manifest.derived!.unchangedLibraries, { name: "Ghost", version: "1.0.000", elmSha256: `sha256:${"0".repeat(64)}` }] });
+  assert.deepEqual(problems130(fx130.bundle, ghost), ["cms130: unchangedLibraries lists Ghost|1.0.000, which is not in the bundle"]);
+
+  // The main library is named by the translation's identity, never listed.
+  const mainKey = `${fx130.manifest.measureName}|ww-2027.1`;
+  const mainListed = derived130With({ changedLibraries: [changedEntry, { ...changedEntry, name: fx130.manifest.measureName }] });
+  expect(problems130(fx130.bundle, mainListed), new RegExp(`the main library ${esc(mainKey)} is listed in changedLibraries; it carries the translation's own identity and is listed in neither`));
+
+  // Listed twice.
+  expect(problems130(fx130.bundle, derived130With({ changedLibraries: [changedEntry, changedEntry] })), new RegExp(`changedLibraries lists ${esc(CHANGED_KEY)} more than once`));
+});
+
+test("each changedLibraries entry names one library and traces it to CMS's committed library, which is gone", () => {
+  // A wrong hash for CMS's ELM: the record must name the exact library the edit was made to.
+  const wrong = `sha256:${"7".repeat(64)}`;
+  assert.deepEqual(problems130(fx130.bundle, withChanged((e) => ({ ...e, from: { ...e.from, elmSha256: wrong } }))), [
+    `cms130: changed library ${CHANGED_KEY} says it was edited from CMS's ${FROM_KEY} with ELM ${wrong}, but CMS's committed ELM for it is ${changedEntry.from.elmSha256}`,
+  ]);
+  // A CMS library CMS's artifact does not hold.
+  expect(
+    problems130(fx130.bundle, withChanged((e) => ({ ...e, from: { ...e.from, version: "1.26.000" } }))),
+    new RegExp(`changed library ${esc(CHANGED_KEY)} says it was edited from CMS's AdvancedIllnessandFrailty\\|1\\.26\\.000, which CMS's committed artifact does not hold`),
+  );
+  // No provenance at all.
+  expect(problems130(fx130.bundle, withChanged(({ from: _from, ...e }) => e)), new RegExp(`changed library ${esc(CHANGED_KEY)} does not name the CMS library it was edited from`));
+  // A malformed edit hash.
+  expect(problems130(fx130.bundle, withChanged((e) => ({ ...e, translationSha256: "sha256:edit" }))), new RegExp(`changed library ${esc(CHANGED_KEY)}'s translationSha256 'sha256:edit' is not a sha256:<64 hex> digest`));
+  // An entry naming a library the bundle does not hold: and the real one is then unaccounted for.
+  const elsewhere = problems130(fx130.bundle, withChanged((e) => ({ ...e, name: "WorkWellNothing2027" })));
+  expect(elsewhere, /changedLibraries lists WorkWellNothing2027\|ww-2027\.1, which is not in the bundle; each entry names exactly one/);
+  expect(elsewhere, new RegExp(`library ${esc(CHANGED_KEY)} is neither listed`));
+  // Two libraries answering to one entry.
+  const twice = clone130();
+  twice.entry.push({ resource: fresh(libraryIn(twice, CMS130_CHANGED.name)) });
+  expect(problems130(twice), new RegExp(`changedLibraries lists ${esc(CHANGED_KEY)}, which matches 2 libraries in the bundle; each entry names exactly one`));
+});
+
+test("a hand-edited changedLibraries comes back as sentences, never as an exception in the router", () => {
+  let list: readonly string[] = [];
+  assert.doesNotThrow(() => (list = problems130(fx130.bundle, derived130With({ changedLibraries: {} as never }))));
+  expect(list, /derived\.changedLibraries is not a list/);
+  assert.doesNotThrow(() => (list = problems130(fx130.bundle, derived130With({ changedLibraries: [null, 5, {}, { from: null }] as never, unchangedLibraries: "x" as never }))));
+  expect(list, /derived\.unchangedLibraries is not a list/);
+  expect(list, /changedLibraries lists undefined\|undefined, which is not in the bundle/);
+  expect(list, /changed library undefined\|undefined does not name the CMS library it was edited from/);
+});
+
+test("a changed library is scanned whole for CMS's identity; only a depends-on naming an unchanged library is exempt", () => {
+  // CMS's resource identifier put back: its system is CMS's host.
+  let b = clone130();
+  libraryIn(b, CMS130_CHANGED.name)["identifier"] = cmsLibraryIn(CMS130_CHANGED_FROM.name)["identifier"];
+  expect(problems130(b), new RegExp(`translated changed library ${esc(CHANGED_KEY)} still carries CMS's identity in 1 place\\(s\\): Library\\.identifier\\[0\\]\\.system 'https://madie\\.cms\\.gov/login'`));
+  // CMS's host, and CMS's measure short name, where no field check looks.
+  b = clone130();
+  libraryIn(b, CMS130_CHANGED.name)["purpose"] = "see https://madie.cms.gov";
+  expect(problems130(b), new RegExp(`translated changed library ${esc(CHANGED_KEY)} still carries CMS's identity in 1 place\\(s\\): Library\\.purpose`));
+  b = clone130();
+  libraryIn(b, CMS130_CHANGED.name)["purpose"] = "the CMS130FHIR exclusions";
+  expect(problems130(b), new RegExp(`translated changed library ${esc(CHANGED_KEY)} still carries CMS's identity in 1 place\\(s\\): Library\\.purpose`));
+  // A depends-on naming CMS's library the copy replaces is not exempt: that library is not carried unchanged.
+  b = clone130();
+  const changed = libraryIn(b, CMS130_CHANGED.name);
+  changed["relatedArtifact"] = [...(changed["relatedArtifact"] as unknown[]), { type: "depends-on", resource: `https://madie.cms.gov/Library/${CMS130_CHANGED_FROM.name}|${CMS130_CHANGED_FROM.version}` }];
+  expect(problems130(b), new RegExp(`translated changed library ${esc(CHANGED_KEY)} still carries CMS's identity in 1 place\\(s\\): Library\\.relatedArtifact\\[\\d+\\]\\.resource`));
+});
+
+test("the main library's depends-on still naming CMS's edited library is refused", () => {
+  const b = clone130();
+  const cmsCanonical = `https://madie.cms.gov/Library/${CMS130_CHANGED_FROM.name}|${CMS130_CHANGED_FROM.version}`;
+  const main = mainIn(b);
+  main["relatedArtifact"] = (main["relatedArtifact"] as Array<Record<string, unknown>>).map((r) => (r["resource"] === `${CMS130_CHANGED.url}|ww-2027.1` ? { ...r, resource: cmsCanonical } : r));
+  assert.ok((main["relatedArtifact"] as Array<Record<string, unknown>>).some((r) => r["resource"] === cmsCanonical), "non-vacuous: the entry was reverted");
+  expect(problems130(b), /translated main library still carries CMS's identity in 1 place\(s\): Library\.relatedArtifact\[\d+\]\.resource 'https:\/\/madie\.cms\.gov\/Library\/AdvancedIllnessandFrailty\|1\.27\.000'/);
+});
+
+test("the Measure's copyright is CMS's, verbatim: neither edited, dropped nor added", () => {
+  const sentence = /the translated Measure's copyright is not CMS's Measure's, verbatim/;
+  assert.equal(measureIn(clone130())["copyright"], measureIn(cms130.bundle as unknown as B)["copyright"], "non-vacuous: CMS's Measure carries one");
+  let b = clone130();
+  measureIn(b)["copyright"] = `${String(measureIn(b)["copyright"])} `;
+  assert.deepEqual(problems130(b).filter((p) => sentence.test(p)).length, 1);
+  b = clone130();
+  delete measureIn(b)["copyright"];
+  expect(problems130(b), sentence);
+  b = clone();
+  delete measureIn(b)["copyright"];
+  expect(problems(b), sentence);
+  // Absent on both is equal.
+  const noCopyright = fresh(cms137.bundle as unknown as B);
+  delete measureIn(noCopyright)["copyright"];
+  b = clone();
+  delete measureIn(b)["copyright"];
+  assert.deepEqual(problems(b, fixture.manifest, { ...cms137, bundle: noCopyright as never }), []);
 });
 
 test("the rewrite is idempotent over the fixture's own identity", () => {

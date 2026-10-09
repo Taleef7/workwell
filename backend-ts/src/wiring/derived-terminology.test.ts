@@ -54,8 +54,29 @@ interface ChangedValueSets {
  * cms137 (ww-2027.1): CMS137 v14 → v15 is a value-set-only change, and these are the ten sets the
  * eCQM Update 2026-05-14 release moved — the same ten an independent read of the raw VSAC dump found before
  * the translation existed. +43/−13 is a NET of 30, which is why the sidecar holds 976 codes to CMS's 946.
+ *
+ * cms130 (ww-2027.1, #779): the ten sets the same release moved for CMS130 — the same ten the
+ * `terminology-equivalence` check found changed against the Cypress 2027 export, and an independent read
+ * of the release found before the build. Its one LOGIC change (the frailty look-back, `overlaps`) is the
+ * translation's edit, not a code change, so it is not here.
  */
 const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
+  cms130: {
+    oids: [
+      "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)
+      "2.16.840.1.113883.3.464.1003.101.12.1080", // Telephone Visits (+9)
+      "2.16.840.1.113883.3.464.1003.101.12.1089", // Virtual Encounter (+2/−4)
+      "2.16.840.1.113883.3.464.1003.108.12.1001", // Malignant Neoplasm of Colon (+18)
+      "2.16.840.1.113883.3.464.1003.108.12.1020", // Colonoscopy (+10)
+      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+25)
+      "2.16.840.1.113883.3.464.1003.118.12.1300", // Frailty Device (−12)
+      "2.16.840.1.113883.3.464.1003.198.12.1011", // Fecal Occult Blood Test (FOBT) (+4)
+      "2.16.840.1.113883.3.464.1003.198.12.1019", // Total Colectomy (+2)
+      "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient (+4)
+    ],
+    added: 84,
+    removed: 16,
+  },
   cms137: {
     oids: [
       "2.16.840.1.113762.1.4.1029.206", // Intensive Care Unit

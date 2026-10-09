@@ -4,14 +4,21 @@
  * no network — `run/cli/build-derived.ts` does those and calls these.
  *
  * What is stored in the repo is only ever WorkWell's: the edits file holds WorkWell's replacement text
- * and a hash of the CMS lines it replaces (never those lines), and the main library's ELM is stripped of
- * the keys that carry CMS's CQL text (`annotation`, `locator`). CMS's six shared libraries are copied byte-for-byte from the
- * committed official artifact, because a recompile of them would differ from CMS's ELM in bytes (include
- * paths, `identifier.system`, choice order) while meaning the same thing — and "unchanged" is checked
- * by those bytes (`derivedIdentityProblems`).
+ * and a hash of the CMS lines it replaces (never those lines), and every library WorkWell compiled is
+ * stripped of the keys that carry CMS's CQL text (`annotation`, `locator`). CMS's shared libraries that
+ * WorkWell did not edit are copied byte-for-byte from the committed official artifact, because a recompile
+ * of them would differ from CMS's ELM in bytes (include paths, `identifier.system`, choice order) while
+ * meaning the same thing — and "unchanged" is checked by those bytes (`derivedIdentityProblems`).
+ *
+ * An edit may name the main library or a shared one (#779). The edits are grouped by library and applied
+ * per library; a shared library WorkWell edited becomes a CHANGED library — WorkWell's compile, under
+ * WorkWell's name, URL and `ww-` version (`rewriteChangedLibrary`) — and the main library's include of it
+ * is repointed, while the main library's CQL stays as CMS wrote it unless it was edited too. The manifest
+ * records each changed library beside the unchanged ones (`derived.changedLibraries`).
  */
 import { createHash } from "node:crypto";
-import type { DerivedManifestBlock, OfficialArtifact, OfficialManifest } from "../wiring/official-artifacts.ts";
+import type { DerivedChangedLibrary, DerivedManifestBlock, OfficialArtifact, OfficialManifest } from "../wiring/official-artifacts.ts";
+import { changedLibraryIdentity, rewriteChangedLibrary } from "./derived-changed-library.ts";
 import { DERIVED_CANONICAL_PREFIX, DERIVED_LABEL_PREFIX, libraryElmSha256, rewriteDerivedIdentity, type DerivedIdentity } from "./derived-identity.ts";
 
 const sha256 = (data: string | Buffer): string => `sha256:${createHash("sha256").update(data).digest("hex")}`;
@@ -92,13 +99,34 @@ export function spanSha256(cql: string, startLine: number, endLine: number): str
 }
 
 /**
+ * The edits grouped by the library they name, each group in file order, the groups in order of first
+ * appearance. Line numbers mean something only within one library's CQL, so every per-library step — the
+ * anchors, the overlap check, the replacement — runs on one group at a time.
+ */
+export function groupEditsByLibrary(edits: readonly CqlEdit[]): Map<string, CqlEdit[]> {
+  const groups = new Map<string, CqlEdit[]>();
+  for (const edit of edits) {
+    const group = groups.get(edit.library);
+    if (group) group.push(edit);
+    else groups.set(edit.library, [edit]);
+  }
+  return groups;
+}
+
+/**
  * Apply `edits` to one library's CQL. Every anchor is checked against the ORIGINAL text before anything
  * changes, then the spans are replaced bottom-up, so an edit that adds or removes lines never moves the
  * lines a later (higher) edit was anchored to. Overlapping spans are refused: their order would be a
  * guess. `[]` returns the input exactly as given.
+ *
+ * The edits must all name ONE library (`groupEditsByLibrary` first): another library's edit would be
+ * anchor-checked against this text, and its lines 3-5 compared for overlap with this library's lines 4-6,
+ * which are different lines.
  */
 export function applyEdits(cql: string, edits: readonly CqlEdit[]): string {
   if (edits.length === 0) return cql;
+  const named = [...new Set(edits.map((e) => e.library))];
+  if (named.length > 1) throw new Error(`one library's edits are applied at a time, but these name ${named.join(", ")}; group them by library first`);
   const { lines, trailingNewline } = splitLines(cql);
   for (const edit of edits) {
     const where = `${edit.library} lines ${edit.startLine}-${edit.endLine}`;
@@ -163,17 +191,38 @@ export interface AssembledTranslation<T> {
   bundle: T;
   /** CMS's libraries carried unchanged, each pinned by the hash of its ELM, in bundle order. */
   unchangedLibraries: DerivedManifestBlock["unchangedLibraries"];
+  /** The shared libraries WorkWell edited, as the manifest records them, in bundle order; empty when none. */
+  changedLibraries: DerivedChangedLibrary[];
+}
+
+type CompiledElm = { library: { identifier: { id?: unknown; version?: unknown } } & Record<string, unknown> };
+
+/** A shared library WorkWell edited, as the builder hands it to the assembler. */
+export interface ChangedLibraryBuild {
+  /** CMS's library the edits were made to, by its name and version in CMS's committed bundle. */
+  from: { name: string; version: string };
+  /** WorkWell's compile of the edited CQL, under CMS's name (stripped here). */
+  compiledElm: CompiledElm;
+  /** `cqlSha256` of the library's edited CQL. */
+  translationSha256: string;
 }
 
 /**
  * The translation's bundle: a copy of CMS's committed (already reduced and stripped) bundle in which the
- * main library's ELM is replaced by OURS, stripped, then given the translation's identity. The Measure
- * and the shared libraries are carried as they are; nothing else changes.
+ * main library's ELM is replaced by OURS, stripped, then given the translation's identity. Then each
+ * shared library WorkWell edited (`changed`) gets OUR compile of it, stripped, under WorkWell's identity
+ * for it, and the main library is repointed at it (`rewriteChangedLibrary`, which also refuses a library
+ * that anything but the main library includes). The Measure and every other library are carried as they
+ * are; nothing else changes. With no changed library this is exactly the CMS137 build.
+ *
+ * Each changed library's `from.elmSha256` is CMS's committed ELM for it, read here before the rewrite
+ * replaces it, so the manifest pins what the edit started from; it is never listed as unchanged.
  */
 export function assembleTranslationBundle<T extends Bundle>(
   base: T,
-  compiledMainElm: { library: { identifier: { id?: unknown; version?: unknown } } & Record<string, unknown> },
+  compiledMainElm: CompiledElm,
   identity: DerivedIdentity,
+  changed: readonly ChangedLibraryBuild[] = [],
 ): AssembledTranslation<T> {
   const copy = JSON.parse(JSON.stringify(base)) as T;
   const resources = (copy.entry ?? []).map((e) => e.resource).filter((r): r is Resource => !!r);
@@ -193,14 +242,38 @@ export function assembleTranslationBundle<T extends Bundle>(
     throw new Error(`the compiled ELM is ${String(compiledId.id)}|${String(compiledId.version)}, not the main library ${String(main["name"])}|${String(main["version"])}`);
   }
   main["content"] = [{ contentType: "application/elm+json", data: encodeElm(stripElmDebugKeys(compiledMainElm)) }];
-  const unchangedLibraries = resources
-    .filter((r) => r.resourceType === "Library" && r !== main)
-    .map((l) => {
-      const elmSha256 = libraryElmSha256(l);
-      if (!elmSha256) throw new Error(`shared library ${String(l["name"])} has no ELM to pin`);
-      return { name: String(l["name"]), version: String(l["version"]), elmSha256 };
+  const keyOf = (name: unknown, version: unknown) => `${String(name)}|${String(version)}`;
+  const changedKeys = new Set(changed.map((c) => keyOf(c.from.name, c.from.version)));
+  if (changedKeys.size !== changed.length) throw new Error("a changed library is listed twice");
+  const shared = resources.filter((r) => r.resourceType === "Library" && r !== main);
+  const pinOf = (l: Resource) => {
+    const elmSha256 = libraryElmSha256(l);
+    if (!elmSha256) throw new Error(`shared library ${String(l["name"])} has no ELM to pin`);
+    return elmSha256;
+  };
+  const unchangedLibraries = shared
+    .filter((l) => !changedKeys.has(keyOf(l["name"], l["version"])))
+    .map((l) => ({ name: String(l["name"]), version: String(l["version"]), elmSha256: pinOf(l) }));
+  // Bundle order, whatever order the builder listed them in, so the manifest does not depend on it.
+  const order = (c: ChangedLibraryBuild) => shared.findIndex((l) => keyOf(l["name"], l["version"]) === keyOf(c.from.name, c.from.version));
+  const changedLibraries: DerivedChangedLibrary[] = [];
+  let bundle = rewriteDerivedIdentity(copy, identity);
+  for (const library of [...changed].sort((a, b) => order(a) - order(b))) {
+    const at = order(library);
+    if (at < 0) {
+      const what = library.from.name === main["name"] ? "is the main library, which is renamed with the Measure" : "is not a shared library of CMS's committed bundle";
+      throw new Error(`the edited library ${library.from.name} ${library.from.version} ${what}`);
+    }
+    const libraryIdentity = changedLibraryIdentity(library.from.name, library.from.version, identity);
+    bundle = rewriteChangedLibrary(bundle, library.from, stripElmDebugKeys(library.compiledElm), libraryIdentity);
+    changedLibraries.push({
+      name: libraryIdentity.name,
+      version: libraryIdentity.version,
+      from: { name: library.from.name, version: library.from.version, elmSha256: pinOf(shared[at]!) },
+      translationSha256: library.translationSha256,
     });
-  return { bundle: rewriteDerivedIdentity(copy, identity), unchangedLibraries };
+  }
+  return { bundle, unchangedLibraries, changedLibraries };
 }
 
 export interface DerivedManifestInput {
@@ -211,6 +284,8 @@ export interface DerivedManifestInput {
   identity: DerivedIdentity;
   build: DerivedManifestBlock["build"];
   unchangedLibraries: DerivedManifestBlock["unchangedLibraries"];
+  /** The shared libraries WorkWell edited (`assembleTranslationBundle`); none is written as no key. */
+  changedLibraries?: readonly DerivedChangedLibrary[];
   /** `sha256:` of the CMS package the edits were read from (provenance; the package is never committed). */
   packageSha256: string;
   terminologyBlock: NonNullable<OfficialManifest["terminology"]>;
@@ -225,9 +300,13 @@ export interface DerivedManifestInput {
  * Oracle records are carried forward ONLY when the artifact and its terminology are byte-for-byte the
  * ones the records ran against; otherwise they are cleared, and the router refuses the translation until
  * the checks are re-run. Clearing is reported as a warning, never done silently.
+ *
+ * `derived.changedLibraries` is written after `unchangedLibraries` and before `oracles`, and only when a
+ * shared library was edited: a translation with none (CMS137) keeps its manifest byte for byte, which is
+ * what its `--verify` compares. `build.translationSha256` stays the main library's CQL, edited or not.
  */
 export function derivedManifestFor(input: DerivedManifestInput): { manifest: OfficialManifest; warnings: string[] } {
-  const { base, bundleJson, identity, build, unchangedLibraries, packageSha256, terminologyBlock, previous } = input;
+  const { base, bundleJson, identity, build, unchangedLibraries, changedLibraries, packageSha256, terminologyBlock, previous } = input;
   const sha = sha256(bundleJson);
   const warnings: string[] = [];
   const previousOracles = previous?.derived?.oracles ?? [];
@@ -268,6 +347,7 @@ export function derivedManifestFor(input: DerivedManifestInput): { manifest: Off
       base: { catalogId: b.catalogId, manifestSha256: b.sha256 },
       build,
       unchangedLibraries,
+      ...(changedLibraries && changedLibraries.length > 0 ? { changedLibraries: [...changedLibraries] } : {}),
       oracles,
     },
   };

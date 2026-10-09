@@ -117,6 +117,13 @@ export interface DerivedManifestBlock {
   build: { translator: string; modelInfoSha256: string; signatureLevel: string; translationSha256: string };
   /** CMS libraries carried unchanged, each pinned by the hash of its ELM. */
   unchangedLibraries: Array<{ name: string; version: string; elmSha256: string }>;
+  /**
+   * CMS shared libraries WorkWell EDITED (#779), each under WorkWell's own name and `ww-` version, and the
+   * CMS library it was edited from: `from.elmSha256` is CMS's committed ELM, checked against CMS's
+   * artifact, and `translationSha256` hashes that library's edited CQL. Absent when no shared library was
+   * edited, so a translation with none (CMS137) keeps its manifest byte for byte.
+   */
+  changedLibraries?: DerivedChangedLibrary[];
   /** The checks it passed, each naming the exact artifact and terminology it ran against. */
   oracles: Array<{
     name: string;
@@ -127,6 +134,14 @@ export interface DerivedManifestBlock {
     result: "pass" | "fail";
     ranAgainst: { artifactSha256: string; terminologySha256: string };
   }>;
+}
+
+/** One entry of `DerivedManifestBlock.changedLibraries`. */
+export interface DerivedChangedLibrary {
+  name: string;
+  version: string;
+  from: { name: string; version: string; elmSha256: string };
+  translationSha256: string;
 }
 
 export type ArtifactKind = "official" | "derived";

@@ -87,6 +87,41 @@ test("a define's value is compared, not just fqm's truthiness label", () => {
   assert.match(c.samples.join("\n"), /SDE Sex/);
 });
 
+test("every differing define value is returned, uncapped, with each side's compared string", () => {
+  // Twenty defines that differ on one patient, plus one only CMS's run reports and one only ours does:
+  // more than the 15 samples, so a list built from the samples would be short.
+  const many = (side: "cms" | "ours") => ({
+    results: [
+      {
+        patientId: "p1",
+        detailedResults: [
+          {
+            statementResults: [
+              ...Array.from({ length: 20 }, (_, i) => ({ libraryName: "M", statementName: `D${i}`, raw: side === "cms" ? i : -i - 1, final: "TRUE", relevance: "TRUE" })),
+              { libraryName: "M", statementName: side === "cms" ? "Only CMS" : "Only ours", raw: true, final: "TRUE", relevance: "TRUE" },
+              { libraryName: "M", statementName: "Same", raw: true, final: "TRUE", relevance: "TRUE" },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const c = compareRuns("cms137", { run: run(1), output: many("cms") }, { run: run(1), output: many("ours") });
+  assert.equal(c.statementsDiffering, 22);
+  assert.equal(c.statementDifferences.length, 22, "every difference, not the 15 samples");
+  assert.equal(c.samples.length, 15, "the samples stay capped");
+  assert.deepEqual(c.statementDifferences[3], { case: "u1", key: "g0|M.D3", cms: '3|"TRUE"|TRUE', ours: '-4|"TRUE"|TRUE' });
+  assert.deepEqual(
+    c.statementDifferences.filter((d) => d.cms === null || d.ours === null),
+    [
+      { case: "u1", key: "g0|M.Only CMS", cms: 'true|"TRUE"|TRUE', ours: null },
+      { case: "u1", key: "g0|M.Only ours", cms: null, ours: 'true|"TRUE"|TRUE' },
+    ],
+  );
+  assert.ok(!c.statementDifferences.some((d) => d.key === "g0|M.Same"));
+  assert.deepEqual(compareRuns("cms137", { run: run(1), output: output(true) }, { run: run(1), output: output(true) }).statementDifferences, []);
+});
+
 test("functions are left out: they have no value, and overloads share a name", () => {
   const keys = [...(statementsByPatient(output(true)).get("p1")?.keys() ?? [])];
   assert.deepEqual(keys, ["g0|M.Numerator", "g0|M.SDE Sex"]);

@@ -6,10 +6,16 @@
  *     --package <CMS's eCQM package zip> --vsac-manifest http://cts.nlm.nih.gov/fhir/Library/ecqm-update-2026-05-14
  *
  * The steps, each a refusal on failure: CMS's upstream bundle is the one the official manifest pins →
- * its main library was compiled with the options we reproduce → WorkWell's edits land on the exact CMS
- * lines they were written against → the translator compiles the library set TWICE to byte-identical ELM
- * (a build that is not reproducible cannot be verified later) → the main library's ELM is stripped of
- * CMS's CQL text and dropped into CMS's committed bundle, whose six shared libraries are carried
+ * its main library, and every library an edit names, was compiled with the options we reproduce →
+ * WorkWell's edits, grouped by library, land on the exact CMS lines they were written against, name only
+ * libraries the upstream bundle holds, and change each library they name → the translator compiles the
+ * library set TWICE, and the main library and every edited one compile to byte-identical ELM both times
+ * (a build that is not reproducible cannot be verified later) → each of those reads exactly the data
+ * CMS's committed ELM for it reads (`elmDataSurface`: the translation carries CMS's computed data
+ * requirements, which are true only while no retrieve moved) → the main library's ELM is stripped of
+ * CMS's CQL text and dropped into CMS's committed bundle, every edited shared library is dropped in the
+ * same way under WorkWell's name with the main library's include repointed at it (a library that a
+ * library other than the main one includes is refused), and every other shared library is carried
  * byte-for-byte → the translation's identity passes the same check the router runs → only then is
  * anything written. Output is counts and hashes; no CQL is ever printed.
  *
@@ -26,11 +32,15 @@ import {
   applyEdits,
   assembleTranslationBundle,
   derivedManifestFor,
+  groupEditsByLibrary,
   parseEdits,
   stripElmDebugKeys,
   translationIdentity,
+  type ChangedLibraryBuild,
 } from "../../standards/derived-build.ts";
+import { cqlSha256 } from "../../standards/derived-changed-library.ts";
 import { derivedIdentityProblems, installedTranslatorVersion, translatorId } from "../../standards/derived-identity.ts";
+import { dataSurfaceDifferences, elmDataSurface } from "../../standards/elm-data-surface.ts";
 import { loadOfficialMeasureCases, officialMeasureName, type LoadedOfficialMeasure, type OfficialMeasureId } from "../../standards/official-cases.ts";
 import {
   assertAppliedOptions,
@@ -276,40 +286,80 @@ function run(args: BuildDerivedArgs, deps: BuildDerivedDeps): number {
   if (!main) throw new Error(`the upstream Measure's library '${String(mainUrl)}' names no library in the upstream bundle`);
   assertCmsTranslatorOptions(main.resource as { name?: string; contained?: unknown[] });
 
-  // Editing a shared library would make it a changed library needing its own WorkWell identity, and the
-  // main library's includes would have to follow it. Not in this cut.
-  const foreign = [...new Set(edits.filter((e) => e.library !== main.name).map((e) => e.library))];
-  if (foreign.length > 0) throw new Error(`only the main library may be edited (${main.name}); the edits name ${foreign.join(", ")}`);
-  const editedCql = applyEdits(main.cql, edits);
-  const translationSha256 = sha256(lf(editedCql));
-  deps.log(`${id}: ${edits.length} edit(s) applied to ${main.name} ${main.version}; translated CQL ${translationSha256}`);
+  // Edits are grouped by the library they name (line numbers mean something only within one library).
+  // A shared library WorkWell edits becomes a CHANGED library: compiled from the edited text under CMS's
+  // name, then given WorkWell's identity, with the main library's include repointed at it (#779).
+  const editsByLibrary = groupEditsByLibrary(edits);
+  const absent = [...editsByLibrary.keys()].filter((name) => !libraries.some((l) => l.name === name));
+  if (absent.length > 0) {
+    throw new Error(`the edits name ${absent.join(", ")}, which the upstream bundle does not hold (it holds ${libraries.map((l) => l.name).join(", ")})`);
+  }
+  const editedCql = new Map<string, string>();
+  for (const library of libraries) {
+    const libraryEdits = editsByLibrary.get(library.name);
+    if (!libraryEdits) continue;
+    // Checked on every library an edit names, not only the main one: the edited text is compiled with
+    // these options and its ELM compared with CMS's, which is meaningful only if CMS compiled it with them.
+    if (library !== main) assertCmsTranslatorOptions(library.resource as { name?: string; contained?: unknown[] });
+    const cql = applyEdits(library.cql, libraryEdits);
+    // An edit that changes nothing would put WorkWell's name on CMS's untouched library.
+    if (lf(cql) === lf(library.cql)) {
+      throw new Error(`the edits to ${library.name} ${library.version} leave its CQL byte-equal to CMS's; an edit must change the library it names`);
+    }
+    editedCql.set(library.name, cql);
+  }
+  const changed = libraries.filter((l) => l !== main && editedCql.has(l.name));
+  const translationSha256 = sha256(lf(editedCql.get(main.name) ?? main.cql));
+  deps.log(`${id}: ${editsByLibrary.get(main.name)?.length ?? 0} edit(s) applied to ${main.name} ${main.version}; translated CQL ${translationSha256}`);
+  for (const library of changed) {
+    deps.log(`${id}: ${editsByLibrary.get(library.name)!.length} edit(s) applied to ${library.name} ${library.version}; translated CQL ${cqlSha256(editedCql.get(library.name)!)}`);
+  }
 
-  const sources: LibrarySource[] = libraries.map((l) => ({ name: l.name, version: l.version, cql: l === main ? editedCql : l.cql }));
+  const sources: LibrarySource[] = libraries.map((l) => ({ name: l.name, version: l.version, cql: editedCql.get(l.name) ?? l.cql }));
   const modelInfos = deps.modelInfos();
-  const compileMain = (): CompiledLibrary => {
-    const compiled = deps.compile(sources, { modelInfos, signatureLevel: args.signatureLevel }).find((c) => c.name === main.name && c.version === main.version);
-    if (!compiled) throw new Error(`the compile returned no ${main.name} ${main.version}`);
+  const compileAll = () => deps.compile(sources, { modelInfos, signatureLevel: args.signatureLevel });
+  const compiledOf = (set: readonly CompiledLibrary[], library: { name: string; version: string }): CompiledLibrary => {
+    const compiled = set.find((c) => c.name === library.name && c.version === library.version);
+    if (!compiled) throw new Error(`the compile returned no ${library.name} ${library.version}`);
     return compiled;
   };
-  const first = compileMain();
-  const second = compileMain();
-  const firstJson = JSON.stringify(first.elm);
-  const secondJson = JSON.stringify(second.elm);
-  if (firstJson !== secondJson) {
-    throw new Error(
-      `the translator compiled ${main.name} to different ELM on two runs (${sha256(firstJson)} vs ${sha256(secondJson)}); ` +
-        "a translation that is not reproducible byte for byte cannot be verified, so none is written",
-    );
+  const first = compileAll();
+  const second = compileAll();
+  // WorkWell's compile of the main library and of every edited one is what the bundle carries; each must
+  // be reproducible and compiled with CMS's options. The unedited shared libraries are carried as CMS's.
+  const ours = [main, ...changed];
+  const elmSha256 = new Map<string, string>();
+  for (const library of ours) {
+    const firstJson = JSON.stringify(compiledOf(first, library).elm);
+    const secondJson = JSON.stringify(compiledOf(second, library).elm);
+    if (firstJson !== secondJson) {
+      throw new Error(
+        `the translator compiled ${library.name} to different ELM on two runs (${sha256(firstJson)} vs ${sha256(secondJson)}); ` +
+          "a translation that is not reproducible byte for byte cannot be verified, so none is written",
+      );
+    }
+    assertAppliedOptions(compiledOf(first, library).elm, args.signatureLevel, `${library.name} ${library.version}`);
+    elmSha256.set(library.name, sha256(firstJson));
   }
-  assertAppliedOptions(first.elm, args.signatureLevel, `${main.name} ${main.version}`);
-  deps.log(`${id}: compiled ${sources.length} libraries twice; ${main.name} ELM identical on both (${sha256(firstJson)})`);
+  deps.log(
+    `${id}: compiled ${sources.length} libraries twice; ${ours.map((l) => `${l.name} ELM identical on both (${elmSha256.get(l.name)})`).join(", ")}`,
+  );
 
   const base = deps.loadBase(id);
   if (!base) throw new Error(`CMS's artifact measures/official/${id}/ is not committed`);
-  const { bundle, unchangedLibraries } = assembleTranslationBundle(
-    base.bundle as unknown as { entry?: Array<{ resource?: Record<string, unknown> }> },
-    stripElmDebugKeys(first.elm),
+  const baseBundle = base.bundle as unknown as { entry?: Array<{ resource?: Record<string, unknown> }> };
+  assertSameDataSurface(baseBundle, ours, (library) => compiledOf(first, library).elm);
+  const { bundle, unchangedLibraries, changedLibraries } = assembleTranslationBundle(
+    baseBundle,
+    stripElmDebugKeys(compiledOf(first, main).elm),
     identity,
+    changed.map(
+      (library): ChangedLibraryBuild => ({
+        from: { name: library.name, version: library.version },
+        compiledElm: compiledOf(first, library).elm,
+        translationSha256: cqlSha256(editedCql.get(library.name)!),
+      }),
+    ),
   );
   const bundleJson = `${JSON.stringify(bundle, null, 0)}\n`;
 
@@ -325,6 +375,7 @@ function run(args: BuildDerivedArgs, deps: BuildDerivedDeps): number {
         translationSha256,
       },
       unchangedLibraries,
+      changedLibraries,
       packageSha256,
       terminologyBlock,
       previous,
@@ -337,8 +388,9 @@ function run(args: BuildDerivedArgs, deps: BuildDerivedDeps): number {
   if (identityProblems.length > 0) throw new Error(`the translation's identity would be refused:\n  ${identityProblems.join("\n  ")}`);
   deps.log(
     `${id}: ${identity.name} ${identity.version}: bundle.json ${built.manifest.sha256} (${Buffer.byteLength(bundleJson)} bytes), ` +
-      `${unchangedLibraries.length} libraries carried unchanged, terminology ${built.manifest.terminology?.sha256} ` +
-      `(${built.manifest.terminology?.valueSets} value sets, ${built.manifest.terminology?.codes} codes)`,
+      `${unchangedLibraries.length} libraries carried unchanged, ${changedLibraries.length} changed` +
+      `${changedLibraries.length > 0 ? ` (${changedLibraries.map((l) => `${l.name} ${l.version} from ${l.from.name} ${l.from.version}`).join(", ")})` : ""}, ` +
+      `terminology ${built.manifest.terminology?.sha256} (${built.manifest.terminology?.valueSets} value sets, ${built.manifest.terminology?.codes} codes)`,
   );
 
   if (args.verify) return verifyAgainstCommitted(args, deps, outputDir, previous!, built);
@@ -350,6 +402,37 @@ function run(args: BuildDerivedArgs, deps: BuildDerivedDeps): number {
   deps.fs.writeFile(manifestPath, `${JSON.stringify(built.manifest, null, 2)}\n`);
   deps.log(`${id}: wrote ${outputDir} (${built.manifest.derived!.oracles.length} oracle record(s) carried)`);
   return 0;
+}
+
+/**
+ * Refuse unless every library WorkWell compiled for the bundle (the main one and each edited one) reads
+ * exactly the data CMS's committed ELM for the same library reads: the same value sets, codes and code
+ * systems declared, and the same retrieves with multiplicity (`elmDataSurface`). The translation carries
+ * CMS's computed data requirements — the Measure's `dataRequirement` entries and the `depends-on` value
+ * sets, which MADiE computed from CMS's ELM — and nothing recomputes them, so they are true only while
+ * this holds. An edit that changes how fetched data is compared (`starts during` → `overlaps`) passes;
+ * one that fetches another value set or resource type does not, until the builder recomputes them.
+ * Compared with CMS's COMMITTED ELM (what the translation is built on), not upstream's; calibrated equal
+ * for an unedited recompile, see `elm-data-surface.ts`.
+ */
+function assertSameDataSurface(
+  baseBundle: { entry?: Array<{ resource?: Record<string, unknown> }> },
+  libraries: ReadonlyArray<{ name: string; version: string }>,
+  oursOf: (library: { name: string; version: string }) => unknown,
+): void {
+  const baseLibraries = (baseBundle.entry ?? []).map((e) => e.resource).filter((r) => r?.["resourceType"] === "Library");
+  for (const library of libraries) {
+    const cms = baseLibraries.find((l) => l?.["name"] === library.name && l["version"] === library.version);
+    const data = ((cms?.["content"] as Array<{ contentType?: string; data?: string }> | undefined) ?? []).find((c) => c.contentType === "application/elm+json")?.data;
+    if (!data) throw new Error(`CMS's committed artifact holds no ELM for ${library.name} ${library.version} to compare the translation's data requirements with`);
+    const differences = dataSurfaceDifferences(elmDataSurface(JSON.parse(Buffer.from(data, "base64").toString("utf8"))), elmDataSurface(oursOf(library)));
+    if (differences.length > 0) {
+      throw new Error(
+        `${library.name} ${library.version} would read other data than CMS's, but the translation carries CMS's computed data ` +
+          `requirements, which nothing recomputes:\n  ${differences.join("\n  ")}`,
+      );
+    }
+  }
 }
 
 /**

@@ -1,0 +1,9 @@
+[
+  {
+    "case": "7822bd0a-ba96-46f0-8c57-204d37156184",
+    "key": "g0|AdvancedIllnessandFrailty.Has Advanced Illness in Year Before or During Measurement Period",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "true|\"TRUE\"|TRUE",
+    "reason": "The edit itself. This case's advanced-illness Condition begins at 2024-12-31T23:59Z, one minute before the look-back window opens (2025-01-01), and is still active: it does not START during the window (CMS's 2026 logic) but it OVERLAPS it (CMS130v15). The patient is 46, below the frailty exclusion's 66, so no population moves. The Condition carries the base qicore-condition profile and is retrieved because the harness runs with trustMetaProfile false; an engine that filters by profile would read false under both logics. fqm parses the measurement period as UTC, so the boundary does not depend on the host's timezone."
+  }
+]

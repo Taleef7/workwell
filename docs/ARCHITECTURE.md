@@ -55,7 +55,7 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
   - both: `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_BUCKET_S3_*`.
   - TWH: `WORKWELL_INSTANCE=twh`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125`.
   - Maui: `WORKWELL_INSTANCE=maui`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137`
-    and `WORKWELL_DERIVED_MEASURES=cms137`;
+    and `WORKWELL_DERIVED_MEASURES=cms137,cms130`;
     `WORKWELL_MAUI_CORPUS_SIZE`, `WORKWELL_RUN_CHUNK_SIZE`, `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC`,
     `WORKWELL_SCHEDULER_DAYS=1-5`, `WORKWELL_OUTCOME_RETENTION_DAYS=90`.
 - Other workflows: `ci.yml`, `flip-gate.yml`, `cross-engine-sweep.yml`, `vendor-official-measure.yml`,
