@@ -31,7 +31,7 @@ root `*.md` files or `wcdb-fhir-shim/` (no image contains them). Each:
 1. **Builds the backend**: vendors official terminology (Step 1), runs the reproducibility gate
    `git diff --exit-code backend-ts/measures/official` (Maui adds `backend-ts/measures/derived`), bakes
    `WORKWELL_BUILD_SHA` and the routing lists (`WORKWELL_OFFICIAL_MEASURES`, `WORKWELL_DERIVED_MEASURES`,
-   #768) into the image as build args.
+   #768) into the image as build args. The lists are set nowhere else: container env would override them.
    TWH tags `latest` + `sha-<SHA>`; Maui pushes only `maui-sha-<SHA>`.
 2. **Builds the frontend** with the stack's build args.
 3. **Deploys the backend**: validates required secrets, builds the container env as a fixed `jq` array,
@@ -152,25 +152,25 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
 3. **Check the numerator, not just membership** (ADR-044: CPT vs LOINC mammograms made screened women
    OVERDUE).
 
-4. **Edit the workflows, never the container**: in the deploy workflow, the `build-backend-ts` build args,
-   the routing gate's `EXPECTED_*` and the container env array; in the reconcile workflow, its env array
-   (until the env keys go, #768). For Maui also `flip-gate.yml`'s `routed` default,
-   `rebuild-quality-snapshots-maui.yml` and CI's `e2e-maui` `ROUTED_MEASURES`/`ROUTED_TRANSLATIONS`.
-   `official-flip-config.test.ts` fails the build if any of them
-   disagree or a measure lacks its gate (ADR-045).
+4. **Edit the deploy workflow, never the container**: its `build-backend-ts` build args and the routing
+   gate's `EXPECTED_*`. No container env array may carry the lists (#768). For Maui also `flip-gate.yml`'s
+   `routed` default, `rebuild-quality-snapshots-maui.yml` and CI's `e2e-maui`
+   `ROUTED_MEASURES`/`ROUTED_TRANSLATIONS`. `official-flip-config.test.ts` fails the build if any of them
+   disagree, a list is set anywhere else, or a measure lacks its gate (ADR-045).
 
 5. **Redeploy and check the signals.** A misconfiguration does not fail boot: grep
-   `WORKWELL_ALERT {"kind":"OFFICIAL_ROUTING_MISCONFIGURED"` (health stays 200 while evaluations 500).
+   `WORKWELL_ALERT {"kind":"OFFICIAL_ROUTING_MISCONFIGURED"` (health stays 200 while evaluations 500;
+   the deploy's routing gate fails the job on it, #768).
    Then run one population run: `run_logs` shows `N subject(s) evaluated in one official batch` per
    routed measure, plus the ADR-043 `WARN` if a roster fell out of the population.
 
-**Reversible:** remove the id from both workflows and redeploy; `logic_version` carries the artifact's
+**Reversible:** remove the id where step 4 says and redeploy; `logic_version` carries the artifact's
 identity (ADR-040), so no cache cleanup is needed.
 
 **Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms137`) lets a committed WorkWell
 translation score the one year it covers (2027); CMS's artifact still scores every other year. Each id
-must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit it where step 4 says (the build arg, the gate's
-`EXPECTED_DERIVED`, both Maui env arrays), same value, and keep the build job's `vendor-derived-terminology.mjs` lines
+must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit it where step 4 says (the build arg and the gate's
+`EXPECTED_DERIVED`, same value), and keep the build job's `vendor-derived-terminology.mjs` lines
 naming the same ids (and `ROUTED_TRANSLATIONS` in CI's `e2e-maui`). `official-flip-config.test.ts` fails
 the build otherwise, and pins TWH and staging to none. `flip-gate.yml` does not read the key: a flip-gate
 run for a 2027 date scores CMS's 2026 artifact, not what Maui runs.
@@ -214,11 +214,11 @@ The deploy fails if a required secret is missing. Suffixed secrets map to unsuff
 Both live stacks ship: `MIEWEB_TARGET=local`, `WORKWELL_ENVIRONMENT=production`, `DATABASE_URL`,
 `OPENAI_API_KEY`, `WORKWELL_CORS_ALLOWED_ORIGINS` + `CORS_ALLOWED_ORIGINS` (the frontend URL),
 `WORKWELL_AUTH_COOKIE_SAME_SITE=None`, `WORKWELL_AUTH_COOKIE_SECURE=true`, `WORKWELL_AUTH_JWT_SECRET`,
-`WORKWELL_INSTANCE`, `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_OFFICIAL_MEASURES`,
-`WORKWELL_VSAC_API_KEY` and the five `WORKWELL_BUCKET_S3_*`; Maui adds the corpus variables,
-`WORKWELL_DERIVED_MEASURES` and `WORKWELL_ALERT_WEBHOOK_URL`.
+`WORKWELL_INSTANCE`, `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_VSAC_API_KEY` and the five
+`WORKWELL_BUCKET_S3_*`; Maui adds the corpus variables and `WORKWELL_ALERT_WEBHOOK_URL`.
 `WORKWELL_EMAIL_PROVIDER` is unset, so email stays simulated. The reconcilers duplicate this array —
-**keep-in-sync**.
+**keep-in-sync**. The routing lists are not in it: they are build args baked into the image (#768), so a
+recreate runs the lists its own image was built with.
 
 `WORKWELL_ENVIRONMENT=production` arms `config/startup-safety.ts`: auth on, JWT secret ≥32 chars and not a
 demo value, exact CORS origins, refresh cookie `SameSite=None; Secure` (frontend and API are different
@@ -438,7 +438,7 @@ delivers scheduled runs hours apart; to heal now, run the reconcile workflow by 
 | `WORKWELL_CORS_ALLOWED_ORIGINS` | B | Exact origins; production refuses wildcard/blank/`localhost` with **503 `unsafe_configuration`**. First origin = Studio link in CDS cards; add a browser CDS client's origin deliberately (ADR-067). |
 | `WORKWELL_SCHEDULER_ENABLED` | B | `true` enables the nightly scheduler. |
 | corpus / chunk / anchor / retention vars | B | See the Maui table. |
-| `WORKWELL_OFFICIAL_MEASURES` | B | Catalog ids run by the official artifact; `all` refused. Workflow edit only (flip checklist). |
+| `WORKWELL_OFFICIAL_MEASURES` | B | Catalog ids run by the official artifact; `all` refused. A build arg baked into the image, never container env (flip checklist, #768). |
 | `WORKWELL_VSAC_API_KEY`, `WORKWELL_VSAC_BASE_URL` | B | Runtime VSAC resolver (ADR-023); base defaults to `https://cts.nlm.nih.gov/fhir`. |
 | `WORKWELL_BUCKET_S3_BUCKET`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY` | B | Evidence bucket; **all three** or evidence falls back to the in-container `fs` (lost on recreate). |
 | `WORKWELL_BUCKET_S3_REGION`, `_ENDPOINT` | B | `auto` on R2; a non-empty endpoint also switches to path-style. |
@@ -639,18 +639,15 @@ No migration to undo — the schema is additive. Roll back by redeploying an ear
 - **Maui:** dispatch `deploy-maui-mieweb.yml` at the good SHA with `replace_existing: true`; the recovery tag
   follows it, but the next push supersedes it, so revert on `main`.
 - During an NLM VSAC outage only a pre-ADR-041 SHA can be rebuilt (Step 1a).
-- Routing: remove the measure from both workflows. Data: `docs/BACKUP_DR_RUNBOOK.md`.
-- **Maui, rolling back past the translation:** the reconciler always runs `main`'s env. After a dispatch
-  rollback to an image built before `measures/derived/<id>/` was committed, the next self-heal recreate
-  puts `main`'s `WORKWELL_DERIVED_MEASURES` on that image, the router refuses it (check D2, `no executable
-  translation is committed`), and every evaluation 500s while health stays 200. Unset the key in **both**
-  Maui workflows on `main` first. The same state arises with no operator action if the **first deploy
-  after the merge that adds a translation fails before its image is built** (a VSAC outage at the
-  `--verify-pin` line is enough): `main` carries the key, `maui-latest` is still the older image, and the
-  next self-heal recreate combines them. So after that merge, confirm the Maui deploy promoted
-  `maui-latest`; if it failed, re-run it or unset the key on `main` before any health event can recreate
-  the container. (The official allowlist has the same shape. Since #768 the image carries both lists, but
-  container env still overrides them until the reconcilers stop setting the keys.)
+- Routing: remove the measure from the deploy's build args (step 4 of the flip checklist) and redeploy.
+  Data: `docs/BACKUP_DR_RUNBOOK.md`.
+- **The routing lists roll back with the image** (#768). An image routes the lists it was built with,
+  so a rollback, and every self-heal after it, routes what that commit routed.
+- **Rolling back to an image built before #768 (before `0c81cfc2`, 2026-10-09):** that image carries no
+  lists. The dispatch itself serves, because it runs that commit's workflow, which still set them on
+  the container. The next self-heal does not: it recreates the container with `main`'s env, which no
+  longer carries them, so it routes nothing. `/health` shows `routing.official: []`, and the official
+  measures show as pending; measures with authored CQL fall back to it. Redeploy a current SHA to fix it.
 
 ## Cost monitoring
 

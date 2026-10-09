@@ -311,7 +311,7 @@ guarantee.
   For an official-routed measure the "defines" are population membership (`official:numerator`, or
   `official:Initiation:numerator` / `official:Engagement:numerator` on a multi-rate measure), and the
   block leads with a plain-English "Why flagged" line that names the rate the patient missed (ADR-074).
-- The routing state is configuration: `WORKWELL_OFFICIAL_MEASURES` in `deploy-twh-mieweb.yml` (TWH) and `deploy-maui-mieweb.yml` (Maui).
+- The routing state is configuration: `WORKWELL_OFFICIAL_MEASURES` (and on Maui `WORKWELL_DERIVED_MEASURES`), build args of the backend image in `deploy-twh-mieweb.yml` (TWH) and `deploy-maui-mieweb.yml` (Maui). The image carries them, so a self-heal recreate routes what its image was built with, and `/health` reports them.
 
 ## Reproduce it yourself
 
