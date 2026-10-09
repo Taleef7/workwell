@@ -555,9 +555,11 @@ jobs:
           fi
           echo "Rebuilt and byte-compared $n translation(s)."
       # The translation's logic against CMS's own: CMS's MADiE deck run through the committed translation
-      # and through CMS's artifact must agree, case by case. It needs neither the credential nor the
-      # sidecar, so it runs in both branches — an uncredentialed push still proves the LOGIC equivalence.
-      - name: Translation logic equals CMS's on the MADiE deck
+      # and through CMS's artifact must agree case by case, except exactly the differences the translation
+      # lists (madie-expected-differences.json, #779); and a translation that edits CMS's logic must tell
+      # the two logics apart on its own hand-built patients (edit-cases.json). It needs neither the
+      # credential nor the sidecar, so it runs in both branches — an uncredentialed push still proves the LOGIC.
+      - name: Translation logic matches CMS's except its listed differences
         env:
           TRANSLATIONS: ${{ steps.translations.outputs.ids }}
         run: |
@@ -759,7 +761,7 @@ jobs:
     # there is no uncredentialed boot for the key to take evaluation down in.
     env:
       ROUTED_MEASURES: cms122,cms125,cms2,cms130,cms165,cms137
-      ROUTED_TRANSLATIONS: cms137
+      ROUTED_TRANSLATIONS: cms137,cms130
     steps:
       # backend-ts consumes @mieweb/cloud + @mieweb/cli from the external/mieweb-cloud submodule.
       - uses: actions/checkout@v7
@@ -1009,7 +1011,8 @@ jobs:
       # today's routing names CMS's artifact for the measure. The case comes from a one-patient manual run
       # dated in the translation's year, on this throwaway stack only — on the live sandbox a run dated
       # 2027 closes and reopens every 2026 case (#654). Candidates hold an open case today, so they sit in
-      # the measure's population; mid-December puts the year's facts in the corpus.
+      # the measure's population; mid-December puts the year's facts in the corpus. Every translation's case
+      # is handed to Playwright as one list: an environment variable written once per id kept only the last.
       - name: A case a translation scored is labelled as the translation
         id: translated-case
         if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
@@ -1018,6 +1021,7 @@ jobs:
           TOKEN="$(curl -fsS --max-time 60 -X POST "$API/api/auth/login" -H 'content-type: application/json' \
             -d '{"email":"admin@maui.workwell.dev","password":"Workwell123!"}' | jq -er .token)"
           auth=(-H "Authorization: Bearer $TOKEN")
+          CASES='[]'
           IFS=',' read -ra TRANSLATIONS <<< "$ROUTED_TRANSLATIONS"
           for id in "${TRANSLATIONS[@]}"; do
             YEAR="$(jq -er '.effectivePeriod.start[0:4]' "backend-ts/measures/derived/${id}/manifest.json")"
@@ -1041,18 +1045,20 @@ jobs:
                 exit 1
               }
               echo "${id}: case $(printf '%s' "$CASE" | jq -r .caseId) of ${pid} names $(printf '%s' "$CASE" | jq -c '.logic | {label, version}')"
-              echo "TRANSLATED_CASE_ID=$(printf '%s' "$CASE" | jq -r .caseId)" >> "$GITHUB_ENV"
-              echo "TRANSLATED_CASE_LABEL=${LABEL}" >> "$GITHUB_ENV"
+              CASES="$(printf '%s' "$CASES" | jq -c --arg caseId "$(printf '%s' "$CASE" | jq -r .caseId)" --arg label "$LABEL" '. + [{caseId: $caseId, label: $label}]')"
               FOUND="$pid"
               break
             done
             [ -n "$FOUND" ] || { echo "::error::no candidate opened a ${YEAR} ${id} case, so the translated label went unchecked"; exit 1; }
           done
-      - name: The translated case's page names the translation
+          echo "TRANSLATED_CASES=${CASES}" >> "$GITHUB_ENV"
+      - name: Each translated case's page names the translation
         if: ${{ !cancelled() && steps.translated-case.outcome == 'success' }}
         working-directory: e2e
         env:
           PLAYWRIGHT_PROFILE: maui
+          # The spec fails unless it was handed one case per routed translation.
+          TRANSLATED_CASES_EXPECTED: ${{ env.ROUTED_TRANSLATIONS }}
           PLAYWRIGHT_BASE_URL: http://localhost:3000
           PLAYWRIGHT_API_BASE_URL: http://localhost:8080
         # Its own output dir: Playwright empties outputDir at the start of a run, which would delete the

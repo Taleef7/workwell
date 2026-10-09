@@ -1,0 +1,2041 @@
+{
+  "measurementPeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "cases": [
+    {
+      "id": "ww-cms130-edit-01",
+      "description": "Active on the problem list since 2023-06-01, no abatement: began before the window and still active",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-01",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-01-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-01"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-01-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-01"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-01-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-01"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-02",
+      "description": "Active on the problem list, no onset and no abatement: boundless under CMS's FHIR conventions",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-02",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-02-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-02"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-02-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-02"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-02-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-02"
+          }
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-03",
+      "description": "Resolved: onset 2023-06-01, abated 2024-06-01, before the window",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-03",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-03-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-03"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-03-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-03"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-03-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-03"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00",
+          "abatementDateTime": "2024-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-04",
+      "description": "Resolved: onset 2023-06-01, abated 2025-06-01, inside the window",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-04",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-04-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-04"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-04-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-04"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-04-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-04"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00",
+          "abatementDateTime": "2025-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-05",
+      "description": "Resolved: onset 2023-06-01, abated 2025-01-01, the window's first day",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-05",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-05-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-05"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-05-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-05"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-05-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-05"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00",
+          "abatementDateTime": "2025-01-01T12:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-06",
+      "description": "Resolved: onset 2023-06-01, abated 2024-12-31, the day before the window",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-06",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-06-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-06"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-06-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-06"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-06-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-06"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00",
+          "abatementDateTime": "2024-12-31T12:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-07",
+      "description": "Resolved: onset 2023-06-01, no abatement date (an unknown end, not an ongoing one)",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-07",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-07-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-07"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-07-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-07"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-07-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-07"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-08",
+      "description": "Active, onset 2025-01-01, the window's first day",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-08",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-08-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-08"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-08-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-08"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-08-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-08"
+          },
+          "onsetDateTime": "2025-01-01T12:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-09",
+      "description": "Active, onset 2026-03-01, inside the measurement period",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-09",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-09-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-09"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-09-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-09"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-09-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-09"
+          },
+          "onsetDateTime": "2026-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-10",
+      "description": "Active, onset 2027-02-01, after the measurement period",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-10",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-10-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-10"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-10-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-10"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-10-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-10"
+          },
+          "onsetDateTime": "2027-02-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-11",
+      "description": "As 1, recorded as an encounter diagnosis (the union's second branch)",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-11",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-11-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-11"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-11-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-11"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-11-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-encounter-diagnosis"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "encounter-diagnosis"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-11"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-12",
+      "description": "As 1, aged exactly 66 at the end of the measurement period",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-12",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1960-12-31"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-12-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-12"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-12-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-12"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-12-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-12"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-13",
+      "description": "As 1, aged 65 at the end of the measurement period",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-13",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1961-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-13-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-13"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-13-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-13"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-13-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-13"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-14",
+      "description": "As 1, with no evidence of frailty",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-14",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-14-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-14"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-14-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-14"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms130-edit-15",
+      "description": "As 1, verification status refuted",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms130-edit-15",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-15-visit",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-15"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms130-edit-15-frailty",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-15"
+          },
+          "period": {
+            "start": "2026-04-10T10:00:00.000+00:00",
+            "end": "2026-04-10T11:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms130-edit-15-illness",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms130-edit-15"
+          },
+          "verificationStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-ver-status",
+                "code": "refuted"
+              }
+            ]
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    }
+  ]
+}

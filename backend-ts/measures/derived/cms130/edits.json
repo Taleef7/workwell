@@ -1,0 +1,10 @@
+[
+  {
+    "library": "AdvancedIllnessandFrailty",
+    "anchorSha256": "sha256:dd8e6cd21cddad7894d1a885f24e2afcea77dbc3cb372151777b522597d3e0b5",
+    "startLine": 69,
+    "endLine": 69,
+    "replacement": "where AdvancedIllnessDiagnosis.prevalenceInterval() overlaps day of Interval[start of \"Measurement Period\" - 1 year, end of \"Measurement Period\"])",
+    "reason": "CMS130v15: the advanced-illness diagnosis overlaps the look-back window (v14: starts during it)"
+  }
+]
