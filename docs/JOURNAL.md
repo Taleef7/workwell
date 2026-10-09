@@ -5,6 +5,19 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-09
+
+- **#768's first half is live (#772).** Both deploys passed the routing gate, `maui-latest` was promoted,
+  and `/health` shows Maui's six measures plus the cms137 translation and TWH's two, each with 0 problems.
+- **#768's second half: the routing lists are set only in the image.**
+  - The deploy and reconcile workflows no longer put either list in the container env. A self-heal now
+    routes what its image was built with and can serve.
+  - The guard tests read the build args as the one copy. They now fail if either key appears in any
+    container env array, in any spelling.
+  - DEPLOY.md: the rollback runbook drops the translation hazard. It now says what a rollback to an image
+    built before #768 does: it routes nothing after the next self-heal, and a redeploy of a current SHA
+    fixes it.
+
 ## 2026-10-08
 
 - **#767 is deployed and the nightlies are unaffected.** Every weekday nightly since its deploy completed on

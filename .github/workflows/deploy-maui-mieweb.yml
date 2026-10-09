@@ -117,8 +117,8 @@ jobs:
           node scripts/vendor-official-measure.mjs --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --complete-terminology
           node scripts/vendor-official-measure.mjs --measure CMS137FHIRSUDTxInitEngagement --catalog-id cms137 --strip-elm-annotations --complete-terminology
           # Each WorkWell translation this stack routes, one explicit line per id. The list must equal the
-          # WORKWELL_DERIVED_MEASURES value in the env array below, and every line must come before the
-          # image is built; official-flip-config.test.ts enforces both. Every value set is re-expanded at
+          # WORKWELL_DERIVED_MEASURES build arg below, and every line must come before the image is
+          # built; official-flip-config.test.ts enforces both. Every value set is re-expanded at
           # the VSAC release the committed manifest names, and --verify-pin exits 1 unless the bytes hash
           # to its pin. That gate has to run HERE: the worker boots even when the router refuses a
           # translation, then every evaluating route 500s while /actuator/health stays 200.
@@ -141,10 +141,16 @@ jobs:
           file: ./backend-ts/Dockerfile
           push: true
           # The commit, baked into the image and served on /health (#625). The routing lists are baked in
-          # too (#768): the image serves only the artifacts committed in it. Once the container env stops
-          # setting them (#768's second half), a self-heal that recreates an older image starts it with the
-          # list it was built with, never one it cannot serve. Each id here must be vendored above
-          # (translations with --verify-pin), and official-flip-config.test.ts holds the rest.
+          # too, and set nowhere else (#768): an image serves only the artifacts committed in it, so a
+          # self-heal that recreates an older image starts it with the lists it was built with, never one
+          # it cannot serve. Each id here must be vendored above (translations with --verify-pin), and
+          # official-flip-config.test.ts holds the rest.
+          #
+          # THE FLIP (ADR-045; ADR-078, owner decision 2026-09-08): the sandbox routes the whole ACO
+          # computable set. cms2/cms130/cms137 have their second-engine evidence; cms165 runs on the
+          # profiles the corpus stamps (trustMetaProfile per measure, ADR-076 d1) and its WebChart ingest
+          # caveat governs the PHI phase, not the sandbox. The WorkWell translation of CMS137v15
+          # (WORKWELL_DERIVED_MEASURES) scores 2027 only; CMS's artifact still scores every other year.
           build-args: |
             WORKWELL_BUILD_SHA=${{ github.sha }}
             WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137
@@ -323,16 +329,10 @@ jobs:
                 {key: "WORKWELL_INSTANCE", value: "maui"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
-                # THE FLIP (ADR-045; ADR-078, owner decision 2026-09-08): the sandbox routes the whole ACO
-                # computable set. cms2/cms130/cms137 have their second-engine evidence; cms165 runs on the
-                # profiles the corpus stamps (trustMetaProfile per measure, ADR-076 d1) and its WebChart
-                # ingest caveat governs the PHI phase, not the sandbox. reconcile-maui-mieweb.yml MUST match.
                 # No apostrophes in this block: it sits inside a single-quoted jq program.
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125,cms2,cms130,cms165,cms137"},
-                # The WorkWell translation of CMS137v15 scores 2027 only; the CMS artifact still scores every
-                # other year. Each id must be routed above and have its sidecar vendored by the build job.
-                # reconcile-maui-mieweb.yml MUST match.
-                {key: "WORKWELL_DERIVED_MEASURES", value: "cms137"},
+                # The routing lists (WORKWELL_OFFICIAL_MEASURES, WORKWELL_DERIVED_MEASURES) are NOT set here.
+                # They are build args baked into the image (#768), and container env would override them.
+                # official-flip-config.test.ts fails if either key returns to a container env array.
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
                 {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},

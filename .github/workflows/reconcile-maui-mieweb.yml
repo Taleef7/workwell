@@ -20,7 +20,9 @@ name: Reconcile Maui stack (self-heal)
 #     token scoped to it alone, so the pilot and the TWH demo stack cannot read each other. Until then
 #     evidence sat on the in-container fs and was lost on every deploy and self-heal. All five
 #     WORKWELL_BUCKET_S3_* keys must match deploy-maui-mieweb.yml, including which jq --arg each comes
-#     from; `official-flip-config.test.ts` asserts that, and the same for WORKWELL_OFFICIAL_MEASURES.
+#     from; `official-flip-config.test.ts` asserts that.
+#   * The routing lists are NOT in this env array (#768): `maui-latest` carries them, so a recreate
+#     runs the lists its own image was built with.
 
 # Self-healing watchdog (#109). Periodically health-checks the LIVE surfaces and, if any is down,
 # recreates that container from its last-good GHCR `:latest` image (no rebuild). This is independent
@@ -242,16 +244,10 @@ jobs:
                 {key: "WORKWELL_PILOT_PASSWORD_HASH", value: $pilot_password_hash},
                 {key: "WORKWELL_INSTANCE", value: "maui"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
-                # MUST mirror deploy-maui-mieweb.yml (PR-9c / ADR-045). This array recreates the container
-                # from :latest during a self-heal, so anything missing here is SILENTLY DROPPED the first
-                # time the reconciler fires — the container comes back healthy, the image is unchanged,
-                # and cms122/cms125 quietly revert to authored CQL with no signal anywhere. Caught by
-                # Codex on #356 before it could happen; `official-flip-config.test.ts` now asserts the two
-                # workflows agree, so this pair cannot drift again.
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125,cms2,cms130,cms165,cms137"},
-                # MUST mirror deploy-maui-mieweb.yml, for the same reason: dropped here, a self-heal would put
-                # 2027 back on the CMS 2026 draft with no signal. The test asserts the two agree.
-                {key: "WORKWELL_DERIVED_MEASURES", value: "cms137"},
+                # The routing lists (WORKWELL_OFFICIAL_MEASURES, WORKWELL_DERIVED_MEASURES) are NOT set here.
+                # The image carries them (#768), so a self-heal recreates the container with the lists its
+                # own image was built with and can serve. Container env would override them, so
+                # official-flip-config.test.ts fails if either key returns to a container env array.
                 {key: "WORKWELL_MAUI_CORPUS_SIZE", value: "20000"},
                 {key: "WORKWELL_RUN_CHUNK_SIZE", value: "500"},
                 {key: "WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC", value: "12"},

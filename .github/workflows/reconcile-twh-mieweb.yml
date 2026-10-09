@@ -18,10 +18,11 @@ name: Reconcile TWH stack (self-heal)
 # deploy-twh-mieweb.yml, so a heal can never run while a push-to-main deploy is mid delete+recreate of
 # the same container (and vice-versa) — the queued run waits, then re-checks a now-healthy surface.
 #
-# Rollback interaction: a heal recreates from GHCR `:latest`. If you have done a FAST rollback by
-# redeploying an older `sha-<SHA>` via workflow_dispatch, a later heal will re-pull `:latest` (the newer
-# build) and undo it — so follow a fast rollback with a DURABLE one (revert the bad commit on main so
-# `:latest` rebuilds to the good image), or disable this workflow, before relying on it. See docs/DEPLOY.md.
+# Rollback interaction: a heal recreates from GHCR `:latest`. A FAST rollback (dispatching
+# deploy-twh-mieweb.yml at an older commit) rebuilds and pushes `:latest` from that commit, so a heal
+# keeps it; what undoes it is the next push to main. Follow it with a DURABLE one (revert the bad commit
+# on main). The image carries its routing list (#768), so a heal routes what that image was built with.
+# See docs/DEPLOY.md.
 
 # CADENCE, MEASURED — do not read the cron below as a recovery-time guarantee. Over 2026-08-30..09-01
 # the twelve most recent scheduled runs came 2.5-7.5 HOURS apart, never 15 minutes: GitHub queues
@@ -191,13 +192,10 @@ jobs:
                 {key: "WORKWELL_AUTH_JWT_SECRET", value: $jwt_secret},
                 {key: "WORKWELL_INSTANCE", value: "twh"},
                 {key: "WORKWELL_SCHEDULER_ENABLED", value: "true"},
-                # MUST mirror deploy-twh-mieweb.yml (PR-9c / ADR-045). This array recreates the container
-                # from :latest during a self-heal, so anything missing here is SILENTLY DROPPED the first
-                # time the reconciler fires — the container comes back healthy, the image is unchanged,
-                # and cms122/cms125 quietly revert to authored CQL with no signal anywhere. Caught by
-                # Codex on #356 before it could happen; `official-flip-config.test.ts` now asserts the two
-                # workflows agree, so this pair cannot drift again.
-                {key: "WORKWELL_OFFICIAL_MEASURES", value: "cms122,cms125"},
+                # The routing lists (WORKWELL_OFFICIAL_MEASURES, WORKWELL_DERIVED_MEASURES) are NOT set here.
+                # The image carries them (#768), so a self-heal recreates the container with the lists its
+                # own image was built with and can serve. Container env would override them, so
+                # official-flip-config.test.ts fails if either key returns to a container env array.
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},
                 {key: "WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY", value: $bucket_secret},

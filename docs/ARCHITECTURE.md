@@ -49,10 +49,13 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
 
 - Reconcilers (cron every 15 min; GitHub runs them less often) recreate a down container from
   `:latest` with the same env as the deploy (`backend-ts/src/wiring/official-flip-config.test.ts`).
+- The routing lists are build args baked into the backend image, never container env (#768), so a
+  recreate runs the lists its image was built with; `/health` reports them as `routing`.
 - Stack env that shapes behaviour:
   - both: `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_BUCKET_S3_*`.
-  - TWH: `WORKWELL_INSTANCE=twh`, `WORKWELL_OFFICIAL_MEASURES=cms122,cms125`.
-  - Maui: `WORKWELL_INSTANCE=maui`, `WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137`,
+  - TWH: `WORKWELL_INSTANCE=twh`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125`.
+  - Maui: `WORKWELL_INSTANCE=maui`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137`
+    and `WORKWELL_DERIVED_MEASURES=cms137`;
     `WORKWELL_MAUI_CORPUS_SIZE`, `WORKWELL_RUN_CHUNK_SIZE`, `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC`,
     `WORKWELL_SCHEDULER_DAYS=1-5`, `WORKWELL_OUTCOME_RETENTION_DAYS=90`.
 - Other workflows: `ci.yml`, `flip-gate.yml`, `cross-engine-sweep.yml`, `vendor-official-measure.yml`,
