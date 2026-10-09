@@ -22,6 +22,7 @@
  */
 import type { WebChartConfig } from "../data-source.ts";
 import { smartBackendServicesAuth, staticBearerAuth, type WebChartAuthProvider } from "./smart-backend-auth.ts";
+import { WEBCHART_SERVED_RESOURCES } from "./served-resources.ts";
 
 /** Yields one raw per-patient payload per element (a FHIR Bundle or resource list — normalized upstream). */
 export interface WebChartClient {
@@ -65,11 +66,12 @@ interface PatientRef {
 }
 
 /**
- * The clinical resource types composed per patient (no `$everything` on the real contract). The
+ * The clinical resource types composed per patient (no `$everything` on the real contract), from the one
+ * table of what ingest serves (`served-resources.ts`, which the data-coverage report also reads). The
  * normalizer consumes Observation/Procedure/Immunization events + Condition enrollment/exemptions;
  * Encounter feeds the eCQM qualifying-visit CQL.
  */
-export const COMPOSED_RESOURCE_TYPES = ["Observation", "Condition", "Procedure", "Immunization", "Encounter"] as const;
+export const COMPOSED_RESOURCE_TYPES: readonly string[] = WEBCHART_SERVED_RESOURCES.filter((r) => r.how === "fetched").map((r) => r.type);
 
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_RETRIES = 2;

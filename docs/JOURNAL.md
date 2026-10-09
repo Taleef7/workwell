@@ -17,6 +17,19 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - DEPLOY.md: the rollback runbook drops the translation hazard. It now says what a rollback to an image
     built before #768 does: it routes nothing after the next self-heal, and a redeploy of a current SHA
     fixes it.
+- **Per-measure data coverage (#776).** `pnpm data-coverage` reports, for each logic Maui scores with, which
+  FHIR types it reads and whether WebChart ingest supplies them, with a reason for each gap.
+  - What a measure reads is computed from the committed artifact's ELM. The result equals MADiE's
+    effective data requirements for every vendored CMS artifact (apart from one abstract-type element read in
+    cms138, which is not data), and it covers the translation too.
+  - What ingest supplies is one table, which the WebChart client now fetches from.
+  - Result on the WebChart path:
+    - every routed measure scores with types ingest does not fetch: MedicationRequest, Medication and
+      ServiceRequest, plus DeviceRequest for four of them (#713);
+    - cms165 retrieves by profile, and ingest stamps only the blood-pressure profile (#591);
+    - the sandbox's synthetic corpus carries most of these, so its rates are not WebChart's.
+  - A test pins the table: it goes red when a type is dropped, when a measure starts reading a new one,
+    or when a gap has no reason.
 
 ## 2026-10-08
 

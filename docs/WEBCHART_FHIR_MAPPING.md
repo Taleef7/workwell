@@ -45,6 +45,14 @@ ADR-017). The engine derives each subject id from its bundle's `Patient`. Resour
 | `Procedure` | `code.coding[].system` + `.code`, `performedDateTime` (e.g. audiogram, mammogram) |
 | `Immunization` | `vaccineCode.coding[].system` + `.code`, `occurrenceDateTime`, `status` (Td/Tdap, Hep B, MMR, varicella, flu) |
 
+That table is the authored measures'. **What each routed CMS measure reads, and which of it ingest
+supplies, is computed from the committed artifacts by `pnpm data-coverage` (#776)**, with a reason for
+every gap. As of 2026-10-09:
+- Ingest supplies Patient, Observation, Condition, Procedure, Immunization and Encounter.
+- It does not supply MedicationRequest, Medication, ServiceRequest or DeviceRequest, which the measures
+  score with (#713), or Coverage, which feeds only the payer supplemental data element.
+- cms165 retrieves by profile, and ingest stamps only `us-core-blood-pressure` (#591).
+
 The CQL matches events by **inline code filters** on `code.coding.system`/`code`. Today those are
 **synthetic** (`urn:workwell:vs:*` + synthetic codes). WebChart carries **real terminologies**
 (LOINC/CPT/CVX/ICD-10/SNOMED). Bridging the two is the crux of PR-2 — see §5.
