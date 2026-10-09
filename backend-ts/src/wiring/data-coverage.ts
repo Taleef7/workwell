@@ -1,0 +1,119 @@
+/**
+ * Per-measure data coverage (#776): what each routed measure's logic reads, and whether WebChart ingest
+ * supplies it.
+ *
+ * "Reads" is computed from the committed artifact (`standards/measure-data-requirements.ts`), so a measure
+ * that starts reading a new type shows up here without anyone remembering to list it. "Supplies" is the
+ * one table the WebChart client fetches from (`engine/ingress/webchart/served-resources.ts`) plus the
+ * profiles preparation stamps. It describes the WebChart live-tenant path only: the Maui sandbox's
+ * synthetic corpus emits most of what is missing here, so sandbox rates are not what WebChart data would
+ * give.
+ *
+ * A type a measure reads but ingest does not supply carries a reason, and `data-coverage.test.ts` fails
+ * on one without a reason and on a reason no measure needs any more. "Supplied" means the resources reach
+ * the bundle; whether the measure can COUNT them is the data's business (coding, status), not this
+ * report's.
+ */
+import { WEBCHART_SERVED_RESOURCES } from "../engine/ingress/webchart/served-resources.ts";
+import { ecqmIdOf } from "../measure/measure-identity.ts";
+import { measureDataRequirements } from "../standards/measure-data-requirements.ts";
+import { loadDerivedArtifact, loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
+import { OFFICIAL_MEASURE_SEMANTICS } from "./official-measure-semantics.ts";
+import { PROFILES_STAMPED_AT_PREPARATION } from "./qicore-preparation.ts";
+
+/** Why ingest does not supply a type some routed measure reads. One entry per such type, no more. */
+export const NOT_SERVED_REASONS: Readonly<Record<string, string>> = {
+  MedicationRequest: "WebChart ingest does not compose it yet (#713). WebChart's FHIR API lists it.",
+  Medication:
+    "Read through MedicationRequest.medication: it needs MedicationRequest first, then a way to fetch the Medication it references, and WebChart declares no _include for that (#713).",
+  ServiceRequest: "WebChart ingest does not compose it yet (#713).",
+  DeviceRequest:
+    "WebChart's FHIR CapabilityStatement does not list it (checked 2026-10-08); where device orders live is an open question to MIE (#713).",
+  Coverage: "WebChart ingest does not compose it yet (#713). WebChart serves it for few patients, and without Coverage.type.",
+};
+
+/** A type ingest fetches, read by a measure that retrieves by profile, in a profile ingest never stamps. */
+export const UNSTAMPED_PROFILE_REASON =
+  "This measure retrieves by profile, and ingest stamps none of these QI-Core profiles; a resource without one is not retrieved (#591).";
+
+export interface CoverageRow {
+  readonly type: string;
+  readonly forScore: boolean;
+  readonly forSde: boolean;
+  /**
+   * `served`: the resources reach the bundle in a form the measure retrieves. `partial`: a profile-sensitive
+   * measure retrieves this type in several profiles and ingest stamps only some (`stampedProfiles`).
+   */
+  readonly status: "served" | "partial" | "not served";
+  /** How ingest gets the type, or null when it does not. */
+  readonly how: "population" | "fetched" | null;
+  /** What ingest derives of this type from other resources, or empty. */
+  readonly derived: string;
+  readonly profiles: readonly string[];
+  /** For a profile-sensitive measure, the profiles it retrieves by that ingest stamps, and those it does not. */
+  readonly stampedProfiles: readonly string[];
+  readonly unstampedProfiles: readonly string[];
+  /** Why it is not (fully) served; null when it is (or when nobody wrote one, which the test refuses). */
+  readonly reason: string | null;
+}
+
+export interface MeasureCoverage {
+  readonly measureId: string;
+  readonly kind: "cms-artifact" | "workwell-translation";
+  /** The logic this table is for, as the screens name it: `CMS165FHIR v1.0.000`, or a translation's label. */
+  readonly logic: string;
+  /** The executor filters every profile-typed retrieve on `meta.profile` for this measure (`trustMetaProfile`). */
+  readonly profileSensitive: boolean;
+  readonly rows: readonly CoverageRow[];
+}
+
+const SERVED = new Map(WEBCHART_SERVED_RESOURCES.map((resource) => [resource.type, resource]));
+const STAMPED = new Set(PROFILES_STAMPED_AT_PREPARATION);
+
+function logicOf(kind: MeasureCoverage["kind"], artifact: OfficialArtifact): string {
+  const manifest = artifact.manifest as OfficialArtifact["manifest"] & { derived?: { label?: string } };
+  if (kind === "workwell-translation") return `${manifest.derived?.label ?? manifest.catalogId} (${manifest.version})`;
+  return `${manifest.cmsId ? ecqmIdOf(manifest.cmsId) : manifest.measureName} v${manifest.version}`;
+}
+
+/** One logic's coverage table. Pure over the artifact. */
+export function coverageOf(measureId: string, kind: MeasureCoverage["kind"], artifact: OfficialArtifact): MeasureCoverage {
+  const profileSensitive = OFFICIAL_MEASURE_SEMANTICS[measureId]?.trustMetaProfile === true;
+  const rows = measureDataRequirements(artifact.bundle).map((requirement): CoverageRow => {
+    const served = SERVED.get(requirement.type);
+    const byProfile = served !== undefined && profileSensitive;
+    const stampedProfiles = byProfile ? requirement.profiles.filter((profile) => STAMPED.has(profile)) : [];
+    const unstampedProfiles = byProfile ? requirement.profiles.filter((profile) => !STAMPED.has(profile)) : [];
+    const status: CoverageRow["status"] =
+      served === undefined ? "not served" : unstampedProfiles.length === 0 ? "served" : stampedProfiles.length > 0 ? "partial" : "not served";
+    return {
+      type: requirement.type,
+      forScore: requirement.forScore,
+      forSde: requirement.forSde,
+      status,
+      how: served?.how ?? null,
+      derived: served?.derived ?? "",
+      profiles: requirement.profiles,
+      stampedProfiles,
+      unstampedProfiles,
+      reason: status === "served" ? null : served ? UNSTAMPED_PROFILE_REASON : (NOT_SERVED_REASONS[requirement.type] ?? null),
+    };
+  });
+  return { measureId, kind, logic: logicOf(kind, artifact), profileSensitive, rows };
+}
+
+/**
+ * Every logic each measure may be scored by: CMS's artifact, and the WorkWell translation where one is
+ * committed. Throws for a measure with no committed CMS artifact, since there is nothing to read.
+ */
+export function dataCoverage(measureIds: readonly string[]): MeasureCoverage[] {
+  return measureIds.flatMap((measureId) => {
+    const official = loadOfficialArtifact(measureId);
+    if (!official) throw new Error(`${measureId} has no committed CMS artifact under measures/official/`);
+    const translation = loadDerivedArtifact(measureId);
+    return [
+      coverageOf(measureId, "cms-artifact", official),
+      ...(translation ? [coverageOf(measureId, "workwell-translation", translation)] : []),
+    ];
+  });
+}

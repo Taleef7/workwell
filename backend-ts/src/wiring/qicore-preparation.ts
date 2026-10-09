@@ -169,6 +169,12 @@ const ENCOUNTER_CLASS_CODES: ReadonlySet<string> = new Set([
 ]);
 
 const US_CORE_BLOOD_PRESSURE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
+/**
+ * Every profile this file stamps (`stampProfile` below), for the data-coverage report (#776): a measure
+ * that retrieves by profile reads only resources that carry one. A test holds every `stampProfile` call
+ * here to this list.
+ */
+export const PROFILES_STAMPED_AT_PREPARATION: readonly string[] = [US_CORE_BLOOD_PRESSURE];
 /** The two LOINC panel codes a blood pressure is recorded under. Same set `normalize.ts` verified
  *  against the live WebChart export; kept local because these layers must be able to move apart. */
 const LOINC_BP_PANEL = new Set(["85354-9", "55284-4"]);
