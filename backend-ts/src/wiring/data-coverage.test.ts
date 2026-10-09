@@ -150,17 +150,19 @@ test("#776: the coverage of every logic the Maui sandbox scores with is pinned",
       table.rows.map((row) => `${row.type} ${row.forScore ? (row.forSde ? "score+SDE" : "score") : "SDE"} ${row.status}`),
     ]),
   );
+  // Since #713 ingest composes MedicationRequest, ServiceRequest and Coverage. Medication (drugs arrive
+  // inline) and DeviceRequest (no FHIR source) remain.
   const cmsWithDevices = [
     "Condition score served",
-    "Coverage SDE not served",
+    "Coverage SDE served",
     "DeviceRequest score not served",
     "Encounter score served",
     "Medication score not served",
-    "MedicationRequest score not served",
+    "MedicationRequest score served",
     "Observation score served",
     "Patient score+SDE served",
     "Procedure score served",
-    "ServiceRequest score not served",
+    "ServiceRequest score served",
   ];
   const withoutDevices = cmsWithDevices.filter((row) => !row.startsWith("DeviceRequest"));
   assert.deepEqual(compact, {
@@ -200,8 +202,17 @@ test("#776: every type a routed measure reads and ingest does not supply has a r
   assert.deepEqual(Object.keys(NOT_SERVED_REASONS).sort(), [...unsupplied].sort());
 });
 
-test("#776: the client fetches exactly the served table's fetched types, in the order it always has", () => {
-  assert.deepEqual([...COMPOSED_RESOURCE_TYPES], ["Observation", "Condition", "Procedure", "Immunization", "Encounter"]);
+test("#776: the client fetches exactly the served table's fetched types, in order, the #713 three last", () => {
+  assert.deepEqual([...COMPOSED_RESOURCE_TYPES], [
+    "Observation",
+    "Condition",
+    "Procedure",
+    "Immunization",
+    "Encounter",
+    "MedicationRequest",
+    "ServiceRequest",
+    "Coverage",
+  ]);
   assert.deepEqual(
     [...COMPOSED_RESOURCE_TYPES],
     WEBCHART_SERVED_RESOURCES.filter((resource) => resource.how === "fetched").map((resource) => resource.type),

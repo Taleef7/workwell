@@ -44,7 +44,9 @@ function useOf(row: CoverageRow): string {
 }
 
 function statusOf(row: CoverageRow): string {
-  if (row.status === "served") return `served (${row.how === "population" ? "the patient list" : "fetched"})`;
+  if (row.status === "served") {
+    return `served (${row.how === "population" ? "the patient list" : "fetched"})${row.caveat ? `, but ${row.caveat}` : ""}`;
+  }
   if (row.status === "partial") {
     return (
       `PARTLY: ${row.stampedProfiles.map(shortProfile).join(", ")} stamped; ` +
@@ -59,8 +61,8 @@ function statusOf(row: CoverageRow): string {
 export function renderText(tables: readonly MeasureCoverage[]): string {
   const lines = [
     "Data coverage (#776): what each measure's logic reads, and whether WebChart ingest supplies it.",
-    "This is the WebChart live-tenant path. The Maui sandbox scores a synthetic corpus that carries most of",
-    "the types marked NOT SERVED, so its rates are not what WebChart data would give.",
+    "This is the WebChart live-tenant path. The Maui sandbox scores a synthetic corpus, not WebChart data,",
+    "so its rates are not what WebChart data would give.",
     ...WEBCHART_SERVED_RESOURCES.filter((resource) => resource.derived).map(
       (resource) => `Ingest also derives ${resource.type}: ${resource.derived}.`,
     ),

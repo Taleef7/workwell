@@ -73,6 +73,9 @@ interface PatientRef {
  */
 export const COMPOSED_RESOURCE_TYPES: readonly string[] = WEBCHART_SERVED_RESOURCES.filter((r) => r.how === "fetched").map((r) => r.type);
 
+/** The composed types a server may not support: a 404 for one skips it for the run (`ServedResource.optional`). */
+const OPTIONAL_RESOURCE_TYPES: ReadonlySet<string> = new Set(WEBCHART_SERVED_RESOURCES.filter((r) => r.optional).map((r) => r.type));
+
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_RETRY_DELAYS_MS = [50, 100] as const;
@@ -83,6 +86,15 @@ class WebChartNonRetryableError extends Error {
   constructor(message: string, status?: number) {
     super(message);
     this.status = status;
+  }
+}
+
+/** An optional type's first search page answered 404: the server does not support the type (#713). */
+class UnsupportedResourceTypeError extends Error {
+  readonly resourceType: string;
+  constructor(resourceType: string) {
+    super(`WebChart does not support ${resourceType} searches (404)`);
+    this.resourceType = resourceType;
   }
 }
 
@@ -256,6 +268,8 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
   let countDisabled = cfg.disableCount ?? false;
   let patientEnumeration = cfg.patientSearch?.trim() || undefined;
   let countQuirkLogged = false;
+  // Optional types this server answered 404 for, skipped for the rest of the run (`ServedResource.optional`).
+  const unsupportedTypes = new Set<string>();
 
   function logCountFallback(scope: string): void {
     if (countQuirkLogged) return;
@@ -450,6 +464,9 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
       try {
         page = await fetchJson(url);
       } catch (e) {
+        if (firstPage && OPTIONAL_RESOURCE_TYPES.has(resourceType) && e instanceof WebChartNonRetryableError && e.status === 404) {
+          throw new UnsupportedResourceTypeError(resourceType);
+        }
         if (!firstPage || countDisabled || !isCapabilityQuirk(e)) throw e;
         countDisabled = true;
         logCountFallback(`${resourceType} search`);
@@ -475,7 +492,23 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
       // series-completion measure to falsely COMPLIANT. Resources without a string id are kept as-is.
       const seenIds = new Set<string>();
       for (const resourceType of resourceTypes) {
-        for (const resource of await searchResources(resourceType, patient.id)) {
+        if (unsupportedTypes.has(resourceType)) continue;
+        let found: Json[];
+        try {
+          found = await searchResources(resourceType, patient.id);
+        } catch (e) {
+          if (!(e instanceof UnsupportedResourceTypeError)) throw e;
+          // Not a failed patient: the type is missing for everyone, exactly as before it was composed. Said
+          // once, loudly, so a tenant without it is visible in the log rather than in the numbers alone.
+          if (!unsupportedTypes.has(resourceType)) {
+            unsupportedTypes.add(resourceType);
+            console.warn(
+              `WebChart answers 404 for ${resourceType} searches, so this run reads no ${resourceType} for any patient (#713).`,
+            );
+          }
+          continue;
+        }
+        for (const resource of found) {
           if (typeof resource.id === "string" && resource.id) {
             const key = `${String(resource.resourceType)}/${resource.id}`;
             if (seenIds.has(key)) continue;
