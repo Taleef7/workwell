@@ -301,7 +301,8 @@ test("edits land on their library's anchored lines; a library upstream lacks, an
   for (const [library, version] of [[MAIN, "1.0.000"], ["Hospice", "6.18.000"]] as const) {
     h = harness();
     assert.equal(await main(argsFor(h, [], [editOf(library, version, "define \"One\": 1")]), h.deps), 1);
-    assert.match(h.errors.join("\n"), new RegExp(`the edits to ${library} ${version.replace(/\./g, "\\.")} leave its CQL byte-equal to CMS's`));
+    const literal = (text: string) => text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+    assert.match(h.errors.join("\n"), new RegExp(`the edits to ${literal(library)} ${literal(version)} leave its CQL byte-equal to CMS's`));
     assert.equal(h.calls.length, 0);
   }
 
