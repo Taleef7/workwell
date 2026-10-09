@@ -8,12 +8,28 @@
  * libraries that WorkWell did NOT change keep CMS's names: renaming them would present CMS's untouched
  * work as WorkWell's. Each of those is pinned by the hash of its ELM, so "unchanged" is checked, not
  * asserted.
+ *
+ * A CMS shared library WorkWell EDITED (#779, CMS130's AdvancedIllnessandFrailty) is a changed library:
+ * WorkWell's name, canonical and `ww-` version, and a `changedLibraries` record naming the CMS library it
+ * was edited from by name, version and the hash of CMS's ELM — checked against CMS's committed artifact,
+ * as "unchanged" is, and refused while CMS's copy still rides in the bundle beside it. So every library
+ * besides the main one is accounted for exactly once: carried unchanged, or changed and traced to CMS's.
+ *
+ * Which libraries the translation IS, is decided the way the engine decides it: from the main library,
+ * every ELM include is resolved by fqm's rule (`includedLibraryName`) to exactly one library in the
+ * bundle, and the libraries reached must be the bundle's libraries. An include left at CMS's library, a
+ * `urn:` path the engine cannot resolve, and CMS's library left beside WorkWell's copy each fail here,
+ * at router construction, rather than as a missing define on the first evaluation.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import type { OfficialManifest } from "../wiring/official-artifacts.ts";
+import type { DerivedChangedLibrary, DerivedManifestBlock, OfficialManifest } from "../wiring/official-artifacts.ts";
+// A cycle (that module imports DERIVED_LIBRARY_PREFIX from this one), safe because neither module reads
+// the other's bindings at load time. One rule for the builder that writes an include and the check that
+// resolves it, so the two cannot disagree about what the engine will find.
+import { includedLibraryName } from "./derived-changed-library.ts";
 
 export const DERIVED_CANONICAL_PREFIX = "urn:workwell:measure:";
 export const DERIVED_LIBRARY_PREFIX = "urn:workwell:library:";
@@ -94,13 +110,61 @@ const measureOf = (bundle: Bundle): Resource | undefined => resources(bundle).fi
 const librariesOf = (bundle: Bundle): Resource[] => resources(bundle).filter((r) => r.resourceType === "Library");
 
 function elmContent(library: Resource): LibraryContent | undefined {
-  return ((library["content"] as LibraryContent[] | undefined) ?? []).find((c) => c.contentType === "application/elm+json");
+  const content = library["content"];
+  return Array.isArray(content) ? (content as LibraryContent[]).find((c) => c?.contentType === "application/elm+json") : undefined;
 }
 
 /** The hash a library's ELM is pinned by: SHA-256 of the ELM JSON exactly as the bundle stores it. */
 export function libraryElmSha256(library: Resource): string | undefined {
   const data = elmContent(library)?.data;
-  return data ? `sha256:${createHash("sha256").update(Buffer.from(data, "base64")).digest("hex")}` : undefined;
+  return typeof data === "string" && data ? `sha256:${createHash("sha256").update(Buffer.from(data, "base64")).digest("hex")}` : undefined;
+}
+
+/** The parts of an ELM library the identity check reads, every one of them possibly absent or malformed. */
+interface ElmShape {
+  library?: { identifier?: { id?: unknown; version?: unknown; system?: unknown }; includes?: { def?: unknown } };
+}
+interface IncludeDef {
+  localIdentifier?: unknown;
+  path?: unknown;
+  version?: unknown;
+}
+/** A library's ELM decoded ONCE per check: `elm` absent with `unparseable` false means it carries none. */
+interface DecodedElm {
+  elm?: ElmShape;
+  unparseable: boolean;
+}
+/**
+ * What reachability reads of a library's ELM: its identifier and its includes. Kept apart from the decoded
+ * ELM so the ~2.4 MB of parsed JSON is garbage the moment its own library has been checked.
+ */
+interface ElmRefs {
+  identifier?: { id?: unknown; version?: unknown; system?: unknown };
+  includes: IncludeDef[];
+}
+
+function decodeElm(library: Resource): DecodedElm {
+  const data = elmContent(library)?.data;
+  if (typeof data !== "string" || !data) return { unparseable: false };
+  try {
+    return { elm: JSON.parse(Buffer.from(data, "base64").toString("utf8")) as ElmShape, unparseable: false };
+  } catch {
+    return { unparseable: true };
+  }
+}
+
+function refsOf(elm: ElmShape | undefined): ElmRefs {
+  const identifier = elm?.library?.identifier;
+  const defs = elm?.library?.includes?.def;
+  return {
+    identifier: identifier && typeof identifier === "object" ? identifier : undefined,
+    includes: Array.isArray(defs) ? defs.filter((d): d is IncludeDef => !!d && typeof d === "object") : [],
+  };
+}
+
+/** Only the entries of a manifest list that are objects: a hand-edited manifest must come back as sentences. */
+function objectsIn<T>(value: unknown): Array<Partial<T>> {
+  return Array.isArray(value) ? value.filter((v): v is Partial<T> => !!v && typeof v === "object") : [];
 }
 
 export interface DerivedIdentity {
@@ -269,8 +333,21 @@ function sourceKeyIn(node: unknown, path: string): string | undefined {
  * translation compiled by another translator build is rebuilt, not trusted — and well-formed hashes),
  * that no library's ELM carries the keys that hold CMS's CQL text, and that the label every screen shows
  * is the one the Measure carries: `WorkWell translation of <derivedFrom.ecqm>`, equal to the Measure's
- * title, with the Measure's `derived-from` link naming the same CMS measure. The result is memoized and
- * frozen; callers copy it, never mutate it.
+ * title, with the Measure's `derived-from` link naming the same CMS measure.
+ *
+ * And, since a translation may edit a CMS shared library (#779):
+ * - reachability, one rule: from `Measure.library[0]`, every ELM include resolves by the engine's own rule
+ *   to exactly one library in the bundle, and the set reached is the bundle's set of libraries;
+ * - accounting: every library besides the main one is in `unchangedLibraries` or in `changedLibraries`,
+ *   never both, and each entry of either names a library the bundle holds;
+ * - each `changedLibraries` entry names exactly one library, traces it to a CMS library that CMS's
+ *   committed artifact holds with exactly the recorded ELM hash, and that CMS library is gone from the
+ *   bundle; its `translationSha256` is a well-formed digest;
+ * - a changed library is scanned whole for CMS's identity, as the Measure and main library are;
+ * - the Measure's copyright is CMS's, verbatim.
+ *
+ * Every library's ELM is decoded once per check. The result is memoized and frozen; callers copy it,
+ * never mutate it.
  */
 export function derivedIdentityProblems(
   bundle: Bundle,
@@ -398,40 +475,65 @@ function computeProblems(bundle: Bundle, manifest: OfficialManifest, base: Deriv
   else if (derived.base?.manifestSha256 !== base.manifest.sha256) {
     problems.push(`${id}: the translation was built on CMS's artifact ${derived.base?.manifestSha256}, but the committed one is ${base.manifest.sha256}`);
   }
-  const unchanged = new Map((derived.unchangedLibraries ?? []).map((l) => [`${l.name}|${l.version}`, l.elmSha256]));
+  const cmsMeasure = base ? measureOf(base.bundle as Bundle) : undefined;
+  // The copyright is the notice of the measure the translation is derived from (NCQA's, for CMS130), and it
+  // travels with logic derived from that measure exactly as CMS published it: neither edited, nor dropped,
+  // nor added. Absent on both is equal. It is the one CMS text a translation must keep, so it is checked
+  // for equality rather than left to the identity scan, which it passes either way.
+  if (cmsMeasure && measure["copyright"] !== cmsMeasure["copyright"]) {
+    problems.push(`${id}: the translated Measure's copyright is not CMS's Measure's, verbatim; a translation carries the notice of the measure it is derived from unchanged`);
+  }
+
+  // Read defensively, as the build record is: a list that is not a list, or an entry that is not an
+  // object, comes back as a sentence or is skipped, never as an exception inside the router.
+  if (derived.unchangedLibraries !== undefined && !Array.isArray(derived.unchangedLibraries)) problems.push(`${id}: derived.unchangedLibraries is not a list`);
+  if (derived.changedLibraries !== undefined && !Array.isArray(derived.changedLibraries)) problems.push(`${id}: derived.changedLibraries is not a list`);
+  const entryKey = (entry: { name?: unknown; version?: unknown }): string => `${String(entry.name)}|${String(entry.version)}`;
+  const unchanged = new Map(objectsIn<DerivedManifestBlock["unchangedLibraries"][number]>(derived.unchangedLibraries).map((l) => [entryKey(l), l.elmSha256]));
+  const changedEntries = objectsIn<DerivedChangedLibrary>(derived.changedLibraries);
+  const libraries = librariesOf(bundle);
+  const keyOf = (library: Resource): string => `${String(library["name"])}|${String(library["version"])}`;
+  const main = mainLibraryOf(bundle, measure);
+  if (!main) problems.push(`${id}: the translated Measure's library '${String(((measure["library"] as unknown[] | undefined) ?? [])[0])}' names no library in the bundle`);
+  // Every library that must carry WorkWell's identity: all but the main one (checked as the main library)
+  // and those pinned as carried unchanged. A library in neither manifest list is one of these too, so CMS's
+  // library left in the bundle unlisted is held to WorkWell's identity — and fails it.
+  const changedLibraries = libraries.filter((l) => l !== main && !unchanged.has(keyOf(l)));
 
   // The named fields above are where a reader LOOKS for identity; CMS's identity also hides in places
   // nobody reads by name (the resource id, a contained Library, a description that is the bare measure
-  // name, the Bundle's own id). So the Measure and the main library are scanned whole, every string at any
-  // depth, and so are the Bundle's own `id` and `identifier`. The one exception is a main-library
-  // `depends-on` naming a library carried unchanged: that IS CMS's library, under CMS's canonical, and
-  // pointing at it by any other name would be the false claim.
+  // name, the Bundle's own id). So the Measure, the main library and every changed library are scanned
+  // whole, every string at any depth, and so are the Bundle's own `id` and `identifier`. The one exception
+  // is a `depends-on` of the main library or a changed library naming a library carried unchanged: that IS
+  // CMS's library, under CMS's canonical, and pointing at it by any other name would be the false claim.
+  // (CMS's AdvancedIllnessandFrailty, edited for CMS130, depends on four libraries carried unchanged.)
   //
   // The needles are CMS's host, its canonicals, and its NAMES — the measure name and the short name
   // (`CMS` + the base manifest's cmsId, e.g. `CMS137FHIR`), read from CMS's committed manifest rather than
   // written here, so a second translated measure brings its own. Matched without regard to case.
-  const cmsMeasure = base ? measureOf(base.bundle as Bundle) : undefined;
   const cmsMain = cmsMeasure ? mainLibraryOf(base!.bundle as Bundle, cmsMeasure) : undefined;
   const cmsShortName = typeof base?.manifest.cmsId === "string" && base.manifest.cmsId.length > 0 ? `CMS${base.manifest.cmsId}` : undefined;
   const needles = [CMS_HOST, cmsMeasure?.["url"], cmsMain?.["url"], cmsMeasure?.["id"], cmsShortName, base?.manifest.measureName]
     .filter((n): n is string => typeof n === "string" && n.length > 0)
     .map((n) => n.toLowerCase());
   const unchangedCanonicals = new Set(
-    librariesOf(bundle)
-      .filter((l) => unchanged.has(`${String(l["name"])}|${String(l["version"])}`))
-      .flatMap((l) => [String(l["url"]), `${String(l["url"])}|${String(l["version"])}`]),
+    libraries.filter((l) => unchanged.has(keyOf(l))).flatMap((l) => [String(l["url"]), `${String(l["url"])}|${String(l["version"])}`]),
   );
-  const main = mainLibraryOf(bundle, measure);
-  if (!main) problems.push(`${id}: the translated Measure's library '${String(((measure["library"] as unknown[] | undefined) ?? [])[0])}' names no library in the bundle`);
   // Only the Bundle's OWN fields: its entries are the resources scanned (or pinned) one by one.
   const bundleOwn: Resource = { id: bundle.id, identifier: bundle.identifier };
-  const scanned = [["Bundle", bundleOwn, "Bundle"], ["Measure", measure, "Measure"], ["main library", main, "Library"]] as const;
+  const scanned: Array<[what: string, resource: Resource | undefined, root: string]> = [
+    ["Bundle", bundleOwn, "Bundle"],
+    ["Measure", measure, "Measure"],
+    ["main library", main, "Library"],
+    ...changedLibraries.map((l): [string, Resource, string] => [`changed library ${keyOf(l)}`, l, "Library"]),
+  ];
   for (const [what, resource, root] of scanned) {
     if (!resource) continue;
     const dependsOn = new Set<string>();
-    if (resource === main) {
-      ((main["relatedArtifact"] as Array<Record<string, unknown>> | undefined) ?? []).forEach((r, i) => {
-        if (r["type"] === "depends-on" && unchangedCanonicals.has(String(r["resource"]))) dependsOn.add(`${root}.relatedArtifact[${i}].resource`);
+    if (root === "Library") {
+      const related = resource["relatedArtifact"];
+      (Array.isArray(related) ? (related as Array<Record<string, unknown> | null>) : []).forEach((r, i) => {
+        if (r?.["type"] === "depends-on" && unchangedCanonicals.has(String(r["resource"]))) dependsOn.add(`${root}.relatedArtifact[${i}].resource`);
       });
     }
     const found: string[] = [];
@@ -447,29 +549,24 @@ function computeProblems(bundle: Bundle, manifest: OfficialManifest, base: Deriv
     }
   }
 
-  const cmsLibraries = new Map(librariesOf((base?.bundle ?? {}) as Bundle).map((l) => [`${String(l["name"])}|${String(l["version"])}`, libraryElmSha256(l)]));
+  const cmsLibraries = new Map(librariesOf((base?.bundle ?? {}) as Bundle).map((l) => [keyOf(l), libraryElmSha256(l)]));
   const cmsLibraryNames = new Set(librariesOf((base?.bundle ?? {}) as Bundle).map((l) => String(l["name"])));
-  for (const library of librariesOf(bundle)) {
-    const key = `${String(library["name"])}|${String(library["version"])}`;
+  // Each library's ELM is decoded here ONCE, and only its identifier and includes outlive this loop (for
+  // reachability, below): this runs on every router construction, over ~2.4 MB of ELM.
+  const refs = new Map<Resource, ElmRefs>();
+  for (const library of libraries) {
+    const key = keyOf(library);
     // ELM keeps CMS's CQL text in `annotation` and its positions in `locator`. CMS's own libraries were
     // vendored stripped, so EVERY library — unchanged ones included — must be free of both, or the repo
     // would be committing CMS's CQL inside a WorkWell artifact. `localId` is allowed: it carries no CQL.
-    const elmData = elmContent(library)?.data;
-    let elm: { library?: { identifier?: { id?: unknown; version?: unknown } } } | undefined;
-    if (elmData) {
-      let leaked: string | undefined;
-      try {
-        elm = JSON.parse(Buffer.from(elmData, "base64").toString("utf8")) as typeof elm;
-        leaked = sourceKeyIn(elm, "elm");
-      } catch {
-        leaked = "(the ELM does not parse)";
-      }
-      if (leaked) problems.push(`${id}: library ${key}'s ELM carries ${leaked}; ELM is committed stripped of annotation and locator`);
-    }
-    const pinned = unchanged.get(key);
-    if (pinned !== undefined) {
+    const { elm, unparseable } = decodeElm(library);
+    refs.set(library, refsOf(elm));
+    const leaked = unparseable ? "(the ELM does not parse)" : elm !== undefined ? sourceKeyIn(elm, "elm") : undefined;
+    if (leaked) problems.push(`${id}: library ${key}'s ELM carries ${leaked}; ELM is committed stripped of annotation and locator`);
+    if (unchanged.has(key)) {
+      const pinned = unchanged.get(key);
       const actual = libraryElmSha256(library);
-      if (actual !== pinned) problems.push(`${id}: library ${key} is listed as unchanged but its ELM does not match its pin`);
+      if (typeof pinned !== "string" || actual !== pinned) problems.push(`${id}: library ${key} is listed as unchanged but its ELM does not match its pin`);
       else if (base && cmsLibraries.get(key) !== actual) {
         problems.push(`${id}: library ${key} keeps CMS's identity but its ELM is not CMS's — a library WorkWell changed must carry WorkWell's identity`);
       }
@@ -491,6 +588,152 @@ function computeProblems(bundle: Bundle, manifest: OfficialManifest, base: Deriv
     }
     if (NAMES_CMS_HOST.test(JSON.stringify(elmIdentifier ?? "")) || NAMES_CMS_HOST.test(JSON.stringify([library["url"], library["name"]]))) {
       problems.push(`${id}: changed library ${key} still names ${CMS_HOST}`);
+    }
+  }
+
+  if (main) problems.push(...reachabilityProblems(id, main, libraries, refs, keyOf));
+
+  // Accounting: every library besides the main one is carried unchanged (pinned to CMS's bytes above) or
+  // listed as changed (traced to CMS's library below) — exactly one of the two. The main library is named
+  // by the translation's own identity and is in neither list. And neither list may name a library the
+  // bundle does not hold: a record of a library that is not there is a record of a different translation.
+  const changedByKey = new Map<string, Partial<DerivedChangedLibrary>>();
+  for (const entry of changedEntries) {
+    const key = entryKey(entry);
+    if (changedByKey.has(key)) problems.push(`${id}: changedLibraries lists ${key} more than once`);
+    changedByKey.set(key, entry);
+  }
+  for (const library of libraries) {
+    const key = keyOf(library);
+    const isUnchanged = unchanged.has(key);
+    const isChanged = changedByKey.has(key);
+    if (library === main) {
+      if (isUnchanged || isChanged) {
+        problems.push(`${id}: the main library ${key} is listed in ${isUnchanged ? "unchangedLibraries" : "changedLibraries"}; it carries the translation's own identity and is listed in neither`);
+      }
+    } else if (isUnchanged && isChanged) {
+      problems.push(`${id}: library ${key} is listed both as carried unchanged and as changed; it is one or the other`);
+    } else if (!isUnchanged && !isChanged) {
+      problems.push(`${id}: library ${key} is neither listed as carried unchanged (unchangedLibraries) nor as changed (changedLibraries); every library besides the main one is accounted for in exactly one`);
+    }
+  }
+  const bundleKeys = new Set(libraries.map(keyOf));
+  for (const key of unchanged.keys()) {
+    if (!bundleKeys.has(key)) problems.push(`${id}: unchangedLibraries lists ${key}, which is not in the bundle`);
+  }
+
+  // Each changed library is traced to the CMS library it was edited from, and that trace is checked
+  // against CMS's committed artifact, never against the translation's word for it — as "unchanged" is.
+  // CMS's library must also be GONE from the bundle: beside WorkWell's copy it would be a second library
+  // answering to the same logic, under CMS's name.
+  for (const [key, entry] of changedByKey) {
+    const matches = libraries.filter((l) => keyOf(l) === key).length;
+    if (matches !== 1) {
+      problems.push(`${id}: changedLibraries lists ${key}, which ${matches === 0 ? "is not in the bundle" : `matches ${matches} libraries in the bundle`}; each entry names exactly one`);
+    }
+    const from = entry.from && typeof entry.from === "object" ? entry.from : undefined;
+    if (typeof from?.name !== "string" || typeof from.version !== "string") {
+      problems.push(`${id}: changed library ${key} does not name the CMS library it was edited from (from.name and from.version)`);
+    } else {
+      const fromKey = `${from.name}|${from.version}`;
+      if (base) {
+        const cmsElm = cmsLibraries.get(fromKey);
+        if (!cmsLibraries.has(fromKey)) {
+          problems.push(`${id}: changed library ${key} says it was edited from CMS's ${fromKey}, which CMS's committed artifact does not hold`);
+        } else if (from.elmSha256 !== cmsElm) {
+          problems.push(`${id}: changed library ${key} says it was edited from CMS's ${fromKey} with ELM ${String(from.elmSha256)}, but CMS's committed ELM for it is ${String(cmsElm)}`);
+        }
+      }
+      if (bundleKeys.has(fromKey)) {
+        problems.push(`${id}: CMS's ${fromKey}, which changed library ${key} replaces, is still in the bundle; a translation carries WorkWell's copy instead of CMS's library, never beside it`);
+      }
+    }
+    if (!SHA256.test(String(entry.translationSha256))) {
+      problems.push(`${id}: changed library ${key}'s translationSha256 '${String(entry.translationSha256)}' is not a sha256:<64 hex> digest`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Which libraries the translation runs, decided by the engine's own rule — so a bundle that passes here is
+ * one fqm resolves the same way, and one that fails would have failed (or run the wrong library) in fqm.
+ *
+ * The rule, confirmed in the installed packages:
+ * - fqm (`fqm-execution` 1.8.5, `build/helpers/MeasureBundleHelpers.js:463`, `extractLibrariesFromBundle`)
+ *   rewrites every `includes.def[].path` to what follows its last `/` before execution —
+ *   `includedLibraryName`. CMS's committed ELM writes `https://madie.cms.gov/FHIRHelpers`, so without this
+ *   cut every unchanged CMS library would read as unresolvable and the live CMS137 translation would be
+ *   refused, taking every evaluating route on the Maui sandbox down with it.
+ * - cql-execution (3.3.2, `lib/runtime/repository.js:10-27`, `Repository.resolve`) then takes the FIRST
+ *   library, in bundle order, whose ELM `identifier.id` equals that name (or whose `system/id` does —
+ *   never true of a path with no `/`), and whose `identifier.version` equals the include's version when
+ *   the include gives one (`if (version)`: any version when it does not). An include nothing answers to is
+ *   left undefined (`lib/elm/library.js:69`) and fails only when the logic first reads through it.
+ * - The Measure's own logic is resolved the same way: fqm reads the main library's ELM identifier and asks
+ *   the repository for it (`build/execution/Execution.js:49`).
+ *
+ * The resource's `name`/`url` play no part; only the ELM identifier does. So "exactly one" is checked
+ * here where the engine would silently take the first, and a `urn:workwell:…` include path — no `/` to
+ * cut at — is unresolvable, as it would be in fqm.
+ */
+function reachabilityProblems(
+  id: string,
+  main: Resource,
+  libraries: Resource[],
+  refs: Map<Resource, ElmRefs>,
+  keyOf: (library: Resource) => string,
+): string[] {
+  const problems: string[] = [];
+  const identifierOf = (library: Resource) => refs.get(library)?.identifier;
+  const resolve = (name: string, version: unknown): Resource[] =>
+    libraries.filter((l) => {
+      const identifier = identifierOf(l);
+      return identifier?.id === name && (!version || identifier.version === version);
+    });
+  const named = (found: Resource[]) => found.map(keyOf).join(", ");
+
+  const root = identifierOf(main);
+  if (typeof root?.id === "string") {
+    const roots = resolve(root.id, root.version);
+    if (roots.length > 1) {
+      problems.push(
+        `${id}: the main library ${keyOf(main)}'s ELM is identified as '${root.id}|${String(root.version)}', and so ${roots.length - 1 === 1 ? "is another library" : `are ${roots.length - 1} other libraries`} in the bundle (${named(roots.filter((l) => l !== main))}); the engine runs the first of them in bundle order as the Measure's logic`,
+      );
+    }
+  }
+
+  const reached = new Set<Resource>([main]);
+  const queue: Resource[] = [main];
+  for (let library = queue.shift(); library; library = queue.shift()) {
+    for (const include of refs.get(library)?.includes ?? []) {
+      const local = String(include.localIdentifier);
+      if (typeof include.path !== "string" || include.path === "") {
+        problems.push(`${id}: library ${keyOf(library)} includes ${local} with no path, which the engine cannot resolve`);
+        continue;
+      }
+      const name = includedLibraryName(include.path);
+      const as = `${local} as '${include.path}'${include.version ? ` version ${String(include.version)}` : " (any version)"}`;
+      const found = resolve(name, include.version);
+      if (found.length === 0) {
+        problems.push(
+          `${id}: library ${keyOf(library)} includes ${as}, which resolves to no library in the bundle; the engine matches '${name}' (the path after its last '/') and the version against each library's ELM identifier`,
+        );
+        continue;
+      }
+      if (found.length > 1) {
+        problems.push(`${id}: library ${keyOf(library)} includes ${as}, which ${found.length} libraries in the bundle answer to (${named(found)}); the engine takes the first in bundle order`);
+      }
+      // Walk on into what the engine would actually run: the first match.
+      if (!reached.has(found[0]!)) {
+        reached.add(found[0]!);
+        queue.push(found[0]!);
+      }
+    }
+  }
+  for (const library of libraries) {
+    if (!reached.has(library)) {
+      problems.push(`${id}: library ${keyOf(library)} is in the bundle, but nothing the main library includes, directly or through another library, resolves to it; a library the engine never runs is not part of the translation`);
     }
   }
   return problems;

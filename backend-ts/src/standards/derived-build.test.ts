@@ -12,6 +12,7 @@ import {
   assembleTranslationBundle,
   derivedManifestFor,
   encodeElm,
+  groupEditsByLibrary,
   parseEdits,
   spanSha256,
   stripElmDebugKeys,
@@ -104,6 +105,21 @@ test("edits are applied bottom-up, so one that changes the line count never move
   assert.equal(applyEdits(SOURCE, [grow, shrink]), want);
   assert.equal(applyEdits(SOURCE, [shrink, grow]), want, "the order of the file does not matter");
   assert.throws(() => applyEdits(SOURCE, [edit(3, 5, "x"), edit(5, 6, "y")]), /Demo lines 3-5 and 5-6 overlap/);
+});
+
+test("edits are grouped by library, and each library's lines are checked and applied only against that library's text", () => {
+  const other = SOURCE.replace("library Demo", "library Other");
+  const forOther = (startLine: number, endLine: number, replacement: string): CqlEdit => ({ ...edit(startLine, endLine, replacement, other), library: "Other" });
+  const edits = [edit(3, 5, "define \"ABC\": 123"), forOther(4, 6, "define \"BCD\": 234"), edit(7, 7, "define \"E\": 50")];
+  const groups = groupEditsByLibrary(edits);
+  assert.deepEqual([...groups.keys()], ["Demo", "Other"], "in order of first appearance");
+  assert.deepEqual(groups.get("Demo"), [edits[0], edits[2]], "each group in file order");
+  // Demo's lines 3-5 and Other's lines 4-6 are different lines: no overlap, and both land.
+  assert.equal(applyEdits(SOURCE, groups.get("Demo")!), ["library Demo version '1'", "", "define \"ABC\": 123", "define \"D\": 4", "define \"E\": 50"].join("\n") + "\n");
+  assert.equal(applyEdits(other, groups.get("Other")!), ["library Other version '1'", "", "define \"A\": 1", "define \"BCD\": 234", "define \"E\": 5"].join("\n") + "\n");
+  // Handed both libraries' edits at once, applyEdits refuses rather than compare lines across texts.
+  assert.throws(() => applyEdits(SOURCE, edits), /one library's edits are applied at a time, but these name Demo, Other; group them by library first/);
+  assert.deepEqual(groupEditsByLibrary([]), new Map());
 });
 
 test("an edits file is an explicit array of complete edits", () => {
@@ -212,6 +228,70 @@ test("the assembler refuses ELM that is not the main library's, and a base carry
   assert.throws(() => assembleTranslationBundle(withValueSet, compiledMainElm(), IDENTITY), /carries ValueSet; a translation holds only a Measure and its Libraries/);
 });
 
+// ---- a changed library (#779) ---------------------------------------------------------------------------
+
+// The committed official cms130 artifact: its AdvancedIllnessandFrailty is included by the main library alone.
+const cms130 = loadOfficialArtifact("cms130")!;
+const cms130Bundle = cms130.bundle as unknown as B;
+const IDENTITY_130 = translationIdentity("cms130", 2027, "CMS130v15");
+const AIF = "AdvancedIllnessandFrailty";
+const AIF_WW = "WorkWellAdvancedIllnessandFrailtyTranslation2027";
+const cmsAif = librariesOf(cms130Bundle).find((l) => l["name"] === AIF)!;
+/** CMS's ELM for a cms130 library with the keys a fresh compile carries, and a mark that it is OURS. */
+function compiled130(name: string) {
+  const elm = decode(elmDataOf(librariesOf(cms130Bundle).find((l) => l["name"] === name)!));
+  elm.library.annotation = [{ type: "CqlToElmInfo", translatorOptions: "EnableAnnotations", signatureLevel: "All" }];
+  elm.library.statements.def[0].localId = "7";
+  elm.library.statements.def[0].locator = "1:1-1:9";
+  elm.library.oursForTheTest = true;
+  return elm;
+}
+const changedAif = { from: { name: AIF, version: "1.27.000" }, compiledElm: compiled130(AIF), translationSha256: `sha256:${"e".repeat(64)}` };
+
+test("a changed library is OUR compile under WorkWell's identity, pinned to CMS's ELM it came from, and never also listed as unchanged", () => {
+  const before = JSON.stringify(cms130Bundle);
+  const { bundle, unchangedLibraries, changedLibraries } = assembleTranslationBundle(cms130Bundle, compiled130("CMS130FHIRColorectalCancerScrn"), IDENTITY_130, [changedAif]);
+  assert.equal(JSON.stringify(cms130Bundle), before, "CMS's committed bundle is not modified");
+
+  assert.deepEqual(changedLibraries, [
+    { name: AIF_WW, version: "ww-2027.1", from: { name: AIF, version: "1.27.000", elmSha256: libraryElmSha256(cmsAif) }, translationSha256: changedAif.translationSha256 },
+  ]);
+  const shared = librariesOf(cms130Bundle).filter((l) => l !== mainOf(cms130Bundle) && l !== cmsAif);
+  assert.deepEqual(unchangedLibraries, shared.map((l) => ({ name: String(l["name"]), version: String(l["version"]), elmSha256: libraryElmSha256(l) })));
+  for (const library of shared) assert.deepEqual(librariesOf(bundle).find((l) => l["name"] === library["name"]), library, `${String(library["name"])} is carried verbatim`);
+
+  const ours = librariesOf(bundle).find((l) => l["name"] === AIF_WW)!;
+  const elm = decode(elmDataOf(ours));
+  assert.equal(elm.library.oursForTheTest, true, "the changed library's ELM is ours");
+  assert.ok(!/"(annotation|locator)":/.test(JSON.stringify(elm)), "stripped");
+  assert.equal(elm.library.statements.def[0].localId, "7");
+  const include = decode(elmDataOf(mainOf(bundle))).library.includes.def.find((d: { localIdentifier: string }) => d.localIdentifier === "AIFrailLTCF");
+  assert.deepEqual(include, { localIdentifier: "AIFrailLTCF", path: AIF_WW, version: "ww-2027.1" });
+
+  // With no changed library, the assembly is exactly the one CMS137 has always had.
+  const plain = assembleTranslationBundle(baseBundle, compiledMainElm(), IDENTITY);
+  assert.deepEqual(assembleTranslationBundle(baseBundle, compiledMainElm(), IDENTITY, []), plain);
+  assert.deepEqual(plain.changedLibraries, []);
+});
+
+test("the assembler refuses a changed library that is the main one, is not in CMS's bundle, or is listed twice", () => {
+  const main130 = compiled130("CMS130FHIRColorectalCancerScrn");
+  assert.throws(
+    () => assembleTranslationBundle(cms130Bundle, main130, IDENTITY_130, [{ ...changedAif, from: { name: "CMS130FHIRColorectalCancerScrn", version: "1.0.000" } }]),
+    /the edited library CMS130FHIRColorectalCancerScrn 1\.0\.000 is the main library, which is renamed with the Measure/,
+  );
+  assert.throws(
+    () => assembleTranslationBundle(cms130Bundle, main130, IDENTITY_130, [{ ...changedAif, from: { name: AIF, version: "1.26.000" } }]),
+    /the edited library AdvancedIllnessandFrailty 1\.26\.000 is not a shared library of CMS's committed bundle/,
+  );
+  assert.throws(() => assembleTranslationBundle(cms130Bundle, main130, IDENTITY_130, [changedAif, changedAif]), /a changed library is listed twice/);
+  // The ELM must be the edited library's: rewriteChangedLibrary checks the slot.
+  assert.throws(
+    () => assembleTranslationBundle(cms130Bundle, main130, IDENTITY_130, [{ ...changedAif, compiledElm: compiled130("Hospice") }]),
+    /the compiled ELM is Hospice\|6\.18\.000, not AdvancedIllnessandFrailty\|1\.27\.000/,
+  );
+});
+
 // ---- the manifest ---------------------------------------------------------------------------------------
 
 const TERMINOLOGY = {
@@ -298,4 +378,18 @@ test("oracle records survive a rebuild only when the artifact AND its terminolog
 
   // Nothing to clear, nothing to warn about.
   assert.deepEqual(manifestFor({ ...previous(`sha256:${"9".repeat(64)}`, TERMINOLOGY.sha256), derived: { ...manifestFor(null).manifest.derived!, oracles: [] } }).warnings, []);
+});
+
+test("changedLibraries is written after unchangedLibraries and before oracles, and not at all when there is none", () => {
+  const entry = { name: AIF_WW, version: "ww-2027.1", from: { name: AIF, version: "1.27.000", elmSha256: `sha256:${"f".repeat(64)}` }, translationSha256: `sha256:${"e".repeat(64)}` };
+  const input = { base: cms137, bundleJson, identity: IDENTITY, build: BUILD, unchangedLibraries: assembled.unchangedLibraries, packageSha256: `sha256:${"a".repeat(64)}`, terminologyBlock: TERMINOLOGY };
+  const withChanged = derivedManifestFor({ ...input, changedLibraries: [entry] }).manifest.derived!;
+  assert.deepEqual(Object.keys(withChanged), ["label", "derivedFrom", "base", "build", "unchangedLibraries", "changedLibraries", "oracles"]);
+  assert.deepEqual(withChanged.changedLibraries, [entry]);
+  // None (the CMS137 case): the key is absent, so its committed manifest is byte-for-byte what it was.
+  for (const changedLibraries of [undefined, []]) {
+    const derived = derivedManifestFor({ ...input, ...(changedLibraries ? { changedLibraries } : {}) }).manifest.derived!;
+    assert.deepEqual(Object.keys(derived), ["label", "derivedFrom", "base", "build", "unchangedLibraries", "oracles"]);
+  }
+  assert.equal(`${JSON.stringify(derivedManifestFor({ ...input, changedLibraries: [] }).manifest, null, 2)}\n`, `${JSON.stringify(manifestFor(null).manifest, null, 2)}\n`);
 });
