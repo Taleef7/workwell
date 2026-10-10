@@ -1,4 +1,4 @@
-FROM node:24-alpine AS deps
+FROM public.ecr.aws/docker/library/node:24-alpine AS deps
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
@@ -8,7 +8,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY vendor ./vendor
 RUN pnpm install --frozen-lockfile
 
-FROM node:24-alpine AS build
+FROM public.ecr.aws/docker/library/node:24-alpine AS build
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
@@ -35,7 +35,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build
 
-FROM node:24-alpine AS runner
+FROM public.ecr.aws/docker/library/node:24-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

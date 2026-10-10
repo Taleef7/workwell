@@ -12,7 +12,7 @@
 # prunes to production deps. Runtime is node:24-bookworm-slim without the C++ toolchain.
 
 # ── builder ──────────────────────────────────────────────────────────────────
-FROM node:24-bookworm-slim AS builder
+FROM public.ecr.aws/docker/library/node:24-bookworm-slim AS builder
 
 # better-sqlite3 (the SQLite floor driver + the store-contract tests) is a native module; the
 # `local` smoke-test target compiles it, so the builder needs a toolchain. The production `mieweb`
@@ -53,7 +53,7 @@ if (p.devDependencies && p.devDependencies.tsx) {\
   && CI=true pnpm install --prod --no-frozen-lockfile
 
 # ── runtime ──────────────────────────────────────────────────────────────────
-FROM node:24-bookworm-slim AS runtime
+FROM public.ecr.aws/docker/library/node:24-bookworm-slim AS runtime
 
 # No python/make/g++: better-sqlite3's native binary was built in the builder stage on the same
 # node:24-bookworm-slim ABI and is copied in with node_modules. ca-certificates for outbound TLS.
