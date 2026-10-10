@@ -40,7 +40,7 @@ test("the guard sees the model-info directory, skips it, and finds exactly the c
   assert.ok(!VALID_CATALOG_ID.test("_modelinfo"), "and the model info can never be mistaken for a translation");
   // Every translation this repo ships, by name: a new one is added here deliberately, and one that went
   // missing or was renamed fails here rather than silently leaving the loop below with nothing to check.
-  assert.deepEqual(artifacts, ["cms130", "cms137"], "the committed translations");
+  assert.deepEqual(artifacts, ["cms125", "cms130", "cms137"], "the committed translations");
   assert.ok(existsSync(`${DERIVED_DIR}NOTICE.md`));
 });
 

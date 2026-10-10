@@ -129,6 +129,7 @@ jobs:
           # translation, then every evaluating route 500s while /actuator/health stays 200.
           node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin
           node scripts/vendor-derived-terminology.mjs --catalog-id cms130 --verify-pin
+          node scripts/vendor-derived-terminology.mjs --catalog-id cms125 --verify-pin
       # The vendored artifacts must not have changed — only the gitignored sidecars are new. A non-empty
       # diff means a committed bundle does not match its pin, or a translation vendor step rewrote a
       # committed file instead of verifying it; neither may reach a deploy image.
@@ -155,12 +156,12 @@ jobs:
           # THE FLIP (ADR-045; ADR-078, owner decision 2026-09-08): the sandbox routes the whole ACO
           # computable set. cms2/cms130/cms137 have their second-engine evidence; cms165 runs on the
           # profiles the corpus stamps (trustMetaProfile per measure, ADR-076 d1) and its WebChart ingest
-          # caveat governs the PHI phase, not the sandbox. The WorkWell translations of CMS137v15 and CMS130v15
+          # caveat governs the PHI phase, not the sandbox. The WorkWell translations of CMS137v15, CMS130v15 and CMS125v15
           # (WORKWELL_DERIVED_MEASURES) score 2027 only; CMS's artifacts still score every other year.
           build-args: |
             WORKWELL_BUILD_SHA=${{ github.sha }}
             WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137
-            WORKWELL_DERIVED_MEASURES=cms137,cms130
+            WORKWELL_DERIVED_MEASURES=cms137,cms130,cms125
           # Only the IMMUTABLE tag is pushed here. `maui-latest` is the tag the self-heal reconciler
           # recreates from, so it must mean "the last image that DEPLOYED successfully", not "the last
           # image that BUILT" — otherwise a build that deploys badly poisons the recovery path, and the
@@ -377,7 +378,7 @@ jobs:
           HEALTH_URL: ${{ env.BACKEND_TS_URL }}/health
           EXPECTED_SHA: ${{ github.sha }}
           EXPECTED_OFFICIAL: cms122,cms125,cms2,cms130,cms165,cms137
-          EXPECTED_DERIVED: cms137,cms130
+          EXPECTED_DERIVED: cms137,cms130,cms125
         run: bash .github/scripts/verify-routing-health.sh
 
       # The recovery tag is promoted ONLY here, after the container above came up and served its routing.

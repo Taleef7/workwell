@@ -420,31 +420,65 @@ test("an edited shared library must be reproducible, compiled with CMS's options
   assert.equal(h.emits.length, 0, "refused before the terminology is expanded");
 });
 
-test("an edit must not change what a library retrieves: the translation carries CMS's computed data requirements", async () => {
-  // The CMS130v15 edit (`starts during` → `overlaps`) moves no retrieve, and builds (above). One that
-  // retrieves another value set is refused, and nothing is written.
+test("an edit that changes what a library retrieves has that library's data requirements recomputed, and is named in the manifest", async () => {
+  // The CMS130v15 edit (`starts during` → `overlaps`) moves no retrieve: CMS's lists are carried and no
+  // library is named (above, the manifest's keys). One that retrieves another value set gets its entries
+  // edited: Advanced Illness's entry for that retrieve goes, a Frailty Diagnosis entry is appended.
   let h = harness({ compile: stubCompile(cms130.bundle as unknown as B, retrieveEdit).compile }, CMS130);
-  assert.equal(await main(argsFor(h, [], [editOf(AIF, AIF_VERSION)]), h.deps), 1);
-  assert.match(h.errors.join("\n"), /AdvancedIllnessandFrailty 1\.27\.000 would read other data than CMS's, but the translation carries CMS's computed data requirements/);
-  assert.match(h.errors.join("\n"), /retrieves: only in CMS's 1 \(.*2\.16\.840\.1\.113883\.3\.464\.1003\.110\.12\.1082.*\), only in the translation's 1 \(.*2\.16\.840\.1\.113883\.3\.464\.1003\.113\.12\.1074/);
-  assert.deepEqual(filesIn(h.out), []);
-  assert.equal(h.emits.length, 0);
+  assert.equal(await main(argsFor(h, [], [editOf(AIF, AIF_VERSION)]), h.deps), 0, h.errors.join("\n"));
+  let manifest = readManifest(h);
+  assert.deepEqual(Object.keys(manifest.derived!), ["label", "derivedFrom", "base", "build", "unchangedLibraries", "changedLibraries", "recomputedDataRequirements", "oracles"]);
+  assert.deepEqual(manifest.derived!.recomputedDataRequirements, [AIF_WW], "only the library whose reads changed");
+  let bundle = JSON.parse(readFileSync(join(h.out, "bundle.json"), "utf8")) as B;
+  const cmsAif = librariesOf(cms130.bundle as unknown as B).find((l) => l["name"] === AIF)!;
+  const ours = librariesOf(bundle).find((l) => l["name"] === AIF_WW)!;
+  const entries = (library: Res, oid: string) => (library["dataRequirement"] as Res[]).filter((d) => JSON.stringify(d).includes(oid)).length;
+  assert.equal(entries(ours, "113883.3.464.1003.110.12.1082"), entries(cmsAif, "113883.3.464.1003.110.12.1082") - 1);
+  assert.equal(entries(ours, "113883.3.464.1003.113.12.1074"), entries(cmsAif, "113883.3.464.1003.113.12.1074") + 1);
+  assert.ok(h.logs.some((l) => l === `cms130: data requirements recomputed for ${AIF_WW}: their reads differ from CMS's ELM for them`), h.logs.join("\n"));
+  assert.deepEqual(derivedIdentityProblems(bundle, manifest, cms130), []);
+  // It rebuilds byte for byte.
+  assert.equal(await main(argsFor(h, ["--verify", "--skip-terminology"], [editOf(AIF, AIF_VERSION)]), h.deps), 0, h.errors.join("\n"));
 
-  // The main library is WorkWell's compile even unedited, so it is held to the same rule.
+  // The main library is WorkWell's compile even unedited, so it is held to the same rule: here its first
+  // value set is declared under another canonical, and every list that named the old one now names the new.
   const { compile } = stubCompile();
+  const OTHER = "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.0.0.0";
+  let old = "";
   h = harness({
     compile: (sources, options) =>
       compile(sources, options).map((c) => {
         if (c.name !== MAIN) return c;
         const elm = JSON.parse(JSON.stringify(c.elm));
         const valueSets = elm.library.valueSets.def as Array<{ id: string }>;
-        valueSets[0]!.id = "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.0.0.0";
+        old = valueSets[0]!.id;
+        valueSets[0]!.id = OTHER;
         return { ...c, elm };
       }),
   });
-  assert.equal(await main(argsFor(h), h.deps), 1);
-  assert.match(h.errors.join("\n"), /CMS137FHIRSUDTxInitEngagement 1\.0\.000 would read other data than CMS's[\s\S]*valueSets: only in CMS's 1 /);
+  assert.equal(await main(argsFor(h), h.deps), 0, h.errors.join("\n"));
+  manifest = readManifest(h);
+  assert.deepEqual(manifest.derived!.recomputedDataRequirements, ["WorkWellCMS137Translation2027"]);
+  bundle = JSON.parse(readFileSync(join(h.out, "bundle.json"), "utf8")) as B;
+  const mainText = JSON.stringify({ ...mainOf(bundle), content: undefined });
+  assert.ok(old && !mainText.includes(`"${old}"`) && mainText.includes(OTHER), "no list still names the value set the ELM no longer declares");
+  assert.deepEqual(derivedIdentityProblems(bundle, manifest, cms137), []);
+});
+
+test("a changed read the recompute cannot describe is refused, and nothing is written", async () => {
+  // CMS's lists here hold no entry for the Advanced Illness retrieve the edit drops: there is nothing to
+  // remove, so the list is not what the recompute believes it is.
+  const altered = JSON.parse(JSON.stringify(cms130)) as OfficialArtifact;
+  const aif = librariesOf(altered.bundle as unknown as B).find((l) => l["name"] === AIF)!;
+  aif["dataRequirement"] = (aif["dataRequirement"] as Res[]).filter((d) => !JSON.stringify(d).includes("113883.3.464.1003.110.12.1082"));
+  const h = harness({ compile: stubCompile(cms130.bundle as unknown as B, retrieveEdit).compile, loadBase: () => altered }, CMS130);
+  assert.equal(await main(argsFor(h, [], [editOf(AIF, AIF_VERSION)]), h.deps), 1);
+  assert.match(
+    h.errors.join("\n"),
+    /REFUSED — WorkWellAdvancedIllnessandFrailtyTranslation2027 ww-2027\.1: CMS's ELM retrieves Condition \(.*, value set .*110\.12\.1082\), which WorkWell's does not, but no dataRequirement entry describes that retrieve/,
+  );
   assert.deepEqual(filesIn(h.out), []);
+  assert.equal(h.emits.length, 0, "refused before the terminology is expanded");
 });
 
 test("the upstream hash, CMS's recorded options, the options applied and CMS's committed artifact are each required", async () => {

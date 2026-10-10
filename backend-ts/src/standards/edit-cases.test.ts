@@ -14,8 +14,12 @@ import {
   parseEditCases,
   renderRates,
   runEditCases,
+  supplementProblems,
+  supplementValueSets,
 } from "./edit-cases.ts";
 import {
+  supplementFor,
+  type RunOfficialMeasureOptions,
   classifyPopulationAgreement,
   type FhirBundle,
   type LoadedOfficialMeasure,
@@ -147,9 +151,17 @@ const full = (denex: 0 | 1): PopulationCounts => ({ ...rate(denex), "denominator
  * The engine: case 1 is excluded on the translated bundle only, case 3 on neither. `skip` returns that
  * case unscored (what the harness does with a case missing `expected`); `drop` omits it.
  */
-function engine(seen: Array<{ translated: boolean; ids: string[]; denex: number[] }>, over: { skip?: string; drop?: string; error?: string; retryOn?: "translated" } = {}) {
-  return async (loaded: LoadedOfficialMeasure): Promise<OfficialMeasureRun> => {
+function engine(
+  seen: Array<{ translated: boolean; ids: string[]; denex: number[] }>,
+  over: { skip?: string; drop?: string; error?: string; retryOn?: "translated"; supplied?: string[]; dropSupplement?: boolean } = {},
+) {
+  return async (loaded: LoadedOfficialMeasure, options: RunOfficialMeasureOptions = {}): Promise<OfficialMeasureRun> => {
     const translated = loaded.measureBundle === TRANSLATED;
+    // Which side got which supplement, as `side:url=code,code`; and what the real harness would record.
+    for (const vs of (options.supplementalValueSets ?? []) as Array<{ url: string; expansion: { contains: Array<{ code: string }> } }>) {
+      over.supplied?.push(`${translated ? "translation" : "cms"}:${vs.url}=${vs.expansion.contains.map((c) => c.code).join(",")}`);
+    }
+    const supplementedOids = over.dropSupplement ? [] : supplementFor(loaded, options.supplementalValueSets).map((vs) => String((vs as { url: string }).url));
     seen.push({ translated, ids: loaded.cases.map((c) => c.uuid), denex: loaded.cases.map((c) => c.expected!["denominator-exclusion"]) });
     const cases: OfficialCaseResult[] = loaded.cases
       .filter((c) => c.uuid !== over.drop)
@@ -164,7 +176,7 @@ function engine(seen: Array<{ translated: boolean; ids: string[]; denex: number[
       measurementPeriod: loaded.measurementPeriod,
       valueSets: loaded.valueSets,
       valueSetMode: "measure-bundle",
-      supplementedOids: [],
+      supplementedOids,
       trustMetaProfile: translated && over.retryOn === "translated",
       profileRetry: false,
       retrieveSignal: true,
@@ -224,4 +236,54 @@ test("nothing runs for a set that is refused", async () => {
   assert.equal(seen.length, 0);
   assert.deepEqual(outcome.sides, []);
   assert.match(outcome.problems.join(), /written for 2027-01-01\.\.2027-12-31/);
+});
+
+// ---- #782: supplemental value sets, the translation's side only --------------------------------------------
+
+const VS = "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113762.1.4.1003.1285";
+const SUPPLEMENTED = { ...FILE, supplementalValueSets: { [VS]: [{ system: "http://snomed.info/sct", code: "S1" }, { system: "http://snomed.info/sct", code: "S2" }] } };
+
+test("supplementalValueSets is parsed strictly, and must name exactly the value sets the translation adds", () => {
+  const set = parseEditCases(SUPPLEMENTED, [FOUR]);
+  assert.deepEqual(set.supplementalValueSets, SUPPLEMENTED.supplementalValueSets);
+  assert.equal(parseEditCases(FILE, [FOUR]).supplementalValueSets, undefined, "absent when the file states none");
+  assert.deepEqual(supplementValueSets(set), [
+    { resourceType: "ValueSet", id: "2.16.840.1.113762.1.4.1003.1285", url: VS, status: "active", expansion: { timestamp: "2026-01-01T00:00:00Z", contains: SUPPLEMENTED.supplementalValueSets[VS] } },
+  ]);
+  const code = { system: "s", code: "c" };
+  const refusals: Array<[unknown, RegExp]> = [
+    [[code], /supplementalValueSets must be an object/],
+    [{ "urn:oid:1.2.3": [code] }, /key 'urn:oid:1\.2\.3' is not a value-set canonical URL/],
+    [{ [`${VS}|20260514`]: [code] }, /is not a value-set canonical URL \(…\/ValueSet\/<id>, no \|version\)/],
+    [{ [VS]: [] }, /must be a non-empty array of \{ system, code \}/],
+    [{ [VS]: [{ ...code, display: "d" }] }, /\[0\] has unknown key\(s\) display/],
+    [{ [VS]: [{ system: "s" }] }, /\[0\] needs a system and a code/],
+    [{ [VS]: [code, { ...code }] }, /\[1\] repeats s\|c/],
+  ];
+  for (const [supplement, message] of refusals) assert.throws(() => parseEditCases({ ...FILE, supplementalValueSets: supplement }, [FOUR]), message, String(message));
+
+  assert.deepEqual(supplementProblems(set, [VS]), []);
+  assert.deepEqual(supplementProblems(parseEditCases(FILE, [FOUR]), []), []);
+  assert.deepEqual(supplementProblems(parseEditCases(FILE, [FOUR]), [VS]), [
+    `supplementalValueSets states no codes for 1 value set(s) the translation declares and CMS's upstream bundle lacks: ${VS}`,
+  ]);
+  assert.deepEqual(supplementProblems(set, []), [`supplementalValueSets names 1 value set(s) that are not ones the translation declares and CMS's upstream bundle lacks: ${VS}`]);
+  // Exact strings, as fqm compares them: the same OID under a version is another value set.
+  assert.equal(supplementProblems(set, [`${VS}|20260514`]).length, 2);
+});
+
+test("the translation's side alone gets the stated codes, and must report having supplemented every one", async () => {
+  const supplied: string[] = [];
+  const { outcome } = await runWith({ supplied }, parseEditCases(SUPPLEMENTED, [FOUR]));
+  assert.deepEqual(outcome.problems, []);
+  assert.deepEqual(supplied, [`translation:${VS}=S1,S2`], "CMS's side is given nothing");
+
+  // A harness that supplemented nothing (narrowed it all away) fails the translation's side by name.
+  const dropped = await runWith({ dropSupplement: true }, parseEditCases(SUPPLEMENTED, [FOUR]));
+  assert.deepEqual(dropped.outcome.problems, [`the translation: the harness supplemented [], expected [${VS}]`]);
+
+  // A set with no supplement passes no option at all.
+  const none: string[] = [];
+  assert.deepEqual((await runWith({ supplied: none })).outcome.problems, []);
+  assert.deepEqual(none, []);
 });

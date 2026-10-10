@@ -387,6 +387,10 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
  *      bound to the year they score. The deck check's year is the deck's own (`oraclePeriodProblems`);
  *   D8 its terminology sidecar is present, matches its pin, and is neither capped nor missing a set;
  *   D9 its bundle holds only a Measure and Libraries: an embedded ValueSet would outrank its sidecar.
+ *   D10 each library's computed data requirements describe its own ELM (`libraryDataRequirementProblems`, on
+ *      D3's single decode): its relatedArtifact and dataRequirement value sets, read as fqm reads them, equal
+ *      its valueSets.def, and its direct-reference codes are in its codes.def — a stale list makes fqm refuse
+ *      every evaluation. CMS's artifacts are held to it by official-data-requirements.test.ts, not here.
  */
 function derivedRoutingProblems(
   env: OfficialMeasuresEnv,

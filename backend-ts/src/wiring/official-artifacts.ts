@@ -124,6 +124,13 @@ export interface DerivedManifestBlock {
    * edited, so a translation with none (CMS137) keeps its manifest byte for byte.
    */
   changedLibraries?: DerivedChangedLibrary[];
+  /**
+   * The libraries WorkWell compiled whose reads differ from CMS's (#782), so whose computed data
+   * requirements — `dataRequirement`, the value-set and code-system `depends-on` entries and the
+   * direct-reference codes — were edited to match their ELM rather than carried as MADiE wrote them. By
+   * the name each carries in the bundle. Absent when none, so CMS130 and CMS137 keep their manifests.
+   */
+  recomputedDataRequirements?: string[];
   /** The checks it passed, each naming the exact artifact and terminology it ran against. */
   oracles: Array<{
     name: string;

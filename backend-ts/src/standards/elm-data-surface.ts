@@ -2,14 +2,14 @@
  * What an ELM library READS from a record — its data surface — as one value two compiles can be compared
  * by (#779). Build time only (`build:derived`).
  *
- * A translation carries CMS's computed data requirements as they are: the Measure's `dataRequirement`
- * entries and the main library's `depends-on` value sets were computed by MADiE from CMS's ELM, and nothing
- * recomputes them. That is honest only while WorkWell's edits change nothing a retrieve asks for. So the
- * builder refuses an edited library — and the main library, which is always WorkWell's compile — unless its
- * surface here equals the surface of CMS's committed ELM for the same library: the same value sets, codes
- * and code systems declared, and the same retrieves, counted with multiplicity. An edit that only changes
- * how retrieved data is compared (`starts during` → `overlaps`) leaves the surface as it was; an edit that
- * retrieves another value set, or one more resource type, does not.
+ * A translation carries CMS's computed data requirements: each library's `dataRequirement` entries, its
+ * `depends-on` value sets and its direct-reference codes were computed by MADiE from CMS's ELM. They stay
+ * true only while WorkWell's edits change nothing a retrieve asks for, and fqm acts on them (it refuses any
+ * listed value set it was not given). So the builder compares each library WorkWell compiled — every edited
+ * one, and the main library, which is always WorkWell's compile — with CMS's committed ELM for the same
+ * library: the same value sets, codes and code systems declared, and the same retrieves, counted with
+ * multiplicity. Equal (an edit like `starts during` → `overlaps`), CMS's lists are carried byte for byte;
+ * different (CMS125v15's value-set swap, #782), they are edited to match (`derived-data-requirements.ts`).
  *
  * The projection keeps what decides WHICH data is fetched — `dataType`, `templateId`, `codeProperty`,
  * `codeComparator`, `codes`, and `codeFilter` (ELM's other way of saying `codes`; empty in every retrieve

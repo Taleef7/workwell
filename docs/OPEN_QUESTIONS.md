@@ -301,10 +301,20 @@ restarts an exited process. Without that, exiting would leave Maui down until th
 **Status:** new 2026-10-09 (#779); not yet asked.
 
 CMS130's 2027 translation changes one line of the measure steward's logic (the frailty look-back,
-`measures/derived/cms130/`), and CMS125's will do the same. The steward's notice, carried on each, allows
-internal, noncommercial use without its approval and requires approval for any other use. The sandbox is
-within the first; scoring a customer's patients with a modified measure may not be. Before the PHI phase,
-MIE's legal view is needed on whether its arrangement with NCQA covers modified logic.
+`measures/derived/cms130/`). CMS125's changes more: the same line, its mastectomy-laterality logic, a value
+set and its end-of-period comparisons (#782, `measures/derived/cms125/`). The steward's notice, carried on
+each, allows internal, noncommercial use without its approval and requires approval for any other use. The
+sandbox is within the first; scoring a customer's patients with a modified measure may not be. Before the
+PHI phase, MIE's legal view is needed on whether its arrangement with NCQA covers modified logic.
+
+### 4.13 Does WebChart's FHIR `Procedure` carry a body site, and coded how?
+
+**Status:** new 2026-10-10 (#782); not yet asked.
+
+CMS125's 2027 logic reads which breast a unilateral mastectomy was on from `Procedure.bodySite`, coded
+SNOMED "Entire left breast" (361716006) / "Entire right breast" (361715005). WebChart ingest passes a
+Procedure through as WebChart's FHIR server returns it, so the measure can use that path only if WebChart
+fills `bodySite` with those codes. A laterality qualifier or a "structure of" code does not match.
 
 ---
 

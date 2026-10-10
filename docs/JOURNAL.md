@@ -5,6 +5,29 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-10
+
+- **CMS125's 2027 translation (#782), the first that changes what a measure reads.**
+  - v15 adds CMS130's frailty edit, reads mastectomy laterality from a unilateral mastectomy
+    procedure's body site (a new value set) instead of a qualified diagnosis, and makes the
+    end-of-period comparisons day-precise.
+  - fqm refuses any value set a library's computed data requirements name and it was not given, so a
+    translation that moves a value set now has those lists edited to match its logic. The router's
+    new D10 refuses a library whose lists and logic disagree. CMS's nine artifacts all pass it.
+  - CMS's own MADiE deck now moves three populations, each listed and explained. The new value set
+    is absent from CMS's 2026 terminology, so the deck runs it empty on the translation side.
+  - 22 hand-built patients test every edit, 14 of them telling the logics apart.
+  - The changed frailty library is one resource in CMS130's and CMS125's bundles, so its title no
+    longer names CMS130. CMS130 was rebuilt and its checks re-recorded.
+  - **Scope changes from the plan's PR 6 row:**
+    - Mapping QRDA's `targetSiteCode` to `bodySite` is split out, because it would move 2026
+      CMS125 results on both stacks and needs its own re-verification.
+    - Unilateral mastectomies in the synthetic corpus are deferred.
+  - New question for MIE: does WebChart's FHIR Procedure carry a body site, coded how
+    (OPEN_QUESTIONS §4.13)?
+  - The Docker Hub limit that blocked #780's deploys was fixed in #781: the images build from AWS's
+    mirror, with the runner's own Docker.
+
 ## 2026-10-09
 
 - **CMS130's 2027 translation (#779), the first with a logic edit.**

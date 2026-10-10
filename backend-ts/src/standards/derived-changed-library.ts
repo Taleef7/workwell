@@ -46,11 +46,19 @@ export interface ChangedLibraryIdentity {
   version: string;
   /** `urn:workwell:library:<name>`. */
   url: string;
-  /** e.g. "WorkWell translation of CMS's AdvancedIllnessandFrailty 1.27.000, for CMS130v15". */
+  /** e.g. "WorkWell translation of CMS's AdvancedIllnessandFrailty 1.27.000, for 2027". */
   title: string;
 }
 
-/** The identity a CMS library `cmsName` `cmsVersion` takes once WorkWell has edited it for `translation`. */
+/**
+ * The identity a CMS library `cmsName` `cmsVersion` takes once WorkWell has edited it for `translation`.
+ *
+ * Every field is measure-agnostic: the name, url and version follow the measurement year and the
+ * translation's revision, and so does the title (#782). Two translations that make the same edit to the
+ * same CMS library for the same year (CMS125 and CMS130 both edit AdvancedIllnessandFrailty 1.27.000 for
+ * 2027) therefore carry ONE identical Library resource under one canonical and version; a title naming
+ * the measure would have put two different resources under the same `url|version`.
+ */
 export function changedLibraryIdentity(cmsName: string, cmsVersion: string, translation: DerivedIdentity): ChangedLibraryIdentity {
   if (!/^[A-Za-z][A-Za-z0-9]*$/.test(cmsName)) throw new Error(`library name '${cmsName}' is not a plain CQL identifier`);
   const year = translation.effectivePeriod.start.slice(0, 4);
@@ -61,7 +69,7 @@ export function changedLibraryIdentity(cmsName: string, cmsVersion: string, tran
     name,
     version: translation.version,
     url: `${DERIVED_LIBRARY_PREFIX}${name}`,
-    title: `WorkWell translation of CMS's ${cmsName} ${cmsVersion}, for ${translation.derivedFrom}`,
+    title: `WorkWell translation of CMS's ${cmsName} ${cmsVersion}, for ${year}`,
   };
 }
 

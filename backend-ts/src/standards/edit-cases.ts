@@ -10,8 +10,16 @@
  * proves nothing about the edit, so the check refuses it.
  *
  * Both runs use CMS's upstream bundle's own value sets and the MADiE deck's measurement period, so the
- * only thing that differs between them is the logic. Every population the Measure declares must be
- * stated for every rate: an omitted population would be compared as 0 and read as a claim nobody made.
+ * only thing that differs between them is the logic. The one addition is on the TRANSLATION's side only:
+ * a value set the translation's logic declares and CMS's upstream bundle ships no ValueSet for (CMS125v15's
+ * "Unilateral Mastectomy", 1285, absent from CMS's 2026 terminology) would make fqm refuse every run, so
+ * the file's optional `supplementalValueSets` states, per such value set's canonical URL, the codes the
+ * translation's run expands it to. `derived:check` requires its keys to be exactly the set the translation
+ * declares and upstream lacks, and (under `--record`) each code to be in the translation's own sidecar
+ * expansion. CMS's side never gets a supplement, and a supplement never stands in for a value set upstream
+ * ships (the harness's `supplementFor` narrows to the ones it lacks; the runner checks nothing was dropped).
+ * Every population the Measure declares must be stated for every rate: an omitted population would be
+ * compared as 0 and read as a claim nobody made.
  *
  * Prints nothing itself. A patient here is synthetic, but the runner still reports cases by id and
  * populations as counts, never resource content.
@@ -47,9 +55,20 @@ export interface EditCase {
   expected: Record<EditCaseSide, PopulationCounts[]>;
 }
 
+/** One code of a supplemental value set's expansion. */
+export interface SupplementCode {
+  system: string;
+  code: string;
+}
+
 export interface EditCaseSet {
   measurementPeriod: MeasurementPeriod;
   cases: EditCase[];
+  /**
+   * Translation side only: value-set canonical URL → the codes its expansion holds, for the value sets the
+   * translation declares and CMS's upstream bundle lacks. Absent when the file states none.
+   */
+  supplementalValueSets?: Record<string, SupplementCode[]>;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -101,13 +120,76 @@ function parseRates(value: unknown, populations: readonly (readonly PopulationCo
 }
 
 /**
+ * `supplementalValueSets`: an object of value-set canonical URL → a non-empty list of `{ system, code }`.
+ * An empty list is refused: it would supply a value set that matches nothing, which is what the deck's
+ * empty supplement already is — an edit case states codes because it needs them to match.
+ */
+function parseSupplement(value: unknown): Record<string, SupplementCode[]> {
+  const where = "supplementalValueSets";
+  if (!isObject(value)) throw new Error(`${where} must be an object of value-set canonical URL → [{ system, code }]`);
+  const out: Record<string, SupplementCode[]> = {};
+  for (const [url, codes] of Object.entries(value)) {
+    if (!/^https?:\/\/\S+\/ValueSet\/[^/|\s]+$/.test(url)) throw new Error(`${where} key '${url}' is not a value-set canonical URL (…/ValueSet/<id>, no |version)`);
+    if (!Array.isArray(codes) || codes.length === 0) throw new Error(`${where}['${url}'] must be a non-empty array of { system, code }`);
+    const seen = new Set<string>();
+    out[url] = codes.map((raw, i) => {
+      const at = `${where}['${url}'][${i}]`;
+      if (!isObject(raw)) throw new Error(`${at} is not an object`);
+      onlyKeys(raw, ["system", "code"], at);
+      if (!isText(raw["system"]) || !isText(raw["code"])) throw new Error(`${at} needs a system and a code`);
+      const key = `${raw["system"]}|${raw["code"]}`;
+      if (seen.has(key)) throw new Error(`${at} repeats ${key}`);
+      seen.add(key);
+      return { system: raw["system"], code: raw["code"] };
+    });
+  }
+  return out;
+}
+
+/**
+ * Why a set's `supplementalValueSets` is not the one the translation needs: its keys must be EXACTLY
+ * `required` — the value sets the translation declares and CMS's upstream bundle lacks — compared as exact
+ * strings, as fqm compares them. A missing key would leave the translation's run refused by fqm; an extra
+ * one would stand in for a value set nothing needs supplying.
+ */
+export function supplementProblems(set: EditCaseSet, required: readonly string[]): string[] {
+  const stated = Object.keys(set.supplementalValueSets ?? {});
+  const missing = required.filter((url) => !stated.includes(url)).sort();
+  const extra = stated.filter((url) => !required.includes(url)).sort();
+  const problems: string[] = [];
+  if (missing.length > 0) problems.push(`supplementalValueSets states no codes for ${missing.length} value set(s) the translation declares and CMS's upstream bundle lacks: ${missing.join(", ")}`);
+  if (extra.length > 0) problems.push(`supplementalValueSets names ${extra.length} value set(s) that are not ones the translation declares and CMS's upstream bundle lacks: ${extra.join(", ")}`);
+  return problems;
+}
+
+/** The set's supplement as fqm's value-set cache: one ValueSet per URL, its codes as the expansion. */
+export function supplementValueSets(set: EditCaseSet): unknown[] {
+  return Object.entries(set.supplementalValueSets ?? {}).map(([url, codes]) => valueSetExpansion(url, codes));
+}
+
+/**
+ * A ValueSet resource with `codes` as its expansion — the shape fqm reads from its value-set cache (the
+ * same `buildValueSetCache` emits). `id` is the bare id after `/ValueSet/`.
+ */
+export function valueSetExpansion(url: string, codes: readonly SupplementCode[]): Record<string, unknown> {
+  return {
+    resourceType: "ValueSet",
+    id: url.slice(url.lastIndexOf("/") + 1),
+    url,
+    status: "active",
+    expansion: { timestamp: "2026-01-01T00:00:00Z", contains: codes.map((c) => ({ system: c.system, code: c.code })) },
+  };
+}
+
+/**
  * Read an `edit-cases.json`. Strict on purpose — an unknown key, a missing population, a second Patient,
  * a duplicated case or patient id each refuse the whole file, because each would otherwise run as a case
  * that says less than it appears to.
  */
 export function parseEditCases(json: unknown, populations: readonly (readonly PopulationCode[])[]): EditCaseSet {
   if (!isObject(json)) throw new Error("edit-cases.json is not a JSON object");
-  onlyKeys(json, ["measurementPeriod", "cases"], "edit-cases.json");
+  onlyKeys(json, ["measurementPeriod", "cases", "supplementalValueSets"], "edit-cases.json");
+  const supplement = "supplementalValueSets" in json ? parseSupplement(json["supplementalValueSets"]) : undefined;
   const period = json["measurementPeriod"];
   if (!isObject(period) || !isText(period["start"]) || !isText(period["end"])) {
     throw new Error("edit-cases.json needs measurementPeriod { start, end }");
@@ -149,7 +231,7 @@ export function parseEditCases(json: unknown, populations: readonly (readonly Po
       },
     };
   });
-  return { measurementPeriod: { start: period["start"], end: period["end"] }, cases };
+  return { measurementPeriod: { start: period["start"], end: period["end"] }, cases, ...(supplement ? { supplementalValueSets: supplement } : {}) };
 }
 
 const vector = (rates: readonly PopulationCounts[]): string => JSON.stringify(rates.map((r) => POPULATION_CODES.map((c) => r[c])));
@@ -218,7 +300,10 @@ export function editCaseSetProblems(set: EditCaseSet, deckPeriod: MeasurementPer
 
 /**
  * Run the set on CMS's logic (`upstreamBundle`) with CMS's expectations and on the translation's
- * (`translatedBundle`) with the translation's, each over `loaded`'s own value sets and period.
+ * (`translatedBundle`) with the translation's, each over `loaded`'s own value sets and period — the
+ * translation's side plus the set's `supplementalValueSets`, which the harness must then report having
+ * supplemented, every one (CMS's side: none). Whether those are the RIGHT value sets is the caller's
+ * check (`supplementProblems`), made before this runs.
  *
  * Nothing runs for a set `editCaseSetProblems` refuses. After the runs, every case must come back exactly
  * once with an `expected-agreement` on BOTH sides — counted, not assumed, because the harness silently
@@ -240,10 +325,22 @@ export async function runEditCases(input: {
   const populations = declaredPopulations(input.upstreamBundle);
   const sides: EditCaseSideResult[] = [];
   const profile: boolean[] = [];
+  // The translation's side alone gets the file's supplement; the option is left off entirely when there
+  // is none, so the CMS side's call (and a translation that needs none) is exactly as it was.
+  const supplement = supplementValueSets(set);
+  const supplied = Object.keys(set.supplementalValueSets ?? {}).sort();
   for (const side of EDIT_CASE_SIDES) {
-    const run = await input.runCases({ ...loaded, measureBundle: side === "cms" ? input.upstreamBundle : input.translatedBundle, cases: officialCasesFor(set, side) });
+    const options: RunOfficialMeasureOptions = side === "translation" && supplement.length > 0 ? { supplementalValueSets: supplement } : {};
+    const run = await input.runCases({ ...loaded, measureBundle: side === "cms" ? input.upstreamBundle : input.translatedBundle, cases: officialCasesFor(set, side) }, options);
     profile.push(run.trustMetaProfile);
     const label = side === "cms" ? "CMS's logic" : "the translation";
+    // What the harness actually supplemented must be every value set the file states (it narrows away
+    // any upstream ships), and on CMS's side nothing.
+    const used = [...run.supplementedOids].sort();
+    const want = side === "translation" ? supplied : [];
+    if (JSON.stringify(used) !== JSON.stringify(want)) {
+      problems.push(`${label}: the harness supplemented [${used.join(", ")}], expected [${want.join(", ")}]`);
+    }
     if (run.calculationError) problems.push(`${label}: calculation error: ${run.calculationError}`);
     if (run.cases.length !== total) problems.push(`${label}: ${run.cases.length} case result(s) for ${total} edit case(s)`);
     const byId = new Map<string, OfficialCaseResult[]>();
