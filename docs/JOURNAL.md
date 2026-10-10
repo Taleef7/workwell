@@ -7,6 +7,19 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-10
 
+- **cms165 trusts one profile, not all of them (#591).** Its blood-pressure retrieve still keeps only
+  readings stamped `us-core-blood-pressure`; every other retrieve now reads by resource type, as for the
+  other five measures. Until now cms165 required every QI-Core profile, which only the corpus stamps, so
+  every QRDA-imported patient threw.
+  - Identical to trusting every profile on CMS's 68 MADiE cases and on all 20,000 corpus patients.
+    Trusting none differs on 624 of a 2,500-patient sample.
+  - Cypress deck, both years: from 0/44 to 33/44. The other 11 need the blood pressure itself, which
+    QRDA writes as two readings (PR 7b, waiting on the pairing rule).
+  - A test pins that the blood pressure is cms165's only code-less retrieve of a profile that picks out
+    part of its type, so a re-vendor that adds another fails.
+  - The executor package names `cql-exec-fhir` 2.1.6 directly, fqm-execution's own copy, to build the
+    narrowed PatientSource inside the fqm worker.
+  - #591 shrinks to WebChart's `status: unknown` and the missing encounter link.
 - **QRDA I carries the body site both ways (#784)**, the part of #782 split out. A diagnosis's or
   procedure's `<targetSiteCode>` imports as `bodySite` and exports back, placed where Cypress places it.
   CMS125 reads it in both years. Through CMS's 2026 logic, a round-tripped patient with an

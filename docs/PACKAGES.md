@@ -21,7 +21,9 @@ everyone already knows.
 
 - **`@work-well/official-executor`** — the sole home of `fqm-execution`, and the package boundary *is*
   the ADR-026 quarantine. Publishing it would advertise, as a `@work-well` product, exactly the
-  dependency the engine package exists to keep out of its own manifest.
+  dependency the engine package exists to keep out of its own manifest. It also names `cql-exec-fhir`
+  2.1.6, pinned exactly: the copy fqm-execution itself runs on (a test checks the two resolve to one), used
+  to build cms165's profile-narrowed PatientSource, and loaded as lazily as fqm (#591).
 - **`@work-well/example-consumer`** — a test (ADR-062), not a sample.
 - **Measure content.** No catalog, no compiled ELM, no value-set expansions (ADR-059). WorkWell's
   registry names occupational measures and its bundled expansions are, by their own docblock, *"the

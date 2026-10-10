@@ -76,7 +76,7 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
   `measure-executor.ts`, `cql/cql-execution-engine.ts`, the value-set resolvers and `vsac-client.ts`.
   Depends only on `cql-execution` and `cql-exec-fhir`. Measure content is injected (ADR-059).
 - `measure-codegen` (`@work-well/measure-codegen`) - rule params to CQL (`generate-cql.ts`, ADR-015).
-- `official-executor` - the only home of `fqm-execution`, loaded by lazy import (ADR-026). Not published.
+- `official-executor` - the only home of `fqm-execution`, loaded by lazy import (ADR-026), plus fqm's own `cql-exec-fhir` for cms165's profile-narrowed PatientSource (#591). Not published.
 - `example-consumer` - a test that uses the packages as an outsider would (ADR-062). Not published.
 
 **Modules**

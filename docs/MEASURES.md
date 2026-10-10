@@ -88,31 +88,30 @@ match its logic. On CMS's own test deck three patients move (two lose the exclus
 the frailty edit), each listed and explained; 22 hand-built patients test every edit
 (`backend-ts/measures/derived/cms125/README.md`).
 
-> **CMS165 is blocked on more than verification, and the block moved on 2026-09-07.** CMS165 is the only
-> pilot measure whose decisive retrieve identifies a blood pressure by PROFILE alone with no code filter
-> — the artifact's other four Observation retrieves each name a code or a value set. With profiles
-> ignored it matched any final Observation, so a patient with any other lab read as non-compliant and a
-> same-day non-BP Observation threw (verified by execution 2026-09-05).
+> **CMS165 reads a blood pressure by its profile, and nothing else by profile (#591, 2026-10-10).**
+> CMS165 is the only pilot measure whose decisive retrieve identifies a blood pressure by PROFILE alone
+> with no code filter. Read by resource type, it matched any final Observation, so a patient with any
+> other lab read as non-compliant and a same-day non-BP Observation threw (verified by execution
+> 2026-09-05).
 >
-> `trustMetaProfile` is now decided PER MEASURE and cms165 is the only measure that sets it (ADR-076 d1);
-> the default stays false because trusting profiles globally empties cms122's and cms125's populations,
-> and those are routed. That is possible because the ADR-075 corpus stamps the profile each retrieve
-> names. **It does not make cms165 routable, and the ingest half is still open (#591; #533 closed 2026-09-08 with that half unshipped).** On 2026-09-07
-> `prepareForQiCore` began deriving `us-core-blood-pressure` from codes a resource already carries —
-> one necessary piece, and the one no other layer can supply, since only the codes say what a resource
-> IS. It is nowhere near sufficient: `trustMetaProfile: true` filters EVERY profile-typed retrieve on
-> `meta.profile` and the Patient retrieve THROWS when nothing matches
-> (`cql-exec-fhir/lib/fhir.js:428,442`), and cms165 is authored on QI-Core 6, so it wants
-> `qicore-patient`, `qicore-encounter`, both Condition profiles and more. The corpus stamps fourteen,
-> which is why cms165 runs there and only there. A second blocker sits behind that one: WebChart exports
-> its BP panel with `status: "unknown"` while the measure admits only `final | amended | corrected`.
-> And CMS165's own cross-engine sweep is unexplained (#572). The failure mode is louder now, though not unconditionally: the batch-level retrieve refusal fires
-> only for a roster of more than one subject, so a nightly run would refuse while `/simulate` and
-> rerun-to-verify would quietly return MISSING_DATA. Better than a plausible wrong number, and not a
-> guarantee. **cms165 is routed on the SANDBOX since 2026-09-08 (ADR-078)** — it runs there because the
-> corpus stamps every profile it retrieves and #539 stamps a blood pressure from its own codes — and
-> **must not be routed over WebChart data** until the ingest half (#591, formerly #533's; every QI-Core profile stamped
-> at ingest, BP status arriving final) is closed. That condition now sits in the PHI readiness gate.
+> So the executor reads cms165 by type, except that retrieve, which keeps only resources stamped
+> `us-core-blood-pressure` (`OFFICIAL_MEASURE_SEMANTICS.cms165.trustedProfiles`).
+> `prepareForQiCore` derives that stamp from the codes a resource already carries, which no other layer
+> can do. It is the only profile whose code-less retrieve picks out part of its type; the other four
+> code-less retrieves name their type's one QI-Core profile, and a test pins the list
+> (`official-cms165-retrieves.test.ts`).
+>
+> From 2026-09-07 to 2026-10-10 cms165 trusted EVERY profile. That needed `qicore-patient`,
+> `qicore-encounter`, both Condition profiles and more, which only the corpus stamps, so every QRDA-imported
+> or WebChart patient threw. On the same data the narrowed trust is identical to it: CMS's 68 MADiE cases,
+> and all 20,000 corpus patients. On the Cypress deck it scores 33 of 44 patients right, from 0; the rest
+> need a blood pressure the importer can see, a panel QRDA states as two readings.
+>
+> **cms165 is routed on the SANDBOX (ADR-078) and must not be routed over WebChart data** until #591's
+> remaining half is closed: WebChart exports its BP panel with `status: "unknown"`, while the measure
+> admits only `final | amended | corrected`, and without `Observation.encounter` a reading taken in an ED
+> or inpatient stay is counted. CMS165's cross-engine sweep is also unexplained (#572). Both sit in the
+> PHI readiness gate. The batch-level retrieve refusal fires only for a roster of more than one subject.
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027.
