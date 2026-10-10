@@ -1354,3 +1354,17 @@ test("export: targetSiteCode sits where the CDA schema orders it, and only where
   const unsited = buildQrda1Document(run, "cms125", outcome(officialEvidence), sourceBundle);
   assert.ok(!unsited.includes("<targetSiteCode"), "a resource without a site writes none");
 });
+
+test("round trip: a site with several codings keeps every mapped one, as translations (Codex, #785)", () => {
+  // Imported from a <targetSiteCode> with a <translation>, exported, imported again: a measure that
+  // matches the second coding must still find it.
+  const first = importQrda1Document(sitedDocument(sitedProcedure(
+    `<targetSiteCode code="361715005" codeSystem="${SNOMED_OID}"><translation code="80248007" codeSystem="${SNOMED_OID}"/><translation code="X" codeSystem="1.2.3.4"/></targetSiteCode>`,
+  ))).bundle;
+  const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), { ...sourceBundle, entry: [sourceBundle.entry[0]!, ...first.entry.filter((e) => (e.resource as { resourceType: string }).resourceType === "Procedure")] });
+  assert.match(xml, /<targetSiteCode code="361715005"[^>]*>\s*<translation code="80248007" codeSystem="2\.16\.840\.1\.113883\.6\.96"[^>]*\/>\s*<\/targetSiteCode>/);
+  const [procedure] = importedOfType(xml, "Procedure");
+  assert.deepEqual(procedure!.bodySite, [
+    { coding: [{ system: "http://snomed.info/sct", code: "361715005" }, { system: "http://snomed.info/sct", code: "80248007" }] },
+  ]);
+});
