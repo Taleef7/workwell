@@ -1226,3 +1226,145 @@ test("import: an encounter id that is not a valid FHIR id still yields a resolva
   assert.equal(encounter.reasonReference[0].reference, `Condition/${condition.id}`);
 });
 
+
+// ---------------------------------------------------------------------------------------------------
+// Anatomical Location Site (#784): `<targetSiteCode>` ⇄ `bodySite`, on a Diagnosis and a Procedure.
+// CMS125 reads it in both years, so a dropped site silently keeps a bilateral mastectomy in the
+// denominator.
+// ---------------------------------------------------------------------------------------------------
+
+const SNOMED_OID = "2.16.840.1.113883.6.96";
+
+const sitedDocument = (entries: string) => `<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <recordTarget><patientRole><id root="urn:workwell:employee" extension="emp-006"/>
+    <patient><birthTime value="19750312"/></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    ${entries}
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+const sitedDiagnosis = (sites: string) => `<entry typeCode="DRIV"><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
+      <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+      <effectiveTime><low value="20200301"/><high nullFlavor="UNK"/></effectiveTime>
+      <value xsi:type="CD" code="248802009" codeSystem="${SNOMED_OID}"/>
+      ${sites}
+    </observation></entry>`;
+
+const sitedProcedure = (sites: string, template = "2.16.840.1.113883.10.20.24.3.64") => `<entry typeCode="DRIV"><procedure classCode="PROC" moodCode="EVN">
+      <templateId root="${template}" extension="2021-08-01"/>
+      <code code="172043006" codeSystem="${SNOMED_OID}"/>
+      <effectiveTime value="20240405083000"/>
+      ${sites}
+    </procedure></entry>`;
+
+const importedOfType = (xml: string, type: string) =>
+  importQrda1Document(xml).bundle.entry
+    .map((e) => e.resource as Record<string, unknown>)
+    .filter((r) => r.resourceType === type);
+
+const site = (code: string) => `<targetSiteCode code="${code}" codeSystem="${SNOMED_OID}"/>`;
+const snomed = (code: string) => ({ coding: [{ system: "http://snomed.info/sct", code }] });
+
+test("import: a Diagnosis's targetSiteCode becomes Condition.bodySite (#784)", () => {
+  const [condition] = importedOfType(sitedDocument(sitedDiagnosis(site("24028007"))), "Condition");
+  assert.deepEqual(condition!.bodySite, [snomed("24028007")]);
+});
+
+test("import: a Procedure's targetSiteCode becomes Procedure.bodySite, and so does an Intervention's (#784)", () => {
+  const [procedure] = importedOfType(sitedDocument(sitedProcedure(site("361716006"))), "Procedure");
+  assert.deepEqual(procedure!.bodySite, [snomed("361716006")]);
+  const [intervention] = importedOfType(
+    sitedDocument(sitedProcedure(site("361715005"), "2.16.840.1.113883.10.20.24.3.32")),
+    "Procedure",
+  );
+  assert.deepEqual(intervention!.bodySite, [snomed("361715005")]);
+});
+
+test("import: every site is kept, in order, and a translation rides along as a coding (#784)", () => {
+  const both = `${site("361716006")}
+      <targetSiteCode code="361715005" codeSystem="${SNOMED_OID}"><translation code="80248007" codeSystem="${SNOMED_OID}"/></targetSiteCode>`;
+  const [procedure] = importedOfType(sitedDocument(sitedProcedure(both)), "Procedure");
+  assert.deepEqual(procedure!.bodySite, [
+    snomed("361716006"),
+    { coding: [{ system: "http://snomed.info/sct", code: "361715005" }, { system: "http://snomed.info/sct", code: "80248007" }] },
+  ]);
+});
+
+test("import: no site, or only an unmapped one, leaves bodySite ABSENT rather than empty (#784)", () => {
+  const [none] = importedOfType(sitedDocument(sitedDiagnosis("")), "Condition");
+  assert.ok(!("bodySite" in none!), "an absent field stays absent");
+  const [unmapped] = importedOfType(sitedDocument(sitedDiagnosis(`<targetSiteCode code="X" codeSystem="1.2.3.4"/>`)), "Condition");
+  assert.ok(!("bodySite" in unmapped!), "an unmapped system is dropped, as everywhere else");
+  const [mixed] = importedOfType(
+    sitedDocument(sitedDiagnosis(`<targetSiteCode code="X" codeSystem="1.2.3.4"/>${site("7771000")}`)),
+    "Condition",
+  );
+  assert.deepEqual(mixed!.bodySite, [snomed("7771000")]);
+});
+
+test("import: a site on a NESTED element is not lifted onto its parent (#784)", () => {
+  // The procedure states no site; a nested observation does.
+  const nested = `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>${site("24028007")}
+      </observation></entryRelationship>`;
+  const [procedure] = importedOfType(sitedDocument(sitedProcedure(nested)), "Procedure");
+  assert.ok(!("bodySite" in procedure!));
+});
+
+const sitedBundle = {
+  ...sourceBundle,
+  entry: [
+    sourceBundle.entry[0]!,
+    {
+      resource: {
+        resourceType: "Condition", id: "cond-sited",
+        code: { coding: [{ system: "http://snomed.info/sct", code: "248802009" }] },
+        bodySite: [snomed("7771000")],
+        onsetDateTime: "2020-03-01T00:00:00Z",
+      },
+    },
+    {
+      resource: {
+        resourceType: "Procedure", id: "proc-sited", status: "completed",
+        code: { coding: [{ system: "http://snomed.info/sct", code: "172043006" }] },
+        bodySite: [snomed("361716006"), snomed("361715005")],
+        performedDateTime: "2024-04-05T08:30:00Z",
+      },
+    },
+  ],
+};
+
+test("round trip: Condition and Procedure body sites survive export and import (#784)", () => {
+  const back = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), sitedBundle));
+  const strip = (cc: unknown) => (cc as Array<{ coding: Array<{ system: string; code: string }> }>)
+    .map((c) => ({ coding: c.coding.map(({ system, code }) => ({ system, code })) }));
+  assert.deepEqual(strip(byType(back, "Condition")[0]!.bodySite), [snomed("7771000")]);
+  assert.deepEqual(strip(byType(back, "Procedure")[0]!.bodySite), [snomed("361716006"), snomed("361715005")]);
+});
+
+test("export: targetSiteCode sits where the CDA schema orders it, and only where a site exists (#784)", () => {
+  const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), sitedBundle);
+  // Observation: … value, interpretationCode, methodCode, targetSiteCode, so directly after <value>.
+  assert.match(xml, /<value xsi:type="CD" code="248802009"[^>]*\/>\s*<targetSiteCode code="7771000" codeSystem="2\.16\.840\.1\.113883\.6\.96"[^>]*\/>\s*<\/observation>/);
+  // Procedure: … effectiveTime, priorityCode, languageCode, methodCode, approachSiteCode, targetSiteCode.
+  assert.match(xml, /<effectiveTime value="[^"]+"\/>\s*<targetSiteCode code="361716006"[^>]*\/>\s*<targetSiteCode code="361715005"[^>]*\/>\s*<\/procedure>/);
+  assert.equal((xml.match(/<targetSiteCode/g) ?? []).length, 3);
+  const unsited = buildQrda1Document(run, "cms125", outcome(officialEvidence), sourceBundle);
+  assert.ok(!unsited.includes("<targetSiteCode"), "a resource without a site writes none");
+});
+
+test("round trip: a site with several codings keeps every mapped one, as translations (Codex, #785)", () => {
+  // Imported from a <targetSiteCode> with a <translation>, exported, imported again: a measure that
+  // matches the second coding must still find it.
+  const first = importQrda1Document(sitedDocument(sitedProcedure(
+    `<targetSiteCode code="361715005" codeSystem="${SNOMED_OID}"><translation code="80248007" codeSystem="${SNOMED_OID}"/><translation code="X" codeSystem="1.2.3.4"/></targetSiteCode>`,
+  ))).bundle;
+  const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), { ...sourceBundle, entry: [sourceBundle.entry[0]!, ...first.entry.filter((e) => (e.resource as { resourceType: string }).resourceType === "Procedure")] });
+  assert.match(xml, /<targetSiteCode code="361715005"[^>]*>\s*<translation code="80248007" codeSystem="2\.16\.840\.1\.113883\.6\.96"[^>]*\/>\s*<\/targetSiteCode>/);
+  const [procedure] = importedOfType(xml, "Procedure");
+  assert.deepEqual(procedure!.bodySite, [
+    { coding: [{ system: "http://snomed.info/sct", code: "361715005" }, { system: "http://snomed.info/sct", code: "80248007" }] },
+  ]);
+});

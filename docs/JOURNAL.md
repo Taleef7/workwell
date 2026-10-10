@@ -7,6 +7,15 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-10
 
+- **QRDA I carries the body site both ways (#784)**, the part of #782 split out. A diagnosis's or
+  procedure's `<targetSiteCode>` imports as `bodySite` and exports back, placed where Cypress places it.
+  CMS125 reads it in both years. Through CMS's 2026 logic, a round-tripped patient with an
+  unspecified-laterality mastectomy on each side is now excluded; without the sites, the same patient is
+  not.
+  - No Cypress deck patient moved: bundle agreement on every routed measure, both decks, official and
+    translations, and C2 on both archives are identical before and after. No deck patient has a left
+    and a right site on a path CMS125 reads.
+  - Live data is untouched: only QRDA-imported subjects and the deck checks go through this code.
 - **CMS125's 2027 translation (#782), the first that changes what a measure reads.**
   - v15 adds CMS130's frailty edit, reads mastectomy laterality from a unilateral mastectomy
     procedure's body site (a new value set) instead of a qualified diagnosis, and makes the

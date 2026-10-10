@@ -72,6 +72,8 @@ interface FhirResource {
   id?: string;
   status?: string;
   code?: FhirCodeableConcept;
+  /** Condition and Procedure: QDM "Anatomical Location Site" (#784). */
+  bodySite?: FhirCodeableConcept[];
   category?: FhirCodeableConcept | FhirCodeableConcept[];
   type?: FhirCodeableConcept[];
   subject?: { reference?: string };
@@ -91,15 +93,40 @@ interface FhirResource {
   valueCodeableConcept?: FhirCodeableConcept;
 }
 
-/** A `<code>`/`<value xsi:type="CD">` attribute string for the first coding we can map, else null. */
-function cdaCode(concept: FhirCodeableConcept | undefined): string | null {
+/** The attribute string of every coding we can map, in order. */
+function cdaCodes(concept: FhirCodeableConcept | undefined): string[] {
+  const codes: string[] = [];
   for (const coding of concept?.coding ?? []) {
     const sys = coding.system ? CODE_SYSTEMS[coding.system] : undefined;
     if (!sys || !coding.code) continue;
     const display = coding.display ? ` displayName="${esc(coding.display)}"` : "";
-    return `code="${esc(coding.code)}" codeSystem="${sys.oid}" codeSystemName="${sys.name}"${display}`;
+    codes.push(`code="${esc(coding.code)}" codeSystem="${sys.oid}" codeSystemName="${sys.name}"${display}`);
   }
-  return null;
+  return codes;
+}
+
+/** A `<code>`/`<value xsi:type="CD">` attribute string for the first coding we can map, else null. */
+function cdaCode(concept: FhirCodeableConcept | undefined): string | null {
+  return cdaCodes(concept)[0] ?? null;
+}
+
+/**
+ * Each mappable `bodySite` as a `<targetSiteCode>` (QDM "Anatomical Location Site"), one per site, or ""
+ * for none (#784). The import reads them back; CMS125 reads them in both years. Every mapped coding of a
+ * site is kept: the first as the code, the rest as `<translation>`s, which the import reads back as
+ * codings, so a measure matching a later coding still matches after a round trip (Codex, #785). A site
+ * with no mappable coding is left out, as `cdaCode` leaves out any other.
+ */
+function targetSites(r: FhirResource, pad: string): string {
+  return (r.bodySite ?? [])
+    .map((site) => cdaCodes(site))
+    .filter((codes) => codes.length > 0)
+    .map(([first, ...rest]) =>
+      rest.length === 0
+        ? `\n${pad}<targetSiteCode ${first}/>`
+        : `\n${pad}<targetSiteCode ${first}>${rest.map((t) => `\n${pad}  <translation ${t}/>`).join("")}\n${pad}</targetSiteCode>`,
+    )
+    .join("");
 }
 
 /**
@@ -228,7 +255,7 @@ ${pad}          <translation code="282291009" codeSystem="2.16.840.1.113883.6.96
 ${pad}        </code>
 ${pad}        ${COMPLETED}
 ${pad}        ${when}
-${pad}        <value xsi:type="CD" ${value}/>
+${pad}        <value xsi:type="CD" ${value}/>${targetSites(r, `${pad}        `)}
 ${pad}      </observation>
 ${pad}    </entryRelationship>
 ${pad}  </act>
@@ -301,7 +328,7 @@ ${pad}    <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-
 ${pad}    ${cdaId(r, `procedure-${i}`)}
 ${pad}    <code ${code}/>
 ${pad}    ${COMPLETED}
-${pad}    ${effectiveTime(r, `${pad}    `)}
+${pad}    ${effectiveTime(r, `${pad}    `)}${targetSites(r, `${pad}    `)}
 ${pad}  </procedure>
 ${pad}</entry>`;
 }

@@ -164,3 +164,45 @@ test(
     );
   },
 );
+
+/**
+ * The body site moves CMS125's 2026 answer (#784). CMS125FHIR v1.0.000 counts an "Unilateral
+ * Mastectomy, Unspecified Laterality" condition (`…198.12.1071`) as a left or right mastectomy by its
+ * `bodySite` qualifier, so one on each side is a bilateral mastectomy and a denominator exclusion.
+ * The same two conditions without a site are no exclusion at all, which is what the import produced
+ * before it read `<targetSiteCode>`.
+ */
+const unspecifiedMastectomy = (id: string, side?: { code: string; display: string }) => ({
+  resource: {
+    resourceType: "Condition", id,
+    verificationStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }] },
+    code: { coding: [{ system: "http://snomed.info/sct", code: "248802009", display: "Absence of breast" }] },
+    ...(side ? { bodySite: [{ coding: [{ system: "http://snomed.info/sct", ...side }] }] } : {}),
+    onsetDateTime: "2020-03-01T00:00:00Z",
+  },
+});
+
+const withMastectomies = (sited: boolean) => ({
+  ...sourceBundle,
+  entry: [
+    ...sourceBundle.entry,
+    unspecifiedMastectomy("mast-left", sited ? { code: "7771000", display: "Left" } : undefined),
+    unspecifiedMastectomy("mast-right", sited ? { code: "24028007", display: "Right" } : undefined),
+  ],
+});
+
+const outcomeAfterRoundTrip = async (bundle: unknown): Promise<string | undefined> => {
+  const imported = importQrda1Document(buildQrda1Document(run, MEASURE, outcome, bundle)).bundle;
+  const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
+  const results = await executor.evaluateBatch(MEASURE, [{ subjectId: "rt-subject", patientBundle: imported }], EVAL);
+  return results.get("rt-subject")?.outcome;
+};
+
+test("official CMS125 excludes a round-tripped patient whose two unspecified-laterality mastectomies carry a side each (#784)", { skip }, async () => {
+  assert.equal(await outcomeAfterRoundTrip(withMastectomies(true)), "EXCLUDED");
+});
+
+test("official CMS125 does not exclude the same patient when the conditions carry no side (#784)", { skip }, async () => {
+  // The control: without it, the test above could pass on the conditions' codes alone.
+  assert.equal(await outcomeAfterRoundTrip(withMastectomies(false)), "COMPLIANT");
+});

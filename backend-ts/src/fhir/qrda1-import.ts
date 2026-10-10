@@ -374,6 +374,26 @@ function clinicalStatusFrom(t: { end?: string; endUnknown?: boolean }): unknown 
   return undefined;
 }
 
+/**
+ * QDM "Anatomical Location Site" (`<targetSiteCode>`, one per site) → `bodySite`, on a Diagnosis and a
+ * Procedure (#784).
+ *
+ * CMS125 reads it in both years: CMS125FHIR v1.0.000 counts an "Unilateral Mastectomy, Unspecified
+ * Laterality" condition as left or right by its `bodySite` qualifier, and the 2027 translation counts an
+ * "Unilateral Mastectomy" procedure by its "Entire left/right breast" `bodySite`. Dropped, an imported
+ * patient with a mastectomy on each side stayed in the denominator.
+ *
+ * Only the element's direct children are read, so a site belonging to a nested observation is never
+ * lifted onto its parent. Each site goes through `concept()`, so an unmapped system is dropped and no
+ * site at all leaves `bodySite` absent.
+ */
+function bodySiteOf(node: CdaNode): { bodySite: unknown[] } | Record<string, never> {
+  const sites = childrenNamed(node, "targetSiteCode")
+    .map((site) => concept(site))
+    .filter((site) => site !== undefined);
+  return sites.length > 0 ? { bodySite: sites } : {};
+}
+
 function conditionFrom(node: CdaNode, i: string): unknown {
   const t = times(child(node, "effectiveTime"));
   // The patient's condition is the VALUE; `<code>` says only "this entry is a diagnosis".
@@ -387,6 +407,7 @@ function conditionFrom(node: CdaNode, i: string): unknown {
     verificationStatus: { coding: [{ code: "confirmed" }] },
     ...(clinicalStatus ? { clinicalStatus } : {}),
     code,
+    ...bodySiteOf(node),
     ...(t.start ?? t.point ? { onsetDateTime: t.start ?? t.point } : {}),
     ...(t.end ? { abatementDateTime: t.end } : {}),
   };
@@ -477,6 +498,7 @@ function procedureFrom(node: CdaNode, i: string): unknown {
     ...identifierOf(node),
     status: "completed",
     code,
+    ...bodySiteOf(node),
     ...(t.point ? { performedDateTime: t.point } : {}),
     ...(t.start || t.end
       ? { performedPeriod: { ...(t.start ? { start: t.start } : {}), ...(t.end ? { end: t.end } : {}) } }
