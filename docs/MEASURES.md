@@ -79,6 +79,15 @@ one with no onset date, is now excluded. Ten value sets change too. The edit is 
 patients that tell the two rules apart; neither CMS's test decks nor the 2027 Cypress deck exercises it
 (`backend-ts/measures/derived/cms130/README.md`).
 
+**For 2027, Maui scores CMS125 with WorkWell's translation of CMS125v15** (ww-2027.1, #782). It carries the
+same frailty edit, and v15's mastectomy changes: which side a unilateral mastectomy was on now comes from
+the **procedure's body site** ("entire left/right breast", a new value set), and the old path through an
+unspecified-laterality **diagnosis** with a left/right qualifier is gone; the end-of-period comparisons
+become day-precise. Because a value set moved, the translation's computed data requirements were edited to
+match its logic. On CMS's own test deck three patients move (two lose the exclusion, one gains it through
+the frailty edit), each listed and explained; 22 hand-built patients test every edit
+(`backend-ts/measures/derived/cms125/README.md`).
+
 > **CMS165 is blocked on more than verification, and the block moved on 2026-09-07.** CMS165 is the only
 > pilot measure whose decisive retrieve identifies a blood pressure by PROFILE alone with no code filter
 > — the artifact's other four Observation retrieves each name a code or a value set. With profiles
@@ -107,7 +116,7 @@ patients that tell the two rules apart; neither CMS's test decks nor the 2027 Cy
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027.
-Where a WorkWell translation covers the year (CMS137 and CMS130 on Maui, #767, #779), it scores the run with no warning.
+Where a WorkWell translation covers the year (CMS137, CMS130 and CMS125 on Maui, #767, #779, #782), it scores the run with no warning.
 Otherwise the run logs an `effectivePeriod` warning naming both periods, and the measure page says
 "Scored with the 2026 FHIR logic; 2027 logic not yet available" beside the rate, or "…; <translation>
 applies from the next run" for a run scored before the translation was routed (the programs summary's
@@ -130,7 +139,7 @@ pilot group's reported rates, so on the patient profile every rate screen calls 
 > PY2027 FHIR content is a **profile migration plus a full MADiE re-gate per measure**, not a refresh —
 > re-sized in `ROADMAP_2026-08-30.md` MM-1d and §7.9. Until then, a measure without a WorkWell
 > translation fires the `effectivePeriod` warning through 2027, which is the warning doing its job rather
-> than a defect to silence; CMS137 and CMS130 have one (#767, #779). Check the repository for a release tag before assuming
+> than a defect to silence; CMS137, CMS130 and CMS125 have one (#767, #779, #782). Check the repository for a release tag before assuming
 > this is still true.
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
