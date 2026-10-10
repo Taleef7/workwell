@@ -24,10 +24,11 @@
  * once with the record they actually have — must agree. That needs no prediction of which bucket cms165
  * puts them in, and it fails for exactly the reason the defect exists.
  *
- * The fix is per-measure `trustMetaProfile` (`OFFICIAL_MEASURE_SEMANTICS.cms165`), which is available
- * because the corpus stamps the profile each artifact retrieve names — `corpus-bundle.ts` has done so
- * since ADR-075 precisely so this could be turned on. It is NOT turned on globally: cms122 and cms125
- * are routed today and their populations empty out under it.
+ * The fix is per-measure, per-profile trust (`OFFICIAL_MEASURE_SEMANTICS.cms165.trustedProfiles`, #591):
+ * the blood-pressure retrieve keeps only resources stamped `us-core-blood-pressure`, and every other
+ * retrieve reads by type. `official-cms165-retrieves.test.ts` holds why one profile is enough. Until
+ * 2026-10-10 the fix trusted every profile, which this test also passed; it was narrowed because every
+ * patient without the full set of QI-Core stamps (all imported and WebChart data) threw.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";

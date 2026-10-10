@@ -181,3 +181,26 @@ test("the shared pool takes its size from the first caller, and says so when a l
     await __resetSharedFqmWorker();
   }
 });
+
+test("trusted profiles cross the thread as data and the narrowed PatientSource is built in the worker (#591)", async () => {
+  const worker = createFqmWorker({ calculatorModule: FIXTURE });
+  try {
+    const bundle = {
+      mode: "narrowed",
+      resourceType: "Bundle",
+      entry: [
+        { resource: { resourceType: "Patient", id: "p0" } },
+        { resource: { resourceType: "Observation", id: "bp", meta: { profile: ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"] } } },
+        { resource: { resourceType: "Observation", id: "a1c" } },
+      ],
+    };
+    const readOf = async (options: Record<string, unknown>) => {
+      const result = await worker.calculate({ ...input([bundle]), options });
+      return (result.bySubject.get("p0")?.populationResults[0] as { read?: number } | undefined)?.read;
+    };
+    assert.equal(await readOf({ trustedProfiles: ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"] }), 1, "only the stamped reading");
+    assert.equal(await readOf({}), -1, "no list, no source: fqm would build its own");
+  } finally {
+    await worker.close();
+  }
+});

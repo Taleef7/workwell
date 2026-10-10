@@ -22,14 +22,14 @@
  *   that profile alone (every other condition's measures retrieve both profiles)
  * - a Coverage is `qicore-coverage`, a MedicationRequest `qicore-medicationrequest`
  *
- * The executor trusts profiles PER MEASURE, and since 2026-09-07 cms165 is the one that does
- * (`OfficialMeasureSemantics.trustMetaProfile`, issue #533) — so for that measure these stamps now
- * decide retrieval, and this file's correctness is load-bearing rather than tidy. CMS165's decisive
- * retrieve identifies a blood pressure by PROFILE ALONE with no code filter, which is exactly why it
- * needed them; with profiles ignored, any final Observation was a candidate blood pressure. For every
- * other measure `trustMetaProfile` stays false — trusting them globally empties cms122's and cms125's
- * populations, and those are routed. A plausible-but-wrong profile here is now a wrong number, not a
- * foreclosed option.
+ * The executor trusts profiles PER MEASURE and PER PROFILE (`OfficialMeasureSemantics.trustedProfiles`,
+ * #591): cms165 retrieves `us-core-blood-pressure` by profile and everything else by type, so for that
+ * measure the blood-pressure stamp decides retrieval. CMS165's decisive retrieve identifies a blood
+ * pressure by PROFILE ALONE with no code filter; read by type, any final Observation was a candidate
+ * blood pressure. From 2026-09-07 to 2026-10-10 cms165 trusted every profile, which made all the stamps
+ * below decide retrieval; they are kept because each states what the resource is, and a measure that
+ * comes to trust another profile reads it from here. A plausible-but-wrong blood-pressure stamp is a
+ * wrong number, not a foreclosed option.
  *
  * ## The Patient carries what the artifacts actually read
  *

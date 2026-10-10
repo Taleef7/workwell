@@ -317,27 +317,18 @@ export function prepareForQiCore(bundle: PreparableBundle): void {
       if (encounterClass) resource.class = encounterClass;
     } else if (resource.resourceType === "Observation" && isBloodPressure(resource)) {
       // CMS165 identifies a blood pressure by PROFILE ALONE — it is the only Observation retrieve in
-      // that artifact with no code filter — so it is the one measure the executor runs with
-      // `trustMetaProfile: true` (ADR-076 d1). Under that setting an unstamped reading is not
-      // retrieved at all, which is why the ADR-075 corpus stamps its own and why any bundle source
-      // that does not needs this (issue #533).
+      // that artifact with no code filter — so the executor reads that one retrieve by `meta.profile`
+      // (`OFFICIAL_MEASURE_SEMANTICS.cms165.trustedProfiles`, #591) and an unstamped reading is not
+      // retrieved at all. This stamp is what makes a blood pressure IDENTIFIABLE on a bundle no corpus
+      // stamped, the piece no other layer can supply, since only the codes say what the resource is.
       //
-      // **This is one necessary piece and nowhere near sufficient**, which the first version of this
-      // comment got wrong in kind rather than in degree (review finding, verified in the library).
-      // `trustMetaProfile: true` reaches `cql-exec-fhir`'s `requireProfileTagging`, and that filters
-      // EVERY profile-typed retrieve on `meta.profile` — not only the blood-pressure one — while the
-      // Patient retrieve additionally THROWS when nothing matches
-      // (`cql-exec-fhir/lib/fhir.js:428,442`). cms165 is authored on QI-Core 6, so it wants
-      // `qicore-patient`, `qicore-encounter`, both Condition profiles and more; the ADR-075 corpus
-      // stamps fourteen, which is why cms165 runs there and only there.
-      //
-      // So on a bundle that carries no profiles, this stamp does not make cms165 work — the Patient
-      // retrieve throws first, loudly, before any blood pressure is examined. What it does is make a
-      // blood pressure IDENTIFIABLE, which is the piece no other layer can supply, since only the codes
-      // say what the resource is. The rest of #533's ingest half is still open, and a second blocker
-      // sits behind it: teatea exports the BP panel with `status: "unknown"` (verified 2026-07-23, see
-      // `engine/ingress/webchart/normalize.ts`) while `Status.isObservationBP` admits only
-      // `final | amended | corrected`.
+      // Until 2026-10-10 cms165 trusted EVERY profile (`trustMetaProfile`), so this stamp was
+      // necessary and nowhere near sufficient: the Patient retrieve threw without `qicore-patient`
+      // (`cql-exec-fhir/lib/fhir.js:428,442`) before any blood pressure was examined. With only the
+      // blood pressure trusted, every other retrieve reads by type and this stamp is the one cms165
+      // needs. What still sits behind it on WebChart data: teatea exports the BP panel with
+      // `status: "unknown"` (verified 2026-07-23, see `engine/ingress/webchart/normalize.ts`) while
+      // `Status.isObservationBP` admits only `final | amended | corrected`.
       //
       // This is NORMALIZATION and not fabrication, by this file's own test: the profile is DERIVED
       // from codes the resource already carries — the LOINC BP panel, or both a systolic and a

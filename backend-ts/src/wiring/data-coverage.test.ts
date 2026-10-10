@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { measureDataRequirements } from "../standards/measure-data-requirements.ts";
 import { COMPOSED_RESOURCE_TYPES } from "../engine/ingress/webchart/webchart-client.ts";
 import { WEBCHART_SERVED_RESOURCES } from "../engine/ingress/webchart/served-resources.ts";
-import { coverageOf, dataCoverage, NO_PROFILE, NOT_SERVED_REASONS, UNSTAMPED_PROFILE_REASON } from "./data-coverage.ts";
+import { coverageOf, dataCoverage, NOT_SERVED_REASONS, UNSTAMPED_PROFILE_REASON } from "./data-coverage.ts";
 import { loadDerivedArtifact, loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
 import { prepareForQiCore, PROFILES_STAMPED_AT_PREPARATION } from "./qicore-preparation.ts";
 import { resolveDeploymentProfile } from "../config/deployment-profile.ts";
@@ -170,19 +170,9 @@ test("#776: the coverage of every logic the Maui sandbox scores with is pinned",
     "cms125 cms-artifact": cmsWithDevices,
     "cms2 cms-artifact": withoutDevices,
     "cms130 cms-artifact": cmsWithDevices,
-    // Retrieves by profile, and ingest stamps only the blood pressure one.
-    "cms165 cms-artifact": [
-      "Condition score not served",
-      "Coverage SDE not served",
-      "DeviceRequest score not served",
-      "Encounter score not served",
-      "Medication score not served",
-      "MedicationRequest score not served",
-      "Observation score partial",
-      "Patient score+SDE not served",
-      "Procedure score not served",
-      "ServiceRequest score not served",
-    ],
+    // Retrieves by type except its blood pressure, whose profile preparation stamps (#591), so it reads
+    // what the others read. Until 2026-10-10 it trusted every profile and nearly every row was "not served".
+    "cms165 cms-artifact": cmsWithDevices,
     "cms137 cms-artifact": withoutDevices,
     "cms137 workwell-translation": withoutDevices,
     // Its edit changes how a retrieved diagnosis is compared, not what is retrieved (#779), so it reads
@@ -249,7 +239,7 @@ test("#776: preparation stamps the listed profile on a blood pressure", () => {
   assert.deepEqual((bundle.entry[0]!.resource["meta"] as { profile?: unknown }).profile, [...PROFILES_STAMPED_AT_PREPARATION]);
 });
 
-test("#776: a profile-sensitive verdict follows cql-exec-fhir: the base type is exempt, a retrieve with no profile matches nothing", () => {
+test("#591: only a trusted profile is filtered on meta.profile; every other retrieve of the type reads by type", () => {
   const bp = PROFILES_STAMPED_AT_PREPARATION[0];
   const artifact = {
     manifest: { catalogId: "cms165", measureName: "Fixture", version: "0.0.1", cmsId: "165FHIR" },
@@ -273,10 +263,18 @@ test("#776: a profile-sensitive verdict follows cql-exec-fhir: the base type is 
       },
     ]),
   } as unknown as OfficialArtifact;
+  // As production runs cms165: only the blood pressure is trusted, and preparation stamps it.
   const table = coverageOf("cms165", "cms-artifact", artifact);
-  assert.equal(table.profileSensitive, true);
+  assert.deepEqual(table.trustedProfiles, [bp]);
   const row = (type: string) => table.rows.find((r) => r.type === type)!;
-  assert.equal(row("Patient").status, "served", "a retrieve by the base StructureDefinition is not profile-filtered");
-  assert.deepEqual([row("Observation").status, row("Observation").stampedProfiles, row("Observation").unstampedProfiles], ["partial", [bp], [NO_PROFILE]]);
-  assert.deepEqual([row("Encounter").status, row("Encounter").reason], ["not served", UNSTAMPED_PROFILE_REASON]);
+  assert.deepEqual([row("Patient").status, row("Observation").status, row("Encounter").status], ["served", "served", "served"]);
+  assert.deepEqual([row("Observation").stampedProfiles, row("Observation").unstampedProfiles], [[bp], []]);
+  assert.deepEqual([row("Encounter").stampedProfiles, row("Encounter").unstampedProfiles], [[], []], "an untrusted profile is not filtered");
+
+  // A trusted profile preparation does NOT stamp is unreadable: the row says so, with the reason.
+  const encounter = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter";
+  const strict = coverageOf("cms165", "cms-artifact", artifact, [bp, encounter]);
+  const strictRow = (type: string) => strict.rows.find((r) => r.type === type)!;
+  assert.deepEqual([strictRow("Encounter").status, strictRow("Encounter").reason, strictRow("Encounter").unstampedProfiles], ["not served", UNSTAMPED_PROFILE_REASON, [encounter]]);
+  assert.equal(strictRow("Observation").status, "served");
 });

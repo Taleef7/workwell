@@ -153,6 +153,9 @@ importers:
 
   packages/official-executor:
     dependencies:
+      cql-exec-fhir:
+        specifier: 2.1.6
+        version: 2.1.6(cql-execution@3.3.2)
       fqm-execution:
         specifier: 1.8.5
         version: 1.8.5(typescript@5.9.3)

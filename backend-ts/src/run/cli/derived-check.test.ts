@@ -559,7 +559,7 @@ function setup(f: Fixture, over: Partial<DerivedCheckDeps> = {}) {
     loadDerived: (id) => readArtifactDir("derived", id, pathToFileURL(`${derivedRoot}/`)).artifact,
     loadOfficial: () => official,
     loadTerminology,
-    semantics: () => ({ trustMetaProfile: false }),
+    semantics: () => ({}),
     importDeps,
     calculate: deckStub(deckCalls),
     verifyUpstream: () => {},

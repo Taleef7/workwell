@@ -221,3 +221,31 @@ test("5/5 consumers: only the approved app layers may import @work-well/official
       "it is the door to fqm-execution, and must never be opened from a route or the run pipeline",
   );
 });
+
+test("the executor's cql-exec-fhir is the one fqm-execution runs on, pinned exactly, and loaded lazily (#591)", () => {
+  // The package builds cms165's profile-narrowed PatientSource itself, so it names cql-exec-fhir
+  // directly. It must be fqm's own copy: a second version would build patients fqm's engine did not
+  // expect. And like fqm, it must not load until a calculation needs it.
+  const packageRoot = `${BACKEND_ROOT}packages/official-executor/`;
+  const pkg = JSON.parse(readFileSync(`${packageRoot}package.json`, "utf8")) as { dependencies?: Record<string, string> };
+  assert.equal(pkg.dependencies?.["cql-exec-fhir"], "2.1.6", "pinned exactly, like fqm-execution");
+  const fromPackage = createRequire(`${packageRoot}package.json`);
+  const fqmRequire = createRequire(fromPackage.resolve("fqm-execution/package.json"));
+  assert.equal(
+    fromPackage.resolve("cql-exec-fhir"),
+    fqmRequire.resolve("cql-exec-fhir"),
+    "the package and fqm-execution must resolve the SAME cql-exec-fhir",
+  );
+
+  const files: string[] = [];
+  walk(`${packageRoot}src`, files);
+  let lazy = 0;
+  for (const file of files.filter((f) => !f.endsWith(".test.ts"))) {
+    const source = stripComments(readFileSync(file, "utf8"));
+    for (const match of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']cql-exec-fhir["']/g)) {
+      assert.match(match[0], /import\s*\(\s*["']cql-exec-fhir["']/, `${file}: cql-exec-fhir only via a lazy dynamic import, found: ${match[0]}`);
+      lazy += 1;
+    }
+  }
+  assert.ok(lazy > 0, "sanity: the package references cql-exec-fhir");
+});

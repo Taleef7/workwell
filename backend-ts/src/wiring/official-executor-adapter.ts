@@ -115,7 +115,7 @@ import type {
 } from "@work-well/measure-engine";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { artifactKey, artifactKind, effectivePeriodCovers, loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
-import { officialMeasureSemantics } from "./official-measure-semantics.ts";
+import { officialMeasureSemantics, trustedProfilesOf } from "./official-measure-semantics.ts";
 import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.ts";
 import type { BatchCalculator } from "./fqm-worker.ts";
 
@@ -637,13 +637,13 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       patientBundles,
       period,
       valueSetCache,
-      // PER MEASURE since 2026-09-07 (`OfficialMeasureSemantics.trustMetaProfile`), default FALSE —
-      // everything below still describes what false means and why it is the default. cms165 is the one
-      // exception and the field's own note says why: its blood-pressure retrieve carries no code
-      // filter, so with profiles ignored every final Observation is a candidate blood pressure. The
-      // switch is per measure rather than global exactly BECAUSE of the paragraph that follows.
-      options: { trustMetaProfile: semantics.trustMetaProfile ?? false },
-      // `trustMetaProfile` stays FALSE by default. The first cut set it true, reasoning that official artifacts
+      // By resource type, except a measure's own trusted profiles (`OfficialMeasureSemantics.
+      // trustedProfiles`, #591). cms165 is the one measure with any, and the field's own note says why:
+      // its blood-pressure retrieve carries no code filter, so read by type every final Observation is a
+      // candidate blood pressure. Only that profile is trusted, never every profile, exactly BECAUSE of
+      // the paragraph that follows.
+      options: trustedProfilesOf(semantics).length > 0 ? { trustedProfiles: trustedProfilesOf(semantics) } : {},
+      // `trustMetaProfile` (every profile) stays FALSE. The first cut set it true, reasoning that official artifacts
       // retrieve by QICore profile — which is true of the artifact and false as a configuration for
       // OUR bundles. With it on, cql-exec-fhir filters every retrieve to resources whose `meta.profile`
       // contains the exact templateId canonical: the ELM asks for `qicore-condition-problems-health-

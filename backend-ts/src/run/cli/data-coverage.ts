@@ -75,10 +75,10 @@ export function renderText(tables: readonly MeasureCoverage[]): string {
       `${table.measureId} · ${table.logic} (${table.kind === "cms-artifact" ? "CMS's artifact" : "a WorkWell translation"})`,
       `  ${served} of the ${scored.length} types it scores with are served.`,
     );
-    if (table.profileSensitive) {
+    if (table.trustedProfiles.length > 0) {
       lines.push(
-        "  Retrieves by profile: every profile-typed retrieve is filtered on meta.profile, and with no Patient",
-        "  carrying its profile the evaluation fails outright instead of scoring.",
+        `  Retrieves by profile only for ${table.trustedProfiles.map((p) => p.split("/").pop()).join(", ")}:`,
+        "  a resource is read there only if its meta.profile names it. Every other retrieve is by type.",
       );
     }
     const width = Math.max(...table.rows.map((row) => row.type.length));
