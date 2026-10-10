@@ -104,8 +104,11 @@ the frailty edit), each listed and explained; 22 hand-built patients test every 
 > From 2026-09-07 to 2026-10-10 cms165 trusted EVERY profile. That needed `qicore-patient`,
 > `qicore-encounter`, both Condition profiles and more, which only the corpus stamps, so every QRDA-imported
 > or WebChart patient threw. On the same data the narrowed trust is identical to it: CMS's 68 MADiE cases,
-> and all 20,000 corpus patients. On the Cypress deck it scores 33 of 44 patients right, from 0; the rest
-> need a blood pressure the importer can see, a panel QRDA states as two readings.
+> and all 20,000 corpus patients. QRDA states a blood pressure as two readings, a systolic and a diastolic at
+> one time; the importer makes them one panel only under LOCKED §4A.8's conditions. With both changes the
+> Cypress deck scores 42 of 44, from 0 (both years). The two left are readings taken during an ED visit or
+> an inpatient stay: CMS's draft leaves those out only through `Observation.encounter`, which QRDA does not
+> carry and the importer does not infer.
 >
 > **cms165 is routed on the SANDBOX (ADR-078) and must not be routed over WebChart data** until #591's
 > remaining half is closed: WebChart exports its BP panel with `status: "unknown"`, while the measure
