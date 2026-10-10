@@ -1053,9 +1053,14 @@ const deckResources = (xml = deckDocument) => {
 test("import: each resource keeps its source identifier, root as the system", () => {
   // The FHIR id is root-agnostic; the identifier keeps the assigning authority, as an OID URN.
   const { byId } = deckResources();
-  for (const id of ["fobt-1", "sys-1", "medorder-1", "noscreen-1", "enc-dx"]) {
+  for (const id of ["fobt-1", "sys-lone", "medorder-1", "noscreen-1", "enc-dx"]) {
     assert.deepEqual(byId(id)!.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: id }], id);
   }
+  // A blood-pressure panel keeps BOTH readings' source ids (LOCKED §4A.8), which the batch merge matches on.
+  assert.deepEqual(byId("sys-1")!.identifier, [
+    { system: "urn:oid:1.3.6.1.4.1.115", value: "sys-1" },
+    { system: "urn:oid:1.3.6.1.4.1.115", value: "dia-1" },
+  ]);
   const condition = byId("enc-dx-dx-1")!;
   assert.equal(condition.identifier, undefined, "a generated Condition has no source identifier, and none is invented");
 });
@@ -1109,19 +1114,25 @@ test("import: a TEXT result is kept as valueString — CMS130 asks only that the
   assert.equal(fobt!.valueString, "Negative");
 });
 
-test("import: a Physical Exam is one Observation per reading, and no panel code is supplied", () => {
-  // A blood pressure's two halves stay two readings with their own codes and values. Pairing them into a
-  // US Core panel would supply the panel code 85354-9, which the document never states.
+test("import: a blood pressure stated as two readings at one time is one US Core panel; a lone reading stays a reading (LOCKED §4A.8)", () => {
   const { all, byId } = deckResources();
-  for (const [id, code, value] of [["sys-1", "8480-6", 130], ["dia-1", "8462-4", 60], ["sys-lone", "8480-6", 150]] as const) {
-    const reading = byId(id);
-    assert.ok(reading, id);
-    assert.equal(reading!.category[0].coding[0].code, "exam");
-    assert.deepEqual(reading!.code.coding.map((c: { code: string }) => c.code), [code]);
-    assert.equal(reading!.valueQuantity.value, value);
-    assert.equal(reading!.component, undefined);
-  }
-  assert.ok(!JSON.stringify(all).includes("85354-9"), "no resource carries a code the document did not state");
+  const panel = byId("sys-1")!;
+  assert.deepEqual(panel.code.coding.map((c: { code: string }) => c.code), ["85354-9"]);
+  assert.equal(panel.category[0].coding[0].code, "vital-signs");
+  assert.equal(panel.status, "final");
+  assert.equal(panel.valueQuantity, undefined, "a panel carries its readings as components, not a value");
+  assert.deepEqual(
+    panel.component.map((c: { code: { coding: Array<{ code: string }> }; valueQuantity: unknown }) => [c.code.coding[0]!.code, c.valueQuantity]),
+    [
+      ["8480-6", { value: 130, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" }],
+      ["8462-4", { value: 60, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" }],
+    ],
+  );
+  assert.equal(panel.encounter, undefined, "no encounter is inferred");
+  assert.equal(byId("dia-1"), undefined, "the diastolic reading is inside the panel, not beside it");
+  const lone = byId("sys-lone")!;
+  assert.deepEqual([lone.category[0].coding[0].code, lone.code.coding[0].code, lone.valueQuantity.value, lone.component], ["exam", "8480-6", 150, undefined]);
+  assert.equal(all.filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9")).length, 1);
 });
 
 test("import: a Medication Order is an ORDER, never an active medication", () => {
@@ -1367,4 +1378,126 @@ test("round trip: a site with several codings keeps every mapped one, as transla
   assert.deepEqual(procedure!.bodySite, [
     { coding: [{ system: "http://snomed.info/sct", code: "361715005" }, { system: "http://snomed.info/sct", code: "80248007" }] },
   ]);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Blood-pressure pairing (LOCKED §4A.8): two Physical Exam readings become one US Core panel only when
+// every condition holds. Each test below breaks exactly one condition and expects two readings back.
+// ---------------------------------------------------------------------------------------------------
+
+const exam = (o: {
+  id: string;
+  code: string;
+  time?: string;
+  value?: string;
+  extra?: string;
+  negated?: boolean;
+}) => `<entry><observation classCode="OBS" moodCode="EVN"${o.negated ? ' negationInd="true"' : ""}>
+      <templateId root="2.16.840.1.113883.10.20.22.4.13" extension="2014-06-09"/>
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="${o.id}"/>
+      <code code="${o.code}" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      ${o.time ?? "<effectiveTime value='20250219171000'/>"}
+      ${o.value ?? `<value xsi:type="PQ" value="${o.code === "8480-6" ? 130 : 80}" unit="mm[Hg]"/>`}
+      ${o.extra ?? ""}
+    </observation></entry>`;
+
+const paired = (...entries: string[]) => {
+  const imported = importQrda1Document(sitedDocument(entries.join("\n")));
+  const observations = imported.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation");
+  const panels = observations.filter((r) => JSON.stringify(r.code).includes("85354-9"));
+  return { panels, readings: observations.length - panels.length, unpaired: imported.unpairedBloodPressureReadings };
+};
+
+const sys = (extra: Partial<Parameters<typeof exam>[0]> = {}) => exam({ id: "s", code: "8480-6", ...extra });
+const dia = (extra: Partial<Parameters<typeof exam>[0]> = {}) => exam({ id: "d", code: "8462-4", ...extra });
+
+test("§4A.8 baseline: one systolic and one diastolic at one instant with a time of day pair into one panel", () => {
+  const { panels, readings, unpaired } = paired(sys(), dia());
+  assert.deepEqual([panels.length, readings, unpaired], [1, 0, 0]);
+  assert.equal(panels[0]!.effectiveDateTime, "2025-02-19T17:10:00Z");
+});
+
+test("§4A.8: a date with no time of day is never paired", () => {
+  const day = "<effectiveTime value='20250219'/>";
+  assert.deepEqual(Object.values(paired(sys({ time: day }), dia({ time: day }))).map((v) => (Array.isArray(v) ? v.length : v)), [0, 2, 2]);
+});
+
+test("§4A.8: readings at different times are never paired", () => {
+  const { panels, unpaired } = paired(sys(), dia({ time: "<effectiveTime value='20250219171100'/>" }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+});
+
+test("§4A.8: an identical interval pairs, a different one does not", () => {
+  const span = "<effectiveTime><low value='20250219171000'/><high value='20250219171500'/></effectiveTime>";
+  const same = paired(sys({ time: span }), dia({ time: span }));
+  assert.equal(same.panels.length, 1);
+  assert.deepEqual(same.panels[0]!.effectivePeriod, { start: "2025-02-19T17:10:00Z", end: "2025-02-19T17:15:00Z" });
+  const other = "<effectiveTime><low value='20250219171000'/><high value='20250219171600'/></effectiveTime>";
+  assert.equal(paired(sys({ time: span }), dia({ time: other })).panels.length, 0);
+});
+
+test("§4A.8: two systolics at the time make it ambiguous, so nothing pairs", () => {
+  const { panels, unpaired } = paired(sys(), exam({ id: "s2", code: "8480-6" }), dia());
+  assert.deepEqual([panels.length, unpaired], [0, 3]);
+});
+
+test("§4A.8: a null-flavored, unitless or other-unit value is never paired", () => {
+  for (const value of [
+    `<value xsi:type="PQ" nullFlavor="UNK"/>`,
+    `<value xsi:type="INT" value="80"/>`,
+    `<value xsi:type="PQ" value="10.7" unit="kPa"/>`,
+  ]) {
+    const { panels, unpaired } = paired(sys(), dia({ value }));
+    assert.deepEqual([panels.length, unpaired], [0, 2], value);
+  }
+});
+
+test("§4A.8: a negated reading is not imported, so its partner stays a lone reading", () => {
+  const { panels, readings, unpaired } = paired(sys({ negated: true }), dia());
+  assert.deepEqual([panels.length, readings, unpaired], [0, 1, 1]);
+});
+
+test("§4A.8: a conflicting stated method keeps the readings apart; the same method on both pairs", () => {
+  const method = (code: string) => `<methodCode code="${code}" codeSystem="2.16.840.1.113883.6.96"/>`;
+  assert.equal(paired(sys({ extra: method("37931006") }), dia({ extra: method("17146006") })).panels.length, 0);
+  assert.equal(paired(sys({ extra: method("37931006") }), dia()).panels.length, 0, "stated on one only is not the same");
+  assert.equal(paired(sys({ extra: method("37931006") }), dia({ extra: method("37931006") })).panels.length, 1);
+});
+
+test("§4A.8: a conflicting stated performer keeps the readings apart", () => {
+  const by = (ext: string) => `<performer><assignedEntity><id root="2.16.840.1.113883.4.6" extension="${ext}"/></assignedEntity></performer>`;
+  assert.equal(paired(sys({ extra: by("111") }), dia({ extra: by("222") })).panels.length, 0);
+  assert.equal(paired(sys({ extra: by("111") }), dia({ extra: by("111") })).panels.length, 1);
+});
+
+test("§4A.8: a panel round-trips through export and import as one panel, never as a lab test", () => {
+  const bundle = {
+    ...sourceBundle,
+    entry: [
+      sourceBundle.entry[0]!,
+      {
+        resource: {
+          resourceType: "Observation", id: "bp-1", status: "final",
+          category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs" }] }],
+          code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+          effectiveDateTime: "2025-06-01T10:00:00Z",
+          component: [
+            { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] }, valueQuantity: { value: 128, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } },
+            { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 78, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } },
+          ],
+        },
+      },
+    ],
+  };
+  const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), bundle);
+  assert.ok(!xml.includes("85354-9"), "QDM states a blood pressure as its two readings, never as a panel code");
+  assert.equal((xml.match(/2\.16\.840\.1\.113883\.10\.20\.24\.3\.59/g) ?? []).length, 2, "two Physical Exam, Performed entries");
+  assert.ok(!xml.includes("2.16.840.1.113883.10.20.24.3.38"), "not a Laboratory Test, Performed");
+  const back = importQrda1Document(xml);
+  assert.equal(back.unpairedBloodPressureReadings, 0);
+  const panels = back.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9"));
+  assert.equal(panels.length, 1);
+  assert.deepEqual(panels[0]!.component.map((c: { valueQuantity: { value: number } }) => c.valueQuantity.value), [128, 78]);
 });

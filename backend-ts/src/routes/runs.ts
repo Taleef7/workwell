@@ -868,6 +868,7 @@ export async function handleRuns(
               qrda1Import: {
                 untranslatedTemplates: imported.untranslatedTemplates,
                 measureReferences: imported.measureIdentifiers,
+                unpairedBloodPressureReadings: imported.unpairedBloodPressureReadings,
               },
             }
           : result.evidence;
@@ -881,7 +882,9 @@ export async function handleRuns(
         evidence,
       });
       return json(
-        imported ? { ...record, qrda1: { untranslatedTemplates: imported.untranslatedTemplates } } : record,
+        imported
+          ? { ...record, qrda1: { untranslatedTemplates: imported.untranslatedTemplates, unpairedBloodPressureReadings: imported.unpairedBloodPressureReadings } }
+          : record,
         201,
       );
     } catch (err) {
@@ -1030,6 +1033,7 @@ export async function handleRuns(
       const provenance = {
         untranslatedTemplates: subject.untranslatedTemplates,
         measureReferences: subject.measureIdentifiers,
+        unpairedBloodPressureReadings: subject.unpairedBloodPressureReadings,
         documentCount: subject.documentIndexes.length,
         ...(asserted.length > 0 ? { assertedMeasureIdentifiers: asserted } : {}),
         ...(subject.demographicConflicts.length > 0 ? { demographicConflicts: subject.demographicConflicts } : {}),

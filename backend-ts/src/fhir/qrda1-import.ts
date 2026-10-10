@@ -455,6 +455,122 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
 }
 
 const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+const LOINC = "http://loinc.org";
+const UCUM = "http://unitsofmeasure.org";
+const SYSTOLIC = "8480-6";
+const DIASTOLIC = "8462-4";
+
+type ObservationShape = {
+  id?: string;
+  identifier?: unknown[];
+  code?: { coding?: Array<{ system?: string; code?: string }> };
+  effectiveDateTime?: string;
+  effectivePeriod?: { start?: string; end?: string };
+  valueQuantity?: { value?: number; unit?: string };
+};
+
+/** A Physical Exam reading's index in the import's entries, and the CDA element it came from. */
+interface BloodPressureReading {
+  index: number;
+  node: CdaNode;
+}
+
+/** "systolic" / "diastolic" when the Observation states that LOINC code, else undefined. */
+function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | undefined {
+  const codes = ((resource as ObservationShape).code?.coding ?? []).filter((c) => c.system === LOINC).map((c) => c.code);
+  if (codes.includes(SYSTOLIC)) return "systolic";
+  if (codes.includes(DIASTOLIC)) return "diastolic";
+  return undefined;
+}
+
+/**
+ * The reading's time, as the key two halves must share: an instant or a low/high pair, and only when it
+ * carries a time of day. A date alone says nothing about whether two readings were taken together.
+ */
+function timeKeyOf(o: ObservationShape): string | undefined {
+  if (o.effectiveDateTime) return o.effectiveDateTime.includes("T") ? `at ${o.effectiveDateTime}` : undefined;
+  const start = o.effectivePeriod?.start;
+  return start?.includes("T") ? `from ${start} to ${o.effectivePeriod?.end ?? ""}` : undefined;
+}
+
+/** What a reading states about who, how, where and with what. Two halves of one panel state the same. */
+function statedContextOf(node: CdaNode): string {
+  const ids = (n: CdaNode) => descendants(n, "id").map((id) => `${id.attrs.root ?? ""}|${id.attrs.extension ?? ""}`);
+  return JSON.stringify({
+    performers: childrenNamed(node, "performer").map(ids),
+    method: concept(child(node, "methodCode")) ?? null,
+    sites: childrenNamed(node, "targetSiteCode").map((site) => concept(site) ?? null),
+    devices: childrenNamed(node, "participant")
+      .filter((p) => p.attrs.typeCode === "DEV")
+      .map((p) => concept(child(descendants(p, "playingDevice")[0], "code")) ?? ids(p)),
+  });
+}
+
+/**
+ * Pair a document's blood-pressure readings into US Core panels, under LOCKED §4A.8 and nowhere else.
+ *
+ * QRDA states a blood pressure as two Physical Exam, Performed entries, a systolic (8480-6) and a
+ * diastolic (8462-4) at the same time; CMS165's FHIR logic reads one only as a panel (85354-9) carrying
+ * both as components. Two readings become one panel only when every condition holds: one systolic and one
+ * diastolic, the only two at an identical time that includes a time of day, both numeric mm[Hg], and the
+ * same stated performer, method, site and device. The panel takes the systolic's place and id, keeps both
+ * readings' source identifiers (the batch merge recognises a repeated entry by them), and states nothing
+ * the two readings did not: their codes and values, their time, `final`. `prepareForQiCore` then stamps
+ * `us-core-blood-pressure` from those codes. A negated reading never reaches here (the walk skips it), and
+ * no `Observation.encounter` is supplied: the document does not state one.
+ *
+ * Mutates `entries` (each panel replaces its systolic, its diastolic is removed) and returns how many
+ * readings stayed separate.
+ */
+function pairBloodPressures(entries: Array<{ resource: unknown }>, readings: BloodPressureReading[]): number {
+  const byTime = new Map<string, BloodPressureReading[]>();
+  let unpaired = 0;
+  for (const reading of readings) {
+    const key = timeKeyOf(entries[reading.index]!.resource as ObservationShape);
+    if (key === undefined) unpaired++;
+    else byTime.set(key, [...(byTime.get(key) ?? []), reading]);
+  }
+  const removed = new Set<number>();
+  for (const group of byTime.values()) {
+    const half = (r: BloodPressureReading) => bloodPressureHalfOf(entries[r.index]!.resource);
+    const systolic = group.filter((r) => half(r) === "systolic");
+    const diastolic = group.filter((r) => half(r) === "diastolic");
+    const [s, d] = [systolic[0], diastolic[0]];
+    const mmHg = (r: BloodPressureReading) => {
+      const q = (entries[r.index]!.resource as ObservationShape).valueQuantity;
+      return typeof q?.value === "number" && Number.isFinite(q.value) && q.unit === "mm[Hg]";
+    };
+    if (group.length !== 2 || !s || !d || !mmHg(s) || !mmHg(d) || statedContextOf(s.node) !== statedContextOf(d.node)) {
+      unpaired += group.length;
+      continue;
+    }
+    const sys = entries[s.index]!.resource as ObservationShape;
+    const dia = entries[d.index]!.resource as ObservationShape;
+    const component = (o: ObservationShape) => ({
+      code: o.code,
+      valueQuantity: { value: o.valueQuantity!.value, unit: "mm[Hg]", system: UCUM, code: "mm[Hg]" },
+    });
+    entries[s.index] = {
+      resource: {
+        resourceType: "Observation",
+        id: sys.id,
+        identifier: [...(sys.identifier ?? []), ...(dia.identifier ?? [])],
+        status: "final",
+        category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }],
+        code: { coding: [{ system: LOINC, code: "85354-9", display: "Blood pressure panel with all children optional" }] },
+        ...(sys.effectiveDateTime ? { effectiveDateTime: sys.effectiveDateTime } : { effectivePeriod: sys.effectivePeriod }),
+        component: [component(sys), component(dia)],
+      },
+    };
+    removed.add(d.index);
+  }
+  if (removed.size > 0) {
+    const kept = entries.filter((_, i) => !removed.has(i));
+    entries.length = 0;
+    entries.push(...kept);
+  }
+  return unpaired;
+}
 const QICORE_NOT_DONE_REASON = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-notDoneReason";
 
 /**
@@ -702,6 +818,11 @@ export interface Qrda1Import {
   localMeasureId?: string;
   /** QDM entries seen but not translated — surfaced so a gap is visible rather than silent. */
   untranslatedTemplates: string[];
+  /**
+   * Systolic and diastolic readings left as separate Observations because LOCKED §4A.8's conditions did
+   * not all hold. CMS165 reads a blood pressure only as a panel, so each is a reading it cannot see.
+   */
+  unpairedBloodPressureReadings: number;
 }
 
 /**
@@ -727,6 +848,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
   const { id: patientId, resource: patient } = patientFrom(root);
   const entries: Array<{ resource: unknown }> = [{ resource: patient }];
   const untranslatedTemplates: string[] = [];
+  const bloodPressureReadings: BloodPressureReading[] = [];
   // Every Diagnosis entry's own id is reserved before any encounter-diagnosis id is generated, whichever
   // comes first in the document, so a generated id can never shadow a Condition the source named.
   const conditionIds = new Set<string>(
@@ -779,8 +901,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
         // A screening/assessment Observation keeps its own `<code>` (the instrument) and `<value>` (the
         // result) — unlike Symptom below, which inverts them.
         : hasTemplate(candidate, T.assessmentPerformed) ? observationFrom(candidate, key, "survey")
-        // One Observation per reading, with its own code. A blood pressure's two halves are NOT paired into a
-        // US Core panel: that would supply the panel code (85354-9), which the document never states.
+        // One Observation per reading, with its own code. A blood pressure's two halves are paired into one
+        // US Core panel after the walk, under LOCKED §4A.8's conditions only (`pairBloodPressures`).
         : hasTemplate(candidate, T.physicalExamPerformed) ? observationFrom(candidate, key, "exam")
         : hasTemplate(candidate, T.symptom) ? symptomFrom(candidate, key)
         // Intervention, Performed IS a Procedure to the official artifacts — same retrieve, same
@@ -795,7 +917,11 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // An Encounter brings its diagnosis Conditions with it.
       const produced = (Array.isArray(resource) ? resource : [resource]).filter((r) => r !== undefined);
       if (produced.length > 0) {
-        for (const r of produced) entries.push({ resource: r });
+        const exam = hasTemplate(candidate, T.physicalExamPerformed);
+        for (const r of produced) {
+          if (exam && bloodPressureHalfOf(r) !== undefined) bloodPressureReadings.push({ index: entries.length, node: candidate });
+          entries.push({ resource: r });
+        }
         translated++;
       }
     }
@@ -812,6 +938,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
       untranslatedTemplates.push(datatypes[0] ?? roots[roots.length - 1] ?? "(no templateId)");
     }
   });
+
+  const unpairedBloodPressureReadings = pairBloodPressures(entries, bloodPressureReadings);
 
   // A Patient-only bundle is the failure this whole module exists to avoid, and the section being
   // PRESENT but empty reaches it just as surely as the section being absent (Codex, #362). Our own
@@ -850,5 +978,6 @@ export function importQrda1Document(xml: string): Qrda1Import {
     measureIdentifiers,
     ...(localMeasureId ? { localMeasureId } : {}),
     untranslatedTemplates,
+    unpairedBloodPressureReadings,
   };
 }

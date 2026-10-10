@@ -91,6 +91,8 @@ interface FhirResource {
   issued?: string;
   valueQuantity?: { value?: number; unit?: string };
   valueCodeableConcept?: FhirCodeableConcept;
+  /** A blood-pressure panel's systolic and diastolic readings (#591). */
+  component?: Array<{ code?: FhirCodeableConcept; valueQuantity?: { value?: number; unit?: string; code?: string } }>;
 }
 
 /** The attribute string of every coding we can map, in order. */
@@ -333,6 +335,40 @@ ${pad}  </procedure>
 ${pad}</entry>`;
 }
 
+/** The LOINC panel codes a US Core blood pressure carries. */
+const BLOOD_PRESSURE_PANELS = new Set(["85354-9", "55284-4"]);
+
+/**
+ * A blood-pressure panel as QDM states it: one Physical Exam, Performed per reading, each with its own
+ * code (8480-6, 8462-4) and value, at the panel's time (#591). The inverse of the import's pairing
+ * (LOCKED §4A.8), so a panel exported and imported again is one panel again. A component with no numeric
+ * value is left out rather than written as a reading with no result. `null` when the resource is not a
+ * blood-pressure panel, so the caller routes it as any other Observation.
+ */
+function bloodPressureReadings(r: FhirResource, i: number, pad: string): string[] | null {
+  const panel = (r.code?.coding ?? []).some((c) => c.system === "http://loinc.org" && BLOOD_PRESSURE_PANELS.has(c.code ?? ""));
+  if (!panel || !Array.isArray(r.component)) return null;
+  return r.component.flatMap((component, k) => {
+    const code = cdaCode(component.code);
+    const value = component.valueQuantity?.value;
+    if (!code || typeof value !== "number" || !Number.isFinite(value)) return [];
+    const unit = component.valueQuantity?.code ?? component.valueQuantity?.unit;
+    const reading = { ...r, id: `${r.id ?? `observation-${i}`}-${component.code?.coding?.[0]?.code ?? k}` };
+    return [`${pad}<entry typeCode="DRIV">
+${pad}  <observation classCode="OBS" moodCode="EVN">
+${pad}    <templateId root="2.16.840.1.113883.10.20.22.4.13" extension="2014-06-09"/>
+${pad}    <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+${pad}    ${cdaId(reading, `observation-${i}-${k}`)}
+${pad}    <code ${code}/>
+${pad}    <text>Physical Exam, Performed</text>
+${pad}    ${COMPLETED}
+${pad}    ${effectiveTime(r, `${pad}    `)}
+${pad}    <value xsi:type="PQ" value="${esc(String(value))}"${unit ? ` unit="${esc(unit)}"` : ""}/>
+${pad}  </observation>
+${pad}</entry>`];
+  });
+}
+
 /** FHIR `Observation.category` codes that mean "this is a diagnostic study", not a lab result. */
 const IMAGING_CATEGORIES = new Set(["imaging", "procedure"]);
 const LAB_CATEGORIES = new Set(["laboratory", "vital-signs", "survey", "exam"]);
@@ -450,6 +486,11 @@ function entryFor(item: unknown, i: number, pad: string): string[] {
         out.push(procedurePerformed(resource, i, pad) ?? "");
         break;
       case "Observation": {
+        const readings = bloodPressureReadings(resource, i, pad);
+        if (readings !== null) {
+          out.push(...readings);
+          break;
+        }
         const cats = categoryCodes(resource);
         // Unclassifiable is SKIPPED, not guessed. An Observation with no category could be either
         // datatype, and picking one silently is how a mammogram becomes invisible to a numerator that
