@@ -12,6 +12,7 @@
     }
   },
   "dependencies": {
+    "cql-exec-fhir": "2.1.6",
     "fqm-execution": "1.8.5"
   },
   "files": [

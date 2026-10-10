@@ -7,12 +7,15 @@ import assert from "node:assert/strict";
 import {
   buildValueSetCache,
   calculateOfficial,
+  calculateOfficialWithSignal,
   calculationOptions,
   hasRetrieveSignal,
   isExecutableMeasureBundle,
+  loadCqlExecFhir,
   normalizePeriodEnd,
   oidFromValueSetUrl,
   populationMembership,
+  profileNarrowedPatientSource,
   referencedValueSetUrls,
   type MeasureBundle,
 } from "./index.ts";
@@ -219,4 +222,83 @@ test("calculateOfficial can express trustMetaProfile, so both consumers can shar
     calculate: async (_b, _p, options) => { seen = options as Record<string, unknown>; return { results: [] }; },
   });
   assert.equal(seen["trustMetaProfile"], true);
+});
+
+
+// --------------------------------------------------------------------------------------------------
+// Profile trust narrowed to named profiles (#591), against the real cql-exec-fhir fqm runs on.
+// --------------------------------------------------------------------------------------------------
+
+const BP = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
+const QICORE_PATIENT = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient";
+const QICORE_ENCOUNTER = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter";
+const details = (type: string) => ({ datatype: `{http://hl7.org/fhir}${type}` });
+
+/** A patient with nothing profile-stamped but one blood pressure: the shape of imported data. */
+const importedShape = (id: string) => ({
+  resourceType: "Bundle",
+  type: "collection",
+  entry: [
+    { resource: { resourceType: "Patient", id } },
+    { resource: { resourceType: "Encounter", id: `${id}-enc`, status: "finished" } },
+    { resource: { resourceType: "Observation", id: `${id}-bp`, status: "final", meta: { profile: [BP] } } },
+    { resource: { resourceType: "Observation", id: `${id}-a1c`, status: "final" } },
+  ],
+});
+
+const idsOf = (records: Array<{ _json?: { id?: string } }>) => records.map((r) => r._json?.id);
+
+test("a narrowed source reads a trusted profile by meta.profile and everything else by type (#591)", async () => {
+  const { PatientSource } = await loadCqlExecFhir();
+  const source = profileNarrowedPatientSource(PatientSource, [importedShape("p1")], [BP]);
+  const patient = source.currentPatient()!;
+  assert.deepEqual(idsOf(patient.findRecords(BP, details("Observation")) as never), ["p1-bp"], "only the stamped blood pressure");
+  assert.deepEqual(idsOf(patient.findRecords(QICORE_ENCOUNTER, details("Encounter")) as never), ["p1-enc"], "an untrusted profile reads by type");
+  assert.deepEqual(idsOf(patient.findRecords(QICORE_PATIENT, details("Patient")) as never), ["p1"], "no qicore-patient stamp needed, and nothing throws");
+});
+
+test("fqm's own trust-everything source throws on the same patient: the failure the narrowing removes (#591)", async () => {
+  const { PatientSource } = await loadCqlExecFhir();
+  const strict = PatientSource.FHIRv401({ requireProfileTagging: true }) as unknown as {
+    loadBundles(b: unknown[]): void;
+    currentPatient(): { findRecords(p: string, d: unknown): unknown[] };
+  };
+  strict.loadBundles([importedShape("p1")]);
+  assert.throws(() => strict.currentPatient().findRecords(QICORE_PATIENT, details("Patient")), /meta\.profile/);
+});
+
+test("the narrowing follows fqm from patient to patient, not just the first (#591)", async () => {
+  const { PatientSource } = await loadCqlExecFhir();
+  const source = profileNarrowedPatientSource(PatientSource, [importedShape("p1"), importedShape("p2")], [BP]) as unknown as {
+    currentPatient(): { findRecords(p: string, d: unknown): Array<{ _json?: { id?: string } }> };
+    nextPatient(): { findRecords(p: string, d: unknown): Array<{ _json?: { id?: string } }> } | undefined;
+  };
+  assert.deepEqual(idsOf(source.currentPatient().findRecords(BP, details("Observation"))), ["p1-bp"]);
+  assert.deepEqual(idsOf(source.nextPatient()!.findRecords(BP, details("Observation"))), ["p2-bp"]);
+  assert.equal(source.nextPatient(), undefined);
+});
+
+test("a narrowed source refuses an empty batch, as fqm does for its own (#591)", async () => {
+  const { PatientSource } = await loadCqlExecFhir();
+  assert.throws(() => profileNarrowedPatientSource(PatientSource, [{ resourceType: "Bundle", entry: [] }], [BP]), /No entries/);
+});
+
+test("trustedProfiles reach fqm as a built PatientSource, and only when asked for (#591)", async () => {
+  const seen: Array<Record<string, unknown>> = [];
+  const calculate = async (_b: unknown, _p: unknown[], options: unknown) => {
+    seen.push(options as Record<string, unknown>);
+    return { results: [] };
+  };
+  const base = { bundle: { resourceType: "Bundle", entry: [] } as unknown as MeasureBundle, patientBundles: [importedShape("p1")], period: { start: "2026-01-01", end: "2026-12-31" }, calculate };
+  await calculateOfficialWithSignal({ ...base, options: { trustedProfiles: [BP] } });
+  await calculateOfficialWithSignal({ ...base, options: {} });
+  assert.equal(seen[0]!["trustMetaProfile"], false, "the narrowing is not fqm's trust-everything flag");
+  const built = seen[0]!["patientSource"] as { currentPatient(): { findRecords(p: string, d: unknown): unknown[] } };
+  assert.deepEqual(idsOf(built.currentPatient().findRecords(BP, details("Observation")) as never), ["p1-bp"]);
+  assert.equal(seen[1]!["patientSource"], undefined, "no list, no source: fqm builds its own by type");
+  assert.equal("trustedProfiles" in seen[0]!, false, "fqm is handed its own options, not ours");
+});
+
+test("trustMetaProfile and trustedProfiles cannot both be asked for (#591)", () => {
+  assert.throws(() => calculationOptions({ start: "a", end: "b" }, { trustMetaProfile: true, trustedProfiles: [BP] }), /exclusive/);
 });

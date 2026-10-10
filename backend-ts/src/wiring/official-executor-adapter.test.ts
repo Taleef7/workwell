@@ -884,19 +884,19 @@ test("worstOutcome reduces to the rate that still needs attention, over states p
 });
 
 /**
- * `trustMetaProfile` is decided PER MEASURE and reaches fqm (issue #533).
+ * Profile trust is decided PER MEASURE and PER PROFILE, and reaches fqm as a PatientSource (#591).
  *
- * cms165 is the only measure that sets it. Its `[Observation: us-core-blood-pressure]` retrieve carries
- * no code filter, so with profiles ignored every final Observation is a candidate blood pressure and
- * whichever is newest is read as the patient's latest reading. The corpus stamps the profile each
- * retrieve names, which is what makes trusting them an option for this one measure.
+ * cms165 is the only measure with a trusted profile. Its `[Observation: us-core-blood-pressure]`
+ * retrieve carries no code filter, so read by type every final Observation is a candidate blood pressure
+ * and whichever is newest is read as the patient's latest reading. Only that profile is trusted: fqm's
+ * all-or-nothing `trustMetaProfile` stays false for every measure, because trusting every profile empties
+ * the routed cms122 and cms125 populations and makes every imported cms165 patient throw.
  *
- * Both directions are asserted. The false half is not padding: it is the guard on cms122 and cms125,
- * which are ROUTED and whose populations empty out under a global true — a regression that would
- * report a real roster as entirely out-of-population.
+ * Both directions are asserted. The others' half is not padding: a narrowed source handed to cms122 or
+ * cms125 would change what their retrieves read.
  */
-test("trustMetaProfile is per measure: on for cms165, off for the routed measures", async () => {
-  const seen: Array<{ measure: string; trust: unknown }> = [];
+test("profile trust is per measure: cms165 retrieves by type except its blood pressure, the routed measures by type", async () => {
+  const seen: Array<{ measure: string; trust: unknown; narrowed: boolean }> = [];
   const executorFor = (catalogId: string) =>
     officialMeasureExecutor({
       expand: async () => [{ code: "a", system: "s" }],
@@ -905,7 +905,8 @@ test("trustMetaProfile is per measure: on for cms165, off for the routed measure
         manifest: { ...fakeArtifact(catalogId, ["2.16.1"]).manifest, catalogId },
       }),
       calculate: async (_b, _p, options) => {
-        seen.push({ measure: catalogId, trust: (options as Record<string, unknown>)["trustMetaProfile"] });
+        const o = options as Record<string, unknown>;
+        seen.push({ measure: catalogId, trust: o["trustMetaProfile"], narrowed: o["patientSource"] !== undefined });
         return { results: [] };
       },
     });
@@ -917,17 +918,21 @@ test("trustMetaProfile is per measure: on for cms165, off for the routed measure
   }
 
   assert.deepEqual(seen, [
-    { measure: "cms165", trust: true },
-    { measure: "cms122", trust: false },
-    { measure: "cms125", trust: false },
-    { measure: "cms2", trust: false },
-    { measure: "cms137", trust: false },
+    { measure: "cms165", trust: false, narrowed: true },
+    { measure: "cms122", trust: false, narrowed: false },
+    { measure: "cms125", trust: false, narrowed: false },
+    { measure: "cms2", trust: false, narrowed: false },
+    { measure: "cms137", trust: false, narrowed: false },
   ]);
 });
 
-test("cms165 is the ONLY measure whose semantics trust profiles", () => {
+test("cms165 is the ONLY measure with a trusted profile, and it trusts exactly the blood pressure", () => {
   const trusting = Object.entries(OFFICIAL_MEASURE_SEMANTICS)
-    .filter(([, s]) => s.trustMetaProfile)
-    .map(([id]) => id);
-  assert.deepEqual(trusting, ["cms165"], "adding another needs the same evidence cms165 has");
+    .filter(([, s]) => (s.trustedProfiles?.length ?? 0) > 0)
+    .map(([id, s]) => [id, s.trustedProfiles]);
+  assert.deepEqual(
+    trusting,
+    [["cms165", ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"]]],
+    "adding another needs the same evidence cms165 has",
+  );
 });

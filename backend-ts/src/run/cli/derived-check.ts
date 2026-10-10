@@ -204,7 +204,7 @@ export interface DerivedCheckDeps {
   loadDerived: (catalogId: string) => OfficialArtifact | null;
   loadOfficial: (catalogId: string) => OfficialArtifact | null;
   loadTerminology: (artifact: OfficialArtifact) => LoadedTerminology;
-  semantics: (catalogId: string) => { trustMetaProfile?: boolean } | undefined;
+  semantics: (catalogId: string) => { trustedProfiles?: readonly string[] } | undefined;
   importDeps?: ImportDeckDeps;
   /** The deck calculation. Absent: a worker thread, closed when the check ends. */
   calculate?: AgreementCalculate;
@@ -813,9 +813,10 @@ async function check(args: DerivedCheckArgs, deps: DerivedCheckDeps, calculate: 
       return loaded.ok ? [...(loaded.codesByOid.get(oid) ?? [])] : [];
     };
     const valueSetCache = await expandArtifactTerminology(derived, expand);
-    const common = { deck, patients, valueSetCache, trustMetaProfile: semantics.trustMetaProfile ?? false, calculate, strata: "compare" as const, limit: args.limit };
+    // As production runs the measure: by type, except its trusted profiles (#591).
+    const common = { deck, patients, valueSetCache, trustMetaProfile: false, trustedProfiles: semantics.trustedProfiles ?? [], calculate, strata: "compare" as const, limit: args.limit };
     const report = await runAgreement({ ...common, artifact: derived });
-    log(renderAgreementMarkdown(report, { artifact: `WorkWell translation (${bundleSha}); terminology: its own sidecar`, engine: `trustMetaProfile ${common.trustMetaProfile ? "on" : "off"}`, namePatients: false, limit: args.limit }));
+    log(renderAgreementMarkdown(report, { artifact: `WorkWell translation (${bundleSha}); terminology: its own sidecar`, engine: common.trustedProfiles.length > 0 ? `retrieves by type, except ${common.trustedProfiles.join(", ")}` : "retrieves by type", namePatients: false, limit: args.limit }));
     const broken = await runAgreement({ ...common, artifact: { ...derived, bundle: withInitialPopulationBroken(derived.bundle) } });
     const before = rowsAgreeing(report);
     const after = rowsAgreeing(broken);

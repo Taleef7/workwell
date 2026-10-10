@@ -22,8 +22,8 @@ test("the text report names the source it describes, each logic, and why a type 
   assert.match(text, /^Ingest also derives Observation: a LOINC 24606-6 imaging Observation/m, "derivations print once, in the header");
   assert.match(text, /^cms165 · CMS165FHIR v1\.0\.000 \(CMS's artifact\)$/m);
   assert.match(text, /^cms137 · WorkWell translation of CMS137v15 \(ww-2027\.1\) \(a WorkWell translation\)$/m);
-  assert.match(text, /^ {2}Retrieves by profile: every profile-typed retrieve is filtered on meta\.profile/m);
-  assert.match(text, /^ {2}Observation +score +PARTLY: us-core-blood-pressure stamped; not qicore-observation-screening-assessment, qicore-simple-observation\./m);
+  assert.match(text, /^ {2}Retrieves by profile only for us-core-blood-pressure:$/m);
+  assert.match(text, /^ {2}Observation +score +served \(fetched\)$/m, "#591: only the blood pressure is profile-filtered, and preparation stamps it");
   assert.match(text, /^ {2}MedicationRequest +score +served \(fetched\), but WebChart's trial codes every medication in FDDC/m, "a served type says what limits it");
   assert.match(text, /^ {2}Medication +score +NOT SERVED: Read only where a MedicationRequest references a Medication/m);
   assert.match(text, /^ {2}Coverage +SDE only +served \(fetched\), but/m);

@@ -258,7 +258,7 @@ export type AgreementCalculate = (input: {
   patientBundles: unknown[];
   period: { start: string; end: string };
   valueSetCache: unknown[];
-  options: { trustMetaProfile: boolean };
+  options: { trustMetaProfile: boolean; trustedProfiles?: readonly string[] };
 }) => Promise<{ bySubject: ReadonlyMap<string, AgreementSubjectResult> }>;
 
 export interface AgreementTally {
@@ -286,6 +286,8 @@ export interface AgreementReport {
   period: { start: string; end: string };
   artifact: { kind: ArtifactKind; url: string; sha256: string };
   trustMetaProfile: boolean;
+  /** Profiles retrieved by `meta.profile` while every other retrieve is by type (#591); empty when none. */
+  trustedProfiles: readonly string[];
   strataMode: StrataMode;
   patients: number;
   /** Patients whose every compared row (each rate, and each stratum when compared) agreed. */
@@ -311,6 +313,8 @@ export interface RunAgreementInput {
   artifact: OfficialArtifact;
   valueSetCache: unknown[];
   trustMetaProfile: boolean;
+  /** As the executor's option: by type except these profiles. Ignored when `trustMetaProfile` is on. */
+  trustedProfiles?: readonly string[];
   calculate: AgreementCalculate;
   strata: StrataMode;
   limit?: number;
@@ -324,9 +328,11 @@ const newTally = (): AgreementTally => ({ agree: 0, total: 0, expected: {}, repo
 /** Run the artifact over the deck's patients and compare every expected row. */
 export async function runAgreement(input: RunAgreementInput): Promise<AgreementReport> {
   const { deck, patients, artifact, valueSetCache, trustMetaProfile, calculate } = input;
+  const trustedProfiles = trustMetaProfile ? [] : (input.trustedProfiles ?? []);
   const limit = input.limit ?? 40;
+  const options = { trustMetaProfile, ...(trustedProfiles.length > 0 ? { trustedProfiles } : {}) };
   const run = async (patientBundles: unknown[]) =>
-    (await calculate({ bundle: artifact.bundle, patientBundles, period: deck.period, valueSetCache, options: { trustMetaProfile } })).bySubject;
+    (await calculate({ bundle: artifact.bundle, patientBundles, period: deck.period, valueSetCache, options })).bySubject;
 
   const bySubject = new Map<string, AgreementSubjectResult>();
   const engineErrors = new Map<string, number>(); // first lines of the message -> patients
@@ -427,6 +433,7 @@ export async function runAgreement(input: RunAgreementInput): Promise<AgreementR
     period: deck.period,
     artifact: { kind: artifactKind(artifact), url: measureUrlOf(artifact), sha256: artifact.manifest.sha256 },
     trustMetaProfile,
+    trustedProfiles,
     strataMode: input.strata,
     patients: deck.patientIds.length,
     patientsAgreeing: deck.patientIds.filter((id) => !disagreeing.has(id)).length,
@@ -590,7 +597,7 @@ export interface AgreementCliDeps {
   loadDerived?: (catalogId: string) => OfficialArtifact | null;
   expand?: ExpandValueSet;
   importDeps?: ImportDeckDeps;
-  semantics?: (catalogId: string) => { trustMetaProfile?: boolean } | undefined;
+  semantics?: (catalogId: string) => { trustedProfiles?: readonly string[] } | undefined;
   log?: (text: string) => void;
 }
 
@@ -626,15 +633,20 @@ export async function agreementCli(argv: readonly string[], deps: AgreementCliDe
   }
 
   const semantics = (deps.semantics ?? officialMeasureSemantics)(args.measure);
-  const productionTrust = semantics?.trustMetaProfile ?? false;
-  const trustMetaProfile = args.trustMetaProfile ?? productionTrust;
+  // Production retrieves by type, except the measure's own trusted profiles (#591). The override is for
+  // diagnosis: `on` trusts every profile, `off` none, and either drops the production list.
+  const productionProfiles = semantics?.trustedProfiles ?? [];
+  const trustMetaProfile = args.trustMetaProfile ?? false;
+  const trustedProfiles = args.trustMetaProfile === undefined ? productionProfiles : [];
+  const describe = (all: boolean, some: readonly string[]) =>
+    all ? "every profile trusted" : some.length > 0 ? `by type, except ${some.map((p) => p.split("/").pop()).join(", ")}` : "by type";
   const engine =
-    `trustMetaProfile ${trustMetaProfile ? "on" : "off"}` +
+    `retrieves ${describe(trustMetaProfile, trustedProfiles)}` +
     (!semantics
       ? " (production has no recorded semantics for this measure and refuses to run it)"
-      : trustMetaProfile === productionTrust
+      : args.trustMetaProfile === undefined
         ? " (as production runs this measure)"
-        : ` (OVERRIDDEN: production runs it ${productionTrust ? "on" : "off"})`);
+        : ` (OVERRIDDEN: production retrieves ${describe(false, productionProfiles)})`);
 
   const report = await runAgreement({
     deck,
@@ -642,6 +654,7 @@ export async function agreementCli(argv: readonly string[], deps: AgreementCliDe
     artifact,
     valueSetCache,
     trustMetaProfile,
+    trustedProfiles,
     calculate: deps.calculate,
     strata: args.strata,
     limit: args.limit,

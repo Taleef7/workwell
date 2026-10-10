@@ -38,29 +38,34 @@ export interface OfficialMeasureSemantics {
    */
   rateLabels?: readonly string[];
   /**
-   * Retrieve by QI-Core PROFILE as well as resource type, for this measure only. Default false, which
-   * is what every other measure gets and what the executor's docstring explains at length: trusting
-   * profiles globally empties the population for cms122 and cms125, which are routed today.
+   * The QI-Core/US Core profiles this measure retrieves BY PROFILE; every other retrieve is by resource
+   * type, as for every measure without this field. The executor keeps, for a retrieve of one of these,
+   * only the resources whose `meta.profile` names it (`profileNarrowedPatientSource`). Absent for every
+   * measure but cms165.
    *
-   * cms165 is the one pilot measure that cannot be scored correctly without it.
-   * `[Observation: us-core-blood-pressure]` is its only Observation retrieve with NO code filter — the
-   * other four (hospice, palliative care, frailty, advanced illness) each name a code or a value set —
-   * so it identifies a blood pressure by profile ALONE, and `Status.isObservationBP` narrows only by
-   * `status`. With profiles ignored, every final Observation is a candidate blood pressure: whichever
-   * of a patient's results is most recent is read as their latest reading, and a hemoglobin has no
-   * systolic component. The old synthetic fixture emitted one Observation per subject, the only shape
-   * that hides it.
+   * cms165 cannot be scored correctly without it. `[Observation: us-core-blood-pressure]` is its only
+   * profile-typed retrieve with NO code filter (pinned by `official-cms165-retrieves.test.ts`), so it
+   * identifies a blood pressure by profile ALONE, and `Status.isObservationBP` narrows only by `status`.
+   * Read by type, every final Observation is a candidate blood pressure: whichever of a patient's results
+   * is most recent is read as their latest reading, and a hemoglobin has no systolic component.
    *
-   * Turning it on is available because the ADR-075 corpus stamps the profile each retrieve names —
-   * `corpus-bundle.ts` says it does so precisely to make this possible. It is a per-measure switch and
-   * not a global one for the same reason it defaults false.
-   *
-   * **This does not by itself make cms165 routable.** A bundle whose resources are NOT profile-stamped
-   * retrieves nothing under it, so a WebChart-derived roster needs its blood pressures stamped at
-   * ingest first. That failure is at least LOUD — the executor's batch-level refusal fires when nothing
-   * retrieves across a roster — where the current one is silent and wrong.
+   * Only that one profile, not all of them (#591). Until 2026-10-10 cms165 trusted EVERY profile
+   * (fqm's `trustMetaProfile`), which needed the exact QI-Core profile on each patient, encounter,
+   * condition and procedure; the corpus stamps them, nothing else does, and the Patient retrieve throws
+   * without its one, so every QRDA-imported patient errored. Measured against that mode: identical on
+   * CMS's 68 MADiE cases and on all 20,000 corpus patients; trusting none differs on 624 of a 2,500 sample.
+   * Trusting every profile globally would also empty cms122's and cms125's populations, which retrieve
+   * profiles our data does not carry.
    */
-  trustMetaProfile?: boolean;
+  trustedProfiles?: readonly string[];
+}
+
+/** The US Core blood-pressure profile, the one cms165 retrieves with no code filter. */
+export const US_CORE_BLOOD_PRESSURE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
+
+/** The profile trust to hand the executor for a measure: by type, except the measure's trusted profiles. */
+export function trustedProfilesOf(semantics: OfficialMeasureSemantics | undefined): readonly string[] {
+  return semantics?.trustedProfiles ?? [];
 }
 
 export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasureSemantics>> = {
@@ -104,7 +109,7 @@ export const OFFICIAL_MEASURE_SEMANTICS: Readonly<Record<string, OfficialMeasure
       "diastolic < 90 mmHg) during the measurement period. Being in it is the blood pressure being " +
       "controlled, and the artifact's improvementNotation ('increase') agrees.",
     // The only measure that retrieves a blood pressure by profile alone — see the field's own note.
-    trustMetaProfile: true,
+    trustedProfiles: [US_CORE_BLOOD_PRESSURE],
   },
   cms68: {
     numeratorMeansCompliant: true,

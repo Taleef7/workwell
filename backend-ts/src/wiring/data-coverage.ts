@@ -29,12 +29,9 @@ export const NOT_SERVED_REASONS: Readonly<Record<string, string>> = {
     "WebChart's FHIR CapabilityStatement does not list it (checked 2026-10-09); where device orders live is an open question to MIE.",
 };
 
-/** A type ingest fetches, read by a measure that retrieves by profile, in a profile ingest never stamps. */
+/** A type ingest fetches, read through a trusted profile ingest never stamps. */
 export const UNSTAMPED_PROFILE_REASON =
-  "This measure retrieves by profile, and ingest stamps none of these QI-Core profiles; a resource without one is not retrieved. Running cms165 on WebChart data is #591.";
-
-/** What `unstampedProfiles` holds for a retrieve that names no profile: under profile filtering it matches nothing. */
-export const NO_PROFILE = "(a retrieve that names no profile)";
+  "This measure retrieves this type by a profile ingest does not stamp, and a resource without it is not retrieved. Running cms165 on WebChart data is #591.";
 
 export interface CoverageRow {
   readonly type: string;
@@ -64,8 +61,8 @@ export interface MeasureCoverage {
   readonly kind: "cms-artifact" | "workwell-translation";
   /** The logic this table is for, as the screens name it: `CMS165FHIR v1.0.000`, or a translation's label. */
   readonly logic: string;
-  /** The executor filters every profile-typed retrieve on `meta.profile` for this measure (`trustMetaProfile`). */
-  readonly profileSensitive: boolean;
+  /** The profiles the executor retrieves by `meta.profile` for this measure (`trustedProfiles`, #591); empty when none. */
+  readonly trustedProfiles: readonly string[];
   readonly rows: readonly CoverageRow[];
 }
 
@@ -87,16 +84,19 @@ function logicOf(kind: MeasureCoverage["kind"], artifact: OfficialArtifact): str
 }
 
 /** One logic's coverage table. Pure over the artifact. */
-export function coverageOf(measureId: string, kind: MeasureCoverage["kind"], artifact: OfficialArtifact): MeasureCoverage {
-  const profileSensitive = OFFICIAL_MEASURE_SEMANTICS[measureId]?.trustMetaProfile === true;
+export function coverageOf(
+  measureId: string,
+  kind: MeasureCoverage["kind"],
+  artifact: OfficialArtifact,
+  trustedProfiles: readonly string[] = OFFICIAL_MEASURE_SEMANTICS[measureId]?.trustedProfiles ?? [],
+): MeasureCoverage {
   const rows = measureDataRequirements(artifact.bundle).map((requirement): CoverageRow => {
     const served = SERVED.get(requirement.type);
-    const byProfile = served !== undefined && profileSensitive;
-    const stampedProfiles = byProfile ? requirement.profiles.filter((profile) => retrievable(requirement.type, profile)) : [];
-    // A retrieve that names no profile is filtered on its type string, which no `meta.profile` carries.
-    const unstampedProfiles = byProfile
-      ? [...requirement.profiles.filter((profile) => !retrievable(requirement.type, profile)), ...(requirement.untemplated ? [NO_PROFILE] : [])]
-      : [];
+    // Only a trusted profile's retrieve is filtered on `meta.profile`; every other retrieve of the type,
+    // with or without a profile, reads the resources by type.
+    const filtered = served !== undefined ? requirement.profiles.filter((profile) => trustedProfiles.includes(profile)) : [];
+    const stampedProfiles = filtered.filter((profile) => retrievable(requirement.type, profile));
+    const unstampedProfiles = filtered.filter((profile) => !retrievable(requirement.type, profile));
     const status: CoverageRow["status"] =
       served === undefined ? "not served" : unstampedProfiles.length === 0 ? "served" : stampedProfiles.length > 0 ? "partial" : "not served";
     return {
@@ -113,7 +113,7 @@ export function coverageOf(measureId: string, kind: MeasureCoverage["kind"], art
       reason: status === "served" ? null : served ? UNSTAMPED_PROFILE_REASON : (NOT_SERVED_REASONS[requirement.type] ?? null),
     };
   });
-  return { measureId, kind, logic: logicOf(kind, artifact), profileSensitive, rows };
+  return { measureId, kind, logic: logicOf(kind, artifact), trustedProfiles, rows };
 }
 
 /**

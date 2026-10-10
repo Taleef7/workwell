@@ -275,6 +275,82 @@ export interface CalculationOptionOverrides {
    * nothing. Callers that cannot know which they have run once and retry — see `hasRetrieveSignal`.
    */
   trustMetaProfile?: boolean;
+  /**
+   * Retrieve by `meta.profile` for THESE profiles only, and by base resource type for every other one
+   * (#591). A measure whose decisive retrieve is profile-typed with no code filter needs the profile to
+   * know what it is reading; requiring every other profile too would make each resource of plain or
+   * imported data invisible. Serializable, so it crosses the fqm worker thread; the PatientSource it
+   * describes is built on the far side (`profileNarrowedPatientSource`). Exclusive with
+   * `trustMetaProfile: true`, which already trusts every profile.
+   */
+  trustedProfiles?: readonly string[];
+}
+
+/** The parts of `cql-exec-fhir` this package uses. */
+interface CqlExecFhir {
+  PatientSource: { FHIRv401(options: { requireProfileTagging: boolean }): CqlPatientSource };
+}
+interface CqlPatientSource {
+  loadBundles(bundles: unknown[]): void;
+  currentPatient(): CqlPatient | undefined;
+}
+interface CqlPatient {
+  findRecords(profile: string, retrieveDetails: unknown): Array<{ _json?: { meta?: { profile?: unknown } } }>;
+}
+
+/**
+ * Load `cql-exec-fhir`, lazily for the same reason as the calculator: importing this package must not
+ * pull fqm's runtime into the caller's module graph (ADR-026). It is the version fqm-execution 1.8.5
+ * itself runs on, pinned exactly in this package's manifest.
+ */
+export async function loadCqlExecFhir(): Promise<CqlExecFhir> {
+  const mod = (await import("cql-exec-fhir")) as unknown as CqlExecFhir & { default?: CqlExecFhir };
+  return mod.default ?? mod;
+}
+
+/**
+ * A FHIR R4 PatientSource that retrieves by base resource type, except that a retrieve for one of
+ * `trustedProfiles` keeps only the resources whose `meta.profile` names it.
+ *
+ * What fqm builds itself from `trustMetaProfile` is all or nothing: on, every retrieve needs its exact
+ * QI-Core profile and the Patient retrieve throws without `qicore-patient`; off, a profile-typed retrieve
+ * with no code filter (cms165's `[Observation: us-core-blood-pressure]`) matches every Observation. This
+ * is the middle: profile-sensitive only where the profile is the only thing that says what a resource is.
+ * Measured on 2026-10-10 against full trust for cms165: identical on CMS's 68 MADiE cases and on all
+ * 20,000 corpus patients; trusting no profile differs on 624 of a 2,500-patient sample.
+ *
+ * Each patient's `findRecords` is wrapped as it becomes current, and the filter reads the raw resource
+ * (`_json`), the field cql-exec-fhir 2.1.6 keeps it in; the version is pinned and a test runs the real
+ * package. fqm skips its own "no entries" check when handed a source, so it is repeated here.
+ */
+export function profileNarrowedPatientSource(
+  sources: CqlExecFhir["PatientSource"],
+  patientBundles: unknown[],
+  trustedProfiles: readonly string[],
+): CqlPatientSource {
+  const hasEntries = patientBundles.some((b) => ((b as { entry?: unknown[] })?.entry?.length ?? 0) > 0);
+  if (!hasEntries) throw new Error("No entries found in passed patient bundles");
+  const trusted = new Set(trustedProfiles);
+  const source = sources.FHIRv401({ requireProfileTagging: false });
+  source.loadBundles(patientBundles);
+  const current = source.currentPatient.bind(source);
+  // `nextPatient` reaches the patient through `this.currentPatient()`, so wrapping this one method on the
+  // instance covers both ways fqm walks the bundles.
+  source.currentPatient = () => {
+    const patient = current();
+    if (!patient) return patient;
+    const find = patient.findRecords.bind(patient);
+    patient.findRecords = (profile, retrieveDetails) => {
+      const records = find(profile, retrieveDetails);
+      if (!trusted.has(profile)) return records;
+      return records.filter((r) => {
+        const declared = r._json?.meta?.profile;
+        return Array.isArray(declared) && declared.includes(profile);
+      });
+    };
+    return patient;
+  };
+  return source;
 }
 
 /**
@@ -290,6 +366,9 @@ export function calculationOptions(
   period: CalculationPeriod,
   overrides: CalculationOptionOverrides = {},
 ): FqmCalculationOptions {
+  if (overrides.trustMetaProfile === true && (overrides.trustedProfiles?.length ?? 0) > 0) {
+    throw new Error("trustMetaProfile and trustedProfiles are exclusive: one trusts every profile, the other only some");
+  }
   return {
     measurementPeriodStart: period.start,
     measurementPeriodEnd: normalizePeriodEnd(period.end),
@@ -410,12 +489,15 @@ export async function calculateOfficialWithSignal(
   input: OfficialCalculationInput,
 ): Promise<OfficialBatchResult> {
   const calculate = input.calculate ?? (await loadCalculator());
-  const output = await calculate(
-    input.bundle,
-    input.patientBundles,
-    calculationOptions(input.period, input.options),
-    input.valueSetCache,
-  );
+  const trusted = input.options?.trustedProfiles ?? [];
+  const options: Record<string, unknown> = { ...calculationOptions(input.period, input.options) };
+  if (trusted.length > 0) {
+    // Built here, not by the caller, because this is the side of the worker thread fqm runs on: the
+    // input is structured-cloned across it, and a PatientSource does not survive a clone.
+    const { PatientSource } = await loadCqlExecFhir();
+    options["patientSource"] = profileNarrowedPatientSource(PatientSource, input.patientBundles, trusted);
+  }
+  const output = await calculate(input.bundle, input.patientBundles, options, input.valueSetCache);
   const bySubject = new Map<string, OfficialSubjectResult>();
   for (const subject of output.results ?? []) {
     const detailedResults = subject.detailedResults ?? [];
