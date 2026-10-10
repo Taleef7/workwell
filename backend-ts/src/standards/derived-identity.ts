@@ -20,6 +20,12 @@
  * bundle, and the libraries reached must be the bundle's libraries. An include left at CMS's library, a
  * `urn:` path the engine cannot resolve, and CMS's library left beside WorkWell's copy each fail here,
  * at router construction, rather than as a missing define on the first evaluation.
+ *
+ * And what each library says it READS must be what its ELM declares (D10, #782). fqm collects the value
+ * sets every library's `relatedArtifact` and `dataRequirement` name and refuses to evaluate while any of
+ * them is missing from its cache, which a translation builds from ELM declarations; so a library whose
+ * lists still name a value set its edited logic dropped fails every evaluation, and one whose lists miss
+ * a set it declares asserts data requirements its logic does not have. Both are refused here.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -122,7 +128,13 @@ export function libraryElmSha256(library: Resource): string | undefined {
 
 /** The parts of an ELM library the identity check reads, every one of them possibly absent or malformed. */
 interface ElmShape {
-  library?: { identifier?: { id?: unknown; version?: unknown; system?: unknown }; includes?: { def?: unknown } };
+  library?: {
+    identifier?: { id?: unknown; version?: unknown; system?: unknown };
+    includes?: { def?: unknown };
+    valueSets?: { def?: unknown };
+    codes?: { def?: unknown };
+    codeSystems?: { def?: unknown };
+  };
 }
 interface IncludeDef {
   localIdentifier?: unknown;
@@ -160,6 +172,101 @@ function refsOf(elm: ElmShape | undefined): ElmRefs {
     identifier: identifier && typeof identifier === "object" ? identifier : undefined,
     includes: Array.isArray(defs) ? defs.filter((d): d is IncludeDef => !!d && typeof d === "object") : [],
   };
+}
+
+const DIRECT_REFERENCE_CODE = "http://hl7.org/fhir/StructureDefinition/cqf-directReferenceCode";
+/** The entries of a list that are objects; anything else (absent, not a list, a scalar entry) reads as none. */
+const recordsIn = (value: unknown): Array<Record<string, unknown>> =>
+  Array.isArray(value) ? value.filter((v): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v)) : [];
+const defsOf = (section: unknown): Array<Record<string, unknown>> =>
+  section && typeof section === "object" ? recordsIn((section as { def?: unknown }).def) : [];
+
+/**
+ * D10 for one library: what its computed data requirements say it reads, against what its own ELM declares.
+ *
+ * (a) The value-set URLs it names must EQUAL its ELM's `valueSets.def[].id`, compared as exact strings, as
+ * fqm compares them. The URLs are collected exactly as fqm-execution 1.8.5 collects them
+ * (`build/execution/ValueSetHelper.js`, `getMissingDependentValuesets`, the branch WorkWell runs: it never
+ * sets `useEffectiveDataRequirements`):
+ * - every `dataRequirement[].codeFilter[].valueSet` that is set (`:156-169`);
+ * - every `relatedArtifact` of type `depends-on` whose `url` (the legacy field) contains "ValueSet", or
+ *   failing that whose `resource` does (`:172-184`). fqm reads `url` first, and `resource` only when `url`
+ *   does not name a value set.
+ * fqm then throws "Missing the following valuesets" for any URL absent from its cache (`:192-200`), and a
+ * translation's cache is built from its ELM declarations: a URL only the lists name refuses every
+ * evaluation. A URL only the ELM declares is the other half of a stale list — data requirements that no
+ * longer describe the logic — and is refused too. Non-string values are skipped (FHIR types them as
+ * strings; fqm would throw on one).
+ *
+ * (b) Every `cqf-directReferenceCode` extension's code must be one its ELM declares in `codes.def`, matched
+ * by code and by the system its code-system reference resolves to in its OWN `codeSystems.def`. A code
+ * whose code system lives in another library (`codeSystem.libraryName`) does not resolve here, so an
+ * extension naming one is refused; none of the committed artifacts writes one.
+ *
+ * One sentence per violation, naming the library, the URL or code, and the list. A library with no ELM
+ * object is one sentence: there is nothing to compare its lists against. Pure; exported so the committed
+ * official artifacts, which the router does not hold to D10, can be held to it by a unit test.
+ */
+export function libraryDataRequirementProblems(library: Readonly<Record<string, unknown>>, elm: unknown): string[] {
+  const key = `${String(library["name"])}|${String(library["version"])}`;
+  const lib = elm && typeof elm === "object" ? (elm as ElmShape).library : undefined;
+  if (!lib || typeof lib !== "object") return [`library ${key} carries no ELM library to check its data requirements against`];
+  const problems: string[] = [];
+
+  const declared = new Set(defsOf(lib.valueSets).map((d) => d["id"]).filter((u): u is string => typeof u === "string"));
+  const related = new Set<string>();
+  for (const ra of recordsIn(library["relatedArtifact"])) {
+    if (ra["type"] !== "depends-on") continue;
+    const url = ra["url"];
+    const resource = ra["resource"];
+    if (typeof url === "string" && url.includes("ValueSet")) related.add(url);
+    else if (typeof resource === "string" && resource.includes("ValueSet")) related.add(resource);
+  }
+  const filtered = new Set<string>();
+  for (const dr of recordsIn(library["dataRequirement"])) {
+    for (const cf of recordsIn(dr["codeFilter"])) {
+      const vs = cf["valueSet"];
+      if (typeof vs === "string" && vs) filtered.add(vs);
+    }
+  }
+  const unknown = "which its ELM does not declare (valueSets.def); fqm requires every value set these lists name and refuses to evaluate without it";
+  for (const url of related) if (!declared.has(url)) problems.push(`library ${key}'s relatedArtifact depends-on names value set ${url}, ${unknown}`);
+  for (const url of filtered) if (!declared.has(url)) problems.push(`library ${key}'s dataRequirement code filters name value set ${url}, ${unknown}`);
+  for (const url of declared) {
+    if (!related.has(url) && !filtered.has(url)) {
+      problems.push(`library ${key}'s ELM declares value set ${url}, which neither its relatedArtifact nor its dataRequirement names; its data requirements do not describe its logic`);
+    }
+  }
+
+  const systems = new Map(defsOf(lib.codeSystems).map((s) => [s["name"], s["id"]]));
+  const codeKey = (system: unknown, code: unknown): string => JSON.stringify([system, code]);
+  const codes = new Set(
+    defsOf(lib.codes).map((c) => {
+      const ref = c["codeSystem"] && typeof c["codeSystem"] === "object" ? (c["codeSystem"] as Record<string, unknown>) : {};
+      return codeKey(ref["libraryName"] === undefined ? systems.get(ref["name"]) : undefined, c["id"]);
+    }),
+  );
+  for (const ext of recordsIn(library["extension"])) {
+    if (ext["url"] !== DIRECT_REFERENCE_CODE) continue;
+    const coding = ext["valueCoding"] && typeof ext["valueCoding"] === "object" ? (ext["valueCoding"] as Record<string, unknown>) : {};
+    if (typeof coding["code"] !== "string" || typeof coding["system"] !== "string" || !codes.has(codeKey(coding["system"], coding["code"]))) {
+      problems.push(
+        `library ${key}'s cqf-directReferenceCode extension names code ${String(coding["code"])} of ${String(coding["system"])}, which its ELM does not declare (codes.def, by code and the system its codeSystems.def resolves)`,
+      );
+    }
+  }
+  return problems;
+}
+
+/** D10 over every library of a bundle, each library's ELM decoded on its own. For tests and checks, not the router. */
+export function bundleDataRequirementProblems(bundle: unknown): string[] {
+  const problems: string[] = [];
+  for (const library of librariesOf((bundle ?? {}) as Bundle)) {
+    const { elm, unparseable } = decodeElm(library);
+    if (unparseable) problems.push(`library ${String(library["name"])}|${String(library["version"])}'s ELM does not parse`);
+    else problems.push(...libraryDataRequirementProblems(library, elm));
+  }
+  return problems;
 }
 
 /** Only the entries of a manifest list that are objects: a hand-edited manifest must come back as sentences. */
@@ -345,6 +452,12 @@ function sourceKeyIn(node: unknown, path: string): string | undefined {
  *   bundle; its `translationSha256` is a well-formed digest;
  * - a changed library is scanned whole for CMS's identity, as the Measure and main library are;
  * - the Measure's copyright is CMS's, verbatim.
+ *
+ * And D10 (#782), on the same decode: for every library, the value sets its `relatedArtifact` and
+ * `dataRequirement` name, read as fqm reads them, equal its ELM's `valueSets.def`, and its
+ * `cqf-directReferenceCode` codes are among its ELM's `codes.def` (`libraryDataRequirementProblems`); and
+ * `derived.recomputedDataRequirements`, when present, names only libraries WorkWell compiled. CMS's
+ * official artifacts are held to the per-library rule by a committed-artifact test, not here.
  *
  * Every library's ELM is decoded once per check. The result is memoized and frozen; callers copy it,
  * never mutate it.
@@ -563,6 +676,9 @@ function computeProblems(bundle: Bundle, manifest: OfficialManifest, base: Deriv
     refs.set(library, refsOf(elm));
     const leaked = unparseable ? "(the ELM does not parse)" : elm !== undefined ? sourceKeyIn(elm, "elm") : undefined;
     if (leaked) problems.push(`${id}: library ${key}'s ELM carries ${leaked}; ELM is committed stripped of annotation and locator`);
+    // D10, on the ELM already decoded: what the library's lists say it reads is what its ELM declares. A
+    // library with no ELM is refused by reachability, and one whose ELM does not parse just above.
+    if (elm !== undefined) for (const p of libraryDataRequirementProblems(library, elm)) problems.push(`${id}: ${p}`);
     if (unchanged.has(key)) {
       const pinned = unchanged.get(key);
       const actual = libraryElmSha256(library);
@@ -650,6 +766,31 @@ function computeProblems(bundle: Bundle, manifest: OfficialManifest, base: Deriv
     }
     if (!SHA256.test(String(entry.translationSha256))) {
       problems.push(`${id}: changed library ${key}'s translationSha256 '${String(entry.translationSha256)}' is not a sha256:<64 hex> digest`);
+    }
+  }
+
+  // D10, the manifest's record of it: `recomputedDataRequirements` may name only a library WorkWell
+  // compiled — the main library or one listed as changed. CMS's lists on a library carried unchanged are
+  // CMS's, pinned with its ELM; a record of recomputing them, or a library the bundle lacks, is false.
+  // Read defensively, as the other lists are.
+  const recomputed: unknown = derived.recomputedDataRequirements;
+  if (recomputed !== undefined) {
+    if (!Array.isArray(recomputed)) {
+      problems.push(`${id}: derived.recomputedDataRequirements is not a list`);
+    } else {
+      const compiled = new Set(libraries.filter((l) => l === main || changedByKey.has(keyOf(l))).map((l) => l["name"]));
+      const seen = new Set<string>();
+      recomputed.forEach((name: unknown, i) => {
+        if (typeof name !== "string") {
+          problems.push(`${id}: derived.recomputedDataRequirements[${i}] is not a library name`);
+          return;
+        }
+        if (seen.has(name)) problems.push(`${id}: derived.recomputedDataRequirements lists '${name}' more than once`);
+        seen.add(name);
+        if (!compiled.has(name)) {
+          problems.push(`${id}: derived.recomputedDataRequirements names '${name}', which is not a library WorkWell compiled in this bundle (the main library or a changedLibraries entry)`);
+        }
+      });
     }
   }
   return problems;

@@ -140,6 +140,25 @@ test("a changed rate, status, stratifier or value is seen", () => {
   assert.equal(compareRuns("cms137", up, { run: run(1), output: output(false) }).statementsDiffering, 1);
 });
 
+test("every case whose populations or status differ is returned, uncapped, with each side's string", () => {
+  const up = { run: run(1), output: output(true) };
+  const moved = compareRuns("cms137", up, { run: run(0, "mismatch"), output: output(true) });
+  assert.deepEqual(moved.populationDifferences, [{ case: "u1", cms: "11010", ours: "11000" }]);
+  assert.deepEqual(moved.statusDifferences, [{ case: "u1", cms: "expected-agreement", ours: "mismatch" }]);
+  const same = compareRuns("cms137", up, { run: run(1), output: output(true) });
+  assert.deepEqual([same.populationDifferences, same.statusDifferences], [[], []]);
+  // Two empty vectors are no agreement, so they are listed — with equal sides, which no file can excuse.
+  const empty = run(1);
+  const noRates = { ...empty, cases: empty.cases.map((c) => ({ ...c, actualRates: [] })) };
+  assert.deepEqual(compareRuns("cms137", { run: noRates, output: output(true) }, { run: noRates, output: output(true) }).populationDifferences, [{ case: "u1", cms: "", ours: "" }]);
+  // Uncapped: more cases than the 15 samples.
+  const wide = (numer: number) => {
+    const r = run(numer);
+    return { ...r, cases: Array.from({ length: 20 }, (_, i) => ({ ...r.cases[0]!, uuid: `u${i}`, patientId: `p${i}` })) };
+  };
+  assert.equal(compareRuns("cms137", { run: wide(1), output: output(true) }, { run: wide(0), output: output(true) }).populationDifferences.length, 20);
+});
+
 test("values missing or extra on our side are differences; two empty rate vectors are not agreement", () => {
   const missing = compareRuns("cms137", { run: run(1), output: output(true) }, { run: run(1), output: { results: [] } });
   assert.deepEqual([missing.statementsCompared, missing.statementsDiffering], [2, 2]);

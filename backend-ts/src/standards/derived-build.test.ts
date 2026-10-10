@@ -393,3 +393,90 @@ test("changedLibraries is written after unchangedLibraries and before oracles, a
   }
   assert.equal(`${JSON.stringify(derivedManifestFor({ ...input, changedLibraries: [] }).manifest, null, 2)}\n`, `${JSON.stringify(manifestFor(null).manifest, null, 2)}\n`);
 });
+
+// ---- data requirements recomputed where the reads changed (#782) ----------------------------------------
+
+const cms125 = loadOfficialArtifact("cms125")!;
+const cms125Bundle = cms125.bundle as unknown as B;
+const IDENTITY_125 = translationIdentity("cms125", 2027, "CMS125v15");
+const VS_1071 = "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.198.12.1071";
+/** CMS's cms125 main ELM with the unspecified-laterality diagnosis branches and their value set removed. */
+function without1071() {
+  const elm = decode(elmDataOf(mainOf(cms125Bundle)));
+  const unspecified = "Unilateral Mastectomy, Unspecified Laterality";
+  elm.library.valueSets.def = elm.library.valueSets.def.filter((d: { name: string }) => d.name !== unspecified);
+  for (const side of ["Left", "Right"]) {
+    const verified = elm.library.statements.def.find((d: { name: string }) => d.name === `${side} Mastectomy Diagnosis`).expression.source[0].expression;
+    verified.operand[0] = verified.operand[0].operand.find((o: unknown) => !JSON.stringify(o).includes(unspecified));
+  }
+  return elm;
+}
+const valueSetsNamed = (library: Res) =>
+  new Set([
+    ...((library["relatedArtifact"] as Res[] | undefined) ?? []).map((r) => String(r["resource"])).filter((r) => r.includes("ValueSet")),
+    ...((library["dataRequirement"] as Array<{ codeFilter?: Res[] }> | undefined) ?? []).flatMap((d) => (d.codeFilter ?? []).map((f) => String(f["valueSet"]))),
+  ]);
+
+test("a main library whose reads changed carries recomputed lists and is named; its shared libraries and an unchanged build are untouched", () => {
+  const plain = assembleTranslationBundle(cms125Bundle, decode(elmDataOf(mainOf(cms125Bundle))), IDENTITY_125);
+  assert.deepEqual(plain.recomputedDataRequirements, [], "an unedited main library reads what CMS's reads: nothing is recomputed");
+  assert.deepEqual(mainOf(plain.bundle)["dataRequirement"], mainOf(cms125Bundle)["dataRequirement"], "and CMS's lists are carried as they are");
+  assert.deepEqual(assembleTranslationBundle(baseBundle, compiledMainElm(), IDENTITY).recomputedDataRequirements, []);
+
+  const { bundle, recomputedDataRequirements } = assembleTranslationBundle(cms125Bundle, without1071(), IDENTITY_125);
+  assert.deepEqual(recomputedDataRequirements, ["WorkWellCMS125Translation2027"]);
+  const main = mainOf(bundle);
+  assert.ok(valueSetsNamed(mainOf(cms125Bundle)).has(VS_1071));
+  assert.ok(!valueSetsNamed(main).has(VS_1071), "no list still names the value set the ELM no longer declares");
+  const declared = decode(elmDataOf(main)).library.valueSets.def.map((d: { id: string }) => d.id).sort();
+  assert.deepEqual([...valueSetsNamed(main)].sort(), declared);
+  assert.equal((main["dataRequirement"] as unknown[]).length, (mainOf(cms125Bundle)["dataRequirement"] as unknown[]).length - 4, "the four 1071 retrieves' entries are gone");
+  // Identity first, then the lists: the recompute is on the renamed library, and the Measure is untouched.
+  assert.equal(main["name"], IDENTITY_125.name);
+  assert.deepEqual(measureOf(bundle), measureOf(plain.bundle));
+  const cmsMain = String(mainOf(cms125Bundle)["name"]);
+  for (const library of librariesOf(cms125Bundle).filter((l) => l["name"] !== cmsMain)) {
+    assert.deepEqual(librariesOf(bundle).find((l) => l["name"] === library["name"]), library, `${String(library["name"])} is carried verbatim`);
+  }
+});
+
+test("a changed library whose reads changed is recomputed against CMS's ELM for the library it was edited from", () => {
+  const aif = compiled130(AIF);
+  let swapped = false;
+  const swap = (node: unknown): void => {
+    if (swapped || !node || typeof node !== "object") return;
+    const n = node as Record<string, { type?: string; name?: string } | unknown>;
+    const codes = n["codes"] as { type?: string; name?: string } | undefined;
+    if (n["type"] === "Retrieve" && codes?.type === "ValueSetRef" && codes.name === "Advanced Illness") {
+      n["codes"] = { ...codes, name: "Frailty Diagnosis" };
+      swapped = true;
+      return;
+    }
+    for (const value of Object.values(n)) swap(value);
+  };
+  swap(aif.library.statements);
+  assert.ok(swapped);
+  const { bundle, recomputedDataRequirements } = assembleTranslationBundle(cms130Bundle, compiled130("CMS130FHIRColorectalCancerScrn"), IDENTITY_130, [{ ...changedAif, compiledElm: aif }]);
+  assert.deepEqual(recomputedDataRequirements, [AIF_WW], "the main library reads what CMS's does, so only the changed one is named");
+  const entriesFor = (library: Res, oid: string) => (library["dataRequirement"] as Res[]).filter((d) => JSON.stringify(d).includes(oid)).length;
+  const ours = librariesOf(bundle).find((l) => l["name"] === AIF_WW)!;
+  const ADVANCED_ILLNESS = "113883.3.464.1003.110.12.1082";
+  const FRAILTY_DIAGNOSIS = "113883.3.464.1003.113.12.1074";
+  assert.equal(entriesFor(ours, ADVANCED_ILLNESS), entriesFor(cmsAif, ADVANCED_ILLNESS) - 1);
+  assert.equal(entriesFor(ours, FRAILTY_DIAGNOSIS), entriesFor(cmsAif, FRAILTY_DIAGNOSIS) + 1);
+  assert.deepEqual(ours["relatedArtifact"], cmsAif["relatedArtifact"], "the same value sets are declared, so the depends-on entries are CMS's");
+});
+
+test("recomputedDataRequirements is written after changedLibraries and before oracles, and not at all when there is none", () => {
+  const entry = { name: AIF_WW, version: "ww-2027.1", from: { name: AIF, version: "1.27.000", elmSha256: `sha256:${"f".repeat(64)}` }, translationSha256: `sha256:${"e".repeat(64)}` };
+  const input = { base: cms137, bundleJson, identity: IDENTITY, build: BUILD, unchangedLibraries: assembled.unchangedLibraries, packageSha256: `sha256:${"a".repeat(64)}`, terminologyBlock: TERMINOLOGY };
+  const both = derivedManifestFor({ ...input, changedLibraries: [entry], recomputedDataRequirements: [AIF_WW, IDENTITY.name] }).manifest.derived!;
+  assert.deepEqual(Object.keys(both), ["label", "derivedFrom", "base", "build", "unchangedLibraries", "changedLibraries", "recomputedDataRequirements", "oracles"]);
+  assert.deepEqual(both.recomputedDataRequirements, [AIF_WW, IDENTITY.name]);
+  const mainOnly = derivedManifestFor({ ...input, recomputedDataRequirements: [IDENTITY.name] }).manifest.derived!;
+  assert.deepEqual(Object.keys(mainOnly), ["label", "derivedFrom", "base", "build", "unchangedLibraries", "recomputedDataRequirements", "oracles"]);
+  for (const recomputedDataRequirements of [undefined, []]) {
+    const derived = derivedManifestFor({ ...input, ...(recomputedDataRequirements ? { recomputedDataRequirements } : {}) }).manifest.derived!;
+    assert.deepEqual(Object.keys(derived), ["label", "derivedFrom", "base", "build", "unchangedLibraries", "oracles"]);
+  }
+});

@@ -15,10 +15,16 @@
  * WorkWell's name, URL and `ww-` version (`rewriteChangedLibrary`) — and the main library's include of it
  * is repointed, while the main library's CQL stays as CMS wrote it unless it was edited too. The manifest
  * records each changed library beside the unchanged ones (`derived.changedLibraries`).
+ *
+ * A library WorkWell compiled (the main one, or a changed one) whose edit changes what it READS carries
+ * CMS's computed data requirements edited to describe our ELM (#782, `recomputeDataRequirements`); the
+ * manifest names each (`derived.recomputedDataRequirements`). One whose reads are unchanged keeps CMS's
+ * lists byte for byte.
  */
 import { createHash } from "node:crypto";
 import type { DerivedChangedLibrary, DerivedManifestBlock, OfficialArtifact, OfficialManifest } from "../wiring/official-artifacts.ts";
 import { changedLibraryIdentity, rewriteChangedLibrary } from "./derived-changed-library.ts";
+import { recomputeDataRequirements } from "./derived-data-requirements.ts";
 import { DERIVED_CANONICAL_PREFIX, DERIVED_LABEL_PREFIX, libraryElmSha256, rewriteDerivedIdentity, type DerivedIdentity } from "./derived-identity.ts";
 
 const sha256 = (data: string | Buffer): string => `sha256:${createHash("sha256").update(data).digest("hex")}`;
@@ -193,6 +199,11 @@ export interface AssembledTranslation<T> {
   unchangedLibraries: DerivedManifestBlock["unchangedLibraries"];
   /** The shared libraries WorkWell edited, as the manifest records them, in bundle order; empty when none. */
   changedLibraries: DerivedChangedLibrary[];
+  /**
+   * The libraries WorkWell compiled whose data requirements were recomputed because their reads differ
+   * from CMS's, by their name in the bundle, in bundle order; empty when none.
+   */
+  recomputedDataRequirements: string[];
 }
 
 type CompiledElm = { library: { identifier: { id?: unknown; version?: unknown } } & Record<string, unknown> };
@@ -217,6 +228,14 @@ export interface ChangedLibraryBuild {
  *
  * Each changed library's `from.elmSha256` is CMS's committed ELM for it, read here before the rewrite
  * replaces it, so the manifest pins what the edit started from; it is never listed as unchanged.
+ *
+ * Last, every library WorkWell compiled — the main one and each changed one — has its computed data
+ * requirements held against what its ELM, as the bundle now carries it, reads: where `elmDataSurface`
+ * differs from CMS's committed ELM for the same library, its lists are edited to describe ours
+ * (`recomputeDataRequirements`, which refuses what it cannot describe), and the library is named in
+ * `recomputedDataRequirements`. Where it does not, the library is left exactly as assembled. Compared
+ * with CMS's COMMITTED ELM, the one whose lists the translation carries; calibrated equal for an unedited
+ * recompile (`elm-data-surface.ts`).
  */
 export function assembleTranslationBundle<T extends Bundle>(
   base: T,
@@ -241,6 +260,9 @@ export function assembleTranslationBundle<T extends Bundle>(
   if (compiledId.id !== main["name"] || compiledId.version !== main["version"]) {
     throw new Error(`the compiled ELM is ${String(compiledId.id)}|${String(compiledId.version)}, not the main library ${String(main["name"])}|${String(main["version"])}`);
   }
+  // CMS's committed ELM for each library WorkWell compiles, by the name it will carry in the bundle; read
+  // before our compile replaces it.
+  const cmsElmOf = new Map<string, unknown>([[identity.name, decodeElm(main)]]);
   main["content"] = [{ contentType: "application/elm+json", data: encodeElm(stripElmDebugKeys(compiledMainElm)) }];
   const keyOf = (name: unknown, version: unknown) => `${String(name)}|${String(version)}`;
   const changedKeys = new Set(changed.map((c) => keyOf(c.from.name, c.from.version)));
@@ -265,6 +287,7 @@ export function assembleTranslationBundle<T extends Bundle>(
       throw new Error(`the edited library ${library.from.name} ${library.from.version} ${what}`);
     }
     const libraryIdentity = changedLibraryIdentity(library.from.name, library.from.version, identity);
+    cmsElmOf.set(libraryIdentity.name, decodeElm(shared[at]!));
     bundle = rewriteChangedLibrary(bundle, library.from, stripElmDebugKeys(library.compiledElm), libraryIdentity);
     changedLibraries.push({
       name: libraryIdentity.name,
@@ -273,7 +296,25 @@ export function assembleTranslationBundle<T extends Bundle>(
       translationSha256: library.translationSha256,
     });
   }
-  return { bundle, unchangedLibraries, changedLibraries };
+  // Recorded only where the lists actually changed: a surface difference the lists already describe
+  // leaves the library as assembled, and claims no recompute.
+  const recomputedDataRequirements: string[] = [];
+  for (const entry of bundle.entry ?? []) {
+    const library = entry.resource;
+    if (library?.resourceType !== "Library" || !cmsElmOf.has(String(library["name"]))) continue;
+    const recomputed = recomputeDataRequirements(library, cmsElmOf.get(String(library["name"])), decodeElm(library));
+    if (JSON.stringify(recomputed) === JSON.stringify(library)) continue;
+    entry.resource = recomputed;
+    recomputedDataRequirements.push(String(library["name"]));
+  }
+  return { bundle, unchangedLibraries, changedLibraries, recomputedDataRequirements };
+}
+
+/** A library's ELM as a bundle stores it (`content[].data`, base64 JSON). */
+function decodeElm(library: Resource): unknown {
+  const data = ((library["content"] as Array<{ contentType?: string; data?: string }> | undefined) ?? []).find((c) => c.contentType === "application/elm+json")?.data;
+  if (!data) throw new Error(`library ${String(library["name"])} ${String(library["version"])} has no ELM`);
+  return JSON.parse(Buffer.from(data, "base64").toString("utf8"));
 }
 
 export interface DerivedManifestInput {
@@ -286,6 +327,8 @@ export interface DerivedManifestInput {
   unchangedLibraries: DerivedManifestBlock["unchangedLibraries"];
   /** The shared libraries WorkWell edited (`assembleTranslationBundle`); none is written as no key. */
   changedLibraries?: readonly DerivedChangedLibrary[];
+  /** The libraries whose data requirements were recomputed (`assembleTranslationBundle`); none is written as no key. */
+  recomputedDataRequirements?: readonly string[];
   /** `sha256:` of the CMS package the edits were read from (provenance; the package is never committed). */
   packageSha256: string;
   terminologyBlock: NonNullable<OfficialManifest["terminology"]>;
@@ -303,10 +346,12 @@ export interface DerivedManifestInput {
  *
  * `derived.changedLibraries` is written after `unchangedLibraries` and before `oracles`, and only when a
  * shared library was edited: a translation with none (CMS137) keeps its manifest byte for byte, which is
- * what its `--verify` compares. `build.translationSha256` stays the main library's CQL, edited or not.
+ * what its `--verify` compares. `derived.recomputedDataRequirements` follows it on the same terms — only
+ * when a library's lists were recomputed — so CMS130 and CMS137 keep theirs. `build.translationSha256`
+ * stays the main library's CQL, edited or not.
  */
 export function derivedManifestFor(input: DerivedManifestInput): { manifest: OfficialManifest; warnings: string[] } {
-  const { base, bundleJson, identity, build, unchangedLibraries, changedLibraries, packageSha256, terminologyBlock, previous } = input;
+  const { base, bundleJson, identity, build, unchangedLibraries, changedLibraries, recomputedDataRequirements, packageSha256, terminologyBlock, previous } = input;
   const sha = sha256(bundleJson);
   const warnings: string[] = [];
   const previousOracles = previous?.derived?.oracles ?? [];
@@ -348,6 +393,7 @@ export function derivedManifestFor(input: DerivedManifestInput): { manifest: Off
       build,
       unchangedLibraries,
       ...(changedLibraries && changedLibraries.length > 0 ? { changedLibraries: [...changedLibraries] } : {}),
+      ...(recomputedDataRequirements && recomputedDataRequirements.length > 0 ? { recomputedDataRequirements: [...recomputedDataRequirements] } : {}),
       oracles,
     },
   };

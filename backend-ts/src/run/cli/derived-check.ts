@@ -15,23 +15,36 @@
  *   (package)                the CMS package it was translated from hashes to `derivedFrom.packageSha256`,
  *                            and every value set that package's CQL declares is one the translation declares
  *                            (`--package-cql-dir`, required with `--record`).
- *   (--madie)                on CMS's MADiE deck and CMS's own 2026 value sets, the translation's logic
- *                            gives CMS's status, rates and strata on every case, and CMS's value for every
- *                            define EXCEPT exactly the differences `madie-expected-differences.json` lists
- *                            (none when the file is absent; each listed one must be seen). Two breaks must
- *                            move results: the main library's "Initial Population", and each changed
- *                            library's edited defines (or the deck is not running WorkWell's copy). When
- *                            `edits.json` is not `[]`, the edit's own `edit-cases.json` patients must give
- *                            CMS's stated answer on CMS's logic and the translation's on the translation.
- *                            Credential-free; reported, never recorded.
+ *   (--madie)                on CMS's MADiE deck and CMS's own 2026 value sets (both sides run on CMS's
+ *                            upstream ValueSets), the translation's logic gives CMS's strata on every case,
+ *                            and CMS's rates, status and value for every define EXCEPT exactly the
+ *                            differences `madie-expected-differences.json` lists (none when the file is
+ *                            absent; each listed one must be seen). It lists two kinds: a define value
+ *                            `{ case, key, cms, ours, reason }`, and a case's populations
+ *                            `{ case, populations: { cms, ours }, reason }` in `compareRuns`' rate-vector
+ *                            form ("11100"), which alone excuses that case's rates and status. Two breaks
+ *                            must move results, each against the translation's OWN unbroken run: the main
+ *                            library's "Initial Population", and each changed library's edited defines (or
+ *                            the deck is not running WorkWell's copy). When `edits.json` is not `[]`, the
+ *                            edit's own `edit-cases.json` patients must give CMS's stated answer on CMS's
+ *                            logic and the translation's on the translation.
+ *                            The translation side alone is supplemented with each value set its libraries
+ *                            declare and CMS's upstream bundle lacks (CMS125v15's 1285; fqm refuses a run
+ *                            naming a value set it cannot find): an EMPTY expansion for the deck and both
+ *                            breaks, the codes `edit-cases.json`'s `supplementalValueSets` states (its keys
+ *                            exactly that set) for the edit cases. One that would shadow a value set CMS
+ *                            ships is refused, and every run must report having supplemented exactly that
+ *                            set. With `--record`, each stated code must be in the translation's sidecar
+ *                            expansion. Credential-free; reported, never recorded.
  *
  * Each record names the exact bundle and sidecar it ran against, hashed from the bytes ON DISK — never
  * copied from the manifest — so a record cannot vouch for an artifact it did not run.
  *
- * Prints counts and hashes, never a patient name. The one exception is a MADiE define-value difference
- * that is unlisted or listed-but-unseen: it is printed as its case uuid, define key and the two compared
- * strings cut to 80 characters, because that is the exact entry `madie-expected-differences.json` would
- * need. Those are values from CMS's synthetic MADiE patients (booleans and dates for CMS130's edit), and a
+ * Prints counts and hashes, never a patient name. The one exception is a MADiE difference that is
+ * unlisted or listed-but-unseen: a define value is printed as its case uuid, define key and the two
+ * compared strings cut to 80 characters, a population difference as its case uuid and two rate vectors,
+ * because that is the exact entry `madie-expected-differences.json` would need. A supplemental code
+ * missing from the sidecar is printed as system|code. Those are values from CMS's synthetic MADiE patients (booleans and dates for CMS130's edit), and a
  * code-valued define could show part of a code. Exit 0 pass, 1 any failure or refusal (nothing is
  * written), 2 usage. DB-less; fqm runs in a worker thread (deck) or through `standards/official-cases.ts`
  * (MADiE), never imported here.
@@ -65,10 +78,21 @@ import {
   COMPILED_GATE_MEASURES,
   PINNED_STATEMENT_RESULTS,
   verifyUpstreamBundle,
+  type CaseDifference,
   type CompiledGateMeasure,
   type StatementDifference,
 } from "./compiled-cases.ts";
-import { declaredPopulations, EDIT_CASES_FILE, editCaseSetProblems, parseEditCases, runEditCases, type EditCaseSet } from "../../standards/edit-cases.ts";
+import {
+  declaredPopulations,
+  EDIT_CASES_FILE,
+  editCaseSetProblems,
+  parseEditCases,
+  runEditCases,
+  supplementProblems,
+  valueSetExpansion,
+  type EditCaseSet,
+  type SupplementCode,
+} from "../../standards/edit-cases.ts";
 import { withCompiledElm, type CompiledLibrary } from "../../standards/qicore-compile.ts";
 import { compareSidecarToCypressCsv, CSV_SYSTEM_FOR_OID } from "../../standards/terminology-equivalence.ts";
 import { REQUIRED_OFFICIAL_CASE_COUNTS } from "./official-cases.ts";
@@ -275,7 +299,9 @@ function strippedElmText(library: Record<string, unknown>): string {
  * The bundle the MADiE comparison runs the translation as: the translation's Measure, its MAIN library and
  * every CHANGED library it lists (`derived.changedLibraries`), CMS's upstream copy of every other shared
  * library it carries, and everything else upstream ships (its ValueSets above all). That is what makes the
- * comparison about LOGIC: both runs see CMS's own 2026 terminology, so any difference is WorkWell's ELM.
+ * comparison about LOGIC: both runs see CMS's own 2026 terminology, so any difference is WorkWell's ELM
+ * (the translation's run adds only an empty expansion for each value set its logic declares that CMS's
+ * terminology lacks: `translationOnlyValueSets`).
  *
  * Why upstream's shared libraries rather than the translation's: the translation carries CMS's COMMITTED
  * copies, which (like every vendored artifact) have no `localId`, and without one fqm reports no value and
@@ -438,44 +464,159 @@ export function withChangedLibraryBroken<T extends Bundle | FhirBundle>(translat
   return { bundle: copy, broken, differing };
 }
 
+// ---- the value sets the translation declares and CMS's upstream bundle lacks ----------------------------
+
+/**
+ * The value-set canonical URLs the libraries of `translated` (what the translation's side runs: its own
+ * main and changed libraries, upstream's copies of the rest) declare in their ELM (`valueSets.def`) that
+ * CMS's upstream bundle (`upstream`) ships no ValueSet for — compared as exact strings, as fqm compares
+ * them. In declaration order, each once.
+ *
+ * These are what the translation's logic added (CMS125v15's 1285): fqm refuses a run naming a value set it
+ * cannot find, so each must be supplied on the translation's side, and only there. Refused: one whose bare
+ * OID upstream DOES ship under another canonical (a `|version`, another host) — supplying it would stand in
+ * for CMS's own value set, or the harness would narrow it away and fqm still refuse.
+ */
+export function translationOnlyValueSets(upstream: Pick<FhirBundle, "entry">, translated: Pick<FhirBundle, "entry">): string[] {
+  const shippedUrls = new Set<string>();
+  const shippedOids = new Set<string>();
+  for (const { resource } of upstream.entry) {
+    if (resource.resourceType !== "ValueSet" || typeof resource["url"] !== "string") continue;
+    shippedUrls.add(resource["url"]);
+    shippedOids.add(oidFromValueSetUrl(resource["url"]));
+  }
+  const declared: string[] = [];
+  for (const { resource } of translated.entry) {
+    if (resource.resourceType !== "Library") continue;
+    const elm = elmOfLibrary(resource) as ElmJson & { library: { valueSets?: { def?: Array<{ id?: unknown }> } } };
+    for (const def of elm.library.valueSets?.def ?? []) if (typeof def.id === "string" && !declared.includes(def.id)) declared.push(def.id);
+  }
+  const lacking = declared.filter((url) => !shippedUrls.has(url));
+  const shadowing = lacking.filter((url) => shippedOids.has(oidFromValueSetUrl(url)));
+  if (shadowing.length > 0) {
+    throw new Error(`the translation declares ${shadowing.join(", ")}, which CMS's upstream bundle ships under another canonical: a supplement would shadow CMS's own value set`);
+  }
+  return lacking;
+}
+
 // ---- the define-value differences a translation is allowed --------------------------------------------
 
 export const EXPECTED_DIFFERENCES_FILE = "madie-expected-differences.json";
 
-/** One entry of `madie-expected-differences.json`: a `compareRuns` difference, plus why it is right. */
+/** A define-value entry of `madie-expected-differences.json`: a `compareRuns` difference, plus why it is right. */
 export interface ExpectedDifference extends StatementDifference {
   reason: string;
 }
 
+/**
+ * A population entry: one case whose populations differ, as `compareRuns` reports them (`rateVector`
+ * strings, e.g. `"11100"` vs `"11000"`), plus why. It excuses that case's rates and, on that case alone, an
+ * agreement-status difference — never a stratifier difference, and never a define value (each of those is
+ * its own define-value entry).
+ */
+export interface ExpectedPopulationDifference {
+  case: string;
+  populations: { cms: string; ours: string };
+  reason: string;
+}
+
+export interface ExpectedDifferences {
+  defines: ExpectedDifference[];
+  populations: ExpectedPopulationDifference[];
+}
+
 const identityOf = (d: StatementDifference): string => JSON.stringify([d.case, d.key, d.cms, d.ours]);
+const populationIdentityOf = (d: CaseDifference): string => JSON.stringify([d.case, d.cms, d.ours]);
+
+const DEFINE_KEYS = ["case", "key", "cms", "ours", "reason"];
+const POPULATION_KEYS = ["case", "populations", "reason"];
+/** One or more rates of five 0/1 counts, `|`-joined: the only strings `rateVector` gives a scored case. */
+const RATE_VECTOR = /^[01]{5}(\|[01]{5})*$/;
 
 /**
- * Read `madie-expected-differences.json`: a JSON array of `{ case, key, cms, ours, reason }`, exactly the
- * strings `compareRuns` reports (`null` for a side that reports no such define). Refused: an unknown key, a
- * blank reason (a difference nobody can explain is not "expected"), an entry whose two sides are equal (it
- * is no difference), and a duplicate — the list is a set, matched exactly.
+ * Read `madie-expected-differences.json`: a JSON array of two kinds of entry, told apart by their keys.
+ *
+ * - `{ case, key, cms, ours, reason }`: a define value, exactly the strings `compareRuns` reports (`null`
+ *   for a side that reports no such define).
+ * - `{ case, populations: { cms, ours }, reason }`: a case's populations, in `rateVector` form.
+ *
+ * Refused: an entry that mixes the two kinds' keys, an unknown key, a blank reason (a difference nobody can
+ * explain is not "expected"), an entry whose two sides are equal (it is no difference), a population
+ * string that is not a scored case's vector (or whose two sides count different rates), a second
+ * population entry for one case (a case has one vector per run), and a duplicate — the list is a set,
+ * matched exactly.
  */
-export function parseExpectedDifferences(json: unknown): ExpectedDifference[] {
+export function parseExpectedDifferences(json: unknown): ExpectedDifferences {
   if (!Array.isArray(json)) throw new Error("it is not a JSON array");
   const seen = new Set<string>();
-  return json.map((raw, index) => {
+  const populationCases = new Set<string>();
+  const out: ExpectedDifferences = { defines: [], populations: [] };
+  json.forEach((raw, index) => {
     const where = `entry ${index + 1}`;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} is not an object`);
     const entry = raw as Record<string, unknown>;
-    const unknown = Object.keys(entry).filter((k) => !["case", "key", "cms", "ours", "reason"].includes(k));
+    const isPopulation = "populations" in entry;
+    if (isPopulation && ["key", "cms", "ours"].some((k) => k in entry)) {
+      throw new Error(`${where} mixes a population entry's key (populations) with a define entry's (key, cms, ours)`);
+    }
+    const allowed = isPopulation ? POPULATION_KEYS : DEFINE_KEYS;
+    const unknown = Object.keys(entry).filter((k) => !allowed.includes(k));
     if (unknown.length > 0) throw new Error(`${where} has unknown key(s) ${unknown.join(", ")}`);
     if (typeof entry["case"] !== "string" || entry["case"] === "") throw new Error(`${where} has no case`);
+    const reason = entry["reason"];
+    const reasonOk = typeof reason === "string" && reason.trim() !== "";
+    if (isPopulation) {
+      const populations = entry["populations"];
+      if (!populations || typeof populations !== "object" || Array.isArray(populations)) throw new Error(`${where}: populations must be { cms, ours }`);
+      const sides = populations as Record<string, unknown>;
+      const extra = Object.keys(sides).filter((k) => k !== "cms" && k !== "ours");
+      if (extra.length > 0) throw new Error(`${where}: populations has unknown key(s) ${extra.join(", ")}`);
+      for (const side of ["cms", "ours"]) {
+        if (typeof sides[side] !== "string" || !RATE_VECTOR.test(sides[side])) {
+          throw new Error(`${where}: populations.${side} must be a rate vector — five 0/1 counts per rate, rates joined by | (e.g. "11100")`);
+        }
+      }
+      const cms = sides["cms"] as string;
+      const ours = sides["ours"] as string;
+      if (cms === ours) throw new Error(`${where}: populations.cms and populations.ours are equal, so it is no difference`);
+      if (cms.split("|").length !== ours.split("|").length) throw new Error(`${where}: populations.cms and populations.ours count different numbers of rates`);
+      if (!reasonOk) throw new Error(`${where} has no reason`);
+      if (populationCases.has(entry["case"])) throw new Error(`${where} lists case ${entry["case"]}'s populations a second time`);
+      populationCases.add(entry["case"]);
+      out.populations.push({ case: entry["case"], populations: { cms, ours }, reason: reason as string });
+      return;
+    }
     if (typeof entry["key"] !== "string" || !/^g\d+\|.+\..+/.test(entry["key"])) throw new Error(`${where} has no key of the form g<group>|<library>.<define>`);
     for (const side of ["cms", "ours"]) {
       if (entry[side] !== null && typeof entry[side] !== "string") throw new Error(`${where}: ${side} must be the compared string, or null where that side reports no such define`);
     }
     if (entry["cms"] === entry["ours"]) throw new Error(`${where}: cms and ours are equal, so it is no difference`);
-    if (typeof entry["reason"] !== "string" || entry["reason"].trim() === "") throw new Error(`${where} has no reason`);
-    const difference: ExpectedDifference = { case: entry["case"], key: entry["key"], cms: entry["cms"] as string | null, ours: entry["ours"] as string | null, reason: entry["reason"] };
+    if (!reasonOk) throw new Error(`${where} has no reason`);
+    const difference: ExpectedDifference = { case: entry["case"], key: entry["key"], cms: entry["cms"] as string | null, ours: entry["ours"] as string | null, reason: reason as string };
     if (seen.has(identityOf(difference))) throw new Error(`${where} repeats an earlier entry`);
     seen.add(identityOf(difference));
-    return difference;
+    out.defines.push(difference);
   });
+  return out;
+}
+
+/** Observed vs listed, as multisets on `identity`: `missing` were listed but not seen, `unexpected` seen but not listed. */
+function matchMultiset<T>(observed: readonly T[], expected: readonly T[], identity: (item: T) => string): { missing: T[]; unexpected: T[] } {
+  const remaining = new Map<string, number>();
+  for (const d of expected) remaining.set(identity(d), (remaining.get(identity(d)) ?? 0) + 1);
+  const unexpected: T[] = [];
+  for (const d of observed) {
+    const left = remaining.get(identity(d)) ?? 0;
+    if (left > 0) remaining.set(identity(d), left - 1);
+    else unexpected.push(d);
+  }
+  const missing = expected.filter((d) => {
+    const left = remaining.get(identity(d)) ?? 0;
+    if (left === 0) return false;
+    remaining.set(identity(d), left - 1);
+    return true;
+  });
+  return { missing, unexpected };
 }
 
 /**
@@ -484,26 +625,27 @@ export function parseExpectedDifferences(json: unknown): ExpectedDifference[] {
  * missing, the new one unexpected — which is what it is.
  */
 export function matchExpectedDifferences(observed: readonly StatementDifference[], expected: readonly StatementDifference[]): { missing: StatementDifference[]; unexpected: StatementDifference[] } {
-  const remaining = new Map<string, number>();
-  for (const d of expected) remaining.set(identityOf(d), (remaining.get(identityOf(d)) ?? 0) + 1);
-  const unexpected: StatementDifference[] = [];
-  for (const d of observed) {
-    const left = remaining.get(identityOf(d)) ?? 0;
-    if (left > 0) remaining.set(identityOf(d), left - 1);
-    else unexpected.push(d);
-  }
-  const missing = expected.filter((d) => {
-    const left = remaining.get(identityOf(d)) ?? 0;
-    if (left === 0) return false;
-    remaining.set(identityOf(d), left - 1);
-    return true;
-  });
-  return { missing, unexpected };
+  return matchMultiset(observed, expected, identityOf);
+}
+
+/**
+ * Observed vs listed population differences, on (case, cms, ours). `observedListed` are the cases whose
+ * listed difference was seen exactly — the only cases on which a rate or a status difference is excused.
+ */
+export function matchPopulationDifferences(
+  observed: readonly CaseDifference[],
+  expected: readonly ExpectedPopulationDifference[],
+): { missing: CaseDifference[]; unexpected: CaseDifference[]; observedListed: Set<string> } {
+  const listed = expected.map((e) => ({ case: e.case, cms: e.populations.cms, ours: e.populations.ours }));
+  const { missing, unexpected } = matchMultiset(observed, listed, populationIdentityOf);
+  const missed = new Set(missing.map(populationIdentityOf));
+  return { missing, unexpected, observedListed: new Set(listed.filter((d) => !missed.has(populationIdentityOf(d))).map((d) => d.case)) };
 }
 
 /** A compared string for a log line: at most 80 characters, and "(absent)" for a side with no such define. */
 const clip = (value: string | null): string => (value === null ? "(absent)" : value.length > 80 ? `${value.slice(0, 79)}…` : value);
 const describeDifference = (d: StatementDifference): string => `case ${d.case} ${d.key}: CMS's ${clip(d.cms)} · ours ${clip(d.ours)}`;
+const describeCaseDifference = (d: CaseDifference): string => `case ${d.case}: CMS's ${d.cms === "" ? "(no rates)" : d.cms} · ours ${d.ours === "" ? "(no rates)" : d.ours}`;
 /** At most this many differences are printed per list; the counts are always whole. */
 const PRINTED_DIFFERENCES = 25;
 
@@ -738,7 +880,7 @@ async function check(args: DerivedCheckArgs, deps: DerivedCheckDeps, calculate: 
   }
 
   // ---- MADiE: the logic, on CMS's own terminology ------------------------------------------------------
-  if (args.madie) failures.push(...(await madie(args, deps, derived, block)));
+  if (args.madie) failures.push(...(await madie(args, deps, derived, block, translationTerminology?.codesByOid)));
 
   if (failures.length > 0) {
     for (const failure of failures) deps.error(`${id}: FAIL ${failure}`);
@@ -764,7 +906,17 @@ function readJsonBeside(dir: string, file: string): { absent: true } | { absent:
   }
 }
 
-async function madie(args: DerivedCheckArgs, deps: DerivedCheckDeps, derived: OfficialArtifact, block: DerivedManifestBlock): Promise<string[]> {
+/**
+ * `sidecar` is the translation's own terminology when the deck mode loaded it; with `--record` the edit
+ * cases' supplemental codes are checked against it.
+ */
+async function madie(
+  args: DerivedCheckArgs,
+  deps: DerivedCheckDeps,
+  derived: OfficialArtifact,
+  block: DerivedManifestBlock,
+  sidecar?: ReadonlyMap<string, readonly SupplementCode[]>,
+): Promise<string[]> {
   const id = args.catalogId;
   if (!(COMPILED_GATE_MEASURES as readonly string[]).includes(id)) return [`madie: ${id} has no pinned MADiE define count`];
   const measure = id as CompiledGateMeasure;
@@ -784,7 +936,7 @@ async function madie(args: DerivedCheckArgs, deps: DerivedCheckDeps, derived: Of
     return refuse([`the manifest lists ${changed.length} changed librar${changed.length === 1 ? "y" : "ies"} but edits.json is [], so no edit case would run`]);
   }
   const expectedFile = readJsonBeside(dir, EXPECTED_DIFFERENCES_FILE);
-  let expected: ExpectedDifference[] | undefined;
+  let expected: ExpectedDifferences | undefined;
   if (!expectedFile.absent) {
     if ("problem" in expectedFile) return refuse([expectedFile.problem]);
     try {
@@ -827,9 +979,41 @@ async function madie(args: DerivedCheckArgs, deps: DerivedCheckDeps, derived: Of
     const { bundle, broken, differing } = withChangedLibraryBroken(derived.bundle, loaded.measureBundle, library);
     return { library, broken, differing, bundle: broken.length > 0 ? translatedUpstreamBundle(loaded.measureBundle, bundle, block) : undefined };
   });
-  const runOn = async (bundle: FhirBundle) => {
+
+  // ---- the translation-side supplement: value sets the translation declares and upstream lacks ----------
+  // Every translation-side run (the deck, both breaks, the edit cases) needs one, or fqm refuses it: for
+  // the deck and the breaks an EMPTY expansion (the value set is not in CMS's 2026 terminology, so no deck
+  // patient can carry one of its codes), for the edit cases the file's stated codes. CMS's side never gets
+  // one.
+  let lacking: string[];
+  try {
+    lacking = translationOnlyValueSets(loaded.measureBundle, translated);
+  } catch (error) {
+    return refuse([error instanceof Error ? error.message : String(error)]);
+  }
+  if (editSet) {
+    const keyProblems = supplementProblems(editSet, lacking);
+    if (keyProblems.length > 0) return refuse(keyProblems.map((p) => `${EDIT_CASES_FILE}: ${p}`));
+  }
+  const deckSupplement = lacking.map((url) => valueSetExpansion(url, []));
+  if (lacking.length > 0) {
+    deps.log(
+      `${id}: supplemented ${lacking.length} value set(s) upstream lacks on the translation side: ${lacking.map(oidFromValueSetUrl).join(", ")} ` +
+        `(empty for the deck; edit cases use their stated codes)`,
+    );
+  }
+  const supplementFailures: string[] = [];
+  const runOn = async (bundle: FhirBundle, label: string) => {
     const captured: { output?: FqmOutput } = {};
-    const run: OfficialMeasureRun = await deps.runCases({ ...loaded, measureBundle: bundle }, { onOutput: (o) => (captured.output = o) });
+    const run: OfficialMeasureRun = await deps.runCases(
+      { ...loaded, measureBundle: bundle },
+      { onOutput: (o) => (captured.output = o), ...(deckSupplement.length > 0 ? { supplementalValueSets: deckSupplement } : {}) },
+    );
+    // The harness narrows a supplement to what upstream lacks; what it used must be the whole set.
+    const used = [...run.supplementedOids].sort();
+    if (JSON.stringify(used) !== JSON.stringify([...lacking].sort())) {
+      supplementFailures.push(`${label}: the harness supplemented [${used.join(", ")}], the translation lacks [${[...lacking].sort().join(", ")}]`);
+    }
     renameLibrary(captured.output, ourMain, cmsMain);
     for (const library of changed) renameLibrary(captured.output, library.name, library.from.name);
     return { run, output: captured.output };
@@ -837,20 +1021,36 @@ async function madie(args: DerivedCheckArgs, deps: DerivedCheckDeps, derived: Of
   const captured: { output?: FqmOutput } = {};
   const upstreamRun = await deps.runCases(loaded, { onOutput: (o) => (captured.output = o) });
   const upstream = { run: upstreamRun, output: captured.output };
-  const ours = await runOn(translated);
+  const ours = await runOn(translated, "the translation's run");
   const c = compareRuns(measure, upstream, ours);
 
-  // ---- status, rates and strata: strict; define values: exactly the listed differences --------------
+  // ---- rates and status: exactly the listed population differences; strata strict; define values:
+  // exactly the listed differences --------------------------------------------------------------------
   const problems: string[] = [];
   const required = deps.requiredCases[id] ?? 0;
   if (c.cases === 0 || c.cases < required) problems.push(`deck has ${c.cases} cases, at least ${Math.max(required, 1)} required`);
   if (upstream.run.calculationError || ours.run.calculationError) problems.push(`calculation error: ${upstream.run.calculationError ?? ours.run.calculationError}`);
   if (c.compiled.errors > 0) problems.push(`${c.compiled.errors} case error(s) on the translation`);
   if (upstream.run.trustMetaProfile !== ours.run.trustMetaProfile) problems.push("the profile retry ran on one side only");
-  for (const [label, count] of [["status", c.statusEqual], ["rates", c.ratesEqual], ["stratifiers", c.stratifiersEqual]] as const) {
-    if (count !== c.cases) problems.push(`${label} differ on ${c.cases - count} case(s)`);
+  // A case's rates are excused only by a listed population difference that was OBSERVED exactly; on that
+  // case alone its agreement status may differ too (its populations moved, so it no longer agrees with the
+  // deck's expected vector). Strata stay STRICT, never excused: fqm 1.8.5's `appliesResult` is the
+  // stratum's `result` AND the population named by the stratifier's FIRST `cqfm-appliesTo` only, which on
+  // CMS125, CMS130 and CMS137 is "initial-population"; a stratum's `result` is its own define (CMS125's two
+  // are age bands). So a case whose DENEX or NUMER moves (every CMS125v15 move) moves no stratum row, and a
+  // stratifier difference is always something no population entry explains. A listed move of the Initial
+  // Population itself would move strata, and is left to fail here rather than excused.
+  const populationMatch = matchPopulationDifferences(c.populationDifferences, expected?.populations ?? []);
+  const excused = populationMatch.observedListed;
+  if (c.ratesEqual + excused.size !== c.cases) {
+    problems.push(`rates differ on ${c.cases - c.ratesEqual} case(s)${excused.size > 0 ? `, ${excused.size} of them listed and observed` : ""}`);
   }
-  const { missing, unexpected } = matchExpectedDifferences(c.statementDifferences, expected ?? []);
+  const unexcusedStatus = c.statusDifferences.filter((d) => !excused.has(d.case));
+  if (unexcusedStatus.length > 0) problems.push(`status differs on ${unexcusedStatus.length} case(s) with no listed and observed population difference`);
+  if (c.stratifiersEqual !== c.cases) problems.push(`stratifiers differ on ${c.cases - c.stratifiersEqual} case(s)`);
+  if (populationMatch.unexpected.length > 0) problems.push(`${populationMatch.unexpected.length} case(s)' populations differ that ${EXPECTED_DIFFERENCES_FILE} does not list`);
+  if (populationMatch.missing.length > 0) problems.push(`${populationMatch.missing.length} population difference(s) ${EXPECTED_DIFFERENCES_FILE} lists were not observed`);
+  const { missing, unexpected } = matchExpectedDifferences(c.statementDifferences, expected?.defines ?? []);
   if (expected === undefined) {
     if (unexpected.length > 0) problems.push(`${unexpected.length} define value(s) differ, and no ${EXPECTED_DIFFERENCES_FILE} lists any`);
   } else {
@@ -859,11 +1059,20 @@ async function madie(args: DerivedCheckArgs, deps: DerivedCheckDeps, derived: Of
   }
   const pinned = deps.pinnedStatements[id] ?? Number.POSITIVE_INFINITY;
   if (c.statementsCompared < pinned) problems.push(`compared ${c.statementsCompared} define values, at least ${pinned} required`);
-  const listed = expected === undefined ? "" : ` · listed differences ${expected.length - missing.length}/${expected.length} observed, ${unexpected.length} unlisted`;
+  const listedPopulations = expected?.populations.length ?? 0;
+  const populationsNote =
+    listedPopulations > 0 || populationMatch.unexpected.length > 0
+      ? ` · listed population differences ${listedPopulations - populationMatch.missing.length}/${listedPopulations} observed, ${populationMatch.unexpected.length} unlisted`
+      : "";
+  const listed = expected === undefined ? "" : ` · listed differences ${expected.defines.length - missing.length}/${expected.defines.length} observed, ${unexpected.length} unlisted`;
   deps.log(
-    `${id}: madie ${c.cases} cases · status ${c.statusEqual} · rates ${c.ratesEqual} · stratifiers ${c.stratifiersEqual} · ` +
+    `${id}: madie ${c.cases} cases · status ${c.statusEqual} · rates ${c.ratesEqual} · stratifiers ${c.stratifiersEqual}${populationsNote} · ` +
       `define values ${c.statementsCompared - c.statementsDiffering}/${c.statementsCompared} equal${listed} — ${problems.length ? "FAIL" : "PASS"} (reported, never recorded)`,
   );
+  for (const [label, list] of [["unlisted population difference", populationMatch.unexpected], ["listed population difference not observed", populationMatch.missing], ["unexcused status difference", unexcusedStatus]] as const) {
+    for (const d of list.slice(0, PRINTED_DIFFERENCES)) deps.log(`  ${label}: ${describeCaseDifference(d)}`);
+    if (list.length > PRINTED_DIFFERENCES) deps.log(`  … and ${list.length - PRINTED_DIFFERENCES} more ${label}(s)`);
+  }
   for (const [label, list] of [["unlisted difference", unexpected], ["listed difference not observed", missing]] as const) {
     for (const d of list.slice(0, PRINTED_DIFFERENCES)) deps.log(`  ${label}: ${describeDifference(d)}`);
     if (list.length > PRINTED_DIFFERENCES) deps.log(`  … and ${list.length - PRINTED_DIFFERENCES} more ${label}(s)`);
@@ -871,9 +1080,11 @@ async function madie(args: DerivedCheckArgs, deps: DerivedCheckDeps, derived: Of
 
   // ---- the breaks: each must move results, or the run above was not executing what it claims --------
   // "Initial Population" false: the main library is the translation's (a bundle that quietly kept CMS's
-  // ELM passes all of the above).
-  const broken = await runOn(translatedBroken);
-  const brokenComparison = compareRuns(measure, upstream, broken);
+  // ELM passes all of the above). Measured against the translation's OWN unbroken run, not CMS's: against
+  // CMS's, the cases a listed population difference already moved would count as "moved" with the break
+  // doing nothing.
+  const broken = await runOn(translatedBroken, "the \"Initial Population\" break");
+  const brokenComparison = compareRuns(measure, ours, broken);
   const moved = brokenComparison.cases - brokenComparison.ratesEqual;
   deps.log(`${id}: madie non-vacuity, "Initial Population" forced false → ${moved} case(s) move ${moved > 0 ? "(the check runs the translation)" : "— FAIL"}`);
   if (moved === 0) problems.push("breaking the translation moved no case: the check is not running the translation");
@@ -892,7 +1103,7 @@ async function madie(args: DerivedCheckArgs, deps: DerivedCheckDeps, derived: Of
       deps.log(`${id}: madie non-vacuity, ${what}: nothing to break — FAIL`);
       continue;
     }
-    const run = await runOn(bundle);
+    const run = await runOn(bundle, `the ${library.name} break`);
     const versus = compareRuns(measure, ours, run);
     const names = new Set(differing.filter((d) => d.in !== "cms").map((d) => `${library.from.name}.${d.name}`));
     const own = versus.statementDifferences.filter((d) => names.has(d.key.slice(d.key.indexOf("|") + 1))).length;
@@ -914,7 +1125,31 @@ async function madie(args: DerivedCheckArgs, deps: DerivedCheckDeps, derived: Of
         `${outcome.problems.length ? "FAIL" : "PASS"}`,
     );
     problems.push(...outcome.problems.map((p) => `edit cases: ${p}`));
+
+    // Under --record, the codes an edit case expands a supplemented value set to must be codes the
+    // translation's own sidecar puts in it: the file may pick a few, never invent one.
+    const stated = Object.entries(editSet.supplementalValueSets ?? {});
+    if (args.record && sidecar && stated.length > 0) {
+      let checked = 0;
+      for (const [url, codes] of stated) {
+        const oid = oidFromValueSetUrl(url);
+        const expansion = sidecar.get(oid);
+        if (!expansion) {
+          problems.push(`edit cases: the translation's sidecar has no expansion for ${oid}, so the supplemental codes ${EDIT_CASES_FILE} states for it cannot be checked`);
+          continue;
+        }
+        const known = new Set(expansion.map((c) => `${c.system}|${c.code}`));
+        const absent = codes.filter((c) => !known.has(`${c.system}|${c.code}`));
+        checked += codes.length - absent.length;
+        if (absent.length > 0) {
+          problems.push(`edit cases: ${absent.length} supplemental code(s) ${EDIT_CASES_FILE} states for ${oid} are not in the translation's sidecar expansion: ${absent.map((c) => `${c.system}|${c.code}`).join(", ")}`);
+        }
+      }
+      const total = stated.reduce((sum, [, codes]) => sum + codes.length, 0);
+      deps.log(`${id}: edit cases' supplemental codes: ${checked}/${total} in the translation's sidecar expansion`);
+    }
   }
+  problems.push(...supplementFailures.map((p) => `supplement: ${p}`));
   return problems.map((p) => `madie: ${p}`);
 }
 

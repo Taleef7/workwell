@@ -10,14 +10,15 @@
  * WorkWell's edits, grouped by library, land on the exact CMS lines they were written against, name only
  * libraries the upstream bundle holds, and change each library they name → the translator compiles the
  * library set TWICE, and the main library and every edited one compile to byte-identical ELM both times
- * (a build that is not reproducible cannot be verified later) → each of those reads exactly the data
- * CMS's committed ELM for it reads (`elmDataSurface`: the translation carries CMS's computed data
- * requirements, which are true only while no retrieve moved) → the main library's ELM is stripped of
+ * (a build that is not reproducible cannot be verified later) → the main library's ELM is stripped of
  * CMS's CQL text and dropped into CMS's committed bundle, every edited shared library is dropped in the
  * same way under WorkWell's name with the main library's include repointed at it (a library that a
  * library other than the main one includes is refused), and every other shared library is carried
- * byte-for-byte → the translation's identity passes the same check the router runs → only then is
- * anything written. Output is counts and hashes; no CQL is ever printed.
+ * byte-for-byte → each library WorkWell compiled whose reads differ from CMS's committed ELM for it
+ * (`elmDataSurface`) has CMS's computed data requirements edited to describe ours, and is named in the
+ * manifest (#782, `recomputeDataRequirements`; what it cannot describe is refused) → the translation's
+ * identity passes the same check the router runs → only then is anything written. Output is counts and
+ * hashes; no CQL is ever printed.
  *
  * BUILD-ONLY: run by an operator once per edit, never by the worker. Exit 0 ok, 1 refused, 2 usage.
  */
@@ -40,7 +41,6 @@ import {
 } from "../../standards/derived-build.ts";
 import { cqlSha256 } from "../../standards/derived-changed-library.ts";
 import { derivedIdentityProblems, installedTranslatorVersion, translatorId } from "../../standards/derived-identity.ts";
-import { dataSurfaceDifferences, elmDataSurface } from "../../standards/elm-data-surface.ts";
 import { loadOfficialMeasureCases, officialMeasureName, type LoadedOfficialMeasure, type OfficialMeasureId } from "../../standards/official-cases.ts";
 import {
   assertAppliedOptions,
@@ -348,8 +348,7 @@ function run(args: BuildDerivedArgs, deps: BuildDerivedDeps): number {
   const base = deps.loadBase(id);
   if (!base) throw new Error(`CMS's artifact measures/official/${id}/ is not committed`);
   const baseBundle = base.bundle as unknown as { entry?: Array<{ resource?: Record<string, unknown> }> };
-  assertSameDataSurface(baseBundle, ours, (library) => compiledOf(first, library).elm);
-  const { bundle, unchangedLibraries, changedLibraries } = assembleTranslationBundle(
+  const { bundle, unchangedLibraries, changedLibraries, recomputedDataRequirements } = assembleTranslationBundle(
     baseBundle,
     stripElmDebugKeys(compiledOf(first, main).elm),
     identity,
@@ -362,6 +361,9 @@ function run(args: BuildDerivedArgs, deps: BuildDerivedDeps): number {
     ),
   );
   const bundleJson = `${JSON.stringify(bundle, null, 0)}\n`;
+  if (recomputedDataRequirements.length > 0) {
+    deps.log(`${id}: data requirements recomputed for ${recomputedDataRequirements.join(", ")}: their reads differ from CMS's ELM for them`);
+  }
 
   const built = withTerminology(args, deps, previous, bundleJson, (terminologyBlock) =>
     derivedManifestFor({
@@ -376,6 +378,7 @@ function run(args: BuildDerivedArgs, deps: BuildDerivedDeps): number {
       },
       unchangedLibraries,
       changedLibraries,
+      recomputedDataRequirements,
       packageSha256,
       terminologyBlock,
       previous,
@@ -402,37 +405,6 @@ function run(args: BuildDerivedArgs, deps: BuildDerivedDeps): number {
   deps.fs.writeFile(manifestPath, `${JSON.stringify(built.manifest, null, 2)}\n`);
   deps.log(`${id}: wrote ${outputDir} (${built.manifest.derived!.oracles.length} oracle record(s) carried)`);
   return 0;
-}
-
-/**
- * Refuse unless every library WorkWell compiled for the bundle (the main one and each edited one) reads
- * exactly the data CMS's committed ELM for the same library reads: the same value sets, codes and code
- * systems declared, and the same retrieves with multiplicity (`elmDataSurface`). The translation carries
- * CMS's computed data requirements — the Measure's `dataRequirement` entries and the `depends-on` value
- * sets, which MADiE computed from CMS's ELM — and nothing recomputes them, so they are true only while
- * this holds. An edit that changes how fetched data is compared (`starts during` → `overlaps`) passes;
- * one that fetches another value set or resource type does not, until the builder recomputes them.
- * Compared with CMS's COMMITTED ELM (what the translation is built on), not upstream's; calibrated equal
- * for an unedited recompile, see `elm-data-surface.ts`.
- */
-function assertSameDataSurface(
-  baseBundle: { entry?: Array<{ resource?: Record<string, unknown> }> },
-  libraries: ReadonlyArray<{ name: string; version: string }>,
-  oursOf: (library: { name: string; version: string }) => unknown,
-): void {
-  const baseLibraries = (baseBundle.entry ?? []).map((e) => e.resource).filter((r) => r?.["resourceType"] === "Library");
-  for (const library of libraries) {
-    const cms = baseLibraries.find((l) => l?.["name"] === library.name && l["version"] === library.version);
-    const data = ((cms?.["content"] as Array<{ contentType?: string; data?: string }> | undefined) ?? []).find((c) => c.contentType === "application/elm+json")?.data;
-    if (!data) throw new Error(`CMS's committed artifact holds no ELM for ${library.name} ${library.version} to compare the translation's data requirements with`);
-    const differences = dataSurfaceDifferences(elmDataSurface(JSON.parse(Buffer.from(data, "base64").toString("utf8"))), elmDataSurface(oursOf(library)));
-    if (differences.length > 0) {
-      throw new Error(
-        `${library.name} ${library.version} would read other data than CMS's, but the translation carries CMS's computed data ` +
-          `requirements, which nothing recomputes:\n  ${differences.join("\n  ")}`,
-      );
-    }
-  }
 }
 
 /**

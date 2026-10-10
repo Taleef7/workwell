@@ -5,12 +5,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CMS130_CHANGED, CMS130_CHANGED_FROM, derivedCms130Changed, derivedCms137, FIXTURE_URL } from "../test-support/derived-fixture.ts";
-import { loadOfficialArtifact, type OfficialManifest } from "../wiring/official-artifacts.ts";
+import { loadDerivedArtifact, loadOfficialArtifact, type OfficialManifest } from "../wiring/official-artifacts.ts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
+  bundleDataRequirementProblems,
   derivedIdentityProblems,
   installedTranslatorVersion,
+  libraryDataRequirementProblems,
   libraryElmSha256,
   QICORE_MODEL_INFO_SHA256,
   rewriteDerivedIdentity,
@@ -706,4 +708,127 @@ test("the rewrite is idempotent over the fixture's own identity", () => {
     effectivePeriod: { start: "2027-01-01", end: "2027-12-31" },
   });
   assert.deepEqual(twice, fixture.bundle);
+});
+
+// ---- D10 (#782): a library's computed data requirements describe its own ELM ----------------------------
+
+const MAIN_137 = `${String(mainIn(fixture.bundle as unknown as B)["name"])}|ww-2027.1`;
+const STALE = "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.198.12.1071";
+type Related = Array<Record<string, unknown>>;
+type DataRequirements = Array<{ codeFilter?: Array<{ valueSet?: string }> }>;
+const relatedOf = (library: Res) => library["relatedArtifact"] as Related;
+const dataRequirementsOf = (library: Res) => library["dataRequirement"] as DataRequirements;
+const d10 = (list: readonly string[]) => list.filter((p) => / names? value set | declares value set | cqf-directReferenceCode /.test(p));
+const firstDeclared = () => (elmOf(mainIn(clone())).elm.library.valueSets.def as Array<{ id: string }>)[0]!.id;
+
+test("D10: a library whose lists still name a value set its ELM no longer declares is refused (the stale-1071 case)", () => {
+  const b = clone();
+  const main = mainIn(b);
+  const { elm, save } = elmOf(main);
+  const dropped = (elm.library.valueSets.def as Array<{ id: string }>).shift()!.id;
+  save(elm);
+  // Non-vacuous: CMS's lists name it in both places, as MADiE wrote them.
+  assert.ok(relatedOf(main).some((r) => r["resource"] === dropped));
+  assert.ok(dataRequirementsOf(main).some((d) => (d.codeFilter ?? []).some((c) => c.valueSet === dropped)));
+  const list = problems(b);
+  expect(list, new RegExp(`library ${esc(MAIN_137)}'s relatedArtifact depends-on names value set ${esc(dropped)}, which its ELM does not declare`));
+  expect(list, new RegExp(`library ${esc(MAIN_137)}'s dataRequirement code filters name value set ${esc(dropped)}, which its ELM does not declare`));
+  // One sentence per list, not one per dataRequirement entry naming it.
+  assert.equal(d10(list).length, 2, JSON.stringify(d10(list)));
+});
+
+test("D10: a value set only a dataRequirement code filter names is refused on its own", () => {
+  const b = clone();
+  dataRequirementsOf(mainIn(b)).push({ codeFilter: [{ valueSet: STALE }] });
+  expect(problems(b), new RegExp(`dataRequirement code filters name value set ${esc(STALE)}`));
+});
+
+test("D10: a value set the ELM declares and neither list names is refused; the rule is the union of the two lists", () => {
+  const declared = firstDeclared();
+  // Named only by a code filter (MADiE also names it in relatedArtifact): the union still covers it.
+  let b = clone();
+  mainIn(b)["relatedArtifact"] = relatedOf(mainIn(b)).filter((r) => r["resource"] !== declared);
+  assert.deepEqual(d10(problems(b)), []);
+  // Named by neither.
+  b = clone();
+  const main = mainIn(b);
+  main["relatedArtifact"] = relatedOf(main).filter((r) => r["resource"] !== declared);
+  for (const d of dataRequirementsOf(main)) d.codeFilter = (d.codeFilter ?? []).filter((c) => c.valueSet !== declared);
+  const list = problems(b);
+  expect(list, new RegExp(`library ${esc(MAIN_137)}'s ELM declares value set ${esc(declared)}, which neither its relatedArtifact nor its dataRequirement names`));
+  assert.equal(d10(list).length, 1);
+});
+
+test("D10: relatedArtifact is read exactly as fqm reads it: depends-on only, the legacy url first, then resource", () => {
+  const declared = firstDeclared();
+  const withEntry = (entry: Record<string, unknown>) => {
+    const b = clone();
+    relatedOf(mainIn(b)).push(entry);
+    return d10(problems(b));
+  };
+  expect(withEntry({ type: "depends-on", url: STALE }), new RegExp(`relatedArtifact depends-on names value set ${esc(STALE)}`));
+  expect(withEntry({ type: "depends-on", url: "http://example.org/Library/Other", resource: STALE }), new RegExp(esc(STALE)));
+  // fqm takes `url` when it names a value set, and then never reads `resource`.
+  assert.deepEqual(withEntry({ type: "depends-on", url: declared, resource: STALE }), []);
+  // Nor does it read any other relation type, or a URL without "ValueSet" in it.
+  assert.deepEqual(withEntry({ type: "composed-of", resource: STALE }), []);
+  assert.deepEqual(withEntry({ type: "depends-on", resource: "http://example.org/valueset/lowercase" }), []);
+});
+
+test("D10 holds every library, not only the ones WorkWell compiled: a carried-unchanged library's lists are checked too", () => {
+  const b = clone();
+  relatedOf(libraryIn(b, "SupplementalDataElements")).push({ type: "depends-on", resource: STALE });
+  expect(problems(b), new RegExp(`library SupplementalDataElements\\|5\\.1\\.000's relatedArtifact depends-on names value set ${esc(STALE)}`));
+});
+
+test("D10: a cqf-directReferenceCode its ELM's codes.def does not declare is refused, matched by code AND system", () => {
+  const ext = (system: string, code: string) => ({ url: "http://hl7.org/fhir/StructureDefinition/cqf-directReferenceCode", valueCoding: { system, code } });
+  // The v14 qualifier code CMS125's main library would still claim after the v15 edit.
+  let b = clone();
+  mainIn(b)["extension"] = [ext("http://snomed.info/sct", "7771000")];
+  expect(problems(b), new RegExp(`library ${esc(MAIN_137)}'s cqf-directReferenceCode extension names code 7771000 of http://snomed.info/sct, which its ELM does not declare`));
+  // Hospice declares this SNOMED code; the same code under another system is not it.
+  const hospiceCode = "428371000124100";
+  b = clone();
+  const hospice = libraryIn(b, "Hospice");
+  assert.ok((hospice["extension"] as Array<{ valueCoding?: { code?: string } }>).some((e) => e.valueCoding?.code === hospiceCode), "non-vacuous: Hospice already names it");
+  (hospice["extension"] as unknown[]).push(ext("http://loinc.org", hospiceCode));
+  expect(problems(b), new RegExp(`library Hospice\\|6\\.18\\.000's cqf-directReferenceCode extension names code ${hospiceCode} of http://loinc\\.org`));
+  b = clone();
+  (libraryIn(b, "Hospice")["extension"] as unknown[]).push(ext("http://snomed.info/sct", hospiceCode));
+  assert.deepEqual(d10(problems(b)), []);
+  // A malformed extension is a sentence, not an exception.
+  b = clone();
+  mainIn(b)["extension"] = [{ url: "http://hl7.org/fhir/StructureDefinition/cqf-directReferenceCode" }];
+  expect(problems(b), /cqf-directReferenceCode extension names code undefined of undefined/);
+});
+
+test("D10: recomputedDataRequirements names only libraries WorkWell compiled, read defensively", () => {
+  const recomputed = (value: unknown) => derivedWith({ recomputedDataRequirements: value as string[] });
+  const mainName = String(mainIn(clone())["name"]);
+  assert.deepEqual(problems(fixture.bundle, recomputed([mainName])), []);
+  expect(problems(fixture.bundle, recomputed(["NoSuchLibrary"])), /recomputedDataRequirements names 'NoSuchLibrary', which is not a library WorkWell compiled/);
+  // A library carried unchanged keeps CMS's lists; a record of recomputing them is false.
+  expect(problems(fixture.bundle, recomputed(["Hospice"])), /recomputedDataRequirements names 'Hospice'/);
+  expect(problems(fixture.bundle, recomputed(mainName)), /recomputedDataRequirements is not a list/);
+  expect(problems(fixture.bundle, recomputed([7])), /recomputedDataRequirements\[0\] is not a library name/);
+  expect(problems(fixture.bundle, recomputed([mainName, mainName])), new RegExp(`lists '${mainName}' more than once`));
+  // A changed library is one WorkWell compiled; the CMS library it replaced is not in the bundle at all.
+  const main130 = String(mainIn(clone130())["name"]);
+  assert.deepEqual(problems130(fx130.bundle, derived130With({ recomputedDataRequirements: [main130, CMS130_CHANGED.name] })), []);
+  expect(problems130(fx130.bundle, derived130With({ recomputedDataRequirements: [CMS130_CHANGED_FROM.name] })), new RegExp(`names '${CMS130_CHANGED_FROM.name}'`));
+});
+
+test("D10: the committed CMS137 and CMS130 translations pass, and the per-library rule finds their lists exact", () => {
+  for (const id of ["cms137", "cms130"]) {
+    const translation = loadDerivedArtifact(id);
+    assert.ok(translation, `${id}'s translation is committed`);
+    assert.deepEqual(derivedIdentityProblems(translation.bundle as never, translation.manifest, loadOfficialArtifact(id)), [], id);
+    assert.deepEqual(bundleDataRequirementProblems(translation.bundle), [], id);
+  }
+});
+
+test("D10's per-library rule: a library with no ELM library object is one sentence, and malformed lists read as empty", () => {
+  assert.deepEqual(libraryDataRequirementProblems({ name: "X", version: "1" }, {}), ["library X|1 carries no ELM library to check its data requirements against"]);
+  assert.deepEqual(libraryDataRequirementProblems({ name: "X", version: "1", relatedArtifact: "not a list", dataRequirement: [null] }, { library: {} }), []);
 });

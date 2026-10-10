@@ -152,7 +152,12 @@ export function verifyUpstreamBundle(contentDir: string, measure: OfficialMeasur
   if (actual !== expected) throw new Error(`${measure}: upstream bundle hashes to ${actual}, manifest pins ${expected}`);
 }
 
-const rateVector = (rates: PopulationCounts[] | undefined): string =>
+/**
+ * A case's populations as one string: each rate's five counts in `POPULATION_CODES` order (an undeclared
+ * population is 0), rates joined by `|` — `"11100"`, or `"11100|11000"` for two rates. A translation's
+ * `madie-expected-differences.json` writes a population difference in exactly this form.
+ */
+export const rateVector = (rates: PopulationCounts[] | undefined): string =>
   (rates ?? []).map((rate) => POPULATION_CODES.map((code) => rate[code]).join("")).join("|");
 
 /**
@@ -221,6 +226,17 @@ export interface StatementDifference {
   ours: string | null;
 }
 
+/**
+ * One case whose populations (`rateVector`) or agreement status differs between the two runs: the case's
+ * uuid and each side's string. A population difference is the form a translation's
+ * `madie-expected-differences.json` lists, so neither list is capped.
+ */
+export interface CaseDifference {
+  case: string;
+  cms: string;
+  ours: string;
+}
+
 export interface MeasureComparison {
   measure: CompiledGateMeasure;
   cases: number;
@@ -232,6 +248,14 @@ export interface MeasureComparison {
   statementsDiffering: number;
   /** Every differing define value, uncapped: exactly `statementsDiffering` entries, in the order compared. */
   statementDifferences: StatementDifference[];
+  /**
+   * Every case not counted in `ratesEqual` that both runs hold, uncapped, as the two `rateVector`s. A case
+   * whose two vectors are both empty is listed with equal sides: it is no agreement, and no file can
+   * excuse it.
+   */
+  populationDifferences: CaseDifference[];
+  /** Every case not counted in `statusEqual` that both runs hold, uncapped (status, else error, else "none"). */
+  statusDifferences: CaseDifference[];
   /** The first 15 differences of any kind, as readable lines — for a log, never for a decision. */
   samples: string[];
   defCountMismatches: string[];
@@ -256,6 +280,8 @@ export function compareRuns(
   const ourStrata = stratifiersByPatient(compiled.output);
   const samples: string[] = [];
   const statementDifferences: StatementDifference[] = [];
+  const populationDifferences: CaseDifference[] = [];
+  const statusDifferences: CaseDifference[] = [];
   let statusEqual = 0;
   let ratesEqual = 0;
   let stratifiersEqual = 0;
@@ -267,10 +293,20 @@ export function compareRuns(
       samples.push(`${ours.uuid}: not in the upstream run`);
       continue;
     }
-    if ((ours.agreement?.status ?? ours.error ?? "none") === (theirs.agreement?.status ?? theirs.error ?? "none")) statusEqual++;
-    else if (samples.length < 15) samples.push(`${ours.uuid}: status ${theirs.agreement?.status ?? theirs.error} vs ours ${ours.agreement?.status ?? ours.error}`);
-    if (rateVector(ours.actualRates) === rateVector(theirs.actualRates) && rateVector(ours.actualRates) !== "") ratesEqual++;
-    else if (samples.length < 15) samples.push(`${ours.uuid}: rates ${rateVector(theirs.actualRates)} vs ours ${rateVector(ours.actualRates)}`);
+    const ourStatus = ours.agreement?.status ?? ours.error ?? "none";
+    const theirStatus = theirs.agreement?.status ?? theirs.error ?? "none";
+    if (ourStatus === theirStatus) statusEqual++;
+    else {
+      statusDifferences.push({ case: ours.uuid, cms: theirStatus, ours: ourStatus });
+      if (samples.length < 15) samples.push(`${ours.uuid}: status ${theirs.agreement?.status ?? theirs.error} vs ours ${ours.agreement?.status ?? ours.error}`);
+    }
+    const ourRates = rateVector(ours.actualRates);
+    const theirRates = rateVector(theirs.actualRates);
+    if (ourRates === theirRates && ourRates !== "") ratesEqual++;
+    else {
+      populationDifferences.push({ case: ours.uuid, cms: theirRates, ours: ourRates });
+      if (samples.length < 15) samples.push(`${ours.uuid}: rates ${theirRates} vs ours ${ourRates}`);
+    }
     const pid = String(ours.patientId);
     if (upStrata.get(pid) === ourStrata.get(pid)) stratifiersEqual++;
     const up = upStatements.get(pid) ?? new Map<string, string>();
@@ -299,6 +335,8 @@ export function compareRuns(
     statementsCompared,
     statementsDiffering,
     statementDifferences,
+    populationDifferences,
+    statusDifferences,
     samples,
     upstream: upstream.run.summary,
     compiled: compiled.run.summary,
@@ -449,7 +487,7 @@ export async function main(argv: string[], overrides: Partial<CompiledCasesDeps>
       r = comparison;
     } catch (error) {
       problems.push(error instanceof Error ? error.message : String(error));
-      r = { measure, cases: 0, statusEqual: 0, ratesEqual: 0, stratifiersEqual: 0, statementsCompared: 0, statementsDiffering: 0, statementDifferences: [], samples: [], defCountMismatches: [], structurallyIdentical: 0, defs: 0, upstream: emptySummary(), compiled: emptySummary(), problems };
+      r = { measure, cases: 0, statusEqual: 0, ratesEqual: 0, stratifiersEqual: 0, statementsCompared: 0, statementsDiffering: 0, statementDifferences: [], populationDifferences: [], statusDifferences: [], samples: [], defCountMismatches: [], structurallyIdentical: 0, defs: 0, upstream: emptySummary(), compiled: emptySummary(), problems };
     }
     results.push(r);
     deps.log(

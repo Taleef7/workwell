@@ -29,6 +29,7 @@ import {
   type OfficialMeasureRun,
   type PopulationCounts,
   type RunOfficialMeasureOptions,
+  supplementFor,
 } from "../../standards/official-cases.ts";
 import { derivedCms137, FIXTURE_URL } from "../../test-support/derived-fixture.ts";
 import { loadOfficialArtifact, readArtifactDir, type DerivedChangedLibrary, type OfficialArtifact, type OfficialManifest } from "../../wiring/official-artifacts.ts";
@@ -42,9 +43,11 @@ import {
   main,
   mainLibraryName,
   matchExpectedDifferences,
+  matchPopulationDifferences,
   parseArgs,
   parseExpectedDifferences,
   translatedUpstreamBundle,
+  translationOnlyValueSets,
   withChangedLibraryBroken,
   type DerivedCheckDeps,
 } from "./derived-check.ts";
@@ -159,6 +162,26 @@ function changedTranslation(edited: boolean): OfficialArtifact {
   };
 }
 
+/**
+ * A value set the translation's main library declares and CMS's upstream bundle does not ship — CMS125v15's
+ * 1285 in miniature (a synthetic OID), and the code the edit cases state for it.
+ */
+const EXTRA_OID = "9.8.7.6.5";
+const EXTRA_URL = `http://cts.nlm.nih.gov/fhir/ValueSet/${EXTRA_OID}`;
+const EXTRA_CODE = { system: SNOMED, code: "X1" };
+
+/** A copy of `translation` whose main library also declares `url` (`valueSets.def`), as a logic edit that adds a value set does. */
+function declaringExtra(translation: OfficialArtifact, url = EXTRA_URL): OfficialArtifact {
+  const bundle = JSON.parse(JSON.stringify(translation.bundle)) as OfficialArtifact["bundle"];
+  const main = mainLibraryName(bundle as never);
+  const library = bundle.entry.map((e) => e.resource as Record<string, unknown>).find((r) => r["resourceType"] === "Library" && r["name"] === main)!;
+  editElm(library, (elm) => {
+    const declared = elm as unknown as { library: { valueSets: { def: Array<Record<string, unknown>> } } };
+    declared.library.valueSets.def.push({ name: "WorkWell Extra", id: url, accessLevel: "Public" });
+  });
+  return { ...translation, bundle };
+}
+
 /** The deck's period, which `loadedCases` reports. */
 const MADIE_PERIOD = { start: "2026-01-01", end: "2026-12-31" };
 const full = (denex: 0 | 1): PopulationCounts => ({ "initial-population": 1, denominator: 1, "denominator-exclusion": denex, numerator: 0, "denominator-exception": 0 });
@@ -197,12 +220,17 @@ function fixture(
     editCases?: unknown;
     /** null: no madie-expected-differences.json. Default LISTED when `changed` is `edited`, else none. */
     expectedDifferences?: unknown;
+    /** The main library also declares a value set upstream lacks: EXTRA_URL, or the URL given. */
+    extraValueSet?: boolean | string;
+    /** The sidecar's codes for EXTRA_OID (with `extraValueSet`); default [EXTRA_CODE]. */
+    extraSidecarCodes?: Array<{ system: string; code: string }>;
   } = {},
 ): Fixture {
   const root = mkdtempSync(join(tmpdir(), "derived-check-"));
   const dir = join(root, "derived", "cms137");
   mkdirSync(dir, { recursive: true });
-  const translation = options.changed ? changedTranslation(options.changed === "edited") : base;
+  const plain = options.changed ? changedTranslation(options.changed === "edited") : base;
+  const translation = options.extraValueSet ? declaringExtra(plain, typeof options.extraValueSet === "string" ? options.extraValueSet : EXTRA_URL) : plain;
   const bundleText = JSON.stringify(translation.bundle);
   writeFileSync(join(dir, "bundle.json"), bundleText);
   const edits = options.edits === undefined ? (options.changed ? [{ library: "Hospice", note: "one edit; the check reads only how many" }] : []) : options.edits;
@@ -215,7 +243,10 @@ function fixture(
   const terminologyText = JSON.stringify({
     catalogId: "cms137",
     source: { repo: "synthetic", ref: "0", measure: "cms137" },
-    valueSets: REQUIRED.map((oid) => ({ oid, url: `http://cts.nlm.nih.gov/fhir/ValueSet/${oid}`, declaredTotal: codes.get(oid)!.length, codes: codes.get(oid) })),
+    valueSets: [
+      ...REQUIRED.map((oid) => ({ oid, url: `http://cts.nlm.nih.gov/fhir/ValueSet/${oid}`, declaredTotal: codes.get(oid)!.length, codes: codes.get(oid) })),
+      ...(options.extraValueSet === true ? [{ oid: EXTRA_OID, url: EXTRA_URL, declaredTotal: (options.extraSidecarCodes ?? [EXTRA_CODE]).length, codes: options.extraSidecarCodes ?? [EXTRA_CODE] }] : []),
+    ],
   });
   if (options.sidecar !== false) writeFileSync(join(dir, "terminology.json"), terminologyText);
   const bundleSha = sha(bundleText);
@@ -301,6 +332,16 @@ function editElm(resource: Record<string, unknown>, edit: (elm: ElmLibrary) => v
   content.data = Buffer.from(JSON.stringify(elm), "utf8").toString("base64");
 }
 
+/** Every value-set canonical CMS's committed cms137 libraries declare, read from their ELM. */
+const DECLARED_URLS: string[] = [
+  ...new Set(
+    official.bundle.entry
+      .map((e) => e.resource as Record<string, unknown>)
+      .filter((r) => r["resourceType"] === "Library")
+      .flatMap((r) => ((elmOf(r) as unknown as { library: { valueSets?: { def?: Array<{ id: string }> } } }).library.valueSets?.def ?? []).map((d) => d.id)),
+  ),
+];
+
 /**
  * CMS's upstream bundle as MADiE ships it: the committed libraries, but each ELM carrying what the
  * vendored copies were stripped of — a translator annotation and a `localId` on every expression — plus a
@@ -326,6 +367,9 @@ function upstreamWith(edit: (libraries: Map<string, Record<string, unknown>>, bu
     });
   }
   bundle.entry.push({ resource: { resourceType: "ValueSet", id: "kept", url: "http://cts.nlm.nih.gov/fhir/ValueSet/9.9.9" } });
+  // A ValueSet for every canonical CMS's libraries declare, as MADiE's bundle ships them: so a translation
+  // that declares nothing new lacks nothing, and needs no supplement.
+  for (const url of DECLARED_URLS) bundle.entry.push({ resource: { resourceType: "ValueSet", id: url.slice(url.lastIndexOf("/") + 1), url } });
   edit(libraries, bundle);
   return bundle;
 }
@@ -348,7 +392,7 @@ function loadedCases(_contentDir?: string, _measure?: string, measureBundle: Fhi
     cases: ["c1", "c2"].map((uuid, i) => ({ uuid, name: uuid, title: uuid, series: "s", description: "d", patientId: `p${i + 1}`, expected: counts(1, i === 0 ? 1 : 0) })),
     measurementPeriod: { start: "2026-01-01", end: "2026-12-31" },
     valueSets: { total: 0, expanded: 0, truncated: [] },
-    valueSetResources: [],
+    valueSetResources: measureBundle.entry.map((e) => e.resource).filter((r) => r.resourceType === "ValueSet"),
   };
 }
 
@@ -362,6 +406,8 @@ interface MadieCall {
   cases: string[];
   /** Whether the changed library's edited define arrived forced null. */
   changedBroken: boolean;
+  /** The supplemental value sets it was handed, as `url=code,code` (empty codes: `url=`); [] for none. */
+  supplement: string[];
 }
 
 /** The expression type of one define in a bundle library's ELM. */
@@ -387,6 +433,14 @@ interface MadieStubOptions {
   dropEditCase?: string;
   /** Edit cases on the translation answer CMS's logic's way: an edit that did not take. */
   editLostOnTranslation?: boolean;
+  /** Report having supplemented nothing, whatever it was handed (a harness that narrowed it all away). */
+  dropSupplement?: boolean;
+  /** On the translation (unbroken or not), this deck case is denominator-excluded: its populations move and its status becomes a mismatch. */
+  excludeOnTranslation?: string;
+  /** On the translation, this deck case's status is a mismatch with its populations unchanged. */
+  statusOnTranslation?: string;
+  /** On the translation, this deck case's stratum row differs. */
+  stratumOnTranslation?: string;
 }
 
 /**
@@ -409,14 +463,19 @@ function madieStub(calls: MadieCall[], options: MadieStubOptions = {}) {
       libraries: new Map(libraries.map((r) => [String(r["name"]), JSON.stringify(r)])),
       cases: loaded.cases.map((c) => c.uuid),
       changedBroken,
+      supplement: ((runOptions.supplementalValueSets ?? []) as Array<{ url: string; expansion: { contains: Array<{ code: string }> } }>).map(
+        (vs) => `${vs.url}=${vs.expansion.contains.map((c) => c.code).join(",")}`,
+      ),
     });
+    // What the real harness records: the supplement narrowed to what upstream lacks.
+    const supplementedOids = options.dropSupplement ? [] : supplementFor(loaded, runOptions.supplementalValueSets).map((vs) => String((vs as { url: string }).url));
     const shell = {
       measure: "cms137" as const,
       measureName: loaded.measureName,
       measurementPeriod: loaded.measurementPeriod,
       valueSets: loaded.valueSets,
       valueSetMode: "measure-bundle" as const,
-      supplementedOids: [],
+      supplementedOids,
       trustMetaProfile: false,
       profileRetry: false,
       retrieveSignal: true,
@@ -453,16 +512,20 @@ function madieStub(calls: MadieCall[], options: MadieStubOptions = {}) {
             { libraryName: "SupplementalDataElements", statementName: "SDE Sex", raw: translation && options.sexOnTranslation ? options.sexOnTranslation : "F", final: "NA", relevance: "NA" },
             ...(options.changed ? [hospice(i)] : []),
           ],
-          stratifierResults: [{ strataId: "Stratification_1_1", result: !(translation && options.strataOnTranslation === false) }],
+          stratifierResults: [
+            { strataId: "Stratification_1_1", result: !(translation && options.strataOnTranslation === false) && !(translation && options.stratumOnTranslation === c.uuid) },
+          ],
         })),
       })),
     };
     runOptions.onOutput?.(output as never);
     const calculationError = translation ? options.calculationErrorOnTranslation : undefined;
     const cases = loaded.cases.map((c, i) => {
-      const rate = counts(broken ? 0 : 1, !broken && i === 0 ? 1 : 0);
-      const status = broken ? ("mismatch" as const) : ("expected-agreement" as const);
-      return { ...c, actual: rate, actualRates: [rate, rate], agreement: { pass: !broken, status, differences: [] } };
+      const excluded = translation && !broken && options.excludeOnTranslation === c.uuid;
+      const rate = { ...counts(broken ? 0 : 1, !broken && i === 0 && !excluded ? 1 : 0), "denominator-exclusion": excluded ? 1 : 0 };
+      const mismatch = broken || excluded || (translation && options.statusOnTranslation === c.uuid);
+      const status = mismatch ? ("mismatch" as const) : ("expected-agreement" as const);
+      return { ...c, actual: rate, actualRates: [rate, rate], agreement: { pass: !mismatch, status, differences: [] } };
     });
     return {
       ...shell,
@@ -1082,7 +1145,7 @@ test("--madie: the define-value differences must equal the listed ones exactly",
 
 test("an expected-differences file is a set of exact, explained differences", () => {
   const ok = { case: "c1", key: "g0|Lib.Define", cms: "false", ours: "true", reason: "why" };
-  assert.equal(parseExpectedDifferences([ok, { ...ok, key: "g1|Lib.Define", ours: null }]).length, 2);
+  assert.deepEqual(parseExpectedDifferences([ok, { ...ok, key: "g1|Lib.Define", ours: null }]), { defines: [ok, { ...ok, key: "g1|Lib.Define", ours: null }], populations: [] });
   const refusals: Array<[unknown, string]> = [
     [{}, "not a JSON array"],
     [[{ ...ok, extra: 1 }], "unknown key(s) extra"],
@@ -1169,4 +1232,164 @@ test("--madie: every edit case must agree on both logics, counted rather than as
 test("sanity: the edit-case fixture states exactly the populations cms137 declares, at the deck's period", () => {
   assert.deepEqual(declaredPopulations(upstreamBundle), [0, 1].map(() => ["initial-population", "denominator", "denominator-exclusion", "numerator"]));
   assert.deepEqual(loadedCases().measurementPeriod, MADIE_PERIOD);
+});
+
+// ---- #782: population differences, the translation-side supplement --------------------------------------
+
+/** c2 as each run scores it: "11000" per rate on CMS's logic; denominator-excluded, "11100", when the translation moves it. */
+const C2_MOVED = { case: "c2", populations: { cms: "11000|11000", ours: "11100|11100" }, reason: "the edit excludes c2" };
+
+test("an expected-differences file lists population entries beside define entries, told apart by their keys", () => {
+  const define = { case: "c1", key: "g0|Lib.Define", cms: "false", ours: "true", reason: "why" };
+  assert.deepEqual(parseExpectedDifferences([define, C2_MOVED]), { defines: [define], populations: [C2_MOVED] });
+  const refusals: Array<[unknown, string]> = [
+    [[{ ...C2_MOVED, key: "g0|L.D" }], "entry 1 mixes a population entry's key (populations) with a define entry's (key, cms, ours)"],
+    [[{ ...C2_MOVED, cms: "x" }], "entry 1 mixes"],
+    [[{ ...C2_MOVED, extra: 1 }], "entry 1 has unknown key(s) extra"],
+    [[{ ...C2_MOVED, populations: { ...C2_MOVED.populations, rate: 1 } }], "populations has unknown key(s) rate"],
+    [[{ ...C2_MOVED, populations: "11000" }], "populations must be { cms, ours }"],
+    [[{ ...C2_MOVED, populations: { cms: "1100", ours: "11100" } }], "populations.cms must be a rate vector"],
+    [[{ ...C2_MOVED, populations: { cms: "11000", ours: "" } }], "populations.ours must be a rate vector"],
+    [[{ ...C2_MOVED, populations: { cms: "11000", ours: "11000" } }], "populations.cms and populations.ours are equal"],
+    [[{ ...C2_MOVED, populations: { cms: "11000", ours: "11100|11100" } }], "count different numbers of rates"],
+    [[{ ...C2_MOVED, reason: " " }], "entry 1 has no reason"],
+    [[C2_MOVED, { ...C2_MOVED, populations: { cms: "11000|11000", ours: "11010|11010" } }], "entry 2 lists case c2's populations a second time"],
+  ];
+  for (const [bad, message] of refusals) throwsWith(() => parseExpectedDifferences(bad), message);
+
+  const seen = { case: "c2", cms: "11000|11000", ours: "11100|11100" };
+  assert.deepEqual(matchPopulationDifferences([seen], [C2_MOVED]), { missing: [], unexpected: [], observedListed: new Set(["c2"]) });
+  const other = { ...seen, ours: "11010|11010" };
+  assert.deepEqual(matchPopulationDifferences([other], [C2_MOVED]), { missing: [seen], unexpected: [other], observedListed: new Set() }, "the right case, another vector: nothing is excused");
+});
+
+test("--madie: a case's populations may differ only as listed, and only that case's status with them", async () => {
+  const run = async (stub: MadieStubOptions, expectedDifferences: unknown) => {
+    const s = setup(fixture({ sidecar: false, expectedDifferences }), { runCases: madieStub([], stub) });
+    const code = await main(MADIE, s.deps);
+    return { code, errors: s.errors.join("\n"), logs: s.logs.join("\n") };
+  };
+  const listed = await run({ excludeOnTranslation: "c2" }, [C2_MOVED]);
+  assert.equal(listed.code, 0, listed.errors);
+  assert.match(listed.logs, /madie 2 cases · status 1 · rates 1 · stratifiers 2 · listed population differences 1\/1 observed, 0 unlisted · define values 8\/8 equal · listed differences 0\/0 observed, 0 unlisted — PASS/);
+
+  const unlisted = await run({ excludeOnTranslation: "c2" }, null);
+  assert.equal(unlisted.code, 1);
+  for (const text of [
+    "madie: rates differ on 1 case(s)",
+    "madie: status differs on 1 case(s) with no listed and observed population difference",
+    "madie: 1 case(s)' populations differ that madie-expected-differences.json does not list",
+  ]) assert.ok(unlisted.errors.includes(text), `expected '${text}' in:\n${unlisted.errors}`);
+  assert.ok(unlisted.logs.includes("unlisted population difference: case c2: CMS's 11000|11000 · ours 11100|11100"), unlisted.logs);
+
+  const unseen = await run({}, [C2_MOVED]);
+  assert.equal(unseen.code, 1);
+  assert.ok(unseen.errors.includes("madie: 1 population difference(s) madie-expected-differences.json lists were not observed"), unseen.errors);
+  assert.ok(unseen.logs.includes("listed population difference not observed: case c2: CMS's 11000|11000 · ours 11100|11100"), unseen.logs);
+
+  const wrongVector = await run({ excludeOnTranslation: "c2" }, [{ ...C2_MOVED, populations: { cms: "11000|11000", ours: "11110|11110" } }]);
+  assert.equal(wrongVector.code, 1);
+  assert.ok(wrongVector.errors.includes("madie: rates differ on 1 case(s)"), "a listed-but-unseen entry excuses nothing");
+  assert.ok(wrongVector.errors.includes("status differs on 1 case(s)"), wrongVector.errors);
+
+  // c2 is listed and moves; c1's status differs too, with no population of its own moving: not excused.
+  const otherStatus = await run({ excludeOnTranslation: "c2", statusOnTranslation: "c1" }, [C2_MOVED]);
+  assert.equal(otherStatus.code, 1);
+  assert.ok(otherStatus.errors.includes("madie: status differs on 1 case(s) with no listed and observed population difference"), otherStatus.errors);
+  assert.ok(otherStatus.logs.includes("unexcused status difference: case c1: CMS's expected-agreement · ours mismatch"), otherStatus.logs);
+
+  // Strata stay strict, even on the listed case.
+  const stratum = await run({ excludeOnTranslation: "c2", stratumOnTranslation: "c2" }, [C2_MOVED]);
+  assert.equal(stratum.code, 1);
+  assert.ok(stratum.errors.includes("madie: stratifiers differ on 1 case(s)"), stratum.errors);
+});
+
+test("--madie: the Initial Population break is measured against the translation's own run, so a listed move cannot make it pass", async () => {
+  // An engine that ignores the break: against CMS's run, c2's listed move alone would read as "1 case moves".
+  const s = setup(fixture({ sidecar: false, expectedDifferences: [C2_MOVED] }), { runCases: madieStub([], { excludeOnTranslation: "c2", honourBreak: false }) });
+  assert.equal(await main(MADIE, s.deps), 1);
+  assert.ok(s.errors.join("\n").includes("madie: breaking the translation moved no case"), s.errors.join("\n"));
+  assert.match(s.logs.join("\n"), /"Initial Population" forced false → 0 case\(s\) move — FAIL/);
+});
+
+test("translationOnlyValueSets: what the translation declares and upstream lacks, exactly; never a set upstream ships under another canonical", () => {
+  assert.deepEqual(translationOnlyValueSets(upstreamBundle, translatedUpstreamBundle(upstreamBundle, base.bundle, {})), [], "the fixture translation declares nothing new");
+  const extra = declaringExtra(base);
+  assert.deepEqual(translationOnlyValueSets(upstreamBundle, translatedUpstreamBundle(upstreamBundle, extra.bundle, {})), [EXTRA_URL]);
+  // Upstream ships 9.9.9 at cts.nlm.nih.gov; the translation names it elsewhere, and with a version.
+  for (const url of ["http://example.org/fhir/ValueSet/9.9.9", "http://cts.nlm.nih.gov/fhir/ValueSet/9.9.9|20260514"]) {
+    throwsWith(() => translationOnlyValueSets(upstreamBundle, translatedUpstreamBundle(upstreamBundle, declaringExtra(base, url).bundle, {})), `the translation declares ${url}, which CMS's upstream bundle ships under another canonical`);
+  }
+});
+
+/** The changed-library edit cases, stating EXTRA_CODE for the value set the translation adds. */
+const SUPPLEMENTED_CASES = { ...EDIT_CASES, supplementalValueSets: { [EXTRA_URL]: [EXTRA_CODE] } };
+
+test("--madie: a value set upstream lacks is supplied on the translation's side only — empty for the deck and breaks, the stated codes for the edit cases", async () => {
+  const f = fixture({ sidecar: false, changed: "edited", extraValueSet: true, editCases: SUPPLEMENTED_CASES });
+  const { deps, logs, errors, calls } = changedSetup(f);
+  assert.equal(await main(MADIE, deps), 0, errors.join("\n"));
+  assert.ok(logs.join("\n").includes(`cms137: supplemented 1 value set(s) upstream lacks on the translation side: ${EXTRA_OID} (empty for the deck; edit cases use their stated codes)`), logs.join("\n"));
+  assert.deepEqual(
+    calls.map((c) => [c.measureUrl === FIXTURE_URL ? "translation" : "cms", c.cases.join(","), c.supplement.join(" ")]),
+    [
+      ["cms", "c1,c2", ""],
+      ["translation", "c1,c2", `${EXTRA_URL}=`],
+      ["translation", "c1,c2", `${EXTRA_URL}=`],
+      ["translation", "c1,c2", `${EXTRA_URL}=`],
+      ["cms", "e1,e2", ""],
+      ["translation", "e1,e2", `${EXTRA_URL}=X1`],
+    ],
+    "CMS's runs get nothing; the deck and both breaks an empty expansion; the edit cases the stated code",
+  );
+
+  // Without any supplement the translation could not run, so a translation needing one is not quiet about it:
+  // a harness that narrowed it away fails every translation-side run by name.
+  const dropped = changedSetup(fixture({ sidecar: false, changed: "edited", extraValueSet: true, editCases: SUPPLEMENTED_CASES }), { dropSupplement: true });
+  assert.equal(await main(MADIE, dropped.deps), 1);
+  const text = dropped.errors.join("\n");
+  for (const label of ["the translation's run", 'the "Initial Population" break', `the ${CHANGED.name} break`]) {
+    assert.ok(text.includes(`madie: supplement: ${label}: the harness supplemented [], the translation lacks [${EXTRA_URL}]`), `${label}:\n${text}`);
+  }
+  assert.ok(text.includes(`madie: edit cases: the translation: the harness supplemented [], expected [${EXTRA_URL}]`), text);
+});
+
+test("--madie: the edit cases' supplementalValueSets must name exactly the value sets the translation adds", async () => {
+  const refused = async (extraValueSet: boolean, editCases: unknown, message: string) => {
+    const s = changedSetup(fixture({ sidecar: false, changed: "edited", extraValueSet, editCases }));
+    assert.equal(await main(MADIE, s.deps), 1, message);
+    assert.ok(s.errors.join("\n").includes(message), `expected '${message}' in:\n${s.errors.join("\n")}`);
+    assert.equal(s.calls.length, 0, `${message}: refused before fqm ran`);
+  };
+  await refused(true, EDIT_CASES, `madie: edit-cases.json: supplementalValueSets states no codes for 1 value set(s) the translation declares and CMS's upstream bundle lacks: ${EXTRA_URL}`);
+  const other = "http://cts.nlm.nih.gov/fhir/ValueSet/1.1.1.1";
+  await refused(true, { ...SUPPLEMENTED_CASES, supplementalValueSets: { [EXTRA_URL]: [EXTRA_CODE], [other]: [EXTRA_CODE] } }, `supplementalValueSets names 1 value set(s) that are not ones the translation declares and CMS's upstream bundle lacks: ${other}`);
+  await refused(false, SUPPLEMENTED_CASES, `supplementalValueSets names 1 value set(s) that are not ones the translation declares and CMS's upstream bundle lacks: ${EXTRA_URL}`);
+  // A value set upstream ships under another canonical is never supplied.
+  const shadow = "http://example.org/fhir/ValueSet/9.9.9";
+  const s = changedSetup(fixture({ sidecar: false, changed: "edited", extraValueSet: shadow, editCases: EDIT_CASES }));
+  assert.equal(await main(MADIE, s.deps), 1);
+  assert.ok(s.errors.join("\n").includes(`madie: the translation declares ${shadow}, which CMS's upstream bundle ships under another canonical`), s.errors.join("\n"));
+  assert.equal(s.calls.length, 0);
+});
+
+test("--madie --record: each supplemental code an edit case states must be in the translation's sidecar expansion", async () => {
+  const recordMadie = (f: Fixture) => [...recordArgs(f), "--madie"];
+  const run = async (extraSidecarCodes?: Array<{ system: string; code: string }>) => {
+    const f = fixture({ changed: "edited", extraValueSet: true, editCases: SUPPLEMENTED_CASES, ...(extraSidecarCodes ? { extraSidecarCodes } : {}) });
+    const s = changedSetup(f);
+    const before = readFileSync(f.manifestPath, "utf8");
+    const code = await main(recordMadie(f), s.deps);
+    // Whatever else this synthetic deck says, nothing is recorded on a failure.
+    if (code !== 0) assert.equal(readFileSync(f.manifestPath, "utf8"), before);
+    return { code, errors: s.errors.join("\n"), logs: s.logs.join("\n") };
+  };
+  const inSidecar = await run([EXTRA_CODE, { system: SNOMED, code: "X2" }]);
+  assert.ok(inSidecar.logs.includes("cms137: edit cases' supplemental codes: 1/1 in the translation's sidecar expansion"), inSidecar.logs);
+  assert.ok(!inSidecar.errors.includes("supplemental code(s)"), inSidecar.errors);
+
+  const notInSidecar = await run([{ system: SNOMED, code: "X2" }]);
+  assert.equal(notInSidecar.code, 1);
+  assert.ok(notInSidecar.errors.includes(`madie: edit cases: 1 supplemental code(s) edit-cases.json states for ${EXTRA_OID} are not in the translation's sidecar expansion: ${SNOMED}|X1`), notInSidecar.errors);
+  assert.ok(notInSidecar.logs.includes("supplemental codes: 0/1 in the translation's sidecar expansion"), notInSidecar.logs);
 });
