@@ -188,6 +188,9 @@ test("#776: the coverage of every logic the Maui sandbox scores with is pinned",
     // Its edit changes how a retrieved diagnosis is compared, not what is retrieved (#779), so it reads
     // exactly what CMS's artifact reads.
     "cms130 workwell-translation": cmsWithDevices,
+    // Its edit swaps a value set and moves a laterality read from a Condition to a Procedure (#782), but
+    // both types were already read, so by type it reads what CMS's artifact reads.
+    "cms125 workwell-translation": cmsWithDevices,
   });
 });
 

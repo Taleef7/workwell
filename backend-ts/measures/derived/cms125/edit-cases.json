@@ -1,0 +1,2983 @@
+{
+  "measurementPeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "supplementalValueSets": {
+    "http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.1285": [
+      {
+        "system": "http://snomed.info/sct",
+        "code": "172043006"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "ww-cms125-edit-01",
+      "description": "Unilateral mastectomy procedure (1285), body site entire left breast, + status post right mastectomy",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-01",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-01-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-01"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-01-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "172043006",
+                "display": "Simple mastectomy (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-01"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "361716006",
+                  "display": "Entire left breast (body structure)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-01-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-01"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-02",
+      "description": "Unilateral mastectomy procedure (1285), body site entire right breast, + status post left mastectomy",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-02",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-02-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-02"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-02-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "172043006",
+                "display": "Simple mastectomy (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-02"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "361715005",
+                  "display": "Entire right breast (body structure)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-02-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429009003",
+                "display": "History of left mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-02"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-03",
+      "description": "One unilateral mastectomy procedure (1285) listing both entire breasts as body sites (FHIR's bodySite is a list)",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-03",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-03-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-03"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-03-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "172043006",
+                "display": "Simple mastectomy (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-03"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "361716006",
+                  "display": "Entire left breast (body structure)"
+                }
+              ]
+            },
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "361715005",
+                  "display": "Entire right breast (body structure)"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-04",
+      "description": "Unilateral mastectomy procedure (1285), body site entire left breast, and nothing on the right",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-04",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-04-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-04"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-04-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "172043006",
+                "display": "Simple mastectomy (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-04"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "361716006",
+                  "display": "Entire left breast (body structure)"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-05",
+      "description": "Unilateral mastectomy procedure (1285) with no body site, + status post right mastectomy",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-05",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-05-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-05"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-05-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "172043006",
+                "display": "Simple mastectomy (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-05"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-05-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-05"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-06",
+      "description": "Unilateral mastectomy procedure (1285), body site the qualifier Left (7771000), + status post right",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-06",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-06-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-06"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-06-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "172043006",
+                "display": "Simple mastectomy (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-06"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "7771000",
+                  "display": "Left (qualifier value)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-06-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-06"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-07",
+      "description": "Unilateral mastectomy procedure (1285), body site structure of left breast (80248007), + status post right",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-07",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-07-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-07"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-07-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "172043006",
+                "display": "Simple mastectomy (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-07"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "80248007",
+                  "display": "Structure of left breast (body structure)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-07-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-07"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-08",
+      "description": "Unilateral mastectomy procedure (1285) entire left breast, status not-done, + status post right",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-08",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-08-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-08"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-08-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "not-done",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "172043006",
+                "display": "Simple mastectomy (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-08"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "361716006",
+                  "display": "Entire left breast (body structure)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-08-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-08"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-09",
+      "description": "Unspecified-laterality mastectomy diagnosis with qualifier Left, + status post right (v14's removed path)",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-09",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-09-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-09"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-09-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "248802009",
+                "display": "Absence of breast (finding)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-09"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "7771000",
+                  "display": "Left (qualifier value)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-09-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-09"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-10",
+      "description": "Two unspecified-laterality mastectomy diagnoses, qualifier Right and qualifier Left (v14's removed path)",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-10",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-10-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-10"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-10-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "248802009",
+                "display": "Absence of breast (finding)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-10"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "24028007",
+                  "display": "Right (qualifier value)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-10-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "248802009",
+                "display": "Absence of breast (finding)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-10"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00",
+          "bodySite": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "7771000",
+                  "display": "Left (qualifier value)"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-11",
+      "description": "Status post left + status post right mastectomy (unchanged path)",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-11",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-11-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-11"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-11-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429009003",
+                "display": "History of left mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-11"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-11-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-11"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-12",
+      "description": "Bilateral mastectomy procedure (unchanged path)",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-12",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-12-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-12"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-12-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "27865001",
+                "display": "Excision of bilateral breasts (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-12"
+          },
+          "performedDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-13",
+      "description": "Status post left mastectomy with a date-only onset on the period's last day, + status post right",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-13",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-13-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-13"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-13-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429009003",
+                "display": "History of left mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-13"
+          },
+          "onsetDateTime": "2026-12-31"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-13-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-13"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-14",
+      "description": "Status post right mastectomy with a date-only onset on the period's last day, + status post left",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-14",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-14-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-14"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-14-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-14"
+          },
+          "onsetDateTime": "2026-12-31"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-14-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429009003",
+                "display": "History of left mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-14"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-15",
+      "description": "Unilateral mastectomy left procedure (1133) performed date-only on the period's last day, + status post right",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-15",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-15-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-15"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-15-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428571003",
+                "display": "Excision of left breast (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-15"
+          },
+          "performedDateTime": "2026-12-31"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-15-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-15"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-16",
+      "description": "Unilateral mastectomy right procedure (1134) performed date-only on the period's last day, + status post left",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-16",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-16-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-16"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-16-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429400009",
+                "display": "Excision of right breast (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-16"
+          },
+          "performedDateTime": "2026-12-31"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-16-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429009003",
+                "display": "History of left mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-16"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-17",
+      "description": "History of bilateral mastectomy with a date-only onset on the period's last day",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-17",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-17-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-17"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-17-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428529004",
+                "display": "History of bilateral mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-17"
+          },
+          "onsetDateTime": "2026-12-31"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-18",
+      "description": "Bilateral mastectomy procedure performed date-only on the period's last day",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-18",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-18-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-18"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-18-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "27865001",
+                "display": "Excision of bilateral breasts (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-18"
+          },
+          "performedDateTime": "2026-12-31"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-19",
+      "description": "Unilateral mastectomy left procedure (1133) at 2026-12-31T20:00-05:00 (Jan 1 in UTC), + status post right",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-19",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-19-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-19"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-19-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428571003",
+                "display": "Excision of left breast (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-19"
+          },
+          "performedDateTime": "2026-12-31T20:00:00.000-05:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-19-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-19"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-20",
+      "description": "Unilateral mastectomy left procedure (1133) at 2027-01-01T03:00+05:00 (Dec 31 in UTC), + status post right",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-20",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-20-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-20"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms125-edit-20-proc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428571003",
+                "display": "Excision of left breast (procedure)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-20"
+          },
+          "performedDateTime": "2027-01-01T03:00:00.000+05:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-20-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "429242008",
+                "display": "History of right mastectomy (situation)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-20"
+          },
+          "onsetDateTime": "2020-03-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-21",
+      "description": "Aged 70, frail, advanced illness since 2023-06-01 and still active (the frailty look-back edit)",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-21",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-21-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-21"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-21-enc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-21"
+          },
+          "period": {
+            "start": "2026-04-10T09:00:00.000+00:00",
+            "end": "2026-04-10T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-21-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-21"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      }
+    },
+    {
+      "id": "ww-cms125-edit-22",
+      "description": "As 21, aged 65",
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms125-edit-22",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1961-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-22-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-22"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms125-edit-22-enc-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-22"
+          },
+          "period": {
+            "start": "2026-04-10T09:00:00.000+00:00",
+            "end": "2026-04-10T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms125-edit-22-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms125-edit-22"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ],
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      }
+    }
+  ]
+}

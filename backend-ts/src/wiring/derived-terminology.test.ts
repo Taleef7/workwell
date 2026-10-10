@@ -61,6 +61,25 @@ interface ChangedValueSets {
  * translation's edit, not a code change, so it is not here.
  */
 const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
+  // cms125 (ww-2027.1, #782): seven sets the release moved, and two that are the LOGIC edit's, not the
+  // release's: CMS125v15 swaps the unspecified-laterality mastectomy diagnosis set (…198.12.1071, its 2
+  // codes all "removed") for the unilateral mastectomy procedure set (…1003.1285, its 20 codes all
+  // "added"). The translation declares 1285 and not 1071, so its sidecar has the one and not the other.
+  cms125: {
+    oids: [
+      "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)
+      "2.16.840.1.113883.3.464.1003.101.12.1080", // Telephone Visits (+9)
+      "2.16.840.1.113883.3.464.1003.101.12.1089", // Virtual Encounter (+2/−4)
+      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+25)
+      "2.16.840.1.113883.3.464.1003.118.12.1300", // Frailty Device (−12)
+      "2.16.840.1.113883.3.464.1003.1285", // Unilateral Mastectomy (+20: the logic edit's new set)
+      "2.16.840.1.113883.3.464.1003.198.12.1005", // Bilateral Mastectomy (−1)
+      "2.16.840.1.113883.3.464.1003.198.12.1071", // Unilateral Mastectomy, Unspecified Laterality (−2: the set the edit drops)
+      "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient (+4)
+    ],
+    added: 70,
+    removed: 19,
+  },
   cms130: {
     oids: [
       "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)

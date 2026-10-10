@@ -1,0 +1,138 @@
+[
+  {
+    "case": "7e5d94fa-3630-43b6-9b6e-b75c0fba7cd0",
+    "populations": {
+      "cms": "11100",
+      "ours": "11000"
+    },
+    "reason": "No longer excluded. Its mastectomy laterality comes only from 'Unilateral Mastectomy, Unspecified Laterality' diagnoses carrying a Left/Right qualifier body site, the path CMS125v15 removes (laterality now comes from a unilateral mastectomy PROCEDURE's body site)."
+  },
+  {
+    "case": "c6897181-bb69-4bda-a44d-7c07cf81fc1b",
+    "populations": {
+      "cms": "11100",
+      "ours": "11000"
+    },
+    "reason": "No longer excluded. Its mastectomy laterality comes only from 'Unilateral Mastectomy, Unspecified Laterality' diagnoses carrying a Left/Right qualifier body site, the path CMS125v15 removes (laterality now comes from a unilateral mastectomy PROCEDURE's body site)."
+  },
+  {
+    "case": "cf727fca-40bc-46ed-b97b-e9021cffb8d3",
+    "populations": {
+      "cms": "11000",
+      "ours": "11100"
+    },
+    "reason": "Now excluded. The frailty look-back edit: its advanced illness is active with onset 2023-12-31T23:59:59Z, before the look-back window opens (2025-01-01), so it does not START during the window (CMS's 2026 logic) but OVERLAPS it (v15); the patient is 74 with a frailty device order, so the exclusion applies."
+  },
+  {
+    "case": "68067d39-5287-40dd-ba97-c2aa1bf46d78",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Right Mastectomy Diagnosis",
+    "cms": "[{\"resourceType\":\"Condition\",\"id\":\"5268a594-f096-4dd5-a6c2-2cf5413d04ee\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns\"]},\"clinicalStatus\":{\"coding\":[{\"code\":\"active\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-clinical\"}]},\"category\":[{\"coding\":[{\"code\":\"problem-list-item\",\"display\":\"Problem List Item\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-category\"}]}],\"code\":{\"coding\":[{\"code\":\"248802009\",\"display\":\"Absence of breast (finding)\",\"system\":\"http://snomed.info/sct\"}]},\"bodySite\":[{\"coding\":[{\"code\":\"24028007\",\"display\":\"Right (qualifier value)\",\"system\":\"http://snomed.info/sct\"}]}],\"subject\":{\"reference\":\"Patient/68067d39-5287-40dd-ba97-c2aa1bf46d78\"},\"onsetDateTime\":\"2026-01-01T00:00:00.000+00:00\"}]|\"TRUE\"|TRUE",
+    "ours": "[]|\"FALSE\"|TRUE",
+    "reason": "Define value only: its Right qualifier condition is an unspecified-laterality diagnosis, a path v15 removes; its Left one starts after the measurement period, so Denominator Exclusions is false under both logics."
+  },
+  {
+    "case": "7e5d94fa-3630-43b6-9b6e-b75c0fba7cd0",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Right Mastectomy Diagnosis",
+    "cms": "[{\"resourceType\":\"Condition\",\"id\":\"604fbb54-f46f-41bc-8ddc-03ea69b195efa\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns\"]},\"clinicalStatus\":{\"coding\":[{\"code\":\"active\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-clinical\"}]},\"category\":[{\"coding\":[{\"code\":\"problem-list-item\",\"display\":\"Problem List Item\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-category\"}]}],\"code\":{\"coding\":[{\"code\":\"248802009\",\"display\":\"Absence of breast (finding)\",\"system\":\"http://snomed.info/sct\"}]},\"bodySite\":[{\"coding\":[{\"code\":\"24028007\",\"display\":\"Right (qualifier value)\",\"system\":\"http://snomed.info/sct\"}]}],\"subject\":{\"reference\":\"Patient/7e5d94fa-3630-43b6-9b6e-b75c0fba7cd0\"},\"onsetDateTime\":\"2026-01-01T00:00:00.000+00:00\"}]|\"TRUE\"|TRUE",
+    "ours": "[]|\"FALSE\"|TRUE",
+    "reason": "The diagnosis is an unspecified-laterality mastectomy with a qualifier body site, which v15 no longer reads. Its mastectomy laterality comes only from 'Unilateral Mastectomy, Unspecified Laterality' diagnoses carrying a Left/Right qualifier body site, the path CMS125v15 removes (laterality now comes from a unilateral mastectomy PROCEDURE's body site)."
+  },
+  {
+    "case": "7e5d94fa-3630-43b6-9b6e-b75c0fba7cd0",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Left Mastectomy Diagnosis",
+    "cms": "[{\"resourceType\":\"Condition\",\"id\":\"604fbb54-f46f-41bc-8ddc-03ea69b195ef\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns\"]},\"clinicalStatus\":{\"coding\":[{\"code\":\"active\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-clinical\"}]},\"category\":[{\"coding\":[{\"code\":\"problem-list-item\",\"display\":\"Problem List Item\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-category\"}]}],\"code\":{\"coding\":[{\"code\":\"248802009\",\"display\":\"Absence of breast (finding)\",\"system\":\"http://snomed.info/sct\"}]},\"bodySite\":[{\"coding\":[{\"code\":\"7771000\",\"display\":\"Left (qualifier value)\",\"system\":\"http://snomed.info/sct\"}]}],\"subject\":{\"reference\":\"Patient/7e5d94fa-3630-43b6-9b6e-b75c0fba7cd0\"},\"onsetDateTime\":\"2026-01-01T00:00:00.000+00:00\"}]|\"TRUE\"|TRUE",
+    "ours": "[]|\"FALSE\"|TRUE",
+    "reason": "The diagnosis is an unspecified-laterality mastectomy with a qualifier body site, which v15 no longer reads. Its mastectomy laterality comes only from 'Unilateral Mastectomy, Unspecified Laterality' diagnoses carrying a Left/Right qualifier body site, the path CMS125v15 removes (laterality now comes from a unilateral mastectomy PROCEDURE's body site)."
+  },
+  {
+    "case": "7e5d94fa-3630-43b6-9b6e-b75c0fba7cd0",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Denominator Exclusions",
+    "cms": "true|\"TRUE\"|TRUE",
+    "ours": "false|\"FALSE\"|TRUE",
+    "reason": "No longer excluded. Its mastectomy laterality comes only from 'Unilateral Mastectomy, Unspecified Laterality' diagnoses carrying a Left/Right qualifier body site, the path CMS125v15 removes (laterality now comes from a unilateral mastectomy PROCEDURE's body site)."
+  },
+  {
+    "case": "7e5d94fa-3630-43b6-9b6e-b75c0fba7cd0",
+    "key": "g0|CMS125FHIRBreastCancerScreen.October 1 Two Years Prior to the Measurement Period",
+    "cms": "\"2024-10-01T00:00:00.000+00:00\"|\"UNHIT\"|FALSE",
+    "ours": "\"2024-10-01T00:00:00.000+00:00\"|\"TRUE\"|TRUE",
+    "reason": "Follows from the Denominator Exclusion this case loses (see its population entry): the numerator and its period start are now reached."
+  },
+  {
+    "case": "7e5d94fa-3630-43b6-9b6e-b75c0fba7cd0",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Numerator",
+    "cms": "false|\"UNHIT\"|FALSE",
+    "ours": "false|\"FALSE\"|TRUE",
+    "reason": "Follows from the Denominator Exclusion this case loses (see its population entry): the numerator and its period start are now reached."
+  },
+  {
+    "case": "c6897181-bb69-4bda-a44d-7c07cf81fc1b",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Right Mastectomy Diagnosis",
+    "cms": "[{\"resourceType\":\"Condition\",\"id\":\"d279a7ea-65e7-4959-be21-db8bceb56609a\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-encounter-diagnosis\"]},\"clinicalStatus\":{\"coding\":[{\"code\":\"active\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-clinical\"}]},\"category\":[{\"coding\":[{\"code\":\"encounter-diagnosis\",\"display\":\"Encounter Diagnosis\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-category\"}]}],\"code\":{\"coding\":[{\"code\":\"248802009\",\"display\":\"Absence of breast (finding)\",\"system\":\"http://snomed.info/sct\"}]},\"bodySite\":[{\"coding\":[{\"code\":\"24028007\",\"display\":\"Right (qualifier value)\",\"system\":\"http://snomed.info/sct\"}]}],\"subject\":{\"reference\":\"Patient/c6897181-bb69-4bda-a44d-7c07cf81fc1b\"},\"onsetDateTime\":\"2026-01-01T00:00:00.000+00:00\"}]|\"TRUE\"|TRUE",
+    "ours": "[]|\"FALSE\"|TRUE",
+    "reason": "The diagnosis is an unspecified-laterality mastectomy with a qualifier body site, which v15 no longer reads. Its mastectomy laterality comes only from 'Unilateral Mastectomy, Unspecified Laterality' diagnoses carrying a Left/Right qualifier body site, the path CMS125v15 removes (laterality now comes from a unilateral mastectomy PROCEDURE's body site)."
+  },
+  {
+    "case": "c6897181-bb69-4bda-a44d-7c07cf81fc1b",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Left Mastectomy Diagnosis",
+    "cms": "[{\"resourceType\":\"Condition\",\"id\":\"d279a7ea-65e7-4959-be21-db8bceb56609\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-encounter-diagnosis\"]},\"clinicalStatus\":{\"coding\":[{\"code\":\"active\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-clinical\"}]},\"category\":[{\"coding\":[{\"code\":\"encounter-diagnosis\",\"display\":\"Encounter Diagnosis\",\"system\":\"http://terminology.hl7.org/CodeSystem/condition-category\"}]}],\"code\":{\"coding\":[{\"code\":\"248802009\",\"display\":\"Absence of breast (finding)\",\"system\":\"http://snomed.info/sct\"}]},\"bodySite\":[{\"coding\":[{\"code\":\"7771000\",\"display\":\"Left (qualifier value)\",\"system\":\"http://snomed.info/sct\"}]}],\"subject\":{\"reference\":\"Patient/c6897181-bb69-4bda-a44d-7c07cf81fc1b\"},\"onsetDateTime\":\"2026-01-01T00:00:00.000+00:00\"}]|\"TRUE\"|TRUE",
+    "ours": "[]|\"FALSE\"|TRUE",
+    "reason": "The diagnosis is an unspecified-laterality mastectomy with a qualifier body site, which v15 no longer reads. Its mastectomy laterality comes only from 'Unilateral Mastectomy, Unspecified Laterality' diagnoses carrying a Left/Right qualifier body site, the path CMS125v15 removes (laterality now comes from a unilateral mastectomy PROCEDURE's body site)."
+  },
+  {
+    "case": "c6897181-bb69-4bda-a44d-7c07cf81fc1b",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Denominator Exclusions",
+    "cms": "true|\"TRUE\"|TRUE",
+    "ours": "false|\"FALSE\"|TRUE",
+    "reason": "No longer excluded. Its mastectomy laterality comes only from 'Unilateral Mastectomy, Unspecified Laterality' diagnoses carrying a Left/Right qualifier body site, the path CMS125v15 removes (laterality now comes from a unilateral mastectomy PROCEDURE's body site)."
+  },
+  {
+    "case": "c6897181-bb69-4bda-a44d-7c07cf81fc1b",
+    "key": "g0|CMS125FHIRBreastCancerScreen.October 1 Two Years Prior to the Measurement Period",
+    "cms": "\"2024-10-01T00:00:00.000+00:00\"|\"UNHIT\"|FALSE",
+    "ours": "\"2024-10-01T00:00:00.000+00:00\"|\"TRUE\"|TRUE",
+    "reason": "Follows from the Denominator Exclusion this case loses (see its population entry): the numerator and its period start are now reached."
+  },
+  {
+    "case": "c6897181-bb69-4bda-a44d-7c07cf81fc1b",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Numerator",
+    "cms": "false|\"UNHIT\"|FALSE",
+    "ours": "false|\"FALSE\"|TRUE",
+    "reason": "Follows from the Denominator Exclusion this case loses (see its population entry): the numerator and its period start are now reached."
+  },
+  {
+    "case": "cf727fca-40bc-46ed-b97b-e9021cffb8d3",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Denominator Exclusions",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "true|\"TRUE\"|TRUE",
+    "reason": "Follows from the Denominator Exclusion this case gains (see its population entry): the numerator and its period start are no longer reached."
+  },
+  {
+    "case": "cf727fca-40bc-46ed-b97b-e9021cffb8d3",
+    "key": "g0|CMS125FHIRBreastCancerScreen.October 1 Two Years Prior to the Measurement Period",
+    "cms": "\"2024-10-01T00:00:00.000+00:00\"|\"TRUE\"|TRUE",
+    "ours": "\"2024-10-01T00:00:00.000+00:00\"|\"UNHIT\"|FALSE",
+    "reason": "Follows from the Denominator Exclusion this case gains (see its population entry): the numerator and its period start are no longer reached."
+  },
+  {
+    "case": "cf727fca-40bc-46ed-b97b-e9021cffb8d3",
+    "key": "g0|CMS125FHIRBreastCancerScreen.Numerator",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "false|\"UNHIT\"|FALSE",
+    "reason": "Follows from the Denominator Exclusion this case gains (see its population entry): the numerator and its period start are no longer reached."
+  },
+  {
+    "case": "cf727fca-40bc-46ed-b97b-e9021cffb8d3",
+    "key": "g0|AdvancedIllnessandFrailty.Has Advanced Illness in Year Before or During Measurement Period",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "true|\"TRUE\"|TRUE",
+    "reason": "The frailty look-back edit: its advanced illness is active with onset 2023-12-31T23:59:59Z, before the look-back window opens (2025-01-01), so it does not START during the window (CMS's 2026 logic) but OVERLAPS it (v15); the patient is 74 with a frailty device order, so the exclusion applies."
+  },
+  {
+    "case": "cf727fca-40bc-46ed-b97b-e9021cffb8d3",
+    "key": "g0|AdvancedIllnessandFrailty.Is Age 66 or Older with Advanced Illness and Frailty",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "true|\"TRUE\"|TRUE",
+    "reason": "The frailty look-back edit: its advanced illness is active with onset 2023-12-31T23:59:59Z, before the look-back window opens (2025-01-01), so it does not START during the window (CMS's 2026 logic) but OVERLAPS it (v15); the patient is 74 with a frailty device order, so the exclusion applies."
+  }
+]

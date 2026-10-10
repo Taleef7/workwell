@@ -1,0 +1,74 @@
+[
+  {
+    "library": "AdvancedIllnessandFrailty",
+    "anchorSha256": "sha256:dd8e6cd21cddad7894d1a885f24e2afcea77dbc3cb372151777b522597d3e0b5",
+    "startLine": 69,
+    "endLine": 69,
+    "replacement": "where AdvancedIllnessDiagnosis.prevalenceInterval() overlaps day of Interval[start of \"Measurement Period\" - 1 year, end of \"Measurement Period\"])",
+    "reason": "CMS125v15 (as CMS130v15): the advanced-illness diagnosis overlaps the look-back window (v14: starts during it)"
+  },
+  {
+    "library": "CMS125FHIRBreastCancerScreen",
+    "anchorSha256": "sha256:bbc7825ad4ca2a13ed7ea15cdbcb09347b9b508ab2c2d1ef973d8449e69b312a",
+    "startLine": 23,
+    "endLine": 23,
+    "replacement": "valueset \"Unilateral Mastectomy\": 'http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.1285'",
+    "reason": "CMS125v15: the unilateral mastectomy procedure value set replaces the unspecified-laterality diagnosis set"
+  },
+  {
+    "library": "CMS125FHIRBreastCancerScreen",
+    "anchorSha256": "sha256:e240927ff7f42f2b5e87398dbcdbade633819d1c82917a5a59bf540fffa95d41",
+    "startLine": 25,
+    "endLine": 26,
+    "replacement": "code \"Entire left breast (body structure)\": '361716006' from \"SNOMEDCT\" display 'Entire left breast (body structure)'\ncode \"Entire right breast (body structure)\": '361715005' from \"SNOMEDCT\" display 'Entire right breast (body structure)'",
+    "reason": "CMS125v15: laterality is the procedure body site (body structure), not a qualifier value"
+  },
+  {
+    "library": "CMS125FHIRBreastCancerScreen",
+    "anchorSha256": "sha256:8026809bfc77a5446fec1d90da11bc1b7307a9d6a4fe102a7c932b6b112b5052",
+    "startLine": 58,
+    "endLine": 67,
+    "replacement": "define \"Right Mastectomy Diagnosis\":\n  ( ( [ConditionEncounterDiagnosis: \"Status Post Right Mastectomy\"]\n      union [ConditionProblemsHealthConcerns: \"Status Post Right Mastectomy\"]\n  ).verified ( ) ) RightMastectomy\n    where RightMastectomy.prevalenceInterval ( ) starts on or before day of end of \"Measurement Period\"",
+    "reason": "CMS125v15: the unspecified-laterality diagnosis path is removed; day precision"
+  },
+  {
+    "library": "CMS125FHIRBreastCancerScreen",
+    "anchorSha256": "sha256:b258eba1eb63b5b93d13193881cd79bcc4f705486d9f9ebfd5d97711d3a59271",
+    "startLine": 69,
+    "endLine": 71,
+    "replacement": "define \"Right Mastectomy Procedure\":\n  ( ( [Procedure: \"Unilateral Mastectomy Right\"]\n      union ( [Procedure: \"Unilateral Mastectomy\"] UnilateralMastectomyProcedure\n          where exists UnilateralMastectomyProcedure.bodySite S\n            where S ~ \"Entire right breast (body structure)\" )\n  ).isProcedurePerformed ( ) ) UnilateralMastectomyRightPerformed\n    where UnilateralMastectomyRightPerformed.performed.toInterval ( ) ends on or before day of end of \"Measurement Period\"",
+    "reason": "CMS125v15: a unilateral mastectomy procedure whose body site is the entire right breast counts; day precision"
+  },
+  {
+    "library": "CMS125FHIRBreastCancerScreen",
+    "anchorSha256": "sha256:15a1604a6aa1efb0b5f13a45fdf1120ccaa6b8699c30645cb85002302edf1f9d",
+    "startLine": 73,
+    "endLine": 83,
+    "replacement": "define \"Left Mastectomy Diagnosis\":\n  ( ( [ConditionEncounterDiagnosis: \"Status Post Left Mastectomy\"]\n      union [ConditionProblemsHealthConcerns: \"Status Post Left Mastectomy\"]\n  ).verified ( ) ) LeftMastectomy\n    where LeftMastectomy.prevalenceInterval ( ) starts on or before day of end of \"Measurement Period\"",
+    "reason": "CMS125v15: the unspecified-laterality diagnosis path is removed; day precision"
+  },
+  {
+    "library": "CMS125FHIRBreastCancerScreen",
+    "anchorSha256": "sha256:f9e53a32b98db675f8c186e0be89597e5827f6fe4acdc55c09c51f7dc82f5a40",
+    "startLine": 85,
+    "endLine": 87,
+    "replacement": "define \"Left Mastectomy Procedure\":\n  ( ( [Procedure: \"Unilateral Mastectomy Left\"]\n      union ( [Procedure: \"Unilateral Mastectomy\"] UnilateralMastectomyProcedure\n          where exists UnilateralMastectomyProcedure.bodySite S\n            where S ~ \"Entire left breast (body structure)\" )\n  ).isProcedurePerformed ( ) ) UnilateralMastectomyLeftPerformed\n    where UnilateralMastectomyLeftPerformed.performed.toInterval ( ) ends on or before day of end of \"Measurement Period\"",
+    "reason": "CMS125v15: a unilateral mastectomy procedure whose body site is the entire left breast counts; day precision"
+  },
+  {
+    "library": "CMS125FHIRBreastCancerScreen",
+    "anchorSha256": "sha256:9f74075b5846c86983253a291c765e7bc39a27adf486c129f72d7276980c7cd0",
+    "startLine": 93,
+    "endLine": 93,
+    "replacement": "    where BilateralMastectomyHistory.prevalenceInterval ( ) starts on or before day of end of \"Measurement Period\"",
+    "reason": "CMS125v15: day precision"
+  },
+  {
+    "library": "CMS125FHIRBreastCancerScreen",
+    "anchorSha256": "sha256:3fe6d2912abe056de6a5a8eb25d3ad33e6fab8734d3838fd7f0e9e5ab36189e2",
+    "startLine": 97,
+    "endLine": 97,
+    "replacement": "    where BilateralMastectomyPerformed.performed.toInterval ( ) ends on or before day of end of \"Measurement Period\"",
+    "reason": "CMS125v15: day precision"
+  }
+]

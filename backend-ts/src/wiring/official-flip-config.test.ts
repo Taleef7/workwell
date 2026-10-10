@@ -514,11 +514,11 @@ test(`${DERIVED_KEY}: TWH and staging ship no translation`, () => {
   }
 });
 
-test(`${DERIVED_KEY}: the Maui deployment ships the cms137 and cms130 translations`, () => {
+test(`${DERIVED_KEY}: the Maui deployment ships the cms137, cms130 and cms125 translations`, () => {
   // Every check on the list also passes when it is absent, which would put 2027 back on the CMS 2026 draft
   // with every check green. So the value is pinned: turning a translation off, or on for another
   // measure, has to be a deliberate edit of this line.
-  assert.deepEqual(shippedDerived("deploy-maui-mieweb.yml"), ["cms137", "cms130"], `deploy-maui-mieweb.yml must ship ${DERIVED_KEY}=cms137,cms130`);
+  assert.deepEqual(shippedDerived("deploy-maui-mieweb.yml"), ["cms137", "cms130", "cms125"], `deploy-maui-mieweb.yml must ship ${DERIVED_KEY}=cms137,cms130,cms125`);
 });
 
 /**

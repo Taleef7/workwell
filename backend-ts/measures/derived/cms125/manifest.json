@@ -1,9 +1,9 @@
 {
-  "catalogId": "cms130",
-  "measureName": "WorkWellCMS130Translation2027",
+  "catalogId": "cms125",
+  "measureName": "WorkWellCMS125Translation2027",
   "version": "ww-2027.1",
   "cmsId": null,
-  "url": "urn:workwell:measure:cms130:translation",
+  "url": "urn:workwell:measure:cms125:translation",
   "status": "draft",
   "effectivePeriod": {
     "start": "2027-01-01",
@@ -21,8 +21,8 @@
   "source": {
     "repo": "cqframework/dqm-content-qicore-2025",
     "ref": "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
-    "path": "bundles/measure/CMS130FHIRColorectalCancerScrn/CMS130FHIRColorectalCancerScrn-bundle.json",
-    "rawSha256": "sha256:ac4bbfb17fc62a0b32f02baf2ca49f9a6f6725fb548d790c184b0078bca5f58b"
+    "path": "bundles/measure/CMS125FHIRBreastCancerScreen/CMS125FHIRBreastCancerScreen-bundle.json",
+    "rawSha256": "sha256:b8d5ec6664cf339bf83a27ec66c009bd50fd87ed537eaf3b62f3696455598384"
   },
   "reduction": {
     "keptResourceTypes": [
@@ -35,13 +35,13 @@
     "strippedNarratives": true,
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
-    "rawBytes": 17067945,
-    "vendoredBytes": 2412965
+    "rawBytes": 17085208,
+    "vendoredBytes": 2412470
   },
   "terminology": {
     "file": "terminology.json",
-    "valueSets": 31,
-    "codes": 3240,
+    "valueSets": 32,
+    "codes": 3094,
     "truncated": [],
     "completion": {
       "source": "vsac",
@@ -118,32 +118,11 @@
           "declaredTotal": 8
         },
         {
-          "oid": "2.16.840.1.113883.3.464.1003.108.12.1001",
+          "oid": "2.16.840.1.113883.3.464.1003.108.12.1018",
           "reason": "release",
-          "had": 133,
-          "now": 151,
-          "declaredTotal": 151
-        },
-        {
-          "oid": "2.16.840.1.113883.3.464.1003.108.12.1020",
-          "reason": "release",
-          "had": 60,
-          "now": 70,
-          "declaredTotal": 70
-        },
-        {
-          "oid": "2.16.840.1.113883.3.464.1003.108.12.1038",
-          "reason": "release",
-          "had": 6,
-          "now": 6,
-          "declaredTotal": 6
-        },
-        {
-          "oid": "2.16.840.1.113883.3.464.1003.108.12.1039",
-          "reason": "release",
-          "had": 2,
-          "now": 2,
-          "declaredTotal": 2
+          "had": 92,
+          "now": 92,
+          "declaredTotal": 92
         },
         {
           "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
@@ -188,6 +167,13 @@
           "declaredTotal": 109
         },
         {
+          "oid": "2.16.840.1.113883.3.464.1003.1285",
+          "reason": "release",
+          "had": 0,
+          "now": 20,
+          "declaredTotal": 20
+        },
+        {
           "oid": "2.16.840.1.113883.3.464.1003.196.12.1510",
           "reason": "release",
           "had": 33,
@@ -195,25 +181,46 @@
           "declaredTotal": 33
         },
         {
-          "oid": "2.16.840.1.113883.3.464.1003.198.12.1010",
-          "reason": "release",
-          "had": 19,
-          "now": 19,
-          "declaredTotal": 19
-        },
-        {
-          "oid": "2.16.840.1.113883.3.464.1003.198.12.1011",
+          "oid": "2.16.840.1.113883.3.464.1003.198.12.1005",
           "reason": "release",
           "had": 16,
-          "now": 20,
-          "declaredTotal": 20
+          "now": 15,
+          "declaredTotal": 15
         },
         {
-          "oid": "2.16.840.1.113883.3.464.1003.198.12.1019",
+          "oid": "2.16.840.1.113883.3.464.1003.198.12.1068",
           "reason": "release",
-          "had": 30,
-          "now": 32,
-          "declaredTotal": 32
+          "had": 3,
+          "now": 3,
+          "declaredTotal": 3
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.198.12.1069",
+          "reason": "release",
+          "had": 3,
+          "now": 3,
+          "declaredTotal": 3
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.198.12.1070",
+          "reason": "release",
+          "had": 3,
+          "now": 3,
+          "declaredTotal": 3
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.198.12.1133",
+          "reason": "release",
+          "had": 9,
+          "now": 9,
+          "declaredTotal": 9
+        },
+        {
+          "oid": "2.16.840.1.113883.3.464.1003.198.12.1134",
+          "reason": "release",
+          "had": 9,
+          "now": 9,
+          "declaredTotal": 9
         },
         {
           "oid": "2.16.840.1.113883.3.464.1003.198.12.1135",
@@ -266,24 +273,24 @@
         }
       ]
     },
-    "sha256": "sha256:682d199a8c628e7d0b00d3246d54f2a07f416820a1fd911bbd607d13ff9e64d9"
+    "sha256": "sha256:2b0986b449e8b0dd439be51593bc0818cef9c9e097d44b5e73710969721e7214"
   },
-  "sha256": "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db",
+  "sha256": "sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b",
   "derived": {
-    "label": "WorkWell translation of CMS130v15",
+    "label": "WorkWell translation of CMS125v15",
     "derivedFrom": {
-      "ecqm": "CMS130v15",
-      "packageSha256": "sha256:8ac3b6033152a0c5ada9a98593ffdf4f99302f611306640c75c90a29a991ad73"
+      "ecqm": "CMS125v15",
+      "packageSha256": "sha256:05398d619d0562a3176851fcb295fd4e05d5d19d6b4d2cb7309ead0a18ccda2a"
     },
     "base": {
-      "catalogId": "cms130",
-      "manifestSha256": "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629"
+      "catalogId": "cms125",
+      "manifestSha256": "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8"
     },
     "build": {
       "translator": "@cqframework/cql@4.0.0-beta.1",
       "modelInfoSha256": "sha256:75cf34cca8b6ce28f0841201681ff6f2db2235cdcd4ad39bd84c01b8ea76ad33",
       "signatureLevel": "All",
-      "translationSha256": "sha256:3de16db0695f28a30d18e52175ea3c0a1f1b936779349fdd7d98976727e90481"
+      "translationSha256": "sha256:4aaaa1788ff806ed6e6006fc69ef2b7b3519074ee0119ba1a9c67f77e3ca70cd"
     },
     "unchangedLibraries": [
       {
@@ -339,20 +346,23 @@
         "translationSha256": "sha256:77c2cc16f4ff77bc2462106264c6a88590c30a5b23e1a915134b08b6657828fc"
       }
     ],
+    "recomputedDataRequirements": [
+      "WorkWellCMS125Translation2027"
+    ],
     "oracles": [
       {
         "name": "cypress-deck",
-        "inputSha256": "sha256:c224a13869d70203350a9a22b9054096e3d1d4b7142db0687c356cfcb186b589",
+        "inputSha256": "sha256:051a0fb1661c7a42b2c035c4ffb941ee9d1984bb696e53009c046f6660a75517",
         "period": {
           "start": "2025-01-01",
           "end": "2025-12-31"
         },
-        "agree": 269,
-        "total": 269,
+        "agree": 155,
+        "total": 155,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db",
-          "terminologySha256": "sha256:682d199a8c628e7d0b00d3246d54f2a07f416820a1fd911bbd607d13ff9e64d9"
+          "artifactSha256": "sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b",
+          "terminologySha256": "sha256:2b0986b449e8b0dd439be51593bc0818cef9c9e097d44b5e73710969721e7214"
         }
       },
       {
@@ -362,12 +372,12 @@
           "start": "2027-01-01",
           "end": "2027-12-31"
         },
-        "agree": 31,
-        "total": 31,
+        "agree": 32,
+        "total": 32,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db",
-          "terminologySha256": "sha256:682d199a8c628e7d0b00d3246d54f2a07f416820a1fd911bbd607d13ff9e64d9"
+          "artifactSha256": "sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b",
+          "terminologySha256": "sha256:2b0986b449e8b0dd439be51593bc0818cef9c9e097d44b5e73710969721e7214"
         }
       }
     ]

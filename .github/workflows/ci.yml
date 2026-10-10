@@ -767,7 +767,7 @@ jobs:
     # there is no uncredentialed boot for the key to take evaluation down in.
     env:
       ROUTED_MEASURES: cms122,cms125,cms2,cms130,cms165,cms137
-      ROUTED_TRANSLATIONS: cms137,cms130
+      ROUTED_TRANSLATIONS: cms137,cms130,cms125
     steps:
       # backend-ts consumes @mieweb/cloud + @mieweb/cli from the external/mieweb-cloud submodule.
       - uses: actions/checkout@v7

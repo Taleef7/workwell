@@ -30,6 +30,13 @@ included.
   use without NCQA's approval and requires that approval for any other use. Its `README.md` carries the
   edit, the hashes, the commands and what its checks proved. `edit-cases.json` beside it holds synthetic
   test patients written by WorkWell.
+- `cms125/` — WorkWell translation of CMS125v15 (`ww-2027.1`), built from CMS's CMS125FHIR v1.0.000 CQL
+  with nine edits: the same AdvancedIllnessandFrailty edit as `cms130/` (the same changed library), and
+  CMS125v15's mastectomy-laterality and day-precision changes in the main library, whose computed data
+  requirements were edited to match. Its logic is MODIFIED from the measure steward's (NCQA's), under the
+  same carried notice as `cms130/`. Its `edit-cases.json` names one code it asserts is in value set
+  `…1003.1285`, checked against the translation's own expansion when its checks are recorded; it is not a
+  copy of the value set.
 
 ## What does not live here
 
