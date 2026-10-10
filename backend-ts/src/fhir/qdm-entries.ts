@@ -72,6 +72,8 @@ interface FhirResource {
   id?: string;
   status?: string;
   code?: FhirCodeableConcept;
+  /** Condition and Procedure: QDM "Anatomical Location Site" (#784). */
+  bodySite?: FhirCodeableConcept[];
   category?: FhirCodeableConcept | FhirCodeableConcept[];
   type?: FhirCodeableConcept[];
   subject?: { reference?: string };
@@ -100,6 +102,19 @@ function cdaCode(concept: FhirCodeableConcept | undefined): string | null {
     return `code="${esc(coding.code)}" codeSystem="${sys.oid}" codeSystemName="${sys.name}"${display}`;
   }
   return null;
+}
+
+/**
+ * Each mappable `bodySite` as a `<targetSiteCode>` (QDM "Anatomical Location Site"), one line per site,
+ * or "" for none (#784). The import reads them back; CMS125 reads them in both years. A site with no
+ * mappable coding is left out, as `cdaCode` leaves out any other.
+ */
+function targetSites(r: FhirResource, pad: string): string {
+  return (r.bodySite ?? [])
+    .map((site) => cdaCode(site))
+    .filter((code): code is string => code !== null)
+    .map((code) => `\n${pad}<targetSiteCode ${code}/>`)
+    .join("");
 }
 
 /**
@@ -228,7 +243,7 @@ ${pad}          <translation code="282291009" codeSystem="2.16.840.1.113883.6.96
 ${pad}        </code>
 ${pad}        ${COMPLETED}
 ${pad}        ${when}
-${pad}        <value xsi:type="CD" ${value}/>
+${pad}        <value xsi:type="CD" ${value}/>${targetSites(r, `${pad}        `)}
 ${pad}      </observation>
 ${pad}    </entryRelationship>
 ${pad}  </act>
@@ -301,7 +316,7 @@ ${pad}    <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-
 ${pad}    ${cdaId(r, `procedure-${i}`)}
 ${pad}    <code ${code}/>
 ${pad}    ${COMPLETED}
-${pad}    ${effectiveTime(r, `${pad}    `)}
+${pad}    ${effectiveTime(r, `${pad}    `)}${targetSites(r, `${pad}    `)}
 ${pad}  </procedure>
 ${pad}</entry>`;
 }
