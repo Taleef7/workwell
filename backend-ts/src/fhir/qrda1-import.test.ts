@@ -1516,3 +1516,28 @@ test("§4A.8: a method in a code system the importer does not map is still a sta
   assert.equal(paired(sys({ extra: unknown("A") }), dia({ extra: unknown("B") })).panels.length, 0, "two different methods");
   assert.equal(paired(sys({ extra: unknown("A") }), dia({ extra: unknown("A") })).panels.length, 1, "the same method on both");
 });
+
+test("an empty or blank PQ value imports as no result, never as zero; so it never pairs (Codex, #787)", () => {
+  for (const blank of ["", " "]) {
+    const value = `<value xsi:type="PQ" value="${blank}" unit="mm[Hg]"/>`;
+    const { panels, unpaired } = paired(sys({ value }), dia({ value }));
+    assert.deepEqual([panels.length, unpaired], [0, 2], JSON.stringify(blank));
+    const [reading] = importedOfType(sitedDocument(sys({ value })), "Observation");
+    assert.equal(reading!.valueQuantity, undefined, "no number was stated, so none is imported");
+  }
+});
+
+test("§4A.8: readings sharing an unparseable timestamp share no time (Codex, #787)", () => {
+  const bad = "<effectiveTime value='20251301120000'/>";
+  const { panels, unpaired } = paired(sys({ time: bad }), dia({ time: bad }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+  const badHigh = "<effectiveTime><low value='20250219171000'/><high value='20251301120000'/></effectiveTime>";
+  assert.equal(paired(sys({ time: badHigh }), dia({ time: badHigh })).panels.length, 0);
+});
+
+test("§4A.8: performers are compared by everything stated, not only a null-flavored id (Codex, #787)", () => {
+  const by = (name: string) =>
+    `<performer><assignedEntity><id nullFlavor="UNK"/><assignedPerson><name><given>${name}</given></name></assignedPerson></assignedEntity></performer>`;
+  assert.equal(paired(sys({ extra: by("Ana") }), dia({ extra: by("Ben") })).panels.length, 0);
+  assert.equal(paired(sys({ extra: by("Ana") }), dia({ extra: by("Ana") })).panels.length, 1);
+});

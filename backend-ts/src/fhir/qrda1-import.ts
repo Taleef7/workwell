@@ -421,7 +421,9 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
   // outer `value` which is `nullFlavor="NA"` for a study with no coded result (ADR-050).
   const nested = descendants(node, "observation").find((n) => hasTemplate(n, T.result));
   const valueNode = child(nested ?? node, "value") ?? child(node, "value");
-  const quantity = valueNode?.attrs["xsi:type"] === "PQ" && valueNode.attrs.value !== undefined
+  // Only a value that IS a number. `Number("")` and `Number(" ")` are 0, so an empty `value` attribute
+  // would otherwise import as a result of zero, a fact the document never stated (Codex, #787).
+  const quantity = valueNode?.attrs["xsi:type"] === "PQ" && DECIMAL.test(valueNode.attrs.value ?? "")
     ? { value: Number(valueNode.attrs.value), ...(valueNode.attrs.unit ? { unit: valueNode.attrs.unit } : {}) }
     : undefined;
   const coded = valueNode?.attrs["xsi:type"] === "CD" ? concept(valueNode) : undefined;
@@ -455,6 +457,8 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
 }
 
 const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+/** The lexical form of a CDA REAL / PQ value: a decimal, optionally signed, optionally with an exponent. */
+const DECIMAL = /^\s*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/;
 const LOINC = "http://loinc.org";
 const UCUM = "http://unitsofmeasure.org";
 const SYSTOLIC = "8480-6";
@@ -495,10 +499,13 @@ function timeKeyOf(node: CdaNode): string | undefined {
   if (!time) return undefined;
   const raw = (n: CdaNode | undefined) => (n ? { value: n.attrs.value ?? null, nullFlavor: n.attrs.nullFlavor ?? null } : null);
   const low = child(time, "low");
-  // A time of day is at least the hour: YYYYMMDDHH.
+  const high = child(time, "high");
+  // A time of day is at least the hour: YYYYMMDDHH. And every stated bound must be a real timestamp: two
+  // readings that share an unparseable one share no time at all (Codex, #787).
   const start = time.attrs.value ?? low?.attrs.value;
-  if (!start || !/^\d{10}/.test(start)) return undefined;
-  return JSON.stringify({ at: raw(time), low: raw(low), high: raw(child(time, "high")) });
+  if (!start || !/^\d{10}/.test(start) || isoFromHl7(start) === undefined) return undefined;
+  if (high?.attrs.value !== undefined && isoFromHl7(high.attrs.value) === undefined) return undefined;
+  return JSON.stringify({ at: raw(time), low: raw(low), high: raw(high) });
 }
 
 /** A coded element exactly as stated, mapped or not, so an unrecognised code never reads as an absent one. */
@@ -514,15 +521,20 @@ function statedCodeOf(node: CdaNode | undefined): unknown {
  * the map does not carry is still a stated method, and two different ones are still different (Codex, #787).
  */
 function statedContextOf(node: CdaNode): string {
-  const ids = (n: CdaNode) => descendants(n, "id").map((id) => `${id.attrs.root ?? ""}|${id.attrs.extension ?? ""}|${id.attrs.nullFlavor ?? ""}`);
   return JSON.stringify({
-    performers: childrenNamed(node, "performer").map(ids),
+    // Everything a performer or device element states, not just its ids: two performers who share a
+    // null-flavored id and differ by name are different people (Codex, #787).
+    performers: childrenNamed(node, "performer").map(statedContentOf),
     method: statedCodeOf(child(node, "methodCode")),
     sites: childrenNamed(node, "targetSiteCode").map(statedCodeOf),
-    devices: childrenNamed(node, "participant")
-      .filter((p) => p.attrs.typeCode === "DEV")
-      .map((p) => [statedCodeOf(child(descendants(p, "playingDevice")[0], "code")), ids(p)]),
+    devices: childrenNamed(node, "participant").filter((p) => p.attrs.typeCode === "DEV").map(statedContentOf),
   });
+}
+
+/** An element and everything under it, as stated: names, attributes in a fixed order, and text. */
+function statedContentOf(node: CdaNode): unknown {
+  const attrs = Object.keys(node.attrs).sort().map((k) => [k, node.attrs[k]]);
+  return [node.local, attrs, node.text, node.children.map(statedContentOf)];
 }
 
 /**
