@@ -1852,6 +1852,36 @@ test("export: two blood pressures a fraction of a second apart are written apart
   assert.deepEqual(panels.map((p) => p.effectiveDateTime).sort(), ["2025-06-01T10:00:00.1Z", "2025-06-01T10:00:00.9Z"]);
 });
 
+test("export: a blood pressure at an impossible time is not written, never rolled over (Codex, #787)", () => {
+  // `Date` reads 30 February as 2 March and hour 24 as the next day.
+  for (const when of [
+    "2025-02-30T10:00:00Z", "2025-04-31T10:00:00Z", "2025-02-28T24:00:00Z", "2025-06-01T10:60:00Z",
+    "2025-06-01T10:00:60Z", "2025-02-30T10:00:00", "0025-06-01T10:00:00Z", "2025-06-01T10:00:00+0500",
+  ]) {
+    const r = exported(bpPanel({ effectiveDateTime: when }));
+    assert.equal(r.exams, 0, when);
+    assert.match(r.why, /not a real date and time/, when);
+  }
+  const end = exported(bpPanel({ effectiveDateTime: undefined, effectivePeriod: { start: "2025-02-28T10:00:00Z", end: "2025-02-30T10:00:00Z" } }));
+  assert.deepEqual([end.exams, /not a real date and time/.test(end.why)], [0, true]);
+  const readingTimes = (effectiveDateTime: string) =>
+    translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: bpPanel({ effectiveDateTime }) }] })
+      .entries.filter((e) => e.includes("2.16.840.1.113883.10.20.24.3.59"))
+      .map((e) => /<effectiveTime value="([^"]+)"/.exec(e)?.[1]);
+  // Still written: a real local time whose UTC instant falls on the next day, and a time stated to the minute.
+  assert.deepEqual(readingTimes("2025-02-28T23:30:00-05:00"), ["20250301043000", "20250301043000"]);
+  assert.deepEqual(readingTimes("2025-06-01T10:00Z"), ["20250601100000", "20250601100000"]);
+  // A time with no zone (the corpus's own) is written as stated, whatever zone the exporting machine is in.
+  const zone = process.env.TZ;
+  try {
+    process.env.TZ = "Asia/Karachi";
+    assert.deepEqual(readingTimes("2025-06-01T00:00:00"), ["20250601000000", "20250601000000"]);
+  } finally {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  }
+});
+
 test("export: a blood pressure over a period is written only when the period is closed, and comes back as the same period (Codex, #787)", () => {
   for (const [period, why] of [
     [{ start: "2025-06-01T10:00:00Z" }, /no end/],

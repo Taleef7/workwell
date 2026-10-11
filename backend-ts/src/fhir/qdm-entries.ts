@@ -168,14 +168,27 @@ function effectiveTime(resource: FhirResource, indent: string, ts: (iso: unknown
 }
 
 /**
- * `hl7TsOrNull` keeping any fraction of a second, for a blood-pressure reading. Two panels a fraction of a
- * second apart written at the same whole second would come back as four readings at one instant, and
- * neither would pair (Codex, #787). An offset is whole minutes, so the fraction survives the move to UTC.
+ * `hl7TsOrNull` for a blood-pressure reading: a stated instant, to its fraction of a second, or null.
+ * - The date and time must be real as written: `Date` rolls 30 February over to 2 March and hour 24 into
+ *   the next day, a time the panel never stated (Codex, #787).
+ * - A time with no zone (the corpus writes its readings so) is written as stated, a timestamp with no
+ *   offset as HL7 allows; `Date` would read it in the exporting machine's own zone.
+ * - The fraction is kept: two panels a fraction of a second apart written at the same whole second would
+ *   come back as four readings at one instant, and neither would pair (Codex, #787). An offset is whole
+ *   minutes, so the fraction survives the move to UTC.
  */
 function hl7TsKeepingFraction(iso: unknown): string | null {
-  const whole = hl7TsOrNull(iso);
+  const m = typeof iso === "string" ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:\d{2})?$/.exec(iso) : null;
+  if (!m) return null;
+  const stated = m.slice(1, 7).map((part) => part ?? "00");
+  const [y, mo, d, h, mi, s] = stated.map(Number) as [number, number, number, number, number, number];
+  const parsed = new Date(Date.UTC(y, mo - 1, d, h, mi, s));
+  // `Date.UTC` maps years 0-99 to 1900-1999, so a two-digit year fails here too.
+  const real = [parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate(), parsed.getUTCHours(), parsed.getUTCMinutes(), parsed.getUTCSeconds()];
+  if (real.some((part, i) => part !== [y, mo, d, h, mi, s][i])) return null;
+  const whole = m[8] === undefined ? stated.join("") : hl7TsOrNull(iso);
   if (whole === null) return null;
-  const fraction = /T\d{2}:\d{2}:\d{2}\.(\d+)/.exec(iso as string)?.[1]?.replace(/0+$/, "");
+  const fraction = m[7]?.replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
@@ -377,7 +390,8 @@ function bloodPressureTime(r: FhirResource): Pick<FhirResource, "effectiveDateTi
  * condition guards the round trip against stating what the panel does not (review, #787):
  * - final (a preliminary panel would come back `final` and count);
  * - a time of day in `effective[x]` itself (a date alone would be written as midnight and pair; `issued`
- *   is when it was recorded, not when it was measured), and a period only when closed, start not after end;
+ *   is when it was recorded, not when it was measured), a real date and time, and a period only when
+ *   closed, start not after end;
  * - exactly one systolic and one diastolic component, each a plain number with no comparator ("<130" is
  *   not 130), in UCUM mm[Hg].
  * All or nothing: half a panel is never written, so nothing is dropped without a reason.
@@ -387,14 +401,17 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
     return `a blood pressure whose status is '${r.status ?? "absent"}' is not final, so it is not written as completed readings`;
   }
   const time = bloodPressureTime(r);
-  const stamp = (t: string | undefined) => (t?.includes("T") ? hl7TsKeepingFraction(t) : null);
-  const start = stamp(time.effectiveDateTime ?? time.effectivePeriod?.start);
-  if (start === null) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
+  const notReal = "a blood pressure whose time is not a real date and time is not written";
+  const when = time.effectiveDateTime ?? time.effectivePeriod?.start;
+  if (!when?.includes("T")) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
+  const start = hl7TsKeepingFraction(when);
+  if (start === null) return notReal;
   if (time.effectivePeriod) {
     // The import pairs a period only when it states both bounds (LOCKED §4A.8), and a date-only end would be
     // written as midnight, a time the panel never stated (Codex, #787).
-    const end = stamp(time.effectivePeriod.end);
-    if (end === null) return "a blood pressure over a period with no end, or an end with no time of day, is not written";
+    if (!time.effectivePeriod.end?.includes("T")) return "a blood pressure over a period with no end, or an end with no time of day, is not written";
+    const end = hl7TsKeepingFraction(time.effectivePeriod.end);
+    if (end === null) return notReal;
     const whole = [start.slice(0, 14), end.slice(0, 14)];
     if (whole[0]! > whole[1]! || (whole[0] === whole[1] && Number(`0${start.slice(14)}`) > Number(`0${end.slice(14)}`))) {
       return "a blood pressure whose period ends before it starts is not written";
