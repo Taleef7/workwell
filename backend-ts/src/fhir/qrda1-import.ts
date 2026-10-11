@@ -494,8 +494,6 @@ type ObservationShape = {
   id?: string;
   identifier?: unknown[];
   code?: { coding?: Array<{ system?: string; code?: string }> };
-  effectiveDateTime?: string;
-  effectivePeriod?: { start?: string; end?: string };
   valueQuantity?: { value?: number; unit?: string };
 };
 
@@ -517,23 +515,51 @@ function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | "bot
 }
 
 /**
- * The reading's time AS THE DOCUMENT WROTE IT, the key two halves must share: the same instant, or the
- * same low and high, and only when it carries a time of day. Read off the CDA `<effectiveTime>`, not the
- * FHIR value built from it, because that conversion is lossy: an instant and an interval whose high is
- * `nullFlavor="UNK"` both become one `effectiveDateTime`, and are not the same statement (Codex, #787).
- * A date alone says nothing about whether two readings were taken together.
+ * The panel's time, built from the reading's own CDA `<effectiveTime>`, or undefined when that time is not
+ * one §4A.8 pairs on ("the same instant, or the same low and high"):
+ * - an instant: a `value`, with nothing under it;
+ * - a closed interval: one `<low>` and one `<high>`, nothing else, each stating a timestamp, the low not
+ *   after the high, neither bound exclusive.
+ * Each timestamp needs a time of day (an hour and a minute, YYYYMMDDHHMM, the precision the parser keeps)
+ * and keeps its fraction of a second (`instantKeyOf`). An open interval (`<high nullFlavor="UNK"/>`, or no
+ * `<high>`) states no high: the import's general conversion reads it as an instant at its low, and a panel
+ * built from that would state a time the document did not (Codex, #787). A width, a center or an exclusive
+ * bound has no FHIR Period form either.
+ */
+function panelTimeOf(node: CdaNode): { effectiveDateTime: string } | { effectivePeriod: { start: string; end: string } } | undefined {
+  const time = child(node, "effectiveTime");
+  if (!time || time.attrs.nullFlavor !== undefined) return undefined;
+  const stamp = (value: string | undefined) => (value !== undefined && /^\d{12}/.test(value) ? instantKeyOf(value) : undefined);
+  if (time.attrs.value !== undefined) {
+    const at = time.children.length === 0 ? stamp(time.attrs.value) : undefined;
+    return at ? { effectiveDateTime: at } : undefined;
+  }
+  if (time.children.map((c) => c.local).sort().join() !== "high,low") return undefined;
+  const bound = (b: CdaNode) => {
+    const inclusive = b.attrs.inclusive?.trim().toLowerCase();
+    return b.attrs.nullFlavor === undefined && (inclusive === undefined || inclusive === "true" || inclusive === "1") ? stamp(b.attrs.value) : undefined;
+  };
+  const start = bound(child(time, "low")!);
+  const end = bound(child(time, "high")!);
+  return start && end && !instantAfter(start, end) ? { effectivePeriod: { start, end } } : undefined;
+}
+
+/** Whether one `instantKeyOf` instant is later than another: the whole seconds, then the fraction. */
+function instantAfter(a: string, b: string): boolean {
+  const [wholeA, wholeB] = [a.slice(0, 19), b.slice(0, 19)];
+  if (wholeA !== wholeB) return wholeA > wholeB;
+  return Number(`0${a.slice(19, -1)}`) > Number(`0${b.slice(19, -1)}`);
+}
+
+/**
+ * The reading's time AS THE DOCUMENT WROTE IT, the key two halves must share. Read off the CDA
+ * `<effectiveTime>`, not the FHIR value built from it, because that conversion is lossy (Codex, #787), and
+ * only for a time a panel can state (`panelTimeOf`). A date alone says nothing about whether two readings
+ * were taken together.
  */
 function timeKeyOf(node: CdaNode): string | undefined {
-  const time = child(node, "effectiveTime");
-  if (!time) return undefined;
-  const low = child(time, "low");
-  const high = child(time, "high");
-  // A time of day is an hour and a minute: YYYYMMDDHHMM, the precision at which the parser keeps it. And
-  // every stated bound must be a real timestamp: two readings that share an unparseable one share no time
-  // at all (Codex, #787).
-  const start = time.attrs.value ?? low?.attrs.value;
-  if (!start || !/^\d{12}/.test(start) || isoFromHl7(start) === undefined) return undefined;
-  if (high?.attrs.value !== undefined && isoFromHl7(high.attrs.value) === undefined) return undefined;
+  if (panelTimeOf(node) === undefined) return undefined;
+  const time = child(node, "effectiveTime")!;
   // Everything the element states (width, center, inclusive, …), so two different statements of time
   // never share a key (review, #787) — except that each timestamp is compared as the INSTANT it names, to
   // its fraction of a second: §4A.8's "the same instant" holds across time zones (Codex, #787). A point
@@ -654,7 +680,8 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, readings: Blo
         status: "final",
         category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }],
         code: { coding: [{ system: LOINC, code: "85354-9", display: "Blood pressure panel with all children optional" }] },
-        ...(sys.effectiveDateTime ? { effectiveDateTime: sys.effectiveDateTime } : { effectivePeriod: sys.effectivePeriod }),
+        // The time as the document states it (both halves share it), never the reading's lossy conversion.
+        ...panelTimeOf(s.node)!,
         component: [component(sys), component(dia)],
       },
     };

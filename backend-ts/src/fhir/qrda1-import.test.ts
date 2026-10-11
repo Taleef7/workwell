@@ -1508,7 +1508,34 @@ test("§4A.8: an instant and an interval with the same low and an unknown high a
   const open = "<effectiveTime><low value='20250219171000'/><high nullFlavor='UNK'/></effectiveTime>";
   const { panels, unpaired } = paired(sys(), dia({ time: open }));
   assert.deepEqual([panels.length, unpaired], [0, 2]);
-  assert.equal(paired(sys({ time: open }), dia({ time: open })).panels.length, 1, "the same open interval on both pairs");
+});
+
+test("§4A.8: only an instant or a closed interval pairs; an open, exclusive or reversed one does not (Codex, #787)", () => {
+  // Each reading would import as an instant at its low, so a panel built from it would state a time the
+  // document did not. Both readings state the same time in every case.
+  for (const time of [
+    "<effectiveTime><low value='20250219171000'/><high nullFlavor='UNK'/></effectiveTime>",
+    "<effectiveTime><low value='20250219171000'/></effectiveTime>",
+    "<effectiveTime><low value='20250219171000' inclusive='false'/><high value='20250219171500'/></effectiveTime>",
+    "<effectiveTime><low value='20250219171000'/><high value='20250219171500' nullFlavor='UNK'/></effectiveTime>",
+    "<effectiveTime><low value='20250219171500'/><high value='20250219171000'/></effectiveTime>",
+    "<effectiveTime><low value='20250219171000.9'/><high value='20250219171000.1'/></effectiveTime>",
+    "<effectiveTime><low value='20250219171000'/><high value='20250219'/></effectiveTime>",
+    "<effectiveTime><low value='20250219171000'/><high value='20250219171500'/><width value='5' unit='min'/></effectiveTime>",
+    "<effectiveTime value='20250219171000'><low value='20250219171000'/></effectiveTime>",
+  ]) {
+    const { panels, readings, unpaired } = paired(sys({ time }), dia({ time }));
+    assert.deepEqual([panels.length, readings, unpaired], [0, 2, 2], time);
+  }
+  const inclusive = "<effectiveTime><low value='20250219171000' inclusive='true'/><high value='20250219171500'/></effectiveTime>";
+  assert.equal(paired(sys({ time: inclusive }), dia({ time: inclusive })).panels.length, 1, "an inclusive bound is a Period's own");
+});
+
+test("§4A.8: the panel's time is the document's, to the fraction of a second (Codex, #787)", () => {
+  const span = "<effectiveTime><low value='20250219121000.25-0500'/><high value='20250219171500.5'/></effectiveTime>";
+  const { panels } = paired(sys({ time: span }), dia({ time: span }));
+  assert.deepEqual(panels[0]!.effectivePeriod, { start: "2025-02-19T17:10:00.25Z", end: "2025-02-19T17:15:00.5Z" });
+  assert.equal(panels[0]!.effectiveDateTime, undefined);
 });
 
 test("§4A.8: a method in a code system the importer does not map is still a stated method (Codex, #787)", () => {
@@ -1805,4 +1832,40 @@ test("§4A.8: two blood pressures a fraction of a second apart are two times, ea
     exam({ id: "d2", code: "8462-4", time: at("20250219171000.9") }),
   );
   assert.deepEqual([panels.length, unpaired], [2, 0]);
+  assert.deepEqual(panels.map((p) => p.effectiveDateTime), ["2025-02-19T17:10:00.1Z", "2025-02-19T17:10:00.9Z"], "each keeps its own time");
+});
+
+test("export: two blood pressures a fraction of a second apart are written apart, and come back as two panels (Codex, #787)", () => {
+  const bundle = {
+    resourceType: "Bundle",
+    entry: [
+      sourceBundle.entry[0]!,
+      { resource: bpPanel({ id: "a", effectiveDateTime: "2025-06-01T10:00:00.100Z" }) },
+      { resource: bpPanel({ id: "b", effectiveDateTime: "2025-06-01T05:00:00.9-05:00" }) },
+    ],
+  };
+  const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), bundle);
+  assert.deepEqual([...new Set([...xml.matchAll(/<effectiveTime value="([^"]+)"/g)].map((m) => m[1]).filter((t) => t!.startsWith("20250601")))], ["20250601100000.1", "20250601100000.9"]);
+  const back = importQrda1Document(xml);
+  assert.equal(back.unpairedBloodPressureReadings, 0);
+  const panels = back.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9"));
+  assert.deepEqual(panels.map((p) => p.effectiveDateTime).sort(), ["2025-06-01T10:00:00.1Z", "2025-06-01T10:00:00.9Z"]);
+});
+
+test("export: a blood pressure over a period is written only when the period is closed, and comes back as the same period (Codex, #787)", () => {
+  for (const [period, why] of [
+    [{ start: "2025-06-01T10:00:00Z" }, /no end/],
+    [{ start: "2025-06-01T10:00:00Z", end: "2025-06-01" }, /no time of day/],
+    [{ start: "2025-06-01T10:05:00Z", end: "2025-06-01T10:00:00Z" }, /ends before it starts/],
+    [{ start: "2025-06-01T10:00:00.9Z", end: "2025-06-01T10:00:00.1Z" }, /ends before it starts/],
+  ] as const) {
+    const r = exported(bpPanel({ effectiveDateTime: undefined, effectivePeriod: period }));
+    assert.equal(r.exams, 0, JSON.stringify(period));
+    assert.match(r.why, why, JSON.stringify(period));
+  }
+  const closed = { start: "2025-06-01T10:00:00Z", end: "2025-06-01T10:05:00.5Z" };
+  const bundle = { resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: bpPanel({ effectiveDateTime: undefined, effectivePeriod: closed }) }] };
+  const back = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), bundle));
+  const panels = back.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9"));
+  assert.deepEqual(panels.map((p) => p.effectivePeriod), [closed]);
 });

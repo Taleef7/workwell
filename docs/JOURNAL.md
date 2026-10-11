@@ -9,11 +9,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 - **A QRDA blood pressure is one panel when the document states one (LOCKED §4A.8, owner decision
   today).** QRDA writes a systolic and a diastolic as two readings at one time; CMS165 reads only a
-  US Core panel. The importer now pairs them under strict conditions: the same time with a time of day,
-  the only two at that time, both numbers in mm[Hg], and the same stated performer, method, site and
-  device. The panel keeps both source ids; anything else stays two readings and is counted. The exporter
-  writes a final panel with a time of day and plain mm[Hg] values back as its two readings, and nothing
-  else; what the round trip cannot carry is the panel's encounter link, which QDM's reading has no place for.
+  US Core panel. The importer now pairs them under strict conditions: the same instant or closed interval
+  with a time of day (never an open one), the only two at that time, both numbers in mm[Hg], and the same
+  stated performer, method, site and device. The panel keeps both source ids and the document's time to
+  the fraction of a second; anything else stays two readings and is counted. The exporter writes a final
+  panel at such a time, with plain mm[Hg] values, back as its two readings, and nothing else; what the
+  round trip cannot carry is the panel's encounter link, which QDM's reading has no place for.
   - The Cypress deck, both years, as production runs it: CMS165 42/44, from 33/44 after #786 and 0/44
     before. The two left are readings taken during an ED visit or inpatient stay, which CMS's draft
     leaves out only through `Observation.encounter`.

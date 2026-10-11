@@ -141,12 +141,12 @@ function targetSites(r: FhirResource, pad: string): string {
  * sample uses it for an ongoing diagnosis) — as against omitting `high`, which asserts nothing about
  * whether the interval is open.
  */
-function effectiveTime(resource: FhirResource, indent: string): string {
+function effectiveTime(resource: FhirResource, indent: string, ts: (iso: unknown) => string | null = hl7TsOrNull): string {
   const period = resource.effectivePeriod ?? resource.performedPeriod ?? resource.period ?? resource.onsetPeriod;
   // Every date goes through the non-throwing conversion: these strings come from third-party FHIR, and a
   // MariaDB zero-date must degrade this ONE field rather than lose every subject's document (#361).
-  const low = hl7TsOrNull(period?.start ?? resource.effectiveDateTime ?? resource.performedDateTime ?? resource.onsetDateTime ?? resource.issued);
-  const end = hl7TsOrNull(period?.end ?? resource.abatementDateTime);
+  const low = ts(period?.start ?? resource.effectiveDateTime ?? resource.performedDateTime ?? resource.onsetDateTime ?? resource.issued);
+  const end = ts(period?.end ?? resource.abatementDateTime);
   const interval = period !== undefined || resource.resourceType === "Condition";
 
   if (low === null && end === null) {
@@ -165,6 +165,18 @@ function effectiveTime(resource: FhirResource, indent: string): string {
     return `<effectiveTime>\n${indent}  ${lowEl}\n${indent}  ${highEl}\n${indent}</effectiveTime>`;
   }
   return `<effectiveTime value="${low}"/>`;
+}
+
+/**
+ * `hl7TsOrNull` keeping any fraction of a second, for a blood-pressure reading. Two panels a fraction of a
+ * second apart written at the same whole second would come back as four readings at one instant, and
+ * neither would pair (Codex, #787). An offset is whole minutes, so the fraction survives the move to UTC.
+ */
+function hl7TsKeepingFraction(iso: unknown): string | null {
+  const whole = hl7TsOrNull(iso);
+  if (whole === null) return null;
+  const fraction = /T\d{2}:\d{2}:\d{2}\.(\d+)/.exec(iso as string)?.[1]?.replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole;
 }
 
 /** The FHIR `category` codings, flattened — `category` is 0..* on Observation but 0..1 in some shims. */
@@ -355,12 +367,17 @@ function readingComponents(r: FhirResource, code: string) {
   );
 }
 
+/** A panel's own time: `effective[x]` alone, never `issued` (the effectiveTime helper falls back to it). */
+function bloodPressureTime(r: FhirResource): Pick<FhirResource, "effectiveDateTime" | "effectivePeriod"> {
+  return r.effectiveDateTime !== undefined ? { effectiveDateTime: r.effectiveDateTime } : { effectivePeriod: r.effectivePeriod };
+}
+
 /**
  * Why a blood-pressure panel cannot be written as two Physical Exam readings, or null when it can. Every
  * condition guards the round trip against stating what the panel does not (review, #787):
  * - final (a preliminary panel would come back `final` and count);
  * - a time of day in `effective[x]` itself (a date alone would be written as midnight and pair; `issued`
- *   is when it was recorded, not when it was measured);
+ *   is when it was recorded, not when it was measured), and a period only when closed, start not after end;
  * - exactly one systolic and one diastolic component, each a plain number with no comparator ("<130" is
  *   not 130), in UCUM mm[Hg].
  * All or nothing: half a panel is never written, so nothing is dropped without a reason.
@@ -369,8 +386,20 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
   if (!FINAL_STATUSES.has(r.status ?? "")) {
     return `a blood pressure whose status is '${r.status ?? "absent"}' is not final, so it is not written as completed readings`;
   }
-  const when = r.effectiveDateTime ?? r.effectivePeriod?.start;
-  if (!when || !when.includes("T")) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
+  const time = bloodPressureTime(r);
+  const stamp = (t: string | undefined) => (t?.includes("T") ? hl7TsKeepingFraction(t) : null);
+  const start = stamp(time.effectiveDateTime ?? time.effectivePeriod?.start);
+  if (start === null) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
+  if (time.effectivePeriod) {
+    // The import pairs a period only when it states both bounds (LOCKED §4A.8), and a date-only end would be
+    // written as midnight, a time the panel never stated (Codex, #787).
+    const end = stamp(time.effectivePeriod.end);
+    if (end === null) return "a blood pressure over a period with no end, or an end with no time of day, is not written";
+    const whole = [start.slice(0, 14), end.slice(0, 14)];
+    if (whole[0]! > whole[1]! || (whole[0] === whole[1] && Number(`0${start.slice(14)}`) > Number(`0${end.slice(14)}`))) {
+      return "a blood pressure whose period ends before it starts is not written";
+    }
+  }
   const systolic = readingComponents(r, "8480-6");
   const diastolic = readingComponents(r, "8462-4");
   if (systolic.length !== 1 || diastolic.length !== 1 || systolic[0] === diastolic[0]) {
@@ -400,11 +429,7 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
 function bloodPressureReadings(r: FhirResource, i: number, pad: string): string[] | null {
   if (!isBloodPressurePanel(r)) return null;
   if (bloodPressureExportProblem(r) !== null) return [];
-  // The time from `effective[x]` alone, never `issued` (the effectiveTime helper falls back to it).
-  const timed: FhirResource = {
-    resourceType: "Observation",
-    ...(r.effectiveDateTime ? { effectiveDateTime: r.effectiveDateTime } : { effectivePeriod: r.effectivePeriod }),
-  };
+  const timed: FhirResource = { resourceType: "Observation", ...bloodPressureTime(r) };
   return (["8480-6", "8462-4"] as const).map((readingCode) => {
     const component = readingComponents(r, readingCode)[0]!;
     // The reading's own LOINC code first, every other mapped coding as a translation, so the import still
@@ -421,7 +446,7 @@ ${pad}    ${cdaId(entryResource, `observation-${i}-${readingCode}`)}
 ${pad}    ${translations.length === 0 ? `<code ${code}/>` : `<code ${code}>${translations.map((t) => `\n${pad}      <translation ${t}/>`).join("")}\n${pad}    </code>`}
 ${pad}    <text>Physical Exam, Performed</text>
 ${pad}    ${COMPLETED}
-${pad}    ${effectiveTime(timed, `${pad}    `)}
+${pad}    ${effectiveTime(timed, `${pad}    `, hl7TsKeepingFraction)}
 ${pad}    <value xsi:type="PQ" value="${esc(String(component.valueQuantity!.value))}" unit="mm[Hg]"/>
 ${pad}  </observation>
 ${pad}</entry>`;
