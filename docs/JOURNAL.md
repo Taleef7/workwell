@@ -18,6 +18,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
     leaves out only through `Observation.encounter`.
   - Every other measure's agreement, the translations' and C2 on both archives are unchanged.
   - CLAUDE.md's no-invented-data rule names the pairing as a mapping, and §4A.8 states the conditions.
+  - Review found a wider importer defect: an empty or blank numeric value imported as 0 for every
+    observation, a result no document stated. It now imports as no value; no deck report moved.
 - **cms165 trusts one profile, not all of them (#591).** Its blood-pressure retrieve still keeps only
   readings stamped `us-core-blood-pressure`; every other retrieve now reads by resource type, as for the
   other five measures. Until now cms165 required every QI-Core profile, which only the corpus stamps, so
