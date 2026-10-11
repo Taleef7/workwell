@@ -1558,3 +1558,51 @@ test("negationInd=\"1\" is a negation, exactly as \"true\" is (Codex, #787)", ()
   const { panels, readings } = paired(negated({ id: "s", code: "8480-6" }), negated({ id: "d", code: "8462-4" }), sys({ id: "keep" }));
   assert.deepEqual([panels.length, readings], [0, 1], "only the positive reading is imported");
 });
+
+test("§4A.8: an hour without minutes is not a time two readings can share, and an hour of 99 is no timestamp (Codex, #787)", () => {
+  for (const value of ["2025010112", "2025010199"]) {
+    const time = `<effectiveTime value='${value}'/>`;
+    assert.equal(paired(sys({ time }), dia({ time })).panels.length, 0, value);
+  }
+  const [reading] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='2025010199'/>" })), "Observation");
+  assert.equal(reading!.effectiveDateTime, undefined, "an impossible hour is not quietly dropped to a date");
+});
+
+const panelOf = (status: string, systolicCodings: Array<{ system: string; code: string }>) => ({
+  ...sourceBundle,
+  entry: [
+    sourceBundle.entry[0]!,
+    {
+      resource: {
+        resourceType: "Observation", id: "bp-x", status,
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs" }] }],
+        code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+        effectiveDateTime: "2025-06-01T10:00:00Z",
+        component: [
+          { code: { coding: systolicCodings }, valueQuantity: { value: 128, unit: "mm[Hg]", code: "mm[Hg]" } },
+          { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 78, unit: "mm[Hg]", code: "mm[Hg]" } },
+        ],
+      },
+    },
+  ],
+});
+
+test("export: a reading's LOINC code leads whatever order its codings came in, so the round trip still pairs (Codex, #787)", () => {
+  const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), panelOf("final", [
+    { system: "http://snomed.info/sct", code: "271649006" },
+    { system: "http://loinc.org", code: "8480-6" },
+  ]));
+  assert.match(xml, /<code code="8480-6"[^>]*>\s*<translation code="271649006"/);
+  const back = importQrda1Document(xml);
+  assert.equal(back.bundle.entry.filter((e) => JSON.stringify((e.resource as { code?: unknown }).code ?? {}).includes("85354-9")).length, 1);
+});
+
+test("export: a blood pressure that is not final is not written as completed readings, and says why (Codex, #787)", () => {
+  for (const status of ["preliminary", "registered", "unknown"]) {
+    const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), panelOf(status, [{ system: "http://loinc.org", code: "8480-6" }]));
+    assert.ok(!xml.includes("2.16.840.1.113883.10.20.24.3.59"), `${status}: no Physical Exam, Performed`);
+    assert.ok(!xml.includes("85354-9"), `${status}: and not a lab test either`);
+  }
+  const amended = buildQrda1Document(run, "cms125", outcome(officialEvidence), panelOf("amended", [{ system: "http://loinc.org", code: "8480-6" }]));
+  assert.equal((amended.match(/2\.16\.840\.1\.113883\.10\.20\.24\.3\.59/g) ?? []).length, 2, "amended is final");
+});

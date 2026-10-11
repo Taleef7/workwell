@@ -147,6 +147,8 @@ function isoFromHl7(value: string | undefined): string | undefined {
   const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
   const offset = /([+-])(\d{2})(\d{2})$/.exec(value);
   const digits = offset ? value.slice(0, value.length - 5) : value;
+  // An hour without minutes keeps the date only, and an hour that is not one makes it no timestamp.
+  if (digits.length >= 10 && Number(digits.slice(8, 10)) > 23) return undefined;
   if (digits.length < 12) {
     // Validate the date-only path too. `00000000` (a MariaDB zero date) used to become
     // `"0000-00-00"` and flow into `Patient.birthDate`, where CMS125's IPP feeds it to `AgeAt(...)`.
@@ -506,10 +508,11 @@ function timeKeyOf(node: CdaNode): string | undefined {
   const raw = (n: CdaNode | undefined) => (n ? { value: n.attrs.value ?? null, nullFlavor: n.attrs.nullFlavor ?? null } : null);
   const low = child(time, "low");
   const high = child(time, "high");
-  // A time of day is at least the hour: YYYYMMDDHH. And every stated bound must be a real timestamp: two
-  // readings that share an unparseable one share no time at all (Codex, #787).
+  // A time of day is an hour and a minute: YYYYMMDDHHMM, the precision at which the parser keeps it. And
+  // every stated bound must be a real timestamp: two readings that share an unparseable one share no time
+  // at all (Codex, #787).
   const start = time.attrs.value ?? low?.attrs.value;
-  if (!start || !/^\d{10}/.test(start) || isoFromHl7(start) === undefined) return undefined;
+  if (!start || !/^\d{12}/.test(start) || isoFromHl7(start) === undefined) return undefined;
   if (high?.attrs.value !== undefined && isoFromHl7(high.attrs.value) === undefined) return undefined;
   return JSON.stringify({ at: raw(time), low: raw(low), high: raw(high) });
 }

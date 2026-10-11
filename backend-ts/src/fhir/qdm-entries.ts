@@ -335,8 +335,15 @@ ${pad}  </procedure>
 ${pad}</entry>`;
 }
 
-/** The LOINC panel codes a US Core blood pressure carries. */
+/** The LOINC panel codes a US Core blood pressure carries, and its two readings' codes. */
 const BLOOD_PRESSURE_PANELS = new Set(["85354-9", "55284-4"]);
+const READING_CODES = new Set(["8480-6", "8462-4"]);
+/** Statuses that mean the result is final; anything else is not a completed reading. */
+const FINAL_STATUSES = new Set(["final", "amended", "corrected"]);
+
+function isBloodPressurePanel(r: FhirResource): boolean {
+  return (r.code?.coding ?? []).some((c) => c.system === "http://loinc.org" && BLOOD_PRESSURE_PANELS.has(c.code ?? ""));
+}
 
 /**
  * A blood-pressure panel as QDM states it: one Physical Exam, Performed per reading, each with its own
@@ -346,20 +353,26 @@ const BLOOD_PRESSURE_PANELS = new Set(["85354-9", "55284-4"]);
  * blood-pressure panel, so the caller routes it as any other Observation.
  */
 function bloodPressureReadings(r: FhirResource, i: number, pad: string): string[] | null {
-  const panel = (r.code?.coding ?? []).some((c) => c.system === "http://loinc.org" && BLOOD_PRESSURE_PANELS.has(c.code ?? ""));
-  if (!panel || !Array.isArray(r.component)) return null;
+  if (!isBloodPressurePanel(r) || !Array.isArray(r.component)) return null;
+  // Only a blood pressure that is final is written as completed readings: a preliminary or unknown one
+  // would come back from the import as `final` and count (Codex, #787). `dropReason` says why it is left out.
+  if (!FINAL_STATUSES.has(r.status ?? "")) return [];
   return r.component.flatMap((component, k) => {
-    const code = cdaCode(component.code);
+    // The reading's own LOINC code first, every other mapped coding as a translation, so the import still
+    // recognises the reading whatever order the codings came in (Codex, #787).
+    const codings = component.code?.coding ?? [];
+    const reading = codings.filter((c) => c.system === "http://loinc.org" && READING_CODES.has(c.code ?? ""));
+    const [code, ...translations] = cdaCodes({ coding: [...reading, ...codings.filter((c) => !reading.includes(c))] });
     const value = component.valueQuantity?.value;
     if (!code || typeof value !== "number" || !Number.isFinite(value)) return [];
     const unit = component.valueQuantity?.code ?? component.valueQuantity?.unit;
-    const reading = { ...r, id: `${r.id ?? `observation-${i}`}-${component.code?.coding?.[0]?.code ?? k}` };
+    const entryResource = { ...r, id: `${r.id ?? `observation-${i}`}-${reading[0]?.code ?? k}` };
     return [`${pad}<entry typeCode="DRIV">
 ${pad}  <observation classCode="OBS" moodCode="EVN">
 ${pad}    <templateId root="2.16.840.1.113883.10.20.22.4.13" extension="2014-06-09"/>
 ${pad}    <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
-${pad}    ${cdaId(reading, `observation-${i}-${k}`)}
-${pad}    <code ${code}/>
+${pad}    ${cdaId(entryResource, `observation-${i}-${k}`)}
+${pad}    ${translations.length === 0 ? `<code ${code}/>` : `<code ${code}>${translations.map((t) => `\n${pad}      <translation ${t}/>`).join("")}\n${pad}    </code>`}
 ${pad}    <text>Physical Exam, Performed</text>
 ${pad}    ${COMPLETED}
 ${pad}    ${effectiveTime(r, `${pad}    `)}
@@ -397,6 +410,9 @@ function dropReason(resource: FhirResource, type: string): string {
     return `no QDM entry template — this exporter maps ${QDM_MAPPED_RESOURCE_TYPES.join(", ")} only (ADR-055)`;
   }
   if (isNegated(resource)) return "excluded — its status says the event did not happen or was retracted";
+  if (type === "Observation" && isBloodPressurePanel(resource) && !FINAL_STATUSES.has(resource.status ?? "")) {
+    return `a blood pressure whose status is '${resource.status ?? "absent"}' is not final, so it is not written as completed readings`;
+  }
   if (type === "Observation") {
     const cats = categoryCodes(resource);
     if (cats.length === 0) return "no category, so its QDM datatype (laboratory vs diagnostic study) is undetermined";
