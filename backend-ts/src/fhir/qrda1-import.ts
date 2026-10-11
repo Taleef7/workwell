@@ -158,7 +158,13 @@ function isoFromHl7(value: string | undefined): string | undefined {
   const [h, mi, s] = [digits.slice(8, 10), digits.slice(10, 12), digits.slice(12, 14) || "00"];
   const zone = offset ? `${offset[1]}${offset[2]}:${offset[3]}` : "Z";
   const parsed = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}${zone}`);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  // The components must survive the parse. `new Date` rolls an impossible day over instead of failing
+  // (`20250230120000` became 2 March), which would import a date the document never stated (Codex, #787).
+  const offsetMinutes = offset ? (offset[1] === "-" ? -1 : 1) * (Number(offset[2]) * 60 + Number(offset[3])) : 0;
+  const local = new Date(parsed.getTime() + offsetMinutes * 60_000).toISOString().slice(0, 19);
+  if (local !== `${y}-${mo}-${d}T${h}:${mi}:${s}`) return undefined;
+  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /** A CDA coded element → a FHIR CodeableConcept, or undefined when it is nullFlavored/unmapped. */
@@ -916,7 +922,10 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // (the diagnostic does not distinguish "negated" from other drops, which is a known limit).
       // The one exception is an Assessment, Not Performed with a stated reason, which has a faithful
       // QI-Core form of its own (`assessmentNotDoneFrom`) that no positive read can mistake for the act.
-      if (candidate.attrs.negationInd === "true") {
+      // Both lexical forms of an XML Schema boolean true: `"1"` says the act did not happen exactly as
+      // `"true"` does, and read as positive it would import a negated reading as a fact (Codex, #787).
+      const negation = candidate.attrs.negationInd?.trim();
+      if (negation === "true" || negation === "1") {
         const notDone = hasTemplate(candidate, T.assessmentPerformed) ? assessmentNotDoneFrom(candidate, key) : undefined;
         if (notDone !== undefined) {
           entries.push({ resource: notDone });

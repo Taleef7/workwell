@@ -1541,3 +1541,20 @@ test("§4A.8: performers are compared by everything stated, not only a null-flav
   assert.equal(paired(sys({ extra: by("Ana") }), dia({ extra: by("Ben") })).panels.length, 0);
   assert.equal(paired(sys({ extra: by("Ana") }), dia({ extra: by("Ana") })).panels.length, 1);
 });
+
+test("an impossible calendar date is no date: it is not rolled over to the next month (Codex, #787)", () => {
+  // `new Date` turns 30 February into 2 March. Neither the reading's time nor a pair may come from it.
+  const feb30 = "<effectiveTime value='20250230120000'/>";
+  const { panels, unpaired } = paired(sys({ time: feb30 }), dia({ time: feb30 }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+  const [reading] = importedOfType(sitedDocument(sys({ time: feb30 })), "Observation");
+  assert.equal(reading!.effectiveDateTime, undefined, "no date the document did not state");
+  const [real] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='20250228120000-0500'/>" })), "Observation");
+  assert.equal(real!.effectiveDateTime, "2025-02-28T17:00:00Z", "a real date with an offset still parses");
+});
+
+test("negationInd=\"1\" is a negation, exactly as \"true\" is (Codex, #787)", () => {
+  const negated = (o: Parameters<typeof exam>[0]) => exam(o).replace('moodCode="EVN">', 'moodCode="EVN" negationInd="1">');
+  const { panels, readings } = paired(negated({ id: "s", code: "8480-6" }), negated({ id: "d", code: "8462-4" }), sys({ id: "keep" }));
+  assert.deepEqual([panels.length, readings], [0, 1], "only the positive reading is imported");
+});
