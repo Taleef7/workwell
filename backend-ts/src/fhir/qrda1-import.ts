@@ -535,8 +535,26 @@ function timeKeyOf(node: CdaNode): string | undefined {
   if (!start || !/^\d{12}/.test(start) || isoFromHl7(start) === undefined) return undefined;
   if (high?.attrs.value !== undefined && isoFromHl7(high.attrs.value) === undefined) return undefined;
   // Everything the element states (width, center, inclusive, …), so two different statements of time
-  // never share a key (review, #787).
-  return JSON.stringify(statedContentOf(time));
+  // never share a key (review, #787) — except that each timestamp is compared as the INSTANT it names, to
+  // its fraction of a second: §4A.8's "the same instant" holds across time zones (Codex, #787). A point
+  // and an interval still differ, because the element's shape is compared as written.
+  const normalized = (n: CdaNode): unknown => {
+    const attrs = Object.keys(n.attrs).sort().map((k) => [k, k === "value" ? (instantKeyOf(n.attrs[k]) ?? n.attrs[k]) : n.attrs[k]]);
+    return [n.local, attrs, n.text, n.children.map(normalized)];
+  };
+  return JSON.stringify(normalized(time));
+}
+
+/**
+ * A timestamp as the UTC instant it names, keeping any fraction of a second (`isoFromHl7` keeps whole
+ * seconds), or undefined when it is not one. Two readings a tenth of a second apart are two times
+ * (Codex, #787).
+ */
+function instantKeyOf(value: string | undefined): string | undefined {
+  const iso = isoFromHl7(value);
+  if (iso === undefined || !iso.includes("T")) return iso;
+  const fraction = /^\d{14}\.(\d+)/.exec(value!)?.[1]?.replace(/0+$/, "");
+  return fraction ? iso.replace(/Z$/, `.${fraction}Z`) : iso;
 }
 
 /**
@@ -592,7 +610,7 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, readings: Blo
   // (review, #787). Identity of the two halves' time stays the exact spelling (`timeKeyOf`).
   const instantOf = (r: BloodPressureReading): string | undefined => {
     const time = child(r.node, "effectiveTime");
-    return isoFromHl7(time?.attrs.value ?? child(time, "low")?.attrs.value);
+    return instantKeyOf(time?.attrs.value ?? child(time, "low")?.attrs.value);
   };
   const atInstant = new Map<string, number>();
   for (const reading of readings) {

@@ -1787,3 +1787,22 @@ test("review #787: a reading's time is the panel's effective[x] alone, never ano
   const times = translation.entries.filter((e) => e.includes("2.16.840.1.113883.10.20.24.3.59")).map((e) => /<effectiveTime value="(\d+)/.exec(e)?.[1]);
   assert.deepEqual(times, ["20250601100000", "20250601100000"]);
 });
+
+test("§4A.8: the same instant written in two time zones is one time, and pairs (Codex, #787)", () => {
+  const { panels, unpaired } = paired(
+    sys({ time: "<effectiveTime value='20250219171000+0000'/>" }),
+    dia({ time: "<effectiveTime value='20250219121000-0500'/>" }),
+  );
+  assert.deepEqual([panels.length, unpaired], [1, 0]);
+});
+
+test("§4A.8: two blood pressures a fraction of a second apart are two times, each its own panel (Codex, #787)", () => {
+  const at = (t: string) => `<effectiveTime value='${t}'/>`;
+  const { panels, unpaired } = paired(
+    exam({ id: "s1", code: "8480-6", time: at("20250219171000.100") }),
+    exam({ id: "d1", code: "8462-4", time: at("20250219171000.1") }),
+    exam({ id: "s2", code: "8480-6", time: at("20250219171000.900") }),
+    exam({ id: "d2", code: "8462-4", time: at("20250219171000.9") }),
+  );
+  assert.deepEqual([panels.length, unpaired], [2, 0]);
+});
