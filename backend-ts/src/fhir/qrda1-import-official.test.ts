@@ -258,12 +258,13 @@ const cms165Outcome = {
   evidence: { official: { ecqmId: "CMS165FHIR", version: "1.0.000", engine: "fqm-execution", populationResults: [] } },
 } as OutcomeRecord;
 
-const cms165OutcomeOf = async (xml: string): Promise<string | undefined> => {
-  const imported = importQrda1Document(xml).bundle;
+const cms165OutcomeOfBundle = async (bundle: unknown): Promise<string | undefined> => {
   const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
-  const results = await executor.evaluateBatch("cms165", [{ subjectId: "rt-subject", patientBundle: imported }], EVAL);
+  const results = await executor.evaluateBatch("cms165", [{ subjectId: "rt-subject", patientBundle: structuredClone(bundle) }], EVAL);
   return results.get("rt-subject")?.outcome;
 };
+
+const cms165OutcomeOf = async (xml: string): Promise<string | undefined> => cms165OutcomeOfBundle(importQrda1Document(xml).bundle);
 
 test("official CMS165 sees a round-tripped blood pressure: two readings at one time are one panel (§4A.8)", { skip: skipCms165 }, async () => {
   const xml = buildQrda1Document(run, "cms165", cms165Outcome, hypertensiveBundle);
@@ -287,4 +288,30 @@ test("official CMS165 reads an imported blood pressure's day in the document's o
   // converted to UTC scored each the wrong way round.
   assert.equal(await cms165OutcomeOf(at("20251231200000-0500")), "COMPLIANT", "20:00 on 31 December in New York is a 2025 reading");
   assert.equal(await cms165OutcomeOf(at("20260101030000+0500")), "OVERDUE", "03:00 on 1 January in Karachi is a 2026 reading");
+});
+
+test("official CMS165: a reading spelled outside LOINC's own system is neither scored nor exported, so the run and its QRDA agree (review, #787)", { skip: skipCms165 }, async () => {
+  const [patientEntry, encounter, hypertensionEntry, early] = hypertensiveBundle.entry;
+  // Evaluated as a source bundle, not an imported one, so it states what the importer would add: the
+  // patient's US Core sex and the diagnosis's clinical status.
+  const patient = { resource: { ...(patientEntry!.resource as Record<string, unknown>), extension: [{ url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex", valueCode: "248152002" }] } };
+  const hypertension = {
+    resource: { ...(hypertensionEntry!.resource as Record<string, unknown>), clinicalStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "active" }] } },
+  };
+  assert.equal(await cms165OutcomeOfBundle({ ...hypertensiveBundle, entry: [patient, encounter!, hypertension, early!] }), "COMPLIANT", "the fixture alone is controlled");
+  const reading = (system: string, code: string, value: number) => ({ code: { coding: [{ system, code }] }, valueQuantity: { value, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } });
+  // The fixture's 128/78 on 1 June, then a later reading whose codes CMS165 cannot read.
+  for (const [systolic, diastolic] of [[150, 95], [128, 78]] as const) {
+    const late = {
+      resource: {
+        ...(early!.resource as Record<string, unknown>), id: "bp-late", effectiveDateTime: "2025-09-01T10:00:00Z",
+        component: [reading("http://loinc.org/", "8480-6", systolic), reading("http://loinc.org/", "8462-4", diastolic)],
+      },
+    };
+    const bundle = { ...hypertensiveBundle, entry: [patient!, encounter!, hypertension!, early!, late] };
+    // Before, preparation stamped it: CMS165 took 1 September as the latest day, read no values from it, and
+    // scored the patient OVERDUE whatever the reading said.
+    assert.equal(await cms165OutcomeOfBundle(bundle), "COMPLIANT", `${systolic}/${diastolic}: the run scores the readable 128/78`);
+    assert.equal(await cms165OutcomeOf(buildQrda1Document(run, "cms165", cms165Outcome, bundle)), "COMPLIANT", `${systolic}/${diastolic}: and so does its QRDA`);
+  }
 });

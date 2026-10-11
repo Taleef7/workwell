@@ -10,11 +10,18 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 - **#787 had two more review passes before merge** (four reviewers on the whole PR, then two on the
   rework, fuzzing against independent oracles), after Codex kept finding defects. The pairing was rebuilt
   rather than patched: a third systolic or diastolic of any template whose time could fall within the
-  pair's blocks it, judged across time zones; an identical time means the same precision and zone; each
-  half has exactly one value of its own; the panel keeps the document's offset, since CMS165 reads a
-  reading's day in it (a panel converted to UTC moved 20:00 on 31 December in New York into the next
-  year); wrapped readings never pair. The exporter writes readings only in LOINC's own system, the one
-  CMS165 reads, and reports what it does not write as caveats. Decks and C2 unchanged; CMS165 42/44.
+  pair's blocks it, judged across time zones; an identical time means the same instant at the same
+  precision, both or neither stating a zone; each half has exactly one value of its own; the panel keeps
+  the document's offset, since CMS165 reads a reading's day in it (a panel converted to UTC moved 20:00
+  on 31 December in New York into the next year); wrapped readings never pair. The exporter writes
+  readings only in LOINC's own system, the one CMS165 reads, and reports what it does not write as
+  caveats. Decks and C2 unchanged; CMS165 42/44.
+- **Preparation stamps a blood pressure only when CMS165 can read it.** A panel whose systolic and
+  diastolic were coded `http://loinc.org/`, as the OID or with no system was stamped
+  `us-core-blood-pressure`, so CMS165 took its day as the latest and read no values: measured, a patient
+  at 120/70 then 128/78 scored OVERDUE. Now only readings in LOINC's own system are stamped (US Core fixes
+  the same system). The corpus codes them so, as do the trial instance's real readings (2026-07-23) and the
+  dev-database shim, so no live result moves.
 - Proposed to the owner: a §4A.8 amendment stating the conditions the code enforces, and follow-ups for
   defects the reviews found outside #787 (the largest: every imported time is converted to UTC).
 

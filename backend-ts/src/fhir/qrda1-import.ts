@@ -795,14 +795,12 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, candidates: B
     const at = rangeOf(s.reading.node);
     const pair = new Set([s.reading.index, d.reading.index]);
     if (blockers.some((b) => !pair.has(b.index) && rangesOverlap(rangeOf(b.node), at))) continue;
-    // One value, the reading's own: a Result coded as the other half (a systolic carrying a diastolic's
-    // result) is not this reading's value (review, #787).
-    const ownCode = (r: BloodPressureReading) => (half(r) === "systolic" ? SYSTOLIC : DIASTOLIC);
+    // One value, the reading's own: a Result is this reading's only when its code states the same half and
+    // only that half, read as a reading's own code is (`bloodPressureHalfOf`). A Result coded as the other
+    // half, or as both (one code and the other as a translation), is not (review, #787).
     const mmHg = (r: BloodPressureReading) => {
       const q = (entries[r.index]!.resource as ObservationShape).valueQuantity;
-      const resultsAreOwn = ownResultsOf(r.node).every((result) =>
-        (concept(child(result, "code"))?.coding ?? []).some((c) => c.system === LOINC && c.code === ownCode(r)),
-      );
+      const resultsAreOwn = ownResultsOf(r.node).every((result) => bloodPressureHalfOf({ code: concept(child(result, "code")) }) === half(r));
       return statedValuesOf(r.node).length === 1 && resultsAreOwn && typeof q?.value === "number" && Number.isFinite(q.value) && q.unit === "mm[Hg]";
     };
     // A reading that happened: an event (not an intent), completed (not aborted or nullified) (review, #787).

@@ -100,6 +100,7 @@ interface FhirResource {
   valueQuantity?: { value?: number; unit?: string };
   valueCodeableConcept?: FhirCodeableConcept;
   /** A blood-pressure panel's systolic and diastolic readings (#591). */
+  identifier?: Array<{ system?: string; value?: string }>;
   component?: Array<{
     code?: FhirCodeableConcept;
     valueQuantity?: { value?: number; unit?: string; code?: string; system?: string; comparator?: string };
@@ -428,7 +429,6 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
     return `a blood pressure whose status is '${r.status ?? "absent"}' is not final, so it is not written as completed readings`;
   }
   const time = bloodPressureTime(r);
-  const notReal = "a blood pressure whose time is not a real date and time is not written";
   if (time.effectiveDateTime === undefined && time.effectivePeriod === undefined) {
     return r.effectiveTiming !== undefined
       ? "a blood pressure timed by a schedule (effectiveTiming) is not written: a reading is taken at a time"
@@ -438,13 +438,13 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
   const when = time.effectiveDateTime ?? time.effectivePeriod?.start;
   if (!when?.includes("T")) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
   const start = hl7TsKeepingFraction(when);
-  if (start === null) return notReal;
+  if (start === null) return unwritableTimeReason(when);
   if (time.effectivePeriod) {
     // The import pairs a period only when it states both bounds (LOCKED §4A.8), and a date-only end would be
     // written as midnight, a time the panel never stated (Codex, #787).
     if (!time.effectivePeriod.end?.includes("T")) return "a blood pressure over a period with no end, or an end with no time of day, is not written";
     const end = hl7TsKeepingFraction(time.effectivePeriod.end);
-    if (end === null) return notReal;
+    if (end === null) return unwritableTimeReason(time.effectivePeriod.end);
     // A bound in a stated zone and a bound in none are in two frames: they cannot be ordered or written as
     // one period (review, #787).
     const zoned = (t: string) => /(Z|[+-]\d{2}:\d{2})$/.test(t);
@@ -480,11 +480,26 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
   return null;
 }
 
-/** Panel fields the readings carry, or that say nothing about the reading (`meta`, `text`). */
+/** Why a blood pressure's time of day cannot be written: each is a time FHIR or the import cannot state. */
+function unwritableTimeReason(t: string): string {
+  if (/:\d{2}\.\d{10,}/.test(t)) return "a blood pressure whose time states more than nine digits of a second, which FHIR cannot, is not written";
+  const offset = /[+-](\d{2}):(\d{2})$/.exec(t);
+  if (offset && Number(offset[2]) < 60 && Number(offset[1]) * 60 + Number(offset[2]) > 14 * 60) {
+    return "a blood pressure whose time zone offset is beyond 14 hours, which FHIR cannot state, is not written";
+  }
+  return "a blood pressure whose time is not a real date and time is not written";
+}
+
+/**
+ * Panel fields the readings carry, or that say nothing about the reading (`meta`, `text`, `language`).
+ * `identifier` is checked on its own: the readings' ids carry the ones this exporter writes.
+ */
 const BLOOD_PRESSURE_FIELDS_WRITTEN = new Set([
-  "resourceType", "id", "meta", "text", "language", "implicitRules", "status", "category", "code",
+  "resourceType", "id", "meta", "text", "language", "status", "category", "code", "identifier",
   "effectiveDateTime", "effectivePeriod", "effectiveInstant", "component", "bodySite", "method", "subject",
 ]);
+/** A reading's (component's) fields the Physical Exam entry carries; `id` is the element's own handle. */
+const READING_FIELDS_WRITTEN = new Set(["id", "code", "valueQuantity"]);
 
 /**
  * A blood-pressure panel as QDM states it: one Physical Exam, Performed per reading, each with its own
@@ -513,14 +528,36 @@ function bloodPressureReadings(r: FhirResource, i: number, pad: string, caveats:
   for (const field of Object.keys(r).filter((k) => !BLOOD_PRESSURE_FIELDS_WRITTEN.has(k) && (r as Record<string, unknown>)[k] !== undefined)) {
     caveats.push(`a blood pressure's ${field} is not written by this exporter`);
   }
+  // The readings' `<id>`s carry this exporter's own identifiers (a round-tripped panel's, which the import
+  // names by the root's URI form), never another.
+  const writtenIds = new Set([id, `${id}-8462-4`]);
+  const ownSystems = new Set([`urn:uuid:${FHIR_RESOURCE_ID_ROOT.toLowerCase()}`, `urn:oid:${FHIR_RESOURCE_ID_ROOT}`]);
+  if ((r.identifier ?? []).some((x) => !(ownSystems.has(x.system ?? "") && writtenIds.has(x.value ?? "")))) {
+    caveats.push("a blood pressure's identifier is not written by this exporter");
+  }
   if (r.status !== "final") caveats.push(`a blood pressure whose status is '${r.status}' is written as completed`);
+  // The panel's own code is not written (QDM states its readings): anything it says beyond the panel code is
+  // named.
+  if (r.code?.text !== undefined || (r.code?.coding ?? []).some((c) => !loincCodesOf({ coding: [c] }).some((code) => BLOOD_PRESSURE_PANELS.has(code)))) {
+    caveats.push("a blood pressure's own code says more than the panel code, and is not written by this exporter");
+  }
+  for (const reading of written) {
+    for (const [field, value] of Object.entries((reading ?? {}) as Record<string, unknown>)) {
+      if (!READING_FIELDS_WRITTEN.has(field) && value !== undefined) caveats.push(`a blood pressure reading's ${field} is not written by this exporter`);
+    }
+    const codings = reading?.code?.coding ?? [];
+    if (codings.some((c) => cdaCodes({ coding: [c] }).length === 0 && loincCodesOf({ coding: [c] }).length === 0)) {
+      caveats.push("a blood pressure reading's coding in a system CDA does not carry is not written");
+    }
+    if (reading?.code?.text !== undefined) caveats.push("a blood pressure reading's code text is not written by this exporter");
+  }
   // FHIR states one body site and one method on an Observation; a list is read as written, and named,
-  // because the import carries a site or method back only when one is stated.
+  // because the import carries a site or method back only when exactly one is written.
   const listOf = (v: unknown) => (Array.isArray(v) ? (v as FhirCodeableConcept[]) : v ? [v as FhirCodeableConcept] : []);
   const sites = listOf(r.bodySite);
   const methods = listOf(r.method);
-  if (sites.length > 1) caveats.push("a blood pressure with more than one body site is written with each, and a re-import carries none");
-  if (methods.length > 1) caveats.push("a blood pressure with more than one method is written with each, and a re-import carries none");
+  if (sites.filter((site) => cdaCodes(site).length > 0).length > 1) caveats.push("a blood pressure with more than one body site is written with each, and a re-import carries none");
+  if (methods.filter((method) => cdaCodes(method).length > 0).length > 1) caveats.push("a blood pressure with more than one method is written with each, and a re-import carries none");
   if (sites.some((site) => cdaCodes(site).length === 0)) caveats.push("a blood pressure's body site in no code system CDA carries is not written");
   if (methods.some((method) => cdaCodes(method).length === 0)) caveats.push("a blood pressure's method in no code system CDA carries is not written");
   const methodCodes = methods
@@ -645,7 +682,8 @@ export function translateQdm(bundle: unknown, pad = "          "): QdmTranslatio
     }
     if (produced.length > 0) {
       entries.push(...produced);
-      caveats.push(...notCarried.map((caveat) => `${type}: ${caveat}`));
+      // Once per resource: two uncoded components are one panel's caveat, not two resources'.
+      caveats.push(...[...new Set(notCarried)].map((caveat) => `${type}: ${caveat}`));
       return;
     }
     // Nothing produced. Say WHY, for the cases an operator can act on; stay silent for the ones that are

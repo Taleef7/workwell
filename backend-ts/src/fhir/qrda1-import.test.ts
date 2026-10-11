@@ -2121,9 +2121,14 @@ test("export: a malformed field costs one resource its reason, never the run its
 });
 
 test("export: a time the import cannot read back is not written (review, #787)", () => {
-  for (const when of ["2025-06-01T10:00:00.1234567891Z", "2025-06-01T10:00:00+15:00", "2025-06-01T10:00:00+05:60"]) {
+  for (const [when, reason] of [
+    ["2025-06-01T10:00:00.1234567891Z", /more than nine digits of a second/],
+    ["2025-06-01T10:00:00+15:00", /offset is beyond 14 hours/],
+    ["2025-06-01T10:00:00+14:30", /offset is beyond 14 hours/],
+    ["2025-06-01T10:00:00+05:60", /not a real date and time/],
+  ] as const) {
     const r = exported(bpPanel({ effectiveDateTime: when }));
-    assert.deepEqual([r.exams, /not a real date and time/.test(r.why)], [0, true], when);
+    assert.deepEqual([r.exams, reason.test(r.why)], [0, true], `${when}: ${r.why}`);
   }
   const back = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), {
     resourceType: "Bundle",
@@ -2137,7 +2142,13 @@ test("review #787: a third reading blocks across zones, and a range that runs ba
   const third = (time: string) => exam({ id: "s3", code: "8480-6", time, value: `<value xsi:type="PQ" value="150" unit="mm[Hg]"/>` });
   const at = (value: string) => `<effectiveTime value='${value}'/>`;
   // 20:00 on 31 December in New York, and 08:00 on 1 June in Tokyo: in UTC another day than the stated one.
-  for (const [pairTime, sameDay, otherDay] of [["20251231200000-0500", "20251231", "20251229"], ["20250601080000+0900", "20250601", "20250603"]]) {
+  for (const [pairTime, sameDay, otherDay] of [
+    ["20251231200000-0500", "20251231", "20251229"],
+    ["20250601080000+0900", "20250601", "20250603"],
+    // Hawaii and Tonga: ten and thirteen hours from UTC, so a narrower widening would miss the stated day.
+    ["20251231200000-1000", "20251231", "20251229"],
+    ["20250601080000+1300", "20250601", "20250603"],
+  ]) {
     assert.equal(paired(sys({ time: at(pairTime!) }), dia({ time: at(pairTime!) }), third(at(sameDay!))).panels.length, 0, `${sameDay} blocks ${pairTime}`);
     assert.equal(paired(sys({ time: at(pairTime!) }), dia({ time: at(pairTime!) }), third(at(otherDay!))).panels.length, 1, `${otherDay} does not`);
   }
@@ -2156,6 +2167,9 @@ test("review #787: a Result is a reading's value only when it states that readin
         <value xsi:type="PQ" value="${value}" unit="mm[Hg]"/>
       </observation></entryRelationship>`;
   assert.equal(paired(sys({ value: "", extra: result("8462-4", 80) }), dia()).panels.length, 0, "a systolic carrying a diastolic's result");
+  const both = result("8462-4", 80).replace('codeSystem="2.16.840.1.113883.6.1"/>', 'codeSystem="2.16.840.1.113883.6.1"><translation code="8480-6" codeSystem="2.16.840.1.113883.6.1"/></code>');
+  assert.notEqual(both, result("8462-4", 80), "the fixture must add the translation");
+  assert.equal(paired(sys({ value: "", extra: both }), dia()).panels.length, 0, "a Result coded as both halves is neither");
   const own = paired(sys({ value: "", extra: result("8480-6", 132) }), dia());
   assert.equal(own.panels[0]!.component[0].valueQuantity.value, 132, "its own result is its value");
 });
@@ -2180,3 +2194,40 @@ test("review #787: a systolic is 8480-6 and a diastolic 8462-4, the codes §4A.8
   assert.equal(imported.unpairedBloodPressureReadings, 0);
 });
 
+test("export: what a written panel's readings and own code state beyond what is written is named, once per panel (review, #787)", () => {
+  const caveatsOf = (panel: unknown) => translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: panel }] }).caveats ?? [];
+  const systolic = {
+    code: { text: "Systolic, sitting, left arm", coding: [{ system: "http://loinc.org", code: "8480-6" }, { system: "http://example.org/local", code: "SYS" }] },
+    valueQuantity: { value: 150, unit: "mm[Hg]", code: "mm[Hg]" },
+    interpretation: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", code: "H" }] }],
+    referenceRange: [{ high: { value: 120 } }],
+  };
+  const named = caveatsOf(bpPanel({
+    code: { text: "BP", coding: [{ system: "http://loinc.org", code: "85354-9" }, { system: "http://snomed.info/sct", code: "75367002" }] },
+    implicitRules: "http://example.org/rules",
+    components: [systolic, diaComponent],
+  }));
+  for (const what of [
+    /reading's interpretation is not written/, /reading's referenceRange is not written/, /reading's coding in a system CDA does not carry/,
+    /reading's code text is not written/, /own code says more than the panel code/, /implicitRules is not written/,
+  ]) {
+    assert.ok(named.some((c) => what.test(c)), `${String(what)}: ${named.join(" | ")}`);
+  }
+  // Two uncoded components are one panel's caveat, counted once.
+  const uncoded = { code: { coding: [] }, valueQuantity: { value: 1, unit: "mm[Hg]", code: "mm[Hg]" } };
+  const panel = bpPanel({ components: [sysComponent({ value: 150, unit: "mm[Hg]", code: "mm[Hg]" }), diaComponent, uncoded, uncoded] });
+  const [document] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => ({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: panel }] }));
+  assert.deepEqual(document!.caveats.filter((c) => c.includes("uncoded")), ["not carried — Observation: a blood pressure's component uncoded is not written by this exporter"]);
+  // Two sites of which only one can be written: the re-import carries that one, so no "carries none".
+  const snomed = (code: string) => ({ coding: [{ system: "http://snomed.info/sct", code }] });
+  const oneWritable = bpPanel({ bodySite: [snomed("368209003"), { coding: [{ system: "http://example.org/local", code: "L" }] }] });
+  assert.ok(!caveatsOf(oneWritable).some((c) => /more than one body site/.test(c)), caveatsOf(oneWritable).join(" | "));
+  const [back] = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), { resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: oneWritable }] }))
+    .bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9"));
+  assert.equal(back!.bodySite.coding[0].code, "368209003");
+  // A round-tripped panel's identifiers are the ids written for its readings; another source's are not.
+  const roundTripped = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), { resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: bpPanel({ id: "bp-r" }) }] }))
+    .bundle.entry.map((e) => e.resource).find((r) => JSON.stringify((r as { code?: unknown }).code ?? {}).includes("85354-9"));
+  assert.deepEqual(caveatsOf(roundTripped), [], "nothing about a round-tripped panel goes unwritten");
+  assert.ok(caveatsOf(bpPanel({ identifier: [{ system: "urn:oid:1.2.3", value: "ehr-77" }] })).some((c) => /identifier is not written/.test(c)));
+});

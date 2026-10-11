@@ -353,22 +353,35 @@ test("a blood pressure is stamped, and everything that only resembles one is not
   );
 });
 
-test("LOINC is recognised however the source spells it", () => {
-  for (const system of ["http://loinc.org", "http://loinc.org/", "urn:oid:2.16.840.1.113883.6.1", "HTTP://LOINC.ORG"]) {
-    assert.equal(
-      stamped({
-        resourceType: "Observation",
-        status: "final",
-        code: { coding: [{ system, code: "85354-9" }] },
-        component: [
-          { code: { coding: [{ system, code: "8480-6" }] }, valueQuantity: qty(118) },
-          { code: { coding: [{ system, code: "8462-4" }] }, valueQuantity: qty(76) },
-        ],
-      }),
-      true,
-      `${system} should be recognised as LOINC`,
-    );
+test("the panel code may spell LOINC any way; its readings only in LOINC's own system, the one cms165 reads (#787)", () => {
+  const panel = (panelSystem: string | undefined, readingSystem: string | undefined) => ({
+    resourceType: "Observation",
+    status: "final",
+    code: { coding: [{ ...(panelSystem ? { system: panelSystem } : {}), code: "85354-9" }] },
+    component: [
+      { code: { coding: [{ ...(readingSystem ? { system: readingSystem } : {}), code: "8480-6" }] }, valueQuantity: qty(118) },
+      { code: { coding: [{ ...(readingSystem ? { system: readingSystem } : {}), code: "8462-4" }] }, valueQuantity: qty(76) },
+    ],
+  });
+  for (const system of ["http://loinc.org", "http://loinc.org/", "urn:oid:2.16.840.1.113883.6.1", "HTTP://LOINC.ORG", undefined]) {
+    assert.equal(stamped(panel(system, "http://loinc.org")), true, `a panel code in ${String(system)}`);
+    if (system === "http://loinc.org") continue;
+    // cms165 compares a reading's system exactly: stamped, such a reading is retrieved but never read, and as
+    // the newest it displaces a readable one.
+    assert.equal(stamped(panel("http://loinc.org", system)), false, `readings in ${String(system)}`);
   }
+});
+
+test("one component coded both ways is not a systolic and a diastolic (#787)", () => {
+  assert.equal(
+    stamped({
+      resourceType: "Observation",
+      status: "final",
+      code: loinc("85354-9"),
+      component: [{ code: { coding: [{ system: "http://loinc.org", code: "8480-6" }, { system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: qty(118) }],
+    }),
+    false,
+  );
 });
 
 test("an existing meta.profile is preserved, not replaced", () => {
