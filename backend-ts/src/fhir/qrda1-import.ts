@@ -142,9 +142,22 @@ export class Qrda1ImportError extends Error {}
  * of populations. Base HL7 asks for the offset (CONF:81-10130) even though the CMS Hospital IG asks for
  * its absence (CMS_0121), so a conformant document may well carry one.
  */
+/**
+ * `negationInd` true, in either XML Schema boolean spelling (`true`, `1`) and any case or padding: read as
+ * positive, a negated act becomes a fact the document denies (Codex + review, #787).
+ */
+function isNegatedNode(node: CdaNode): boolean {
+  const negation = node.attrs.negationInd?.trim().toLowerCase();
+  return negation === "true" || negation === "1";
+}
+
 function isoFromHl7(value: string | undefined): string | undefined {
-  if (!value || !/^\d{8}/.test(value)) return undefined;
+  // The WHOLE value must be an HL7 TS: a date, an optional time to the second with an optional fraction,
+  // and an optional ±HHMM offset. A colon in the offset or anything trailing makes it no timestamp, rather
+  // than a different instant than the one stated (review, #787).
+  if (!value || !/^\d{8}(\d{2}(\d{2}(\d{2}(\.\d+)?)?)?)?([+-]\d{4})?$/.test(value)) return undefined;
   const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
+  if (y === "0000") return undefined; // FHIR has no year zero
   const offset = /([+-])(\d{2})(\d{2})$/.exec(value);
   const digits = offset ? value.slice(0, value.length - 5) : value;
   // An hour without minutes keeps the date only, and an hour that is not one makes it no timestamp.
@@ -427,11 +440,16 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
   const t = times(child(node, "effectiveTime"));
   // A Laboratory Test carries its result in a nested Result observation; a Diagnostic Study carries an
   // outer `value` which is `nullFlavor="NA"` for a study with no coded result (ADR-050).
-  const nested = descendants(node, "observation").find((n) => hasTemplate(n, T.result));
+  // The node's OWN Result: a direct entryRelationship child, never one belonging to another observation
+  // nested further down, which would lend this reading someone else's value (review, #787).
+  const nested = childrenNamed(node, "entryRelationship")
+    .map((relationship) => child(relationship, "observation"))
+    .find((n): n is CdaNode => n !== undefined && hasTemplate(n, T.result));
   const valueNode = child(nested ?? node, "value") ?? child(node, "value");
   // Only a value that IS a number. `Number("")` and `Number(" ")` are 0, so an empty `value` attribute
   // would otherwise import as a result of zero, a fact the document never stated (Codex, #787).
-  const quantity = valueNode?.attrs["xsi:type"] === "PQ" && DECIMAL.test(valueNode.attrs.value ?? "")
+  // And a value carrying a nullFlavor states that the value is missing, whatever number sits beside it.
+  const quantity = valueNode?.attrs["xsi:type"] === "PQ" && !valueNode.attrs.nullFlavor && DECIMAL.test(valueNode.attrs.value ?? "")
     ? { value: Number(valueNode.attrs.value), ...(valueNode.attrs.unit ? { unit: valueNode.attrs.unit } : {}) }
     : undefined;
   const coded = valueNode?.attrs["xsi:type"] === "CD" ? concept(valueNode) : undefined;
@@ -488,8 +506,11 @@ interface BloodPressureReading {
 }
 
 /** "systolic" / "diastolic" when the Observation states that LOINC code, else undefined. */
-function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | undefined {
+function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | "both" | undefined {
   const codes = ((resource as ObservationShape).code?.coding ?? []).filter((c) => c.system === LOINC).map((c) => c.code);
+  // A reading that states both codes says neither which half it is: it pairs with nothing and, sharing a
+  // time with others, keeps them from pairing too (review, #787).
+  if (codes.includes(SYSTOLIC) && codes.includes(DIASTOLIC)) return "both";
   if (codes.includes(SYSTOLIC)) return "systolic";
   if (codes.includes(DIASTOLIC)) return "diastolic";
   return undefined;
@@ -505,7 +526,6 @@ function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | unde
 function timeKeyOf(node: CdaNode): string | undefined {
   const time = child(node, "effectiveTime");
   if (!time) return undefined;
-  const raw = (n: CdaNode | undefined) => (n ? { value: n.attrs.value ?? null, nullFlavor: n.attrs.nullFlavor ?? null } : null);
   const low = child(time, "low");
   const high = child(time, "high");
   // A time of day is an hour and a minute: YYYYMMDDHHMM, the precision at which the parser keeps it. And
@@ -514,28 +534,25 @@ function timeKeyOf(node: CdaNode): string | undefined {
   const start = time.attrs.value ?? low?.attrs.value;
   if (!start || !/^\d{12}/.test(start) || isoFromHl7(start) === undefined) return undefined;
   if (high?.attrs.value !== undefined && isoFromHl7(high.attrs.value) === undefined) return undefined;
-  return JSON.stringify({ at: raw(time), low: raw(low), high: raw(high) });
-}
-
-/** A coded element exactly as stated, mapped or not, so an unrecognised code never reads as an absent one. */
-function statedCodeOf(node: CdaNode | undefined): unknown {
-  if (!node) return null;
-  const attrs = (n: CdaNode) => [n.attrs.code ?? null, n.attrs.codeSystem ?? null, n.attrs.nullFlavor ?? null];
-  return [attrs(node), ...childrenNamed(node, "translation").map(attrs)];
+  // Everything the element states (width, center, inclusive, …), so two different statements of time
+  // never share a key (review, #787).
+  return JSON.stringify(statedContentOf(time));
 }
 
 /**
  * What a reading states about who, how, where and with what. Two halves of one panel state the same.
- * Compared as written (`statedCodeOf`), never through the import's code-system map: a method in a system
+ * Compared as written (`statedContentOf`), never through the import's code-system map: a method in a system
  * the map does not carry is still a stated method, and two different ones are still different (Codex, #787).
+ * Every repetition and everything under it counts: a second method, a laterality qualifier on a site, an
+ * originalText behind a nullFlavor (review, #787).
  */
 function statedContextOf(node: CdaNode): string {
   return JSON.stringify({
     // Everything a performer or device element states, not just its ids: two performers who share a
     // null-flavored id and differ by name are different people (Codex, #787).
     performers: childrenNamed(node, "performer").map(statedContentOf),
-    method: statedCodeOf(child(node, "methodCode")),
-    sites: childrenNamed(node, "targetSiteCode").map(statedCodeOf),
+    methods: childrenNamed(node, "methodCode").map(statedContentOf),
+    sites: childrenNamed(node, "targetSiteCode").map(statedContentOf),
     devices: childrenNamed(node, "participant").filter((p) => p.attrs.typeCode === "DEV").map(statedContentOf),
   });
 }
@@ -570,8 +587,24 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, readings: Blo
     if (key === undefined) unpaired++;
     else byTime.set(key, [...(byTime.get(key) ?? []), reading]);
   }
+  // "The only systolic and diastolic at that time" is judged by the INSTANT, whatever spelling states it:
+  // a third reading at the same moment written with another offset still makes the pair ambiguous
+  // (review, #787). Identity of the two halves' time stays the exact spelling (`timeKeyOf`).
+  const instantOf = (r: BloodPressureReading): string | undefined => {
+    const time = child(r.node, "effectiveTime");
+    return isoFromHl7(time?.attrs.value ?? child(time, "low")?.attrs.value);
+  };
+  const atInstant = new Map<string, number>();
+  for (const reading of readings) {
+    const instant = instantOf(reading);
+    if (instant !== undefined) atInstant.set(instant, (atInstant.get(instant) ?? 0) + 1);
+  }
   const removed = new Set<number>();
   for (const group of byTime.values()) {
+    if ((atInstant.get(instantOf(group[0]!) ?? "") ?? 0) !== group.length) {
+      unpaired += group.length;
+      continue;
+    }
     const half = (r: BloodPressureReading) => bloodPressureHalfOf(entries[r.index]!.resource);
     const systolic = group.filter((r) => half(r) === "systolic");
     const diastolic = group.filter((r) => half(r) === "diastolic");
@@ -580,7 +613,12 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, readings: Blo
       const q = (entries[r.index]!.resource as ObservationShape).valueQuantity;
       return typeof q?.value === "number" && Number.isFinite(q.value) && q.unit === "mm[Hg]";
     };
-    if (group.length !== 2 || !s || !d || !mmHg(s) || !mmHg(d) || statedContextOf(s.node) !== statedContextOf(d.node)) {
+    // A reading that happened: an event (not an intent), completed (not aborted or nullified) (review, #787).
+    const happened = (r: BloodPressureReading) => r.node.attrs.moodCode === "EVN" && child(r.node, "statusCode")?.attrs.code === "completed";
+    if (
+      group.length !== 2 || !s || !d || !mmHg(s) || !mmHg(d) || !happened(s) || !happened(d) ||
+      statedContextOf(s.node) !== statedContextOf(d.node)
+    ) {
       unpaired += group.length;
       continue;
     }
@@ -594,7 +632,7 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, readings: Blo
       resource: {
         resourceType: "Observation",
         id: sys.id,
-        identifier: [...(sys.identifier ?? []), ...(dia.identifier ?? [])],
+        identifier: [...new Map([...(sys.identifier ?? []), ...(dia.identifier ?? [])].map((id) => [JSON.stringify(id), id])).values()],
         status: "final",
         category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }],
         code: { coding: [{ system: LOINC, code: "85354-9", display: "Blood pressure panel with all children optional" }] },
@@ -904,6 +942,16 @@ export function importQrda1Document(xml: string): Qrda1Import {
     // rest AND reported the entry as fully translated — so an HbA1c that is the second component of a
     // chemistry panel vanished with `untranslatedTemplates: []` (review, #362). Diagnosis is nested
     // inside a Diagnosis Concern Act, so the search descends rather than reading immediate children.
+    // Whatever sits inside a negated element did not happen either: an observation wrapped in an act with
+    // `negationInd="true"` is not a positive fact (review, #787).
+    const underNegation = new Set<CdaNode>();
+    const markUnder = (n: CdaNode, negated: boolean): void => {
+      for (const c of n.children) {
+        if (negated) underNegation.add(c);
+        markUnder(c, negated || isNegatedNode(c));
+      }
+    };
+    for (const node of entry.children) markUnder(node, isNegatedNode(node));
     const candidates = new Set<CdaNode>();
     for (const node of entry.children) {
       candidates.add(node);
@@ -927,8 +975,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // QI-Core form of its own (`assessmentNotDoneFrom`) that no positive read can mistake for the act.
       // Both lexical forms of an XML Schema boolean true: `"1"` says the act did not happen exactly as
       // `"true"` does, and read as positive it would import a negated reading as a fact (Codex, #787).
-      const negation = candidate.attrs.negationInd?.trim();
-      if (negation === "true" || negation === "1") {
+      if (underNegation.has(candidate)) continue;
+      if (isNegatedNode(candidate)) {
         const notDone = hasTemplate(candidate, T.assessmentPerformed) ? assessmentNotDoneFrom(candidate, key) : undefined;
         if (notDone !== undefined) {
           entries.push({ resource: notDone });
