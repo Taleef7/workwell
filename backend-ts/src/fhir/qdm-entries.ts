@@ -92,7 +92,10 @@ interface FhirResource {
   valueQuantity?: { value?: number; unit?: string };
   valueCodeableConcept?: FhirCodeableConcept;
   /** A blood-pressure panel's systolic and diastolic readings (#591). */
-  component?: Array<{ code?: FhirCodeableConcept; valueQuantity?: { value?: number; unit?: string; code?: string } }>;
+  component?: Array<{
+    code?: FhirCodeableConcept;
+    valueQuantity?: { value?: number; unit?: string; code?: string; system?: string; comparator?: string };
+  }>;
 }
 
 /** The attribute string of every coding we can map, in order. */
@@ -345,40 +348,83 @@ function isBloodPressurePanel(r: FhirResource): boolean {
   return (r.code?.coding ?? []).some((c) => c.system === "http://loinc.org" && BLOOD_PRESSURE_PANELS.has(c.code ?? ""));
 }
 
+/** A panel's component that is the systolic or the diastolic reading, by its stated LOINC code. */
+function readingComponents(r: FhirResource, code: string) {
+  return (r.component ?? []).filter((c) =>
+    (c.code?.coding ?? []).some((coding) => coding.system === "http://loinc.org" && coding.code === code),
+  );
+}
+
+/**
+ * Why a blood-pressure panel cannot be written as two Physical Exam readings, or null when it can. Every
+ * condition guards the round trip against stating what the panel does not (review, #787):
+ * - final (a preliminary panel would come back `final` and count);
+ * - a time of day in `effective[x]` itself (a date alone would be written as midnight and pair; `issued`
+ *   is when it was recorded, not when it was measured);
+ * - exactly one systolic and one diastolic component, each a plain number with no comparator ("<130" is
+ *   not 130), in UCUM mm[Hg].
+ * All or nothing: half a panel is never written, so nothing is dropped without a reason.
+ */
+function bloodPressureExportProblem(r: FhirResource): string | null {
+  if (!FINAL_STATUSES.has(r.status ?? "")) {
+    return `a blood pressure whose status is '${r.status ?? "absent"}' is not final, so it is not written as completed readings`;
+  }
+  const when = r.effectiveDateTime ?? r.effectivePeriod?.start;
+  if (!when || !when.includes("T")) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
+  const systolic = readingComponents(r, "8480-6");
+  const diastolic = readingComponents(r, "8462-4");
+  if (systolic.length !== 1 || diastolic.length !== 1 || systolic[0] === diastolic[0]) {
+    return "a blood pressure is written only when it states exactly one systolic and one diastolic reading";
+  }
+  for (const component of [systolic[0]!, diastolic[0]!]) {
+    const q = component.valueQuantity;
+    const unit = q?.code ?? q?.unit;
+    if (typeof q?.value !== "number" || !Number.isFinite(q.value) || q.comparator !== undefined) {
+      return "a blood-pressure reading without a plain numeric value (missing, or a comparator such as '<') is not written";
+    }
+    if (unit !== "mm[Hg]" || (q.system !== undefined && q.system !== "http://unitsofmeasure.org")) {
+      return "a blood-pressure reading not in UCUM mm[Hg] is not written";
+    }
+  }
+  return null;
+}
+
 /**
  * A blood-pressure panel as QDM states it: one Physical Exam, Performed per reading, each with its own
- * code (8480-6, 8462-4) and value, at the panel's time (#591). The inverse of the import's pairing
- * (LOCKED §4A.8), so a panel exported and imported again is one panel again. A component with no numeric
- * value is left out rather than written as a reading with no result. `null` when the resource is not a
- * blood-pressure panel, so the caller routes it as any other Observation.
+ * code (8480-6, 8462-4) and value, at the panel's own time (#591). The inverse of the import's pairing
+ * (LOCKED §4A.8), so a panel exported and imported again is one panel again: written only when
+ * `bloodPressureExportProblem` finds nothing, and then as both readings or neither. What the round trip
+ * cannot carry is `Observation.encounter`: QDM's Physical Exam has no link to it. `null` when the resource
+ * is not a blood-pressure panel, so the caller routes it as any other Observation.
  */
 function bloodPressureReadings(r: FhirResource, i: number, pad: string): string[] | null {
-  if (!isBloodPressurePanel(r) || !Array.isArray(r.component)) return null;
-  // Only a blood pressure that is final is written as completed readings: a preliminary or unknown one
-  // would come back from the import as `final` and count (Codex, #787). `dropReason` says why it is left out.
-  if (!FINAL_STATUSES.has(r.status ?? "")) return [];
-  return r.component.flatMap((component, k) => {
+  if (!isBloodPressurePanel(r)) return null;
+  if (bloodPressureExportProblem(r) !== null) return [];
+  // The time from `effective[x]` alone, never `issued` (the effectiveTime helper falls back to it).
+  const timed: FhirResource = {
+    resourceType: "Observation",
+    ...(r.effectiveDateTime ? { effectiveDateTime: r.effectiveDateTime } : { effectivePeriod: r.effectivePeriod }),
+  };
+  return (["8480-6", "8462-4"] as const).map((readingCode) => {
+    const component = readingComponents(r, readingCode)[0]!;
     // The reading's own LOINC code first, every other mapped coding as a translation, so the import still
     // recognises the reading whatever order the codings came in (Codex, #787).
     const codings = component.code?.coding ?? [];
-    const reading = codings.filter((c) => c.system === "http://loinc.org" && READING_CODES.has(c.code ?? ""));
-    const [code, ...translations] = cdaCodes({ coding: [...reading, ...codings.filter((c) => !reading.includes(c))] });
-    const value = component.valueQuantity?.value;
-    if (!code || typeof value !== "number" || !Number.isFinite(value)) return [];
-    const unit = component.valueQuantity?.code ?? component.valueQuantity?.unit;
-    const entryResource = { ...r, id: `${r.id ?? `observation-${i}`}-${reading[0]?.code ?? k}` };
-    return [`${pad}<entry typeCode="DRIV">
+    const own = codings.filter((c) => c.system === "http://loinc.org" && c.code === readingCode);
+    const [code, ...translations] = cdaCodes({ coding: [...own, ...codings.filter((c) => !own.includes(c))] });
+    const entryResource = { ...r, id: `${r.id ?? `observation-${i}`}-${readingCode}` };
+    return `${pad}<entry typeCode="DRIV">
 ${pad}  <observation classCode="OBS" moodCode="EVN">
 ${pad}    <templateId root="2.16.840.1.113883.10.20.22.4.13" extension="2014-06-09"/>
 ${pad}    <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
-${pad}    ${cdaId(entryResource, `observation-${i}-${k}`)}
+${pad}    ${cdaId(entryResource, `observation-${i}-${readingCode}`)}
 ${pad}    ${translations.length === 0 ? `<code ${code}/>` : `<code ${code}>${translations.map((t) => `\n${pad}      <translation ${t}/>`).join("")}\n${pad}    </code>`}
 ${pad}    <text>Physical Exam, Performed</text>
 ${pad}    ${COMPLETED}
-${pad}    ${effectiveTime(r, `${pad}    `)}
-${pad}    <value xsi:type="PQ" value="${esc(String(value))}"${unit ? ` unit="${esc(unit)}"` : ""}/>
+${pad}    ${effectiveTime(timed, `${pad}    `)}
+${pad}    <value xsi:type="PQ" value="${esc(String(component.valueQuantity!.value))}" unit="mm[Hg]"/>
 ${pad}  </observation>
-${pad}</entry>`];
+${pad}</entry>`;
   });
 }
 
@@ -410,8 +456,8 @@ function dropReason(resource: FhirResource, type: string): string {
     return `no QDM entry template — this exporter maps ${QDM_MAPPED_RESOURCE_TYPES.join(", ")} only (ADR-055)`;
   }
   if (isNegated(resource)) return "excluded — its status says the event did not happen or was retracted";
-  if (type === "Observation" && isBloodPressurePanel(resource) && !FINAL_STATUSES.has(resource.status ?? "")) {
-    return `a blood pressure whose status is '${resource.status ?? "absent"}' is not final, so it is not written as completed readings`;
+  if (type === "Observation" && isBloodPressurePanel(resource)) {
+    return bloodPressureExportProblem(resource) ?? "a blood pressure that could not be written";
   }
   if (type === "Observation") {
     const cats = categoryCodes(resource);
