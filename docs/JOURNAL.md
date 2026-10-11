@@ -5,6 +5,19 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-11
+
+- **#787 had two more review passes before merge** (four reviewers on the whole PR, then two on the
+  rework, fuzzing against independent oracles), after Codex kept finding defects. The pairing was rebuilt
+  rather than patched: a third systolic or diastolic of any template whose time could fall within the
+  pair's blocks it, judged across time zones; an identical time means the same precision and zone; each
+  half has exactly one value of its own; the panel keeps the document's offset, since CMS165 reads a
+  reading's day in it (a panel converted to UTC moved 20:00 on 31 December in New York into the next
+  year); wrapped readings never pair. The exporter writes readings only in LOINC's own system, the one
+  CMS165 reads, and reports what it does not write as caveats. Decks and C2 unchanged; CMS165 42/44.
+- Proposed to the owner: a §4A.8 amendment stating the conditions the code enforces, and follow-ups for
+  defects the reviews found outside #787 (the largest: every imported time is converted to UTC).
+
 ## 2026-10-10
 
 - **A QRDA blood pressure is one panel when the document states one (LOCKED §4A.8, owner decision
@@ -15,8 +28,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   participants, method and site. The panel keeps both source ids, the shared method and site, and the
   document's time with its offset and fraction; anything else stays two readings and is counted. The
   exporter writes a final panel at such a time back as its two readings with its method and site, and
-  names what QDM's reading has no place for: the encounter link, the performer, the recorded time, any
-  other component.
+  names what it does not write (the encounter link, the performer, the recorded time, any other
+  component) as caveats.
   - The Cypress deck, both years, as production runs it: CMS165 42/44, from 33/44 after #786 and 0/44
     before. The two left are readings taken during an ED visit or inpatient stay, which CMS's draft
     leaves out only through `Observation.encounter`.

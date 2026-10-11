@@ -85,7 +85,7 @@ interface FhirResource {
   effectiveInstant?: string;
   effectiveTiming?: unknown;
   /** Observation fields a blood-pressure reading writes (`method`) or names as not written (#787). */
-  method?: FhirCodeableConcept;
+  method?: FhirCodeableConcept | FhirCodeableConcept[];
   performer?: unknown;
   encounter?: unknown;
   performedDateTime?: string;
@@ -184,13 +184,16 @@ function effectiveTime(resource: FhirResource, indent: string, ts: (iso: unknown
  *   0001-9999 has no HL7 form and is refused (review, #787).
  * - A time with no zone (the corpus writes its readings so) is written as stated; `Date` would read it in
  *   the exporting machine's own zone.
- * - The fraction is kept: two panels a fraction of a second apart written at the same whole second would
- *   come back as four readings at one instant, and neither would pair (Codex, #787). An offset is whole
- *   minutes, so the fraction survives the move to UTC.
+ * - The fraction is kept as written, trailing zeros included: two panels a fraction of a second apart
+ *   written at the same whole second would come back as four readings at one instant, and `.000` is a
+ *   precision the import compares (Codex + review, #787). An offset is whole minutes, so the fraction
+ *   survives the move to UTC. More than nine digits of a second, or an offset FHIR cannot state (beyond
+ *   ±14:00), is refused, as the import refuses it (review, #787).
  */
 function hl7TsKeepingFraction(iso: unknown): string | null {
-  const m = typeof iso === "string" ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:\d{2})?$/.exec(iso) : null;
+  const m = typeof iso === "string" ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-](\d{2}):(\d{2}))?$/.exec(iso) : null;
   if (!m) return null;
+  if (m[9] !== undefined && (Number(m[10]) > 59 || Number(m[9]) * 60 + Number(m[10]) > 14 * 60)) return null;
   const stated = m.slice(1, 7).map((part) => part ?? "00");
   const [y, mo, d, h, mi, s] = stated.map(Number) as [number, number, number, number, number, number];
   // `setUTCFullYear`, not `Date.UTC`, which reads the years 0-99 as 1900-1999.
@@ -206,8 +209,7 @@ function hl7TsKeepingFraction(iso: unknown): string | null {
     const p = (n: number, width = 2) => String(n).padStart(width, "0");
     whole = `${p(utc.getUTCFullYear(), 4)}${p(utc.getUTCMonth() + 1)}${p(utc.getUTCDate())}${p(utc.getUTCHours())}${p(utc.getUTCMinutes())}${p(utc.getUTCSeconds())}`;
   }
-  const fraction = m[7]?.replace(/0+$/, "");
-  return fraction ? `${whole}.${fraction}` : whole;
+  return m[7] !== undefined ? `${whole}.${m[7]}` : whole;
 }
 
 /** The FHIR `category` codings, flattened — `category` is 0..* on Observation but 0..1 in some shims. */
@@ -388,14 +390,15 @@ const READING_CODES = new Set(["8480-6", "8462-4"]);
 const FINAL_STATUSES = new Set(["final", "amended", "corrected"]);
 
 /**
- * Recognised exactly as preparation recognises one (`loincCodesOf`: LOINC in any spelling real bundles use,
- * or with no system), so a blood pressure the engine counts is one the document carries (review, #787).
+ * Recognised as preparation recognises one (`loincCodesOf`: LOINC in any spelling real bundles use, or with
+ * no system), so such a panel is never written as a Laboratory Test and is either written or refused with
+ * its reason (review, #787).
  */
 function isBloodPressurePanel(r: FhirResource): boolean {
   return loincCodesOf(r.code).some((c) => BLOOD_PRESSURE_PANELS.has(c));
 }
 
-/** A panel's component that is the systolic or the diastolic reading, by its stated LOINC code. */
+/** A panel's component that is the systolic or the diastolic reading, by its stated LOINC code in any spelling. */
 function readingComponents(r: FhirResource, code: string) {
   return (r.component ?? []).filter((c) => loincCodesOf(c.code).includes(code));
 }
@@ -456,6 +459,14 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
   if (systolic.length !== 1 || diastolic.length !== 1 || systolic[0] === diastolic[0]) {
     return "a blood pressure is written only when it states exactly one systolic and one diastolic reading";
   }
+  // CMS165 reads a reading's code only as `http://loinc.org`: written in another spelling, the document
+  // would carry a blood pressure the run could not read, and a receiver would score what the run did not
+  // (review, #787).
+  for (const [component, code] of [[systolic[0]!, "8480-6"], [diastolic[0]!, "8462-4"]] as const) {
+    if (!(component.code?.coding ?? []).some((c) => c.system === "http://loinc.org" && c.code === code)) {
+      return "a blood-pressure reading not coded in LOINC's own system (http://loinc.org) is not written: CMS165 cannot read it in another spelling";
+    }
+  }
   for (const component of [systolic[0]!, diastolic[0]!]) {
     const q = component.valueQuantity;
     const unit = q?.code ?? q?.unit;
@@ -469,36 +480,49 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
   return null;
 }
 
+/** Panel fields the readings carry, or that say nothing about the reading (`meta`, `text`). */
+const BLOOD_PRESSURE_FIELDS_WRITTEN = new Set([
+  "resourceType", "id", "meta", "text", "language", "implicitRules", "status", "category", "code",
+  "effectiveDateTime", "effectivePeriod", "effectiveInstant", "component", "bodySite", "method", "subject",
+]);
+
 /**
  * A blood-pressure panel as QDM states it: one Physical Exam, Performed per reading, each with its own
  * code (8480-6, 8462-4) and value, at the panel's own time (#591), with the panel's method and body site
  * (QDM's method and Anatomical Location Site, the same on both). The inverse of the import's pairing
- * (LOCKED §4A.8), so a panel exported and imported again is one panel again: written only when
- * `bloodPressureExportProblem` finds nothing, and then as both readings or neither. The systolic reading
- * carries the panel's own id and the diastolic `<id>-8462-4`, so a round trip gives the panel its id back
- * (review, #787). What QDM's Physical Exam has no place for here (another component, the performer, the
- * recorded time, the encounter link) is named in `notes`, never dropped silently (review, #787). `null`
- * when the resource is not a blood-pressure panel, so the caller routes it as any other Observation.
+ * (LOCKED §4A.8): written only when `bloodPressureExportProblem` finds nothing, and then as both readings
+ * or neither. Imported again it is one panel again, unless another blood pressure's stated time could fall
+ * within its own: §4A.8 then keeps every reading at that time separate (two arms, an orthostatic set), and
+ * the import counts them. The systolic reading carries the panel's own id and the diastolic
+ * `<id>-8462-4`, so a round trip gives the panel its id back (review, #787). Whatever else the panel states
+ * that this exporter does not write (another component, the performer, the recorded time, the encounter
+ * link, a note, an amended status, ...) is named in `caveats`, without the panel's id so a run's caveats
+ * tally (review, #787). `null` when the resource is not a blood-pressure panel, so the caller routes it as
+ * any other Observation.
  */
-function bloodPressureReadings(r: FhirResource, i: number, pad: string, notes: string[]): string[] | null {
+function bloodPressureReadings(r: FhirResource, i: number, pad: string, caveats: string[]): string[] | null {
   if (!isBloodPressurePanel(r)) return null;
   if (bloodPressureExportProblem(r) !== null) return [];
   const timed: FhirResource = { resourceType: "Observation", ...bloodPressureTime(r) };
   const id = r.id ?? `observation-${i}`;
-  const name = `blood pressure ${r.id ?? `#${i}`}`;
   const written = new Set([readingComponents(r, "8480-6")[0], readingComponents(r, "8462-4")[0]]);
   for (const other of (r.component ?? []).filter((c) => !written.has(c))) {
     const codes = (other.code?.coding ?? []).map((c) => c.code).filter(Boolean).join("/") || "uncoded";
-    notes.push(`${name}: its component ${codes} is not written; QDM states a blood pressure as its two readings`);
+    caveats.push(`a blood pressure's component ${codes} is not written by this exporter`);
   }
-  if (Array.isArray(r.performer) ? r.performer.length > 0 : r.performer !== undefined) notes.push(`${name}: its performer is not written`);
-  if (r.issued !== undefined) notes.push(`${name}: its recorded time (issued) is not written`);
-  if (r.encounter !== undefined) notes.push(`${name}: its encounter link is not written; QDM's Physical Exam has no place for it`);
-  // An Observation states one body site and one method; a list is read as written.
-  const sites = Array.isArray(r.bodySite) ? r.bodySite : r.bodySite ? [r.bodySite as unknown as FhirCodeableConcept] : [];
-  const methods = r.method ? [r.method] : [];
-  if (sites.some((site) => cdaCodes(site).length === 0)) notes.push(`${name}: a body site in no code system CDA carries is not written`);
-  if (methods.some((method) => cdaCodes(method).length === 0)) notes.push(`${name}: a method in no code system CDA carries is not written`);
+  for (const field of Object.keys(r).filter((k) => !BLOOD_PRESSURE_FIELDS_WRITTEN.has(k) && (r as Record<string, unknown>)[k] !== undefined)) {
+    caveats.push(`a blood pressure's ${field} is not written by this exporter`);
+  }
+  if (r.status !== "final") caveats.push(`a blood pressure whose status is '${r.status}' is written as completed`);
+  // FHIR states one body site and one method on an Observation; a list is read as written, and named,
+  // because the import carries a site or method back only when one is stated.
+  const listOf = (v: unknown) => (Array.isArray(v) ? (v as FhirCodeableConcept[]) : v ? [v as FhirCodeableConcept] : []);
+  const sites = listOf(r.bodySite);
+  const methods = listOf(r.method);
+  if (sites.length > 1) caveats.push("a blood pressure with more than one body site is written with each, and a re-import carries none");
+  if (methods.length > 1) caveats.push("a blood pressure with more than one method is written with each, and a re-import carries none");
+  if (sites.some((site) => cdaCodes(site).length === 0)) caveats.push("a blood pressure's body site in no code system CDA carries is not written");
+  if (methods.some((method) => cdaCodes(method).length === 0)) caveats.push("a blood pressure's method in no code system CDA carries is not written");
   const methodCodes = methods
     .map((method) => cdaCodes(method))
     .filter((codes) => codes.length > 0)
@@ -511,9 +535,9 @@ function bloodPressureReadings(r: FhirResource, i: number, pad: string, notes: s
   const siteCodes = targetSites({ bodySite: sites }, `${pad}    `);
   return (["8480-6", "8462-4"] as const).map((readingCode) => {
     const component = readingComponents(r, readingCode)[0]!;
-    // The reading's code as LOINC first, however the source spelled LOINC's system, then every other mapped
-    // coding as a translation, so the import recognises the reading whatever the codings' order or
-    // spelling (Codex + review, #787).
+    // The reading's LOINC code first (`bloodPressureExportProblem` requires it in LOINC's own system), then
+    // every other mapped coding as a translation, so the import recognises the reading whatever the
+    // codings' order (Codex, #787).
     const codings = component.code?.coding ?? [];
     const own = codings.filter((c) => loincCodesOf({ coding: [c] }).includes(readingCode));
     const loinc = { system: "http://loinc.org", code: readingCode, ...(own[0]?.display ? { display: own[0].display } : {}) };
@@ -592,6 +616,12 @@ export interface QdmTranslation {
    * the round-trip route test, which is precisely what it was written to catch.
    */
   untranslatable: string[];
+  /**
+   * What a WRITTEN entry does not carry, as `"<ResourceType>: <what>"`, with no resource id so a run's
+   * caveats tally (a blood pressure's performer, recorded time, another component, ...). Not a conformance
+   * failure: the document is valid, and a recalculation from it may still differ from the run (#787).
+   */
+  caveats?: string[];
 }
 
 /** Entries plus the reasons anything was dropped — see `QdmTranslation.untranslatable`. */
@@ -600,29 +630,38 @@ export function translateQdm(bundle: unknown, pad = "          "): QdmTranslatio
   const items = Array.isArray(raw) ? raw : [];
   const entries: string[] = [];
   const untranslatable: string[] = [];
+  const caveats: string[] = [];
   items.forEach((item, i) => {
     const resource = (item as { resource?: FhirResource } | null)?.resource;
     const type = resource?.resourceType;
     let produced: string[] = [];
-    // What a written entry could not carry (a blood pressure's third component, its performer, ...).
-    const notes: string[] = [];
+    // What a written entry does not carry (a blood pressure's third component, its performer, ...).
+    const notCarried: string[] = [];
     try {
-      produced = entryFor(item, i, pad, notes);
+      produced = entryFor(item, i, pad, notCarried);
     } catch {
       if (type) untranslatable.push(`${type}: could not be translated (malformed field)`);
       return;
     }
     if (produced.length > 0) {
       entries.push(...produced);
-      untranslatable.push(...notes.map((note) => `${type}: ${note}`));
+      caveats.push(...notCarried.map((caveat) => `${type}: ${caveat}`));
       return;
     }
     // Nothing produced. Say WHY, for the cases an operator can act on; stay silent for the ones that are
     // simply out of scope, where a "gap" would be noise.
     if (!type || type === "Patient" || !(QDM_REPORTABLE_RESOURCE_TYPES as readonly string[]).includes(type)) return;
-    untranslatable.push(`${type}: ${dropReason(resource!, type)}`);
+    // Guarded as `entryFor` is: a malformed field must cost this resource its reason, never the run its
+    // export (review, #787).
+    let reason: string;
+    try {
+      reason = dropReason(resource!, type);
+    } catch {
+      reason = "could not be translated (malformed field)";
+    }
+    untranslatable.push(`${type}: ${reason}`);
   });
-  return { entries, untranslatable };
+  return { entries, untranslatable, caveats };
 }
 
 export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
@@ -639,7 +678,7 @@ export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
  * malformed date or a numeric id used to reach the worker's catch-all and turn a 500-subject export into
  * `{"error":"internal_error"}`, losing the 499 documents that were fine (review, #361).
  */
-function entryFor(item: unknown, i: number, pad: string, notes: string[]): string[] {
+function entryFor(item: unknown, i: number, pad: string, caveats: string[]): string[] {
   const out: string[] = [];
   {
     const resource = (item as { resource?: FhirResource } | null)?.resource;
@@ -657,7 +696,7 @@ function entryFor(item: unknown, i: number, pad: string, notes: string[]): strin
         out.push(procedurePerformed(resource, i, pad) ?? "");
         break;
       case "Observation": {
-        const readings = bloodPressureReadings(resource, i, pad, notes);
+        const readings = bloodPressureReadings(resource, i, pad, caveats);
         if (readings !== null) {
           out.push(...readings);
           break;

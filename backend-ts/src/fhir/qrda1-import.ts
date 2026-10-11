@@ -536,7 +536,9 @@ interface BloodPressureReading {
 /**
  * Which half of a blood pressure an Observation's own code states: "systolic" (8480-6), "diastolic"
  * (8462-4), "both" when it states both (it says neither which half it is: it pairs with nothing, and blocks
- * a pair at its time, review #787), or undefined.
+ * a pair at its time, review #787), or undefined. These are the two codes §4A.8 names and the two CMS165's
+ * own logic reads; a reading under another code (sitting, standing, invasive, a SNOMED concept) is neither
+ * half, and neither pairs nor blocks.
  */
 function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | "both" | undefined {
   const codes = ((resource as ObservationShape).code?.coding ?? []).filter((c) => c.system === LOINC).map((c) => c.code);
@@ -547,12 +549,17 @@ function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | "bot
 }
 
 /**
- * Blood-pressure readings left as separate Observations, of any template: each is a systolic or diastolic
- * CMS165 cannot see, because it reads a blood pressure only as a panel. Counted on a finished bundle, so a
- * person's documents merged into one count each reading once (review, #787).
+ * Blood-pressure readings left as separate Observations, of any template: CMS165 reads a blood pressure only
+ * as a panel, so it does not read one of these as a blood pressure (in a batch, the same reading may also sit
+ * in a panel another of the person's documents formed). A "not done" (`status: cancelled`) is no reading.
+ * Counted on a finished bundle, so a person's documents merged into one count each reading once (review,
+ * #787).
  */
 export function unpairedBloodPressureReadingsIn(resources: readonly unknown[]): number {
-  return resources.filter((r) => (r as { resourceType?: unknown } | null)?.resourceType === "Observation" && bloodPressureHalfOf(r) !== undefined).length;
+  return resources.filter((r) => {
+    const o = r as { resourceType?: unknown; status?: unknown } | null;
+    return o?.resourceType === "Observation" && o.status !== "cancelled" && bloodPressureHalfOf(r) !== undefined;
+  }).length;
 }
 
 /** One HL7 timestamp as the document states it. */
@@ -563,9 +570,9 @@ interface StatedTimestamp {
   start: bigint;
   /** The end of that precision, exclusive. */
   end: bigint;
-  /** What identity compares: the precision (a minute and a second are not the same statement), and either the
-   *  instant, when an offset is stated, or the digits as written, when none is: without an offset a time
-   *  names no instant, so it never equals one that does (review, #787). */
+  /** What identity compares: the precision (a minute, a second and a tenth of a second are different
+   *  statements), and either the instant, when an offset is stated, or the digits as written, when none is:
+   *  without an offset a time names no instant, so it never equals one that does (review, #787). */
   key: string;
   /** For a time of day, the FHIR dateTime IN THE STATED OFFSET (`Z` only when none is stated). CMS165 reads a
    *  reading's day in its own offset, so `20251231200000-0500` written as `2026-01-01T01:00:00Z` would move
@@ -596,14 +603,15 @@ function statedTimestamp(value: string | undefined): StatedTimestamp | undefined
     : mi === undefined ? 3_600_000_000_000n
     : s === undefined ? 60_000_000_000n
     : 10n ** BigInt(Math.max(0, 9 - (fraction?.length ?? 0)));
-  const precision = h === undefined ? "date" : mi === undefined ? "hour" : s === undefined ? "minute" : "second";
-  const written = `${y}${mo}${d}${h ?? ""}${mi ?? ""}${s ?? ""}${digits ? `.${digits}` : ""}`;
+  const precision =
+    h === undefined ? "date" : mi === undefined ? "hour" : s === undefined ? "minute" : `second${fraction !== undefined ? `.${fraction.length}` : ""}`;
+  const written = `${y}${mo}${d}${h ?? ""}${mi ?? ""}${s ?? ""}${fraction !== undefined ? `.${fraction}` : ""}`;
   return {
     start,
     end: start + unit,
     key: `${precision} ${offsetMinutes === undefined ? `as written ${written}` : `instant ${start}`}`,
     ...(mi !== undefined
-      ? { fhir: `${y}-${mo}-${d}T${h}:${mi}:${s ?? "00"}${digits ? `.${digits}` : ""}${sign ? `${sign}${oh}:${om}` : "Z"}` }
+      ? { fhir: `${y}-${mo}-${d}T${h}:${mi}:${s ?? "00"}${fraction !== undefined ? `.${fraction}` : ""}${sign ? `${sign}${oh}:${om}` : "Z"}` }
       : {}),
     fractionDigits: fraction?.length ?? 0,
     ...(offsetMinutes !== undefined ? { offsetMinutes } : {}),
@@ -670,6 +678,8 @@ function panelTimeOf(node: CdaNode): PanelTime | undefined {
 interface TimeRange {
   start?: bigint;
   end?: bigint;
+  /** Whether its timestamps state an offset; undefined when it states no timestamp. */
+  zoned?: boolean;
 }
 
 /**
@@ -682,16 +692,40 @@ function rangeOf(node: CdaNode): TimeRange {
   if (!time || time.attrs.nullFlavor !== undefined) return {};
   if (time.attrs.value !== undefined) {
     const at = time.children.length === 0 ? statedTimestamp(time.attrs.value) : undefined;
-    return at ? { start: at.start, end: at.end } : {};
+    return at ? { start: at.start, end: at.end, zoned: at.offsetMinutes !== undefined } : {};
   }
   if (child(time, "center") || child(time, "width")) return {};
   const low = statedTimestamp(child(time, "low")?.attrs.value);
   const high = statedTimestamp(child(time, "high")?.attrs.value);
-  return { ...(low ? { start: low.start } : {}), ...(high ? { end: high.end } : {}) };
+  // Bounds that disagree on stating a zone, or that run backwards, place the reading nowhere in particular:
+  // it could be any time (review, #787).
+  if (low && high && ((low.offsetMinutes === undefined) !== (high.offsetMinutes === undefined) || low.start > high.start)) return {};
+  const stated = low ?? high;
+  return {
+    ...(low ? { start: low.start } : {}),
+    ...(high ? { end: high.end } : {}),
+    ...(stated ? { zoned: stated.offsetMinutes !== undefined } : {}),
+  };
 }
 
-const rangesOverlap = (a: TimeRange, b: TimeRange) =>
-  (a.start === undefined || b.end === undefined || a.start < b.end) && (b.start === undefined || a.end === undefined || b.start < a.end);
+/** The widest offset either side of UTC a time with no zone could have been stated in. */
+const ZONE_UNCERTAINTY = 14n * 3_600_000_000_000n;
+
+/**
+ * A range stated with no zone, met with one stated in a zone, could be in any zone: it is widened by the
+ * widest offset either way. A date with no zone (`20251231`) is then still the same day as a pair at
+ * `20251231200000-0500`, which CMS165 reads on 31 December, though in UTC the two never meet (review,
+ * #787). Two ranges both with or both without a zone are compared as they stand.
+ */
+const widenedFor = (r: TimeRange, other: TimeRange): TimeRange =>
+  r.zoned === false && other.zoned === true
+    ? { ...(r.start !== undefined ? { start: r.start - ZONE_UNCERTAINTY } : {}), ...(r.end !== undefined ? { end: r.end + ZONE_UNCERTAINTY } : {}) }
+    : r;
+
+const rangesOverlap = (x: TimeRange, y: TimeRange) => {
+  const [a, b] = [widenedFor(x, y), widenedFor(y, x)];
+  return (a.start === undefined || b.end === undefined || a.start < b.end) && (b.start === undefined || a.end === undefined || b.start < a.end);
+};
 
 /**
  * What a reading states about who, how, where and with what. Two halves of one panel state the same.
@@ -761,9 +795,15 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, candidates: B
     const at = rangeOf(s.reading.node);
     const pair = new Set([s.reading.index, d.reading.index]);
     if (blockers.some((b) => !pair.has(b.index) && rangesOverlap(rangeOf(b.node), at))) continue;
+    // One value, the reading's own: a Result coded as the other half (a systolic carrying a diastolic's
+    // result) is not this reading's value (review, #787).
+    const ownCode = (r: BloodPressureReading) => (half(r) === "systolic" ? SYSTOLIC : DIASTOLIC);
     const mmHg = (r: BloodPressureReading) => {
       const q = (entries[r.index]!.resource as ObservationShape).valueQuantity;
-      return statedValuesOf(r.node).length === 1 && typeof q?.value === "number" && Number.isFinite(q.value) && q.unit === "mm[Hg]";
+      const resultsAreOwn = ownResultsOf(r.node).every((result) =>
+        (concept(child(result, "code"))?.coding ?? []).some((c) => c.system === LOINC && c.code === ownCode(r)),
+      );
+      return statedValuesOf(r.node).length === 1 && resultsAreOwn && typeof q?.value === "number" && Number.isFinite(q.value) && q.unit === "mm[Hg]";
     };
     // A reading that happened: an event (not an intent), completed (not aborted or nullified) (review, #787).
     const happened = (r: BloodPressureReading) => r.node.attrs.moodCode === "EVN" && child(r.node, "statusCode")?.attrs.code === "completed";
@@ -1055,7 +1095,7 @@ export interface Qrda1Import {
   /**
    * Systolic and diastolic readings left as separate Observations, of any template, because LOCKED §4A.8's
    * conditions did not all hold (`unpairedBloodPressureReadingsIn`). CMS165 reads a blood pressure only as a
-   * panel, so it cannot see one of these as a blood pressure.
+   * panel, so it does not read one of these as a blood pressure.
    */
   unpairedBloodPressureReadings: number;
 }
