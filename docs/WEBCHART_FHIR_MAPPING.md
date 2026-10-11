@@ -55,7 +55,9 @@ every gap. As of 2026-10-09:
   - So the CMS medication and order value sets cannot match them yet.
 - It does not supply Medication (the trial names every drug inline) or DeviceRequest (not in WebChart's
   FHIR API).
-- cms165 retrieves by profile, and ingest stamps only `us-core-blood-pressure` (#591).
+- cms165 retrieves by profile, and ingest stamps only `us-core-blood-pressure` (#591), and only on a
+  panel whose systolic and diastolic are coded in LOINC's own system (`http://loinc.org`): cms165 reads no
+  other spelling, and a stamped reading it cannot read would displace a readable one (#787).
 
 The CQL matches events by **inline code filters** on `code.coding.system`/`code`. Today those are
 **synthetic** (`urn:workwell:vs:*` + synthetic codes). WebChart carries **real terminologies**

@@ -30,7 +30,9 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
 - Nothing invents clinical data. Bundle preparation may add a missing system to a recognised code but never
   supplies or replaces a code (an absent field stays absent), and the synthetic corpus holds no fact dated
   after its as-of. WebChart ingest's derivations from real rows (us-core-sex from gender, the mammogram
-  Observation from its Procedure) are mappings, not exceptions.
+  Observation from its Procedure) are mappings, not exceptions. So is the QRDA I importer's blood-pressure
+  panel (LOCKED_DECISIONS §4A.8): it supplies the panel code 85354-9 and the `vital-signs` category, and
+  only under §4A.8's conditions.
 - Every state change writes an `audit_event` — the rule, **not yet everywhere true**. Write new code **audit-first** (the event before the mutation). Some paths are still mutate-first: run-boundary ones by design, outreach and the identity links pending owner decisions — `DATA_MODEL_CONTRACTS` §4 lists them. The cross-store `applyCaseAction` primitive (for case actions and run-created transitions) does not exist, and no open issue tracks it (#598 was closed by a PR keyword on 2026-09-21).
 - No silent scope changes; if a plan's stop condition triggers, record the fallback in JOURNAL.md
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction

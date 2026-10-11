@@ -179,18 +179,23 @@ type StampedProfile = (typeof PROFILES_STAMPED_AT_PREPARATION)[number];
 /** The two LOINC panel codes a blood pressure is recorded under. Same set `normalize.ts` verified
  *  against the live WebChart export; kept local because these layers must be able to move apart. */
 const LOINC_BP_PANEL = new Set(["85354-9", "55284-4"]);
+const LOINC_SYSTEM = "http://loinc.org";
 const LOINC_SYSTOLIC = "8480-6";
 const LOINC_DIASTOLIC = "8462-4";
 
 /** LOINC by any of the spellings real bundles use — the canonical URL, a trailing slash, the OID, or
  *  (as `normalize.ts` also allows) an absent system on a code that is unambiguously LOINC. */
-function isLoinc(system: unknown): boolean {
+export function isLoinc(system: unknown): boolean {
   if (typeof system !== "string") return system === undefined || system === null;
   return /loinc/i.test(system) || system === "urn:oid:2.16.840.1.113883.6.1";
 }
 
-/** The LOINC codes on one CodeableConcept — NOT flattened across a resource and its components. */
-function codesOf(concept: unknown): string[] {
+/**
+ * The LOINC codes on one CodeableConcept — NOT flattened across a resource and its components. Exported so
+ * the QRDA I exporter recognises a blood pressure exactly as this file does: a reading the engine counts is
+ * a reading the document carries (review, #787).
+ */
+export function loincCodesOf(concept: unknown): string[] {
   const coding = (concept as { coding?: Array<{ system?: unknown; code?: unknown }> } | undefined)?.coding;
   const out: string[] = [];
   for (const c of coding ?? []) if (isLoinc(c?.system) && typeof c?.code === "string") out.push(c.code);
@@ -225,10 +230,16 @@ function codesOf(concept: unknown): string[] {
  * so the third does not have to.
  */
 function isBloodPressure(resource: Record<string, unknown>): boolean {
-  if (!codesOf(resource.code).some((c) => LOINC_BP_PANEL.has(c))) return false;
+  if (!loincCodesOf(resource.code).some((c) => LOINC_BP_PANEL.has(c))) return false;
   const components = (resource.component as Array<{ code?: unknown; valueQuantity?: { value?: unknown } }> | undefined) ?? [];
+  // Each reading coded in LOINC's own system, the only spelling cms165 reads: it compares a component's
+  // `system` exactly, so a reading spelled `http://loinc.org/`, as the OID or with no system is retrieved
+  // through this stamp but never read, and as the newest reading it displaces a readable controlled one
+  // (measured through CMS165: 120/70 then 128/78 so spelled scored OVERDUE, review #787). US Core's profile
+  // fixes the same system, so the stamp would also claim a conformance the resource does not have. The
+  // panel's own code may be any spelling: cms165 retrieves by this profile and never reads it.
   const measured = (loinc: string) =>
-    components.filter((c) => codesOf(c?.code).includes(loinc) && typeof c?.valueQuantity?.value === "number");
+    components.filter((c) => canonicalLoincCodesOf(c?.code).includes(loinc) && typeof c?.valueQuantity?.value === "number");
   // EXACTLY one of each, each carrying a NUMERIC value. Not "at least one": cms165 reads the systolic
   // out with `singleton from`, which THROWS on two — a bilateral reading or a duplicated flowsheet row —
   // and a throw mid-run is the failure the per-measure profile work exists to prevent. And a component
@@ -237,7 +248,15 @@ function isBloodPressure(resource: Record<string, unknown>): boolean {
   // reading with null systolic/diastolic that displaces a real controlled one (Codex review, #539).
   // Stamping it would also assert a US Core conformance the resource does not have, which is this
   // file's fabrication line.
-  return measured(LOINC_SYSTOLIC).length === 1 && measured(LOINC_DIASTOLIC).length === 1;
+  // And two components: one coded both ways is neither reading, and cms165 would read its one value as both.
+  const [systolic, diastolic] = [measured(LOINC_SYSTOLIC), measured(LOINC_DIASTOLIC)];
+  return systolic.length === 1 && diastolic.length === 1 && systolic[0] !== diastolic[0];
+}
+
+/** The codes on one CodeableConcept in LOINC's own system, `http://loinc.org` exactly. */
+function canonicalLoincCodesOf(concept: unknown): string[] {
+  const coding = (concept as { coding?: Array<{ system?: unknown; code?: unknown }> } | undefined)?.coding;
+  return Array.isArray(coding) ? coding.filter((c) => c?.system === LOINC_SYSTEM && typeof c?.code === "string").map((c) => c.code as string) : [];
 }
 
 /** Add a profile to `meta.profile` without disturbing any already there. */

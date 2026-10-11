@@ -399,6 +399,13 @@ export function qrda1NonConformance(outcome: OutcomeRecord, measureId: string, b
   return nonConformanceFrom(measureId, translation, measureReference(measureId, outcome.evidence), degradationMessage);
 }
 
+/** Identical lines once each, with how many resources each stands for (review, #362). */
+function tallied(lines: readonly string[], verb: string): string[] {
+  const tally = new Map<string, number>();
+  for (const line of lines) tally.set(line, (tally.get(line) ?? 0) + 1);
+  return [...tally].map(([line, count]) => `${verb}${count > 1 ? ` (${count} resources)` : ""} — ${line}`);
+}
+
 /** The reasons, from already-computed inputs — so the batch path can translate each subject once. */
 function nonConformanceFrom(
   measureId: string,
@@ -422,11 +429,7 @@ function nonConformanceFrom(
   // DEDUPED and COUNTED, not one line per resource. `GET /api/runs/:id/qrda1` returns this per subject,
   // and a WebChart bundle of a few hundred observations produced 300 near-identical strings — 31 KB per
   // subject of the same three sentences (review, #362).
-  const tally = new Map<string, number>();
-  for (const reason of translation.untranslatable) tally.set(reason, (tally.get(reason) ?? 0) + 1);
-  for (const [reason, count] of tally) {
-    reasons.push(`not exported${count > 1 ? ` (${count} resources)` : ""} — ${reason}`);
-  }
+  reasons.push(...tallied(translation.untranslatable, "not exported"));
   if (!reference.includes(EMEASURE_ID_ROOT)) {
     reasons.push(`measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was evaluated from authored logic`);
   }
@@ -473,7 +476,7 @@ export function buildQrda1Documents(
       xml: buildQrda1Document(run, measureId, outcome, bundle, { entries: translation.entries, reference }),
       conformant: nonConformanceReasons.length === 0,
       nonConformanceReasons,
-      caveats: qrda1Caveats(measureId, bundle),
+      caveats: [...qrda1Caveats(measureId, bundle), ...tallied(translation.caveats ?? [], "not carried")],
     };
   });
 }

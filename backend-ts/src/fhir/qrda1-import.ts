@@ -134,19 +134,40 @@ const GENDER_FOR_SNOMED: Record<string, string> = { "248152002": "female", "2481
 export class Qrda1ImportError extends Error {}
 
 /**
+ * `negationInd` true, in either XML Schema boolean spelling (`true`, `1`) and any case or padding: read as
+ * positive, a negated act becomes a fact the document denies (Codex + review, #787).
+ */
+function isNegatedNode(node: CdaNode): boolean {
+  const negation = node.attrs.negationInd?.trim().toLowerCase();
+  return negation === "true" || negation === "1";
+}
+
+/** CDA's act classes: the elements whose `negationInd` says the act itself did not happen. */
+const ACT_CLASSES = new Set(["act", "observation", "procedure", "encounter", "substanceAdministration", "supply", "organizer", "observationMedia", "regionOfInterest"]);
+
+/**
  * HL7 `YYYYMMDDHHMMSS[±ZZZZ]` → ISO-8601, or undefined when absent/nullFlavored/unparseable.
  *
  * The **offset is applied, not discarded** (Codex, #362). `20251231230000-0500` is
  * `2026-01-01T04:00:00Z`, a different day and a different YEAR — and a measurement period is a
  * half-open interval on exactly that boundary, so dropping the offset silently moves events in and out
- * of populations. Base HL7 asks for the offset (CONF:81-10130) even though the CMS Hospital IG asks for
- * its absence (CMS_0121), so a conformant document may well carry one.
+ * of populations. C-CDA's US Realm Date and Time asks for an offset (CONF:81-10130, a SHOULD) and CMS_0121
+ * asks a document to state offsets everywhere or nowhere, so a conformant document may well carry one.
+ * A blood-pressure panel keeps the stated offset instead (`statedTimestamp`): CMS165 reads a reading's day
+ * in its own offset (review, #787).
  */
 function isoFromHl7(value: string | undefined): string | undefined {
-  if (!value || !/^\d{8}/.test(value)) return undefined;
+  // The WHOLE value must be an HL7 TS: a date, an optional time to the second with an optional fraction,
+  // and, after a time, an optional ±HHMM offset (the CDA schema allows none on a date). A colon in the
+  // offset or anything trailing makes it no timestamp, rather than a different instant than the one stated
+  // (review, #787).
+  if (!value || !/^\d{8}(\d{2}(\d{2}(\d{2}(\.\d+)?)?)?([+-]\d{4})?)?$/.test(value)) return undefined;
   const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
+  if (y === "0000") return undefined; // FHIR has no year zero
   const offset = /([+-])(\d{2})(\d{2})$/.exec(value);
   const digits = offset ? value.slice(0, value.length - 5) : value;
+  // An hour without minutes keeps the date only, and an hour that is not one makes it no timestamp.
+  if (digits.length >= 10 && Number(digits.slice(8, 10)) > 23) return undefined;
   if (digits.length < 12) {
     // Validate the date-only path too. `00000000` (a MariaDB zero date) used to become
     // `"0000-00-00"` and flow into `Patient.birthDate`, where CMS125's IPP feeds it to `AgeAt(...)`.
@@ -158,7 +179,13 @@ function isoFromHl7(value: string | undefined): string | undefined {
   const [h, mi, s] = [digits.slice(8, 10), digits.slice(10, 12), digits.slice(12, 14) || "00"];
   const zone = offset ? `${offset[1]}${offset[2]}:${offset[3]}` : "Z";
   const parsed = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}${zone}`);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  // The components must survive the parse. `new Date` rolls an impossible day over instead of failing
+  // (`20250230120000` became 2 March), which would import a date the document never stated (Codex, #787).
+  const offsetMinutes = offset ? (offset[1] === "-" ? -1 : 1) * (Number(offset[2]) * 60 + Number(offset[3])) : 0;
+  const local = new Date(parsed.getTime() + offsetMinutes * 60_000).toISOString().slice(0, 19);
+  if (local !== `${y}-${mo}-${d}T${h}:${mi}:${s}`) return undefined;
+  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /** A CDA coded element → a FHIR CodeableConcept, or undefined when it is nullFlavored/unmapped. */
@@ -419,11 +446,13 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
   const t = times(child(node, "effectiveTime"));
   // A Laboratory Test carries its result in a nested Result observation; a Diagnostic Study carries an
   // outer `value` which is `nullFlavor="NA"` for a study with no coded result (ADR-050).
-  const nested = descendants(node, "observation").find((n) => hasTemplate(n, T.result));
+  const nested = ownResultsOf(node)[0];
   const valueNode = child(nested ?? node, "value") ?? child(node, "value");
-  const quantity = valueNode?.attrs["xsi:type"] === "PQ" && valueNode.attrs.value !== undefined
-    ? { value: Number(valueNode.attrs.value), ...(valueNode.attrs.unit ? { unit: valueNode.attrs.unit } : {}) }
-    : undefined;
+  // Only a value that IS a number. `Number("")` and `Number(" ")` are 0, so an empty `value` attribute
+  // would otherwise import as a result of zero, a fact the document never stated (Codex, #787).
+  // And a value carrying a nullFlavor states that the value is missing, whatever number sits beside it.
+  const number = valueNode?.attrs["xsi:type"] === "PQ" && !valueNode.attrs.nullFlavor ? decimalOf(valueNode.attrs.value) : undefined;
+  const quantity = number !== undefined ? { value: number, ...(valueNode!.attrs.unit ? { unit: valueNode!.attrs.unit } : {}) } : undefined;
   const coded = valueNode?.attrs["xsi:type"] === "CD" ? concept(valueNode) : undefined;
   // A result written as text. CMS130 asks only that a stool test HAS a result (`value is not null`), and
   // Cypress writes those results as `<value xsi:type="ST">Negative</value>`: dropped, 12 of 16 of its
@@ -448,13 +477,372 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
     category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: category }] }],
     code,
     ...when,
-    ...(quantity && Number.isFinite(quantity.value) ? { valueQuantity: quantity } : {}),
+    ...(quantity ? { valueQuantity: quantity } : {}),
     ...(coded ? { valueCodeableConcept: coded } : {}),
     ...(text ? { valueString: text } : {}),
   };
 }
 
+/**
+ * A node's OWN Results: Result observations under its direct `entryRelationship`s, never one belonging to
+ * another observation nested further down, which would lend this reading someone else's value (review,
+ * #787). A negated Result, or one under a negated relationship, is not this node's result (review, #787).
+ */
+function ownResultsOf(node: CdaNode): CdaNode[] {
+  return childrenNamed(node, "entryRelationship")
+    .filter((relationship) => !isNegatedNode(relationship))
+    .map((relationship) => child(relationship, "observation"))
+    .filter((n): n is CdaNode => n !== undefined && hasTemplate(n, T.result) && !isNegatedNode(n));
+}
+
+/** Every value a reading states: its own `<value>`s and its own Results'. One blood-pressure half states one. */
+function statedValuesOf(node: CdaNode): CdaNode[] {
+  return [...childrenNamed(node, "value"), ...ownResultsOf(node).flatMap((result) => childrenNamed(result, "value"))];
+}
+
+/**
+ * The number a CDA REAL / PQ value states, or undefined when it states none: the lexical form is a decimal,
+ * optionally signed, optionally with an exponent; one too large for a double is no number, and one too small
+ * is not zero (review, #787).
+ */
+function decimalOf(lexical: string | undefined): number | undefined {
+  if (lexical === undefined || !DECIMAL.test(lexical)) return undefined;
+  const n = Number(lexical);
+  if (!Number.isFinite(n)) return undefined;
+  return n === 0 && /[1-9]/.test(lexical.split(/[eE]/)[0]!) ? undefined : n;
+}
+
 const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+/** The lexical form of a CDA REAL / PQ value: a decimal, optionally signed, optionally with an exponent. */
+const DECIMAL = /^\s*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/;
+const LOINC = "http://loinc.org";
+const UCUM = "http://unitsofmeasure.org";
+const SYSTOLIC = "8480-6";
+const DIASTOLIC = "8462-4";
+
+type ObservationShape = {
+  id?: string;
+  identifier?: unknown[];
+  code?: { coding?: Array<{ system?: string; code?: string }> };
+  valueQuantity?: { value?: number; unit?: string };
+};
+
+/** A blood-pressure-coded Observation the walk imported: its index in the import's entries, and its CDA element. */
+interface BloodPressureReading {
+  index: number;
+  node: CdaNode;
+}
+
+/**
+ * Which half of a blood pressure an Observation's own code states: "systolic" (8480-6), "diastolic"
+ * (8462-4), "both" when it states both (it says neither which half it is: it pairs with nothing, and blocks
+ * a pair at its time, review #787), or undefined. These are the two codes §4A.8 names and the two CMS165's
+ * own logic reads; a reading under another code (sitting, standing, invasive, a SNOMED concept) is neither
+ * half, and neither pairs nor blocks.
+ */
+function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | "both" | undefined {
+  const codes = ((resource as ObservationShape).code?.coding ?? []).filter((c) => c.system === LOINC).map((c) => c.code);
+  if (codes.includes(SYSTOLIC) && codes.includes(DIASTOLIC)) return "both";
+  if (codes.includes(SYSTOLIC)) return "systolic";
+  if (codes.includes(DIASTOLIC)) return "diastolic";
+  return undefined;
+}
+
+/**
+ * Blood-pressure readings left as separate Observations, of any template: CMS165 reads a blood pressure only
+ * as a panel, so it does not read one of these as a blood pressure (in a batch, the same reading may also sit
+ * in a panel another of the person's documents formed). A "not done" (`status: cancelled`) is no reading.
+ * Counted on a finished bundle, so a person's documents merged into one count each reading once (review,
+ * #787).
+ */
+export function unpairedBloodPressureReadingsIn(resources: readonly unknown[]): number {
+  return resources.filter((r) => {
+    const o = r as { resourceType?: unknown; status?: unknown } | null;
+    return o?.resourceType === "Observation" && o.status !== "cancelled" && bloodPressureHalfOf(r) !== undefined;
+  }).length;
+}
+
+/** One HL7 timestamp as the document states it. */
+interface StatedTimestamp {
+  /** The first UTC instant its stated precision covers, in nanoseconds: a date is a whole day, `…1710` a whole
+   *  minute, `…00.25` a hundredth of a second. With no offset it is read as UTC, the convention every
+   *  imported entry follows. */
+  start: bigint;
+  /** The end of that precision, exclusive. */
+  end: bigint;
+  /** What identity compares: the precision (a minute, a second and a tenth of a second are different
+   *  statements), and either the instant, when an offset is stated, or the digits as written, when none is:
+   *  without an offset a time names no instant, so it never equals one that does (review, #787). */
+  key: string;
+  /** For a time of day, the FHIR dateTime IN THE STATED OFFSET (`Z` only when none is stated). CMS165 reads a
+   *  reading's day in its own offset, so `20251231200000-0500` written as `2026-01-01T01:00:00Z` would move
+   *  it into the next measurement year (review, #787). */
+  fhir?: string;
+  fractionDigits: number;
+  offsetMinutes?: number;
+}
+
+const TIMESTAMP = /^(\d{4})(\d{2})(\d{2})(?:(\d{2})(?:(\d{2})(?:(\d{2})(?:\.(\d+))?)?)?(?:([+-])(\d{2})(\d{2}))?)?$/;
+const NS_PER_MS = 1_000_000n;
+
+/** A timestamp as stated, or undefined when it is not a real one (`isoFromHl7` decides that). */
+function statedTimestamp(value: string | undefined): StatedTimestamp | undefined {
+  if (value === undefined || isoFromHl7(value) === undefined) return undefined;
+  const m = TIMESTAMP.exec(value);
+  if (!m) return undefined;
+  const [, y, mo, d, h, mi, s, fraction, sign, oh, om] = m;
+  const offsetMinutes = sign ? (sign === "-" ? -1 : 1) * (Number(oh) * 60 + Number(om)) : undefined;
+  // `setUTCFullYear`, not `Date.UTC`, which reads the years 0-99 as 1900-1999.
+  const local = new Date(0);
+  local.setUTCFullYear(Number(y), Number(mo) - 1, Number(d));
+  local.setUTCHours(Number(h ?? 0), Number(mi ?? 0), Number(s ?? 0), 0);
+  const digits = fraction?.replace(/0+$/, "") ?? "";
+  const start = BigInt(local.getTime() - (offsetMinutes ?? 0) * 60_000) * NS_PER_MS + BigInt(`${digits}000000000`.slice(0, 9));
+  const unit =
+    h === undefined ? 86_400_000_000_000n
+    : mi === undefined ? 3_600_000_000_000n
+    : s === undefined ? 60_000_000_000n
+    : 10n ** BigInt(Math.max(0, 9 - (fraction?.length ?? 0)));
+  const precision =
+    h === undefined ? "date" : mi === undefined ? "hour" : s === undefined ? "minute" : `second${fraction !== undefined ? `.${fraction.length}` : ""}`;
+  const written = `${y}${mo}${d}${h ?? ""}${mi ?? ""}${s ?? ""}${fraction !== undefined ? `.${fraction}` : ""}`;
+  return {
+    start,
+    end: start + unit,
+    key: `${precision} ${offsetMinutes === undefined ? `as written ${written}` : `instant ${start}`}`,
+    ...(mi !== undefined
+      ? { fhir: `${y}-${mo}-${d}T${h}:${mi}:${s ?? "00"}${fraction !== undefined ? `.${fraction}` : ""}${sign ? `${sign}${oh}:${om}` : "Z"}` }
+      : {}),
+    fractionDigits: fraction?.length ?? 0,
+    ...(offsetMinutes !== undefined ? { offsetMinutes } : {}),
+  };
+}
+
+/** Attributes an `<effectiveTime>` or a bound may carry; any other is not a time this importer reads. */
+const TIME_ATTRIBUTES = new Set(["value", "xsi:type", "operator"]);
+const BOUND_ATTRIBUTES = new Set(["value", "inclusive", "xsi:type"]);
+const onlyAttributes = (n: CdaNode, allowed: Set<string>) => Object.keys(n.attrs).every((k) => allowed.has(k) || k.startsWith("xmlns"));
+/** An absent `xsi:type`, or one naming a type the element's schema type already is (`IVL_TS`, …). */
+const timeTypeIs = (n: CdaNode, types: readonly string[]) => {
+  const type = n.attrs["xsi:type"]?.trim();
+  return type === undefined || types.includes(type.slice(type.indexOf(":") + 1));
+};
+
+/** The panel's time and the key both halves must share. */
+interface PanelTime {
+  effective: { effectiveDateTime: string } | { effectivePeriod: { start: string; end: string } };
+  key: string;
+}
+
+/**
+ * The time a reading pairs on, under §4A.8's "an identical time that includes a time of day: the same
+ * instant, or the same low and high", or undefined when it states no such time. Read off the CDA
+ * `<effectiveTime>` itself, never the FHIR value built from it, which is lossy (Codex, #787):
+ * - an instant: a `value`, with nothing under it;
+ * - a closed interval: one `<low>` and one `<high>` and nothing else, each a timestamp, neither exclusive,
+ *   both or neither stating an offset, the low not after the high.
+ * Each timestamp needs a time of day (an hour and a minute), at most nine digits of a second (FHIR's limit)
+ * and an offset FHIR can state. An open interval (`<high nullFlavor="UNK"/>`, or no `<high>`) states no
+ * high: the import's general conversion reads it as an instant at its low, and a panel built from that would
+ * state a time the document did not (Codex, #787). A width, a center, a nullFlavor, an exclusive bound or an
+ * `operator` other than inclusion has no FHIR Period form. Two spellings of one statement (a redundant
+ * `xsi:type="IVL_TS"`, `inclusive="true"`, another offset for the same instant) share a key (review, #787).
+ */
+function panelTimeOf(node: CdaNode): PanelTime | undefined {
+  const time = child(node, "effectiveTime");
+  if (!time || !onlyAttributes(time, TIME_ATTRIBUTES) || !timeTypeIs(time, ["IVL_TS", "TS"])) return undefined;
+  if (time.attrs.operator !== undefined && time.attrs.operator.trim() !== "I") return undefined;
+  const usable = (t: StatedTimestamp | undefined): t is StatedTimestamp & { fhir: string } =>
+    t?.fhir !== undefined && t.fractionDigits <= 9 && Math.abs(t.offsetMinutes ?? 0) <= 14 * 60;
+  if (time.attrs.value !== undefined) {
+    const at = time.children.length === 0 ? statedTimestamp(time.attrs.value) : undefined;
+    return usable(at) ? { effective: { effectiveDateTime: at.fhir }, key: `at ${at.key}` } : undefined;
+  }
+  if (time.children.map((c) => c.local).sort().join() !== "high,low") return undefined;
+  const bound = (b: CdaNode) => {
+    const inclusive = b.attrs.inclusive?.trim().toLowerCase();
+    const closed = inclusive === undefined || inclusive === "true" || inclusive === "1";
+    return closed && b.children.length === 0 && onlyAttributes(b, BOUND_ATTRIBUTES) && timeTypeIs(b, ["IVXB_TS", "TS"])
+      ? statedTimestamp(b.attrs.value)
+      : undefined;
+  };
+  const low = bound(child(time, "low")!);
+  const high = bound(child(time, "high")!);
+  if (!usable(low) || !usable(high) || (low.offsetMinutes === undefined) !== (high.offsetMinutes === undefined) || low.start > high.start) {
+    return undefined;
+  }
+  return { effective: { effectivePeriod: { start: low.fhir, end: high.fhir } }, key: `from ${low.key} to ${high.key}` };
+}
+
+/** The instants a reading's stated time could cover; an absent bound is unbounded. */
+interface TimeRange {
+  start?: bigint;
+  end?: bigint;
+  /** Whether its timestamps state an offset; undefined when it states no timestamp. */
+  zoned?: boolean;
+}
+
+/**
+ * Every instant a reading's `<effectiveTime>` could mean, whatever its shape: an instant covers its stated
+ * precision, an interval runs from its low's start to its high's end, an open side is unbounded, and a time
+ * that cannot be placed (none, a nullFlavor, a center or a width, an unparseable value) could be any time.
+ */
+function rangeOf(node: CdaNode): TimeRange {
+  const time = child(node, "effectiveTime");
+  if (!time || time.attrs.nullFlavor !== undefined) return {};
+  if (time.attrs.value !== undefined) {
+    const at = time.children.length === 0 ? statedTimestamp(time.attrs.value) : undefined;
+    return at ? { start: at.start, end: at.end, zoned: at.offsetMinutes !== undefined } : {};
+  }
+  if (child(time, "center") || child(time, "width")) return {};
+  const low = statedTimestamp(child(time, "low")?.attrs.value);
+  const high = statedTimestamp(child(time, "high")?.attrs.value);
+  // Bounds that disagree on stating a zone, or that run backwards, place the reading nowhere in particular:
+  // it could be any time (review, #787).
+  if (low && high && ((low.offsetMinutes === undefined) !== (high.offsetMinutes === undefined) || low.start > high.start)) return {};
+  const stated = low ?? high;
+  return {
+    ...(low ? { start: low.start } : {}),
+    ...(high ? { end: high.end } : {}),
+    ...(stated ? { zoned: stated.offsetMinutes !== undefined } : {}),
+  };
+}
+
+/** The widest offset either side of UTC a time with no zone could have been stated in. */
+const ZONE_UNCERTAINTY = 14n * 3_600_000_000_000n;
+
+/**
+ * A range stated with no zone, met with one stated in a zone, could be in any zone: it is widened by the
+ * widest offset either way. A date with no zone (`20251231`) is then still the same day as a pair at
+ * `20251231200000-0500`, which CMS165 reads on 31 December, though in UTC the two never meet (review,
+ * #787). Two ranges both with or both without a zone are compared as they stand.
+ */
+const widenedFor = (r: TimeRange, other: TimeRange): TimeRange =>
+  r.zoned === false && other.zoned === true
+    ? { ...(r.start !== undefined ? { start: r.start - ZONE_UNCERTAINTY } : {}), ...(r.end !== undefined ? { end: r.end + ZONE_UNCERTAINTY } : {}) }
+    : r;
+
+const rangesOverlap = (x: TimeRange, y: TimeRange) => {
+  const [a, b] = [widenedFor(x, y), widenedFor(y, x)];
+  return (a.start === undefined || b.end === undefined || a.start < b.end) && (b.start === undefined || a.end === undefined || b.start < a.end);
+};
+
+/**
+ * What a reading states about who, how, where and with what. Two halves of one panel state the same.
+ * Compared as written (`statedContentOf`), never through the import's code-system map: a method in a system
+ * the map does not carry is still a stated method, and two different ones are still different (Codex, #787).
+ * Every repetition and everything under it counts: a second method, a laterality qualifier on a site, an
+ * originalText behind a nullFlavor (review, #787).
+ */
+function statedContextOf(node: CdaNode): string {
+  return JSON.stringify({
+    // Everything a performer element states, not just its ids: two performers who share a null-flavored id
+    // and differ by name are different people (Codex, #787).
+    performers: childrenNamed(node, "performer").map(statedContentOf),
+    // Every participant, whatever its role: QRDA I states a QDM Performer as `participant typeCode="PRF"`
+    // (Participant, …24.3.162) and a device as `typeCode="DEV"` (standards review, #787).
+    participants: childrenNamed(node, "participant").map(statedContentOf),
+    methods: childrenNamed(node, "methodCode").map(statedContentOf),
+    sites: childrenNamed(node, "targetSiteCode").map(statedContentOf),
+  });
+}
+
+/** An element and everything under it, as stated: names, attributes in a fixed order, and text. */
+function statedContentOf(node: CdaNode): unknown {
+  const attrs = Object.keys(node.attrs).sort().map((k) => [k, node.attrs[k]]);
+  return [node.local, attrs, node.text, node.children.map(statedContentOf)];
+}
+
+/**
+ * Pair a document's blood-pressure readings into US Core panels, under LOCKED §4A.8 and nowhere else.
+ *
+ * QRDA states a blood pressure as two Physical Exam, Performed entries, a systolic (8480-6) and a
+ * diastolic (8462-4) at the same time; CMS165's FHIR logic reads one only as a panel (85354-9) carrying
+ * both as components. Two readings become one panel only when every condition holds:
+ * - both are `candidates`: Physical Exam readings that are their entry's own act, never one inside an
+ *   organizer or another act, whose wrapper can state a performer, a device or a status of its own
+ *   (review, #787);
+ * - one systolic and one diastolic share an identical time (`panelTimeOf`), and no other blood-pressure
+ *   reading of any template (`blockers`) states a time that could fall within it: an instant inside the
+ *   pair's interval, an interval or open interval touching it, or a time that cannot be placed at all
+ *   (review, #787);
+ * - each states exactly one value, a number in mm[Hg] (a second value, or a value from a Result beside its
+ *   own, is not one blood pressure, review #787);
+ * - each is an event that happened (`moodCode="EVN"`, `statusCode="completed"`), and both state the same
+ *   performer, participants, method and site.
+ * The panel takes the systolic's place and id, keeps both readings' source identifiers (the batch merge
+ * recognises a repeated entry by them) and their shared site and method when one of each is stated, and
+ * states nothing the two readings did not: their codes and values, their time in its stated offset,
+ * `final`. `prepareForQiCore` then stamps `us-core-blood-pressure` from those codes. A negated reading never
+ * reaches here (the walk skips it), and no `Observation.encounter` is supplied: the document does not state
+ * one.
+ *
+ * Mutates `entries`: each panel replaces its systolic, and its diastolic is removed.
+ */
+function pairBloodPressures(entries: Array<{ resource: unknown }>, candidates: BloodPressureReading[], blockers: BloodPressureReading[]): void {
+  const byTime = new Map<string, Array<{ reading: BloodPressureReading; time: PanelTime }>>();
+  for (const reading of candidates) {
+    const time = panelTimeOf(reading.node);
+    if (time !== undefined) byTime.set(time.key, [...(byTime.get(time.key) ?? []), { reading, time }]);
+  }
+  const removed = new Set<number>();
+  for (const group of byTime.values()) {
+    if (group.length !== 2) continue;
+    const half = (r: BloodPressureReading) => bloodPressureHalfOf(entries[r.index]!.resource);
+    const s = group.find((g) => half(g.reading) === "systolic");
+    const d = group.find((g) => half(g.reading) === "diastolic");
+    if (!s || !d) continue;
+    const at = rangeOf(s.reading.node);
+    const pair = new Set([s.reading.index, d.reading.index]);
+    if (blockers.some((b) => !pair.has(b.index) && rangesOverlap(rangeOf(b.node), at))) continue;
+    // One value, the reading's own: a Result is this reading's only when its code states the same half and
+    // only that half, read as a reading's own code is (`bloodPressureHalfOf`). A Result coded as the other
+    // half, or as both (one code and the other as a translation), is not (review, #787).
+    const mmHg = (r: BloodPressureReading) => {
+      const q = (entries[r.index]!.resource as ObservationShape).valueQuantity;
+      const resultsAreOwn = ownResultsOf(r.node).every((result) => bloodPressureHalfOf({ code: concept(child(result, "code")) }) === half(r));
+      return statedValuesOf(r.node).length === 1 && resultsAreOwn && typeof q?.value === "number" && Number.isFinite(q.value) && q.unit === "mm[Hg]";
+    };
+    // A reading that happened: an event (not an intent), completed (not aborted or nullified) (review, #787).
+    const happened = (r: BloodPressureReading) => r.node.attrs.moodCode === "EVN" && child(r.node, "statusCode")?.attrs.code === "completed";
+    if (!mmHg(s.reading) || !mmHg(d.reading) || !happened(s.reading) || !happened(d.reading)) continue;
+    if (statedContextOf(s.reading.node) !== statedContextOf(d.reading.node)) continue;
+    const sys = entries[s.reading.index]!.resource as ObservationShape;
+    const dia = entries[d.reading.index]!.resource as ObservationShape;
+    const component = (o: ObservationShape) => ({
+      code: o.code,
+      valueQuantity: { value: o.valueQuantity!.value, unit: "mm[Hg]", system: UCUM, code: "mm[Hg]" },
+    });
+    const identifier = [...new Map([...(sys.identifier ?? []), ...(dia.identifier ?? [])].map((id) => [JSON.stringify(id), id])).values()];
+    // The site and method both halves state (the context rule makes them the same), when one of each is
+    // stated and mapped: a FHIR Observation carries one of each.
+    const sites = childrenNamed(s.reading.node, "targetSiteCode");
+    const methods = childrenNamed(s.reading.node, "methodCode");
+    const bodySite = sites.length === 1 ? concept(sites[0]) : undefined;
+    const method = methods.length === 1 ? concept(methods[0]) : undefined;
+    entries[s.reading.index] = {
+      resource: {
+        resourceType: "Observation",
+        id: sys.id,
+        ...(identifier.length > 0 ? { identifier } : {}),
+        status: "final",
+        category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }],
+        code: { coding: [{ system: LOINC, code: "85354-9", display: "Blood pressure panel with all children optional" }] },
+        // The time as the document states it, offset included (both halves share it).
+        ...s.time.effective,
+        ...(bodySite ? { bodySite } : {}),
+        ...(method ? { method } : {}),
+        component: [component(sys), component(dia)],
+      },
+    };
+    removed.add(d.reading.index);
+  }
+  if (removed.size > 0) {
+    const kept = entries.filter((_, i) => !removed.has(i));
+    entries.length = 0;
+    entries.push(...kept);
+  }
+}
 const QICORE_NOT_DONE_REASON = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-notDoneReason";
 
 /**
@@ -702,6 +1090,12 @@ export interface Qrda1Import {
   localMeasureId?: string;
   /** QDM entries seen but not translated — surfaced so a gap is visible rather than silent. */
   untranslatedTemplates: string[];
+  /**
+   * Systolic and diastolic readings left as separate Observations, of any template, because LOCKED §4A.8's
+   * conditions did not all hold (`unpairedBloodPressureReadingsIn`). CMS165 reads a blood pressure only as a
+   * panel, so it does not read one of these as a blood pressure.
+   */
+  unpairedBloodPressureReadings: number;
 }
 
 /**
@@ -727,6 +1121,9 @@ export function importQrda1Document(xml: string): Qrda1Import {
   const { id: patientId, resource: patient } = patientFrom(root);
   const entries: Array<{ resource: unknown }> = [{ resource: patient }];
   const untranslatedTemplates: string[] = [];
+  // Physical Exam readings that may pair, and every blood-pressure reading that can keep a pair from forming.
+  const pairable: BloodPressureReading[] = [];
+  const bloodPressureReadings: BloodPressureReading[] = [];
   // Every Diagnosis entry's own id is reserved before any encounter-diagnosis id is generated, whichever
   // comes first in the document, so a generated id can never shadow a Condition the source named.
   const conditionIds = new Set<string>(
@@ -742,6 +1139,19 @@ export function importQrda1Document(xml: string): Qrda1Import {
     // rest AND reported the entry as fully translated — so an HbA1c that is the second component of a
     // chemistry panel vanished with `untranslatedTemplates: []` (review, #362). Diagnosis is nested
     // inside a Diagnosis Concern Act, so the search descends rather than reading immediate children.
+    // Whatever sits inside a negated act did not happen either: an observation wrapped in an act with
+    // `negationInd="true"` is not a positive fact (review, #787). Only an act negates what it contains; a
+    // negated `entryRelationship` says the RELATIONSHIP does not hold, not that the act it points to did not
+    // happen (review, #787).
+    const negatesContents = (n: CdaNode) => ACT_CLASSES.has(n.local) && isNegatedNode(n);
+    const underNegation = new Set<CdaNode>();
+    const markUnder = (n: CdaNode, negated: boolean): void => {
+      for (const c of n.children) {
+        if (negated) underNegation.add(c);
+        markUnder(c, negated || negatesContents(c));
+      }
+    };
+    for (const node of entry.children) markUnder(node, negatesContents(node));
     const candidates = new Set<CdaNode>();
     for (const node of entry.children) {
       candidates.add(node);
@@ -763,7 +1173,10 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // (the diagnostic does not distinguish "negated" from other drops, which is a known limit).
       // The one exception is an Assessment, Not Performed with a stated reason, which has a faithful
       // QI-Core form of its own (`assessmentNotDoneFrom`) that no positive read can mistake for the act.
-      if (candidate.attrs.negationInd === "true") {
+      // Both lexical forms of an XML Schema boolean true: `"1"` says the act did not happen exactly as
+      // `"true"` does, and read as positive it would import a negated reading as a fact (Codex, #787).
+      if (underNegation.has(candidate)) continue;
+      if (isNegatedNode(candidate)) {
         const notDone = hasTemplate(candidate, T.assessmentPerformed) ? assessmentNotDoneFrom(candidate, key) : undefined;
         if (notDone !== undefined) {
           entries.push({ resource: notDone });
@@ -779,8 +1192,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
         // A screening/assessment Observation keeps its own `<code>` (the instrument) and `<value>` (the
         // result) — unlike Symptom below, which inverts them.
         : hasTemplate(candidate, T.assessmentPerformed) ? observationFrom(candidate, key, "survey")
-        // One Observation per reading, with its own code. A blood pressure's two halves are NOT paired into a
-        // US Core panel: that would supply the panel code (85354-9), which the document never states.
+        // One Observation per reading, with its own code. A blood pressure's two halves are paired into one
+        // US Core panel after the walk, under LOCKED §4A.8's conditions only (`pairBloodPressures`).
         : hasTemplate(candidate, T.physicalExamPerformed) ? observationFrom(candidate, key, "exam")
         : hasTemplate(candidate, T.symptom) ? symptomFrom(candidate, key)
         // Intervention, Performed IS a Procedure to the official artifacts — same retrieve, same
@@ -795,7 +1208,17 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // An Encounter brings its diagnosis Conditions with it.
       const produced = (Array.isArray(resource) ? resource : [resource]).filter((r) => r !== undefined);
       if (produced.length > 0) {
-        for (const r of produced) entries.push({ resource: r });
+        // A Physical Exam reading may pair only when it is its entry's own act: one inside an organizer or
+        // another act can take a performer, a device or a status from its wrapper (review, #787).
+        const pairs = hasTemplate(candidate, T.physicalExamPerformed) && entry.children.includes(candidate);
+        for (const r of produced) {
+          if ((r as { resourceType?: unknown }).resourceType === "Observation" && bloodPressureHalfOf(r) !== undefined) {
+            const reading = { index: entries.length, node: candidate };
+            bloodPressureReadings.push(reading);
+            if (pairs) pairable.push(reading);
+          }
+          entries.push({ resource: r });
+        }
         translated++;
       }
     }
@@ -812,6 +1235,9 @@ export function importQrda1Document(xml: string): Qrda1Import {
       untranslatedTemplates.push(datatypes[0] ?? roots[roots.length - 1] ?? "(no templateId)");
     }
   });
+
+  pairBloodPressures(entries, pairable, bloodPressureReadings);
+  const unpairedBloodPressureReadings = unpairedBloodPressureReadingsIn(entries.map((e) => e.resource));
 
   // A Patient-only bundle is the failure this whole module exists to avoid, and the section being
   // PRESENT but empty reaches it just as surely as the section being absent (Codex, #362). Our own
@@ -850,5 +1276,6 @@ export function importQrda1Document(xml: string): Qrda1Import {
     measureIdentifiers,
     ...(localMeasureId ? { localMeasureId } : {}),
     untranslatedTemplates,
+    unpairedBloodPressureReadings,
   };
 }

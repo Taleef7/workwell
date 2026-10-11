@@ -5,8 +5,50 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-11
+
+- **#787 had two more review passes before merge** (four reviewers on the whole PR, then two on the
+  rework, fuzzing against independent oracles), after Codex kept finding defects. The pairing was rebuilt
+  rather than patched: a third systolic or diastolic of any template whose time could fall within the
+  pair's blocks it, judged across time zones; an identical time means the same instant at the same
+  precision, both or neither stating a zone; each half has exactly one value of its own; the panel keeps
+  the document's offset, since CMS165 reads a reading's day in it (a panel converted to UTC moved 20:00
+  on 31 December in New York into the next year); wrapped readings never pair. The exporter writes
+  readings only in LOINC's own system, the one CMS165 reads, and reports what it does not write as
+  caveats. Decks and C2 unchanged; CMS165 42/44.
+- **Preparation stamps a blood pressure only when CMS165 can read it.** A panel whose systolic and
+  diastolic were coded `http://loinc.org/`, as the OID or with no system was stamped
+  `us-core-blood-pressure`, so CMS165 took its day as the latest and read no values: measured, a patient
+  at 120/70 then 128/78 scored OVERDUE. Now only readings in LOINC's own system are stamped (US Core fixes
+  the same system). The corpus codes them so, as do the trial instance's real readings (2026-07-23) and the
+  dev-database shim, so no live result moves.
+- §4A.8 now states every condition the code enforces (owner decision today): a systolic is 8480-6 and a
+  diastolic 8462-4, and a stated value is not judged (0/0 pairs). The defects the reviews found outside
+  #787 are #788-#795; the largest is #788 (every other imported time is converted to UTC), and #789 (one
+  non-UCUM blood-pressure unit fails cms165 for its whole batch) matters once cms165 runs on WebChart.
+
 ## 2026-10-10
 
+- **A QRDA blood pressure is one panel when the document states one (LOCKED §4A.8, owner decision
+  today).** QRDA writes a systolic and a diastolic as two readings at one time; CMS165 reads only a
+  US Core panel. The importer now pairs them under strict conditions: two readings that are each their own
+  entry, at the same instant or closed interval with a time of day (never an open one), with no other
+  blood-pressure reading of any kind at that time, one value each in mm[Hg], and the same stated performer,
+  participants, method and site. The panel keeps both source ids, the shared method and site, and the
+  document's time with its offset and fraction; anything else stays two readings and is counted. The
+  exporter writes a final panel at such a time back as its two readings with its method and site, and
+  names what it does not write (the encounter link, the performer, the recorded time, any other
+  component) as caveats.
+  - The Cypress deck, both years, as production runs it: CMS165 42/44, from 33/44 after #786 and 0/44
+    before. The two left are readings taken during an ED visit or inpatient stay, which CMS's draft
+    leaves out only through `Observation.encounter`.
+  - Every other measure's agreement, the translations' and C2 on both archives are unchanged.
+  - CLAUDE.md's no-invented-data rule names the pairing as a mapping, and §4A.8 states the conditions.
+  - Review (Codex and an adversarial pass) found wider importer defects, each stating something no
+    document said, now fixed for every entry: an empty, blank or null-flavored value imported as a
+    number; an impossible or malformed timestamp read as another instant; a negation written `"1"`, in
+    capitals, or on a wrapping act read as a fact; a reading lent another observation's nested result.
+    No deck report moved.
 - **cms165 trusts one profile, not all of them (#591).** Its blood-pressure retrieve still keeps only
   readings stamped `us-core-blood-pressure`; every other retrieve now reads by resource type, as for the
   other five measures. Until now cms165 required every QI-Core profile, which only the corpus stamps, so
