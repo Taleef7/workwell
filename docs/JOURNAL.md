@@ -7,6 +7,23 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-10
 
+- **A QRDA blood pressure is one panel when the document states one (LOCKED §4A.8, owner decision
+  today).** QRDA writes a systolic and a diastolic as two readings at one time; CMS165 reads only a
+  US Core panel. The importer now pairs them under strict conditions: the same time with a time of day,
+  the only two at that time, both numbers in mm[Hg], and the same stated performer, method, site and
+  device. The panel keeps both source ids; anything else stays two readings and is counted. The exporter
+  writes a final panel with a time of day and plain mm[Hg] values back as its two readings, and nothing
+  else; what the round trip cannot carry is the panel's encounter link, which QDM's reading has no place for.
+  - The Cypress deck, both years, as production runs it: CMS165 42/44, from 33/44 after #786 and 0/44
+    before. The two left are readings taken during an ED visit or inpatient stay, which CMS's draft
+    leaves out only through `Observation.encounter`.
+  - Every other measure's agreement, the translations' and C2 on both archives are unchanged.
+  - CLAUDE.md's no-invented-data rule names the pairing as a mapping, and §4A.8 states the conditions.
+  - Review (Codex and an adversarial pass) found wider importer defects, each stating something no
+    document said, now fixed for every entry: an empty, blank or null-flavored value imported as a
+    number; an impossible or malformed timestamp read as another instant; a negation written `"1"`, in
+    capitals, or on a wrapping act read as a fact; a reading lent another observation's nested result.
+    No deck report moved.
 - **cms165 trusts one profile, not all of them (#591).** Its blood-pressure retrieve still keeps only
   readings stamped `us-core-blood-pressure`; every other retrieve now reads by resource type, as for the
   other five measures. Until now cms165 required every QI-Core profile, which only the corpus stamps, so

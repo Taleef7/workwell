@@ -142,11 +142,26 @@ export class Qrda1ImportError extends Error {}
  * of populations. Base HL7 asks for the offset (CONF:81-10130) even though the CMS Hospital IG asks for
  * its absence (CMS_0121), so a conformant document may well carry one.
  */
+/**
+ * `negationInd` true, in either XML Schema boolean spelling (`true`, `1`) and any case or padding: read as
+ * positive, a negated act becomes a fact the document denies (Codex + review, #787).
+ */
+function isNegatedNode(node: CdaNode): boolean {
+  const negation = node.attrs.negationInd?.trim().toLowerCase();
+  return negation === "true" || negation === "1";
+}
+
 function isoFromHl7(value: string | undefined): string | undefined {
-  if (!value || !/^\d{8}/.test(value)) return undefined;
+  // The WHOLE value must be an HL7 TS: a date, an optional time to the second with an optional fraction,
+  // and an optional ±HHMM offset. A colon in the offset or anything trailing makes it no timestamp, rather
+  // than a different instant than the one stated (review, #787).
+  if (!value || !/^\d{8}(\d{2}(\d{2}(\d{2}(\.\d+)?)?)?)?([+-]\d{4})?$/.test(value)) return undefined;
   const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
+  if (y === "0000") return undefined; // FHIR has no year zero
   const offset = /([+-])(\d{2})(\d{2})$/.exec(value);
   const digits = offset ? value.slice(0, value.length - 5) : value;
+  // An hour without minutes keeps the date only, and an hour that is not one makes it no timestamp.
+  if (digits.length >= 10 && Number(digits.slice(8, 10)) > 23) return undefined;
   if (digits.length < 12) {
     // Validate the date-only path too. `00000000` (a MariaDB zero date) used to become
     // `"0000-00-00"` and flow into `Patient.birthDate`, where CMS125's IPP feeds it to `AgeAt(...)`.
@@ -158,7 +173,13 @@ function isoFromHl7(value: string | undefined): string | undefined {
   const [h, mi, s] = [digits.slice(8, 10), digits.slice(10, 12), digits.slice(12, 14) || "00"];
   const zone = offset ? `${offset[1]}${offset[2]}:${offset[3]}` : "Z";
   const parsed = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}${zone}`);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  // The components must survive the parse. `new Date` rolls an impossible day over instead of failing
+  // (`20250230120000` became 2 March), which would import a date the document never stated (Codex, #787).
+  const offsetMinutes = offset ? (offset[1] === "-" ? -1 : 1) * (Number(offset[2]) * 60 + Number(offset[3])) : 0;
+  const local = new Date(parsed.getTime() + offsetMinutes * 60_000).toISOString().slice(0, 19);
+  if (local !== `${y}-${mo}-${d}T${h}:${mi}:${s}`) return undefined;
+  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /** A CDA coded element → a FHIR CodeableConcept, or undefined when it is nullFlavored/unmapped. */
@@ -419,9 +440,16 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
   const t = times(child(node, "effectiveTime"));
   // A Laboratory Test carries its result in a nested Result observation; a Diagnostic Study carries an
   // outer `value` which is `nullFlavor="NA"` for a study with no coded result (ADR-050).
-  const nested = descendants(node, "observation").find((n) => hasTemplate(n, T.result));
+  // The node's OWN Result: a direct entryRelationship child, never one belonging to another observation
+  // nested further down, which would lend this reading someone else's value (review, #787).
+  const nested = childrenNamed(node, "entryRelationship")
+    .map((relationship) => child(relationship, "observation"))
+    .find((n): n is CdaNode => n !== undefined && hasTemplate(n, T.result));
   const valueNode = child(nested ?? node, "value") ?? child(node, "value");
-  const quantity = valueNode?.attrs["xsi:type"] === "PQ" && valueNode.attrs.value !== undefined
+  // Only a value that IS a number. `Number("")` and `Number(" ")` are 0, so an empty `value` attribute
+  // would otherwise import as a result of zero, a fact the document never stated (Codex, #787).
+  // And a value carrying a nullFlavor states that the value is missing, whatever number sits beside it.
+  const quantity = valueNode?.attrs["xsi:type"] === "PQ" && !valueNode.attrs.nullFlavor && DECIMAL.test(valueNode.attrs.value ?? "")
     ? { value: Number(valueNode.attrs.value), ...(valueNode.attrs.unit ? { unit: valueNode.attrs.unit } : {}) }
     : undefined;
   const coded = valueNode?.attrs["xsi:type"] === "CD" ? concept(valueNode) : undefined;
@@ -455,6 +483,190 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
 }
 
 const OBSERVATION_CATEGORY = "http://terminology.hl7.org/CodeSystem/observation-category";
+/** The lexical form of a CDA REAL / PQ value: a decimal, optionally signed, optionally with an exponent. */
+const DECIMAL = /^\s*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/;
+const LOINC = "http://loinc.org";
+const UCUM = "http://unitsofmeasure.org";
+const SYSTOLIC = "8480-6";
+const DIASTOLIC = "8462-4";
+
+type ObservationShape = {
+  id?: string;
+  identifier?: unknown[];
+  code?: { coding?: Array<{ system?: string; code?: string }> };
+  effectiveDateTime?: string;
+  effectivePeriod?: { start?: string; end?: string };
+  valueQuantity?: { value?: number; unit?: string };
+};
+
+/** A Physical Exam reading's index in the import's entries, and the CDA element it came from. */
+interface BloodPressureReading {
+  index: number;
+  node: CdaNode;
+}
+
+/** "systolic" / "diastolic" when the Observation states that LOINC code, else undefined. */
+function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | "both" | undefined {
+  const codes = ((resource as ObservationShape).code?.coding ?? []).filter((c) => c.system === LOINC).map((c) => c.code);
+  // A reading that states both codes says neither which half it is: it pairs with nothing and, sharing a
+  // time with others, keeps them from pairing too (review, #787).
+  if (codes.includes(SYSTOLIC) && codes.includes(DIASTOLIC)) return "both";
+  if (codes.includes(SYSTOLIC)) return "systolic";
+  if (codes.includes(DIASTOLIC)) return "diastolic";
+  return undefined;
+}
+
+/**
+ * The reading's time AS THE DOCUMENT WROTE IT, the key two halves must share: the same instant, or the
+ * same low and high, and only when it carries a time of day. Read off the CDA `<effectiveTime>`, not the
+ * FHIR value built from it, because that conversion is lossy: an instant and an interval whose high is
+ * `nullFlavor="UNK"` both become one `effectiveDateTime`, and are not the same statement (Codex, #787).
+ * A date alone says nothing about whether two readings were taken together.
+ */
+function timeKeyOf(node: CdaNode): string | undefined {
+  const time = child(node, "effectiveTime");
+  if (!time) return undefined;
+  const low = child(time, "low");
+  const high = child(time, "high");
+  // A time of day is an hour and a minute: YYYYMMDDHHMM, the precision at which the parser keeps it. And
+  // every stated bound must be a real timestamp: two readings that share an unparseable one share no time
+  // at all (Codex, #787).
+  const start = time.attrs.value ?? low?.attrs.value;
+  if (!start || !/^\d{12}/.test(start) || isoFromHl7(start) === undefined) return undefined;
+  if (high?.attrs.value !== undefined && isoFromHl7(high.attrs.value) === undefined) return undefined;
+  // Everything the element states (width, center, inclusive, …), so two different statements of time
+  // never share a key (review, #787) — except that each timestamp is compared as the INSTANT it names, to
+  // its fraction of a second: §4A.8's "the same instant" holds across time zones (Codex, #787). A point
+  // and an interval still differ, because the element's shape is compared as written.
+  const normalized = (n: CdaNode): unknown => {
+    const attrs = Object.keys(n.attrs).sort().map((k) => [k, k === "value" ? (instantKeyOf(n.attrs[k]) ?? n.attrs[k]) : n.attrs[k]]);
+    return [n.local, attrs, n.text, n.children.map(normalized)];
+  };
+  return JSON.stringify(normalized(time));
+}
+
+/**
+ * A timestamp as the UTC instant it names, keeping any fraction of a second (`isoFromHl7` keeps whole
+ * seconds), or undefined when it is not one. Two readings a tenth of a second apart are two times
+ * (Codex, #787).
+ */
+function instantKeyOf(value: string | undefined): string | undefined {
+  const iso = isoFromHl7(value);
+  if (iso === undefined || !iso.includes("T")) return iso;
+  const fraction = /^\d{14}\.(\d+)/.exec(value!)?.[1]?.replace(/0+$/, "");
+  return fraction ? iso.replace(/Z$/, `.${fraction}Z`) : iso;
+}
+
+/**
+ * What a reading states about who, how, where and with what. Two halves of one panel state the same.
+ * Compared as written (`statedContentOf`), never through the import's code-system map: a method in a system
+ * the map does not carry is still a stated method, and two different ones are still different (Codex, #787).
+ * Every repetition and everything under it counts: a second method, a laterality qualifier on a site, an
+ * originalText behind a nullFlavor (review, #787).
+ */
+function statedContextOf(node: CdaNode): string {
+  return JSON.stringify({
+    // Everything a performer or device element states, not just its ids: two performers who share a
+    // null-flavored id and differ by name are different people (Codex, #787).
+    performers: childrenNamed(node, "performer").map(statedContentOf),
+    methods: childrenNamed(node, "methodCode").map(statedContentOf),
+    sites: childrenNamed(node, "targetSiteCode").map(statedContentOf),
+    devices: childrenNamed(node, "participant").filter((p) => p.attrs.typeCode === "DEV").map(statedContentOf),
+  });
+}
+
+/** An element and everything under it, as stated: names, attributes in a fixed order, and text. */
+function statedContentOf(node: CdaNode): unknown {
+  const attrs = Object.keys(node.attrs).sort().map((k) => [k, node.attrs[k]]);
+  return [node.local, attrs, node.text, node.children.map(statedContentOf)];
+}
+
+/**
+ * Pair a document's blood-pressure readings into US Core panels, under LOCKED §4A.8 and nowhere else.
+ *
+ * QRDA states a blood pressure as two Physical Exam, Performed entries, a systolic (8480-6) and a
+ * diastolic (8462-4) at the same time; CMS165's FHIR logic reads one only as a panel (85354-9) carrying
+ * both as components. Two readings become one panel only when every condition holds: one systolic and one
+ * diastolic, the only two at an identical time that includes a time of day, both numeric mm[Hg], and the
+ * same stated performer, method, site and device. The panel takes the systolic's place and id, keeps both
+ * readings' source identifiers (the batch merge recognises a repeated entry by them), and states nothing
+ * the two readings did not: their codes and values, their time, `final`. `prepareForQiCore` then stamps
+ * `us-core-blood-pressure` from those codes. A negated reading never reaches here (the walk skips it), and
+ * no `Observation.encounter` is supplied: the document does not state one.
+ *
+ * Mutates `entries` (each panel replaces its systolic, its diastolic is removed) and returns how many
+ * readings stayed separate.
+ */
+function pairBloodPressures(entries: Array<{ resource: unknown }>, readings: BloodPressureReading[]): number {
+  const byTime = new Map<string, BloodPressureReading[]>();
+  let unpaired = 0;
+  for (const reading of readings) {
+    const key = timeKeyOf(reading.node);
+    if (key === undefined) unpaired++;
+    else byTime.set(key, [...(byTime.get(key) ?? []), reading]);
+  }
+  // "The only systolic and diastolic at that time" is judged by the INSTANT, whatever spelling states it:
+  // a third reading at the same moment written with another offset still makes the pair ambiguous
+  // (review, #787). Identity of the two halves' time stays the exact spelling (`timeKeyOf`).
+  const instantOf = (r: BloodPressureReading): string | undefined => {
+    const time = child(r.node, "effectiveTime");
+    return instantKeyOf(time?.attrs.value ?? child(time, "low")?.attrs.value);
+  };
+  const atInstant = new Map<string, number>();
+  for (const reading of readings) {
+    const instant = instantOf(reading);
+    if (instant !== undefined) atInstant.set(instant, (atInstant.get(instant) ?? 0) + 1);
+  }
+  const removed = new Set<number>();
+  for (const group of byTime.values()) {
+    if ((atInstant.get(instantOf(group[0]!) ?? "") ?? 0) !== group.length) {
+      unpaired += group.length;
+      continue;
+    }
+    const half = (r: BloodPressureReading) => bloodPressureHalfOf(entries[r.index]!.resource);
+    const systolic = group.filter((r) => half(r) === "systolic");
+    const diastolic = group.filter((r) => half(r) === "diastolic");
+    const [s, d] = [systolic[0], diastolic[0]];
+    const mmHg = (r: BloodPressureReading) => {
+      const q = (entries[r.index]!.resource as ObservationShape).valueQuantity;
+      return typeof q?.value === "number" && Number.isFinite(q.value) && q.unit === "mm[Hg]";
+    };
+    // A reading that happened: an event (not an intent), completed (not aborted or nullified) (review, #787).
+    const happened = (r: BloodPressureReading) => r.node.attrs.moodCode === "EVN" && child(r.node, "statusCode")?.attrs.code === "completed";
+    if (
+      group.length !== 2 || !s || !d || !mmHg(s) || !mmHg(d) || !happened(s) || !happened(d) ||
+      statedContextOf(s.node) !== statedContextOf(d.node)
+    ) {
+      unpaired += group.length;
+      continue;
+    }
+    const sys = entries[s.index]!.resource as ObservationShape;
+    const dia = entries[d.index]!.resource as ObservationShape;
+    const component = (o: ObservationShape) => ({
+      code: o.code,
+      valueQuantity: { value: o.valueQuantity!.value, unit: "mm[Hg]", system: UCUM, code: "mm[Hg]" },
+    });
+    entries[s.index] = {
+      resource: {
+        resourceType: "Observation",
+        id: sys.id,
+        identifier: [...new Map([...(sys.identifier ?? []), ...(dia.identifier ?? [])].map((id) => [JSON.stringify(id), id])).values()],
+        status: "final",
+        category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }],
+        code: { coding: [{ system: LOINC, code: "85354-9", display: "Blood pressure panel with all children optional" }] },
+        ...(sys.effectiveDateTime ? { effectiveDateTime: sys.effectiveDateTime } : { effectivePeriod: sys.effectivePeriod }),
+        component: [component(sys), component(dia)],
+      },
+    };
+    removed.add(d.index);
+  }
+  if (removed.size > 0) {
+    const kept = entries.filter((_, i) => !removed.has(i));
+    entries.length = 0;
+    entries.push(...kept);
+  }
+  return unpaired;
+}
 const QICORE_NOT_DONE_REASON = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-notDoneReason";
 
 /**
@@ -702,6 +914,11 @@ export interface Qrda1Import {
   localMeasureId?: string;
   /** QDM entries seen but not translated — surfaced so a gap is visible rather than silent. */
   untranslatedTemplates: string[];
+  /**
+   * Systolic and diastolic readings left as separate Observations because LOCKED §4A.8's conditions did
+   * not all hold. CMS165 reads a blood pressure only as a panel, so each is a reading it cannot see.
+   */
+  unpairedBloodPressureReadings: number;
 }
 
 /**
@@ -727,6 +944,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
   const { id: patientId, resource: patient } = patientFrom(root);
   const entries: Array<{ resource: unknown }> = [{ resource: patient }];
   const untranslatedTemplates: string[] = [];
+  const bloodPressureReadings: BloodPressureReading[] = [];
   // Every Diagnosis entry's own id is reserved before any encounter-diagnosis id is generated, whichever
   // comes first in the document, so a generated id can never shadow a Condition the source named.
   const conditionIds = new Set<string>(
@@ -742,6 +960,16 @@ export function importQrda1Document(xml: string): Qrda1Import {
     // rest AND reported the entry as fully translated — so an HbA1c that is the second component of a
     // chemistry panel vanished with `untranslatedTemplates: []` (review, #362). Diagnosis is nested
     // inside a Diagnosis Concern Act, so the search descends rather than reading immediate children.
+    // Whatever sits inside a negated element did not happen either: an observation wrapped in an act with
+    // `negationInd="true"` is not a positive fact (review, #787).
+    const underNegation = new Set<CdaNode>();
+    const markUnder = (n: CdaNode, negated: boolean): void => {
+      for (const c of n.children) {
+        if (negated) underNegation.add(c);
+        markUnder(c, negated || isNegatedNode(c));
+      }
+    };
+    for (const node of entry.children) markUnder(node, isNegatedNode(node));
     const candidates = new Set<CdaNode>();
     for (const node of entry.children) {
       candidates.add(node);
@@ -763,7 +991,10 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // (the diagnostic does not distinguish "negated" from other drops, which is a known limit).
       // The one exception is an Assessment, Not Performed with a stated reason, which has a faithful
       // QI-Core form of its own (`assessmentNotDoneFrom`) that no positive read can mistake for the act.
-      if (candidate.attrs.negationInd === "true") {
+      // Both lexical forms of an XML Schema boolean true: `"1"` says the act did not happen exactly as
+      // `"true"` does, and read as positive it would import a negated reading as a fact (Codex, #787).
+      if (underNegation.has(candidate)) continue;
+      if (isNegatedNode(candidate)) {
         const notDone = hasTemplate(candidate, T.assessmentPerformed) ? assessmentNotDoneFrom(candidate, key) : undefined;
         if (notDone !== undefined) {
           entries.push({ resource: notDone });
@@ -779,8 +1010,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
         // A screening/assessment Observation keeps its own `<code>` (the instrument) and `<value>` (the
         // result) — unlike Symptom below, which inverts them.
         : hasTemplate(candidate, T.assessmentPerformed) ? observationFrom(candidate, key, "survey")
-        // One Observation per reading, with its own code. A blood pressure's two halves are NOT paired into a
-        // US Core panel: that would supply the panel code (85354-9), which the document never states.
+        // One Observation per reading, with its own code. A blood pressure's two halves are paired into one
+        // US Core panel after the walk, under LOCKED §4A.8's conditions only (`pairBloodPressures`).
         : hasTemplate(candidate, T.physicalExamPerformed) ? observationFrom(candidate, key, "exam")
         : hasTemplate(candidate, T.symptom) ? symptomFrom(candidate, key)
         // Intervention, Performed IS a Procedure to the official artifacts — same retrieve, same
@@ -795,7 +1026,11 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // An Encounter brings its diagnosis Conditions with it.
       const produced = (Array.isArray(resource) ? resource : [resource]).filter((r) => r !== undefined);
       if (produced.length > 0) {
-        for (const r of produced) entries.push({ resource: r });
+        const exam = hasTemplate(candidate, T.physicalExamPerformed);
+        for (const r of produced) {
+          if (exam && bloodPressureHalfOf(r) !== undefined) bloodPressureReadings.push({ index: entries.length, node: candidate });
+          entries.push({ resource: r });
+        }
         translated++;
       }
     }
@@ -812,6 +1047,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
       untranslatedTemplates.push(datatypes[0] ?? roots[roots.length - 1] ?? "(no templateId)");
     }
   });
+
+  const unpairedBloodPressureReadings = pairBloodPressures(entries, bloodPressureReadings);
 
   // A Patient-only bundle is the failure this whole module exists to avoid, and the section being
   // PRESENT but empty reaches it just as surely as the section being absent (Codex, #362). Our own
@@ -850,5 +1087,6 @@ export function importQrda1Document(xml: string): Qrda1Import {
     measureIdentifiers,
     ...(localMeasureId ? { localMeasureId } : {}),
     untranslatedTemplates,
+    unpairedBloodPressureReadings,
   };
 }

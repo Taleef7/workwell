@@ -54,3 +54,20 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
    accounts use pseudonymous identifiers; source materials stay under the gitignored local-only path.
 7. **Which staff member works each provider's panel is kept in WorkWell**, not taken from WebChart
    departments; MIE data may only seed it through a reviewed import (owner decision, 2026-09-12).
+8. **A QRDA I blood pressure becomes one US Core panel only when the document states exactly one**
+   (owner decision, 2026-10-10). Pairing is a mapping, not an invention: two Physical Exam, Performed
+   readings become one Observation (code 85354-9, category `vital-signs`, `status: final`, the two stated
+   readings as its components; preparation then stamps `us-core-blood-pressure` from those codes) only when
+   ALL of these hold:
+   - both are positive (not negated) entries in one document;
+   - one states 8480-6 and the other 8462-4, each kept verbatim as its component's code;
+   - they share an identical time that includes a time of day: the same instant, or the same low and high
+     (never a date alone);
+   - they are the only systolic and the only diastolic at that time;
+   - both values are numeric `PQ` in mm[Hg] (a `nullFlavor`, a unitless value or another unit is never paired);
+   - they state the same performer, method, site and device, or none.
+
+   The panel replaces both readings and keeps both source ids. Anything short of that stays as separate
+   readings, which CMS165 cannot see, and is counted in the import diagnostics. No half-panel is emitted
+   and no `Observation.encounter` is inferred. This does not lift the PHI gate: cms165 over real data still
+   needs §4A.2's and §4A.5's conditions (#591, #572).

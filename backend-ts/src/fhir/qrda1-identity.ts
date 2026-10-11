@@ -51,6 +51,11 @@ export interface ResolvedSubject {
   bundle: { resourceType: "Bundle"; type: "collection"; entry: Array<{ resource: unknown }> };
   /** Union of every source document's untranslated QDM templates. */
   untranslatedTemplates: string[];
+  /**
+   * Blood-pressure readings the source documents left unpaired, summed. Pairing happens per document
+   * (LOCKED §4A.8), so a reading whose other half sits in another document stays unpaired.
+   */
+  unpairedBloodPressureReadings: number;
   /** Union of the measure identities the source documents reference. */
   measureIdentifiers: string[];
   /** Fields on which this person's documents disagree — reported, never resolved. */
@@ -294,6 +299,7 @@ function merge(
     subjectId: canonical.imported.patientId,
     bundle: { resourceType: "Bundle", type: "collection", entry },
     untranslatedTemplates: [...new Set(members.flatMap((m) => m.imported.untranslatedTemplates))],
+    unpairedBloodPressureReadings: members.reduce((n, m) => n + m.imported.unpairedBloodPressureReadings, 0),
     // BOTH identity kinds, exactly as `/evaluate` checks them. Dropping `localMeasureId` left an
     // authored-measure export — which carries `urn:workwell:measure` and no published identifier — with
     // nothing to check against, so re-importing one under the WRONG authored measure passed silently on

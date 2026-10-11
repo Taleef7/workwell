@@ -409,3 +409,25 @@ test("a document's LOCAL measure id is carried, so an authored export is checked
   );
   assert.deepEqual(resolveQrda1Documents([authored]).subjects[0]!.measureIdentifiers, ["audiogram"]);
 });
+
+test("a blood-pressure panel repeated in a person's two documents merges once, on both readings' ids (LOCKED §4A.8)", () => {
+  const reading = (id: string, code: string, value: number) => `<entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="${MRN_ROOT}" extension="${id}"/>
+      <code code="${code}" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20240331080500'/>
+      <value xsi:type="PQ" value="${value}" unit="mm[Hg]" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
+    </observation></entry>`;
+  const withBloodPressure = (xml: string) =>
+    xml.replace("  </section>", `    ${reading("bp-s", "8480-6", 132)}\n    ${reading("bp-d", "8462-4", 84)}\n  </section>`);
+  const first = withBloodPressure(doc({ mrn: "mrn-a", mbi: "8UA6K41TH72" }));
+  assert.notEqual(first, doc({ mrn: "mrn-a", mbi: "8UA6K41TH72" }), "the fixture must carry the readings");
+  const resolution = resolveQrda1Documents([first, withBloodPressure(doc({ mrn: "mrn-b", mbi: "8UA6K41TH72", given: "TWO X" }))]);
+  assert.equal(resolution.subjects.length, 1);
+  const panels = resolution.subjects[0]!.bundle.entry
+    .map((e) => e.resource as Record<string, any>)
+    .filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9"));
+  assert.equal(panels.length, 1, "the same panel, asserted twice, is one panel");
+  assert.equal(resolution.subjects[0]!.unpairedBloodPressureReadings, 0);
+});

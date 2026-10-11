@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { buildQrda1Document } from "./qrda1-export.ts";
+import { translateQdm } from "./qdm-entries.ts";
 import { importQrda1Document, Qrda1ImportError, SYSTEM_FOR_OID } from "./qrda1-import.ts";
 import { parseXml, decodeEntities, child, descendants, hasTemplate } from "./cda-parse.ts";
 import type { RunRecord } from "../stores/run-store.ts";
@@ -1053,9 +1054,14 @@ const deckResources = (xml = deckDocument) => {
 test("import: each resource keeps its source identifier, root as the system", () => {
   // The FHIR id is root-agnostic; the identifier keeps the assigning authority, as an OID URN.
   const { byId } = deckResources();
-  for (const id of ["fobt-1", "sys-1", "medorder-1", "noscreen-1", "enc-dx"]) {
+  for (const id of ["fobt-1", "sys-lone", "medorder-1", "noscreen-1", "enc-dx"]) {
     assert.deepEqual(byId(id)!.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: id }], id);
   }
+  // A blood-pressure panel keeps BOTH readings' source ids (LOCKED §4A.8), which the batch merge matches on.
+  assert.deepEqual(byId("sys-1")!.identifier, [
+    { system: "urn:oid:1.3.6.1.4.1.115", value: "sys-1" },
+    { system: "urn:oid:1.3.6.1.4.1.115", value: "dia-1" },
+  ]);
   const condition = byId("enc-dx-dx-1")!;
   assert.equal(condition.identifier, undefined, "a generated Condition has no source identifier, and none is invented");
 });
@@ -1109,19 +1115,25 @@ test("import: a TEXT result is kept as valueString — CMS130 asks only that the
   assert.equal(fobt!.valueString, "Negative");
 });
 
-test("import: a Physical Exam is one Observation per reading, and no panel code is supplied", () => {
-  // A blood pressure's two halves stay two readings with their own codes and values. Pairing them into a
-  // US Core panel would supply the panel code 85354-9, which the document never states.
+test("import: a blood pressure stated as two readings at one time is one US Core panel; a lone reading stays a reading (LOCKED §4A.8)", () => {
   const { all, byId } = deckResources();
-  for (const [id, code, value] of [["sys-1", "8480-6", 130], ["dia-1", "8462-4", 60], ["sys-lone", "8480-6", 150]] as const) {
-    const reading = byId(id);
-    assert.ok(reading, id);
-    assert.equal(reading!.category[0].coding[0].code, "exam");
-    assert.deepEqual(reading!.code.coding.map((c: { code: string }) => c.code), [code]);
-    assert.equal(reading!.valueQuantity.value, value);
-    assert.equal(reading!.component, undefined);
-  }
-  assert.ok(!JSON.stringify(all).includes("85354-9"), "no resource carries a code the document did not state");
+  const panel = byId("sys-1")!;
+  assert.deepEqual(panel.code.coding.map((c: { code: string }) => c.code), ["85354-9"]);
+  assert.equal(panel.category[0].coding[0].code, "vital-signs");
+  assert.equal(panel.status, "final");
+  assert.equal(panel.valueQuantity, undefined, "a panel carries its readings as components, not a value");
+  assert.deepEqual(
+    panel.component.map((c: { code: { coding: Array<{ code: string }> }; valueQuantity: unknown }) => [c.code.coding[0]!.code, c.valueQuantity]),
+    [
+      ["8480-6", { value: 130, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" }],
+      ["8462-4", { value: 60, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" }],
+    ],
+  );
+  assert.equal(panel.encounter, undefined, "no encounter is inferred");
+  assert.equal(byId("dia-1"), undefined, "the diastolic reading is inside the panel, not beside it");
+  const lone = byId("sys-lone")!;
+  assert.deepEqual([lone.category[0].coding[0].code, lone.code.coding[0].code, lone.valueQuantity.value, lone.component], ["exam", "8480-6", 150, undefined]);
+  assert.equal(all.filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9")).length, 1);
 });
 
 test("import: a Medication Order is an ORDER, never an active medication", () => {
@@ -1367,4 +1379,430 @@ test("round trip: a site with several codings keeps every mapped one, as transla
   assert.deepEqual(procedure!.bodySite, [
     { coding: [{ system: "http://snomed.info/sct", code: "361715005" }, { system: "http://snomed.info/sct", code: "80248007" }] },
   ]);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Blood-pressure pairing (LOCKED §4A.8): two Physical Exam readings become one US Core panel only when
+// every condition holds. Each test below breaks exactly one condition and expects two readings back.
+// ---------------------------------------------------------------------------------------------------
+
+const exam = (o: {
+  id: string;
+  code: string;
+  time?: string;
+  value?: string;
+  extra?: string;
+  negated?: boolean;
+}) => `<entry><observation classCode="OBS" moodCode="EVN"${o.negated ? ' negationInd="true"' : ""}>
+      <templateId root="2.16.840.1.113883.10.20.22.4.13" extension="2014-06-09"/>
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="${o.id}"/>
+      <code code="${o.code}" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      ${o.time ?? "<effectiveTime value='20250219171000'/>"}
+      ${o.value ?? `<value xsi:type="PQ" value="${o.code === "8480-6" ? 130 : 80}" unit="mm[Hg]"/>`}
+      ${o.extra ?? ""}
+    </observation></entry>`;
+
+const paired = (...entries: string[]) => {
+  const imported = importQrda1Document(sitedDocument(entries.join("\n")));
+  const observations = imported.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation");
+  const panels = observations.filter((r) => JSON.stringify(r.code).includes("85354-9"));
+  return { panels, readings: observations.length - panels.length, unpaired: imported.unpairedBloodPressureReadings };
+};
+
+const sys = (extra: Partial<Parameters<typeof exam>[0]> = {}) => exam({ id: "s", code: "8480-6", ...extra });
+const dia = (extra: Partial<Parameters<typeof exam>[0]> = {}) => exam({ id: "d", code: "8462-4", ...extra });
+
+test("§4A.8 baseline: one systolic and one diastolic at one instant with a time of day pair into one panel", () => {
+  const { panels, readings, unpaired } = paired(sys(), dia());
+  assert.deepEqual([panels.length, readings, unpaired], [1, 0, 0]);
+  assert.equal(panels[0]!.effectiveDateTime, "2025-02-19T17:10:00Z");
+});
+
+test("§4A.8: a date with no time of day is never paired", () => {
+  const day = "<effectiveTime value='20250219'/>";
+  assert.deepEqual(Object.values(paired(sys({ time: day }), dia({ time: day }))).map((v) => (Array.isArray(v) ? v.length : v)), [0, 2, 2]);
+});
+
+test("§4A.8: readings at different times are never paired", () => {
+  const { panels, unpaired } = paired(sys(), dia({ time: "<effectiveTime value='20250219171100'/>" }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+});
+
+test("§4A.8: an identical interval pairs, a different one does not", () => {
+  const span = "<effectiveTime><low value='20250219171000'/><high value='20250219171500'/></effectiveTime>";
+  const same = paired(sys({ time: span }), dia({ time: span }));
+  assert.equal(same.panels.length, 1);
+  assert.deepEqual(same.panels[0]!.effectivePeriod, { start: "2025-02-19T17:10:00Z", end: "2025-02-19T17:15:00Z" });
+  const other = "<effectiveTime><low value='20250219171000'/><high value='20250219171600'/></effectiveTime>";
+  assert.equal(paired(sys({ time: span }), dia({ time: other })).panels.length, 0);
+});
+
+test("§4A.8: two systolics at the time make it ambiguous, so nothing pairs", () => {
+  const { panels, unpaired } = paired(sys(), exam({ id: "s2", code: "8480-6" }), dia());
+  assert.deepEqual([panels.length, unpaired], [0, 3]);
+});
+
+test("§4A.8: a null-flavored, unitless or other-unit value is never paired", () => {
+  for (const value of [
+    `<value xsi:type="PQ" nullFlavor="UNK"/>`,
+    `<value xsi:type="INT" value="80"/>`,
+    `<value xsi:type="PQ" value="10.7" unit="kPa"/>`,
+  ]) {
+    const { panels, unpaired } = paired(sys(), dia({ value }));
+    assert.deepEqual([panels.length, unpaired], [0, 2], value);
+  }
+});
+
+test("§4A.8: a negated reading is not imported, so its partner stays a lone reading", () => {
+  const { panels, readings, unpaired } = paired(sys({ negated: true }), dia());
+  assert.deepEqual([panels.length, readings, unpaired], [0, 1, 1]);
+});
+
+test("§4A.8: a conflicting stated method keeps the readings apart; the same method on both pairs", () => {
+  const method = (code: string) => `<methodCode code="${code}" codeSystem="2.16.840.1.113883.6.96"/>`;
+  assert.equal(paired(sys({ extra: method("37931006") }), dia({ extra: method("17146006") })).panels.length, 0);
+  assert.equal(paired(sys({ extra: method("37931006") }), dia()).panels.length, 0, "stated on one only is not the same");
+  assert.equal(paired(sys({ extra: method("37931006") }), dia({ extra: method("37931006") })).panels.length, 1);
+});
+
+test("§4A.8: a conflicting stated performer keeps the readings apart", () => {
+  const by = (ext: string) => `<performer><assignedEntity><id root="2.16.840.1.113883.4.6" extension="${ext}"/></assignedEntity></performer>`;
+  assert.equal(paired(sys({ extra: by("111") }), dia({ extra: by("222") })).panels.length, 0);
+  assert.equal(paired(sys({ extra: by("111") }), dia({ extra: by("111") })).panels.length, 1);
+});
+
+test("§4A.8: a panel round-trips through export and import as one panel, never as a lab test", () => {
+  const bundle = {
+    ...sourceBundle,
+    entry: [
+      sourceBundle.entry[0]!,
+      {
+        resource: {
+          resourceType: "Observation", id: "bp-1", status: "final",
+          category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs" }] }],
+          code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+          effectiveDateTime: "2025-06-01T10:00:00Z",
+          component: [
+            { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] }, valueQuantity: { value: 128, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } },
+            { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 78, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } },
+          ],
+        },
+      },
+    ],
+  };
+  const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), bundle);
+  assert.ok(!xml.includes("85354-9"), "QDM states a blood pressure as its two readings, never as a panel code");
+  assert.equal((xml.match(/2\.16\.840\.1\.113883\.10\.20\.24\.3\.59/g) ?? []).length, 2, "two Physical Exam, Performed entries");
+  assert.ok(!xml.includes("2.16.840.1.113883.10.20.24.3.38"), "not a Laboratory Test, Performed");
+  const back = importQrda1Document(xml);
+  assert.equal(back.unpairedBloodPressureReadings, 0);
+  const panels = back.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9"));
+  assert.equal(panels.length, 1);
+  assert.deepEqual(panels[0]!.component.map((c: { valueQuantity: { value: number } }) => c.valueQuantity.value), [128, 78]);
+});
+
+test("§4A.8: an instant and an interval with the same low and an unknown high are not the same time (Codex, #787)", () => {
+  // Both become one FHIR effectiveDateTime on import, so the time must be compared as the document wrote it.
+  const open = "<effectiveTime><low value='20250219171000'/><high nullFlavor='UNK'/></effectiveTime>";
+  const { panels, unpaired } = paired(sys(), dia({ time: open }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+  assert.equal(paired(sys({ time: open }), dia({ time: open })).panels.length, 1, "the same open interval on both pairs");
+});
+
+test("§4A.8: a method in a code system the importer does not map is still a stated method (Codex, #787)", () => {
+  const unknown = (code: string) => `<methodCode code="${code}" codeSystem="1.2.3.4.5"/>`;
+  assert.equal(paired(sys({ extra: unknown("A") }), dia()).panels.length, 0, "stated on one, absent on the other");
+  assert.equal(paired(sys({ extra: unknown("A") }), dia({ extra: unknown("B") })).panels.length, 0, "two different methods");
+  assert.equal(paired(sys({ extra: unknown("A") }), dia({ extra: unknown("A") })).panels.length, 1, "the same method on both");
+});
+
+test("an empty or blank PQ value imports as no result, never as zero; so it never pairs (Codex, #787)", () => {
+  for (const blank of ["", " "]) {
+    const value = `<value xsi:type="PQ" value="${blank}" unit="mm[Hg]"/>`;
+    const { panels, unpaired } = paired(sys({ value }), dia({ value }));
+    assert.deepEqual([panels.length, unpaired], [0, 2], JSON.stringify(blank));
+    const [reading] = importedOfType(sitedDocument(sys({ value })), "Observation");
+    assert.equal(reading!.valueQuantity, undefined, "no number was stated, so none is imported");
+  }
+});
+
+test("§4A.8: readings sharing an unparseable timestamp share no time (Codex, #787)", () => {
+  const bad = "<effectiveTime value='20251301120000'/>";
+  const { panels, unpaired } = paired(sys({ time: bad }), dia({ time: bad }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+  const badHigh = "<effectiveTime><low value='20250219171000'/><high value='20251301120000'/></effectiveTime>";
+  assert.equal(paired(sys({ time: badHigh }), dia({ time: badHigh })).panels.length, 0);
+});
+
+test("§4A.8: performers are compared by everything stated, not only a null-flavored id (Codex, #787)", () => {
+  const by = (name: string) =>
+    `<performer><assignedEntity><id nullFlavor="UNK"/><assignedPerson><name><given>${name}</given></name></assignedPerson></assignedEntity></performer>`;
+  assert.equal(paired(sys({ extra: by("Ana") }), dia({ extra: by("Ben") })).panels.length, 0);
+  assert.equal(paired(sys({ extra: by("Ana") }), dia({ extra: by("Ana") })).panels.length, 1);
+});
+
+test("an impossible calendar date is no date: it is not rolled over to the next month (Codex, #787)", () => {
+  // `new Date` turns 30 February into 2 March. Neither the reading's time nor a pair may come from it.
+  const feb30 = "<effectiveTime value='20250230120000'/>";
+  const { panels, unpaired } = paired(sys({ time: feb30 }), dia({ time: feb30 }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+  const [reading] = importedOfType(sitedDocument(sys({ time: feb30 })), "Observation");
+  assert.equal(reading!.effectiveDateTime, undefined, "no date the document did not state");
+  const [real] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='20250228120000-0500'/>" })), "Observation");
+  assert.equal(real!.effectiveDateTime, "2025-02-28T17:00:00Z", "a real date with an offset still parses");
+});
+
+test("negationInd=\"1\" is a negation, exactly as \"true\" is (Codex, #787)", () => {
+  const negated = (o: Parameters<typeof exam>[0]) => exam(o).replace('moodCode="EVN">', 'moodCode="EVN" negationInd="1">');
+  const { panels, readings } = paired(negated({ id: "s", code: "8480-6" }), negated({ id: "d", code: "8462-4" }), sys({ id: "keep" }));
+  assert.deepEqual([panels.length, readings], [0, 1], "only the positive reading is imported");
+});
+
+test("§4A.8: an hour without minutes is not a time two readings can share, and an hour of 99 is no timestamp (Codex, #787)", () => {
+  for (const value of ["2025010112", "2025010199"]) {
+    const time = `<effectiveTime value='${value}'/>`;
+    assert.equal(paired(sys({ time }), dia({ time })).panels.length, 0, value);
+  }
+  const [reading] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='2025010199'/>" })), "Observation");
+  assert.equal(reading!.effectiveDateTime, undefined, "an impossible hour is not quietly dropped to a date");
+});
+
+const panelOf = (status: string, systolicCodings: Array<{ system: string; code: string }>) => ({
+  ...sourceBundle,
+  entry: [
+    sourceBundle.entry[0]!,
+    {
+      resource: {
+        resourceType: "Observation", id: "bp-x", status,
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs" }] }],
+        code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+        effectiveDateTime: "2025-06-01T10:00:00Z",
+        component: [
+          { code: { coding: systolicCodings }, valueQuantity: { value: 128, unit: "mm[Hg]", code: "mm[Hg]" } },
+          { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 78, unit: "mm[Hg]", code: "mm[Hg]" } },
+        ],
+      },
+    },
+  ],
+});
+
+test("export: a reading's LOINC code leads whatever order its codings came in, so the round trip still pairs (Codex, #787)", () => {
+  const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), panelOf("final", [
+    { system: "http://snomed.info/sct", code: "271649006" },
+    { system: "http://loinc.org", code: "8480-6" },
+  ]));
+  assert.match(xml, /<code code="8480-6"[^>]*>\s*<translation code="271649006"/);
+  const back = importQrda1Document(xml);
+  assert.equal(back.bundle.entry.filter((e) => JSON.stringify((e.resource as { code?: unknown }).code ?? {}).includes("85354-9")).length, 1);
+});
+
+test("export: a blood pressure that is not final is not written as completed readings, and says why (Codex, #787)", () => {
+  for (const status of ["preliminary", "registered", "unknown"]) {
+    const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), panelOf(status, [{ system: "http://loinc.org", code: "8480-6" }]));
+    assert.ok(!xml.includes("2.16.840.1.113883.10.20.24.3.59"), `${status}: no Physical Exam, Performed`);
+    assert.ok(!xml.includes("85354-9"), `${status}: and not a lab test either`);
+  }
+  const amended = buildQrda1Document(run, "cms125", outcome(officialEvidence), panelOf("amended", [{ system: "http://loinc.org", code: "8480-6" }]));
+  assert.equal((amended.match(/2\.16\.840\.1\.113883\.10\.20\.24\.3\.59/g) ?? []).length, 2, "amended is final");
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Adversarial review of #787 (import side): each input below once made the importer state something the
+// document did not. One test per finding, each against the real importer.
+// ---------------------------------------------------------------------------------------------------
+
+test("review #787: a reading's value is its own, never a Result nested inside another observation it carries", () => {
+  // A systolic of 150 carrying, inside it, a diastolic whose value sits in its own nested Result (80).
+  const inner = `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="d-in"/>
+        <code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
+        <effectiveTime value='20250219171000'/>
+        <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+          <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
+          <code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>
+          <value xsi:type="PQ" value="80" unit="mm[Hg]"/>
+        </observation></entryRelationship>
+      </observation></entryRelationship>`;
+  const imported = importQrda1Document(sitedDocument(sys({ value: `<value xsi:type="PQ" value="150" unit="mm[Hg]"/>`, extra: inner })));
+  const all = imported.bundle.entry.map((e) => e.resource as Record<string, any>);
+  const systolic = all.find((r) => r.id === "s" || JSON.stringify(r.code ?? {}).includes("85354-9"))!;
+  const value = systolic.component
+    ? systolic.component.find((c: { code: { coding: Array<{ code: string }> } }) => c.code.coding[0]!.code === "8480-6").valueQuantity.value
+    : systolic.valueQuantity.value;
+  assert.equal(value, 150, "the systolic keeps the 150 it states");
+});
+
+test("review #787: an aborted or nullified reading, or an intent, never pairs", () => {
+  for (const status of ["nullified", "aborted"]) {
+    const nullified = (o: Parameters<typeof exam>[0]) => exam(o).replace('<statusCode code="completed"/>', `<statusCode code="${status}"/>`);
+    assert.equal(paired(nullified({ id: "s", code: "8480-6" }), nullified({ id: "d", code: "8462-4" })).panels.length, 0, status);
+  }
+  const intent = (o: Parameters<typeof exam>[0]) => exam(o).replace('moodCode="EVN"', 'moodCode="INT"');
+  assert.equal(paired(intent({ id: "s", code: "8480-6" }), intent({ id: "d", code: "8462-4" })).panels.length, 0, "an intent is not a reading");
+});
+
+test("review #787: a value carrying a nullFlavor is no value, whatever number sits beside it", () => {
+  const flavored = `<value xsi:type="PQ" nullFlavor="OTH" value="130" unit="mm[Hg]"/>`;
+  assert.equal(paired(sys({ value: flavored }), dia()).panels.length, 0);
+  const [reading] = importedOfType(sitedDocument(sys({ value: flavored })), "Observation");
+  assert.equal(reading!.valueQuantity, undefined);
+});
+
+test("review #787: every stated method and site counts, qualifiers and originalText included", () => {
+  const method = (code: string) => `<methodCode code="${code}" codeSystem="2.16.840.1.113883.6.96"/>`;
+  assert.equal(paired(sys({ extra: method("A") + method("B") }), dia({ extra: method("A") })).panels.length, 0, "a second method");
+  const site = (side: string) =>
+    `<targetSiteCode code="368209003" codeSystem="2.16.840.1.113883.6.96"><qualifier><value code="${side}" codeSystem="2.16.840.1.113883.6.96"/></qualifier></targetSiteCode>`;
+  assert.equal(paired(sys({ extra: site("7771000") }), dia({ extra: site("24028007") })).panels.length, 0, "left vs right arm");
+  assert.equal(paired(sys({ extra: site("7771000") }), dia({ extra: site("7771000") })).panels.length, 1, "the same site pairs");
+  const text = (t: string) => `<methodCode nullFlavor="OTH"><originalText>${t}</originalText></methodCode>`;
+  assert.equal(paired(sys({ extra: text("auscultation") }), dia({ extra: text("oscillometric cuff") })).panels.length, 0, "originalText");
+});
+
+test("review #787: the time key is everything the effectiveTime states, a width included", () => {
+  const span = (width: string) => `<effectiveTime><low value='20250219171000'/><width value='${width}' unit='min'/></effectiveTime>`;
+  assert.equal(paired(sys({ time: span("5") }), dia({ time: span("60") })).panels.length, 0);
+});
+
+test("review #787: a reading stating both codes is neither half, and keeps the others at its time apart", () => {
+  const both = exam({ id: "a", code: "8462-4" }).replace(
+    '<code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>',
+    '<code code="8462-4" codeSystem="2.16.840.1.113883.6.1"><translation code="8480-6" codeSystem="2.16.840.1.113883.6.1"/></code>',
+  );
+  const { panels, unpaired } = paired(both, dia({ id: "d2" }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+});
+
+test("review #787: a negation in any case, or on an act around the readings, is a negation", () => {
+  for (const spelling of ["TRUE", "True", " true "]) {
+    const neg = (o: Parameters<typeof exam>[0]) => exam(o).replace('moodCode="EVN">', `moodCode="EVN" negationInd="${spelling}">`);
+    // One positive reading at another time, so the document still has something to import.
+    const keep = sys({ id: "keep", time: "<effectiveTime value='20250101090000'/>" });
+    const { panels, readings } = paired(neg({ id: "s", code: "8480-6" }), neg({ id: "d", code: "8462-4" }), keep);
+    assert.deepEqual([panels.length, readings], [0, 1], JSON.stringify(spelling));
+  }
+  const wrapped = `<entry><act classCode="ACT" moodCode="EVN" negationInd="true">
+      <code code="CONC" codeSystem="2.16.840.1.113883.5.6"/>
+      <entryRelationship typeCode="COMP">${sys().replace(/^<entry>|<\/entry>$/g, "")}</entryRelationship>
+      <entryRelationship typeCode="COMP">${dia().replace(/^<entry>|<\/entry>$/g, "")}</entryRelationship>
+    </act></entry>`;
+  const inside = importQrda1Document(sitedDocument(wrapped + sys({ id: "keep", time: "<effectiveTime value='20250101090000'/>" })));
+  const observations = inside.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation");
+  assert.deepEqual(observations.map((r) => r.id), ["keep"], "nothing inside the negated act is imported");
+});
+
+test("review #787: a malformed offset or trailing text makes no timestamp rather than another instant", () => {
+  for (const value of ["20250219171000+05:00", "20250219171000-05", "20250219171000-05000", "20250219171000+0500junk", "00000101120000"]) {
+    const [reading] = importedOfType(sitedDocument(sys({ time: `<effectiveTime value='${value}'/>` })), "Observation");
+    assert.equal(reading!.effectiveDateTime, undefined, value);
+  }
+  const [ok] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='20250219171000.123-0500'/>" })), "Observation");
+  assert.equal(ok!.effectiveDateTime, "2025-02-19T22:10:00Z", "a fraction and a well-formed offset still parse");
+});
+
+test("review #787: a panel names a source id once, even when both readings share it", () => {
+  const { panels } = paired(sys({ id: "same" }), dia({ id: "same" }));
+  assert.equal(panels.length, 1);
+  assert.deepEqual(panels[0]!.identifier, [{ system: "urn:oid:1.3.6.1.4.1.115", value: "same" }]);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// Adversarial review of #787 (export side): a blood pressure is written as two readings only when nothing
+// about it is ambiguous, and otherwise not at all, with the reason.
+// ---------------------------------------------------------------------------------------------------
+
+type PanelOverrides = Record<string, unknown> & { components?: unknown[] };
+const bpPanel = (o: PanelOverrides = {}) => {
+  const { components, ...rest } = o;
+  return {
+    resourceType: "Observation", id: "bp-r", status: "final",
+    category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs" }] }],
+    code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+    effectiveDateTime: "2025-06-01T10:00:00Z",
+    component: components ?? [
+      { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] }, valueQuantity: { value: 150, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } },
+      { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 95, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } },
+    ],
+    ...rest,
+  };
+};
+const exported = (panel: unknown) => {
+  const translation = translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: panel }] });
+  const exams = translation.entries.filter((e) => e.includes("2.16.840.1.113883.10.20.24.3.59")).length;
+  return { exams, lab: translation.entries.some((e) => e.includes("2.16.840.1.113883.10.20.24.3.38")), why: translation.untranslatable.join(" | ") };
+};
+const sysComponent = (vq: Record<string, unknown>) => ({ code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] }, valueQuantity: vq });
+const diaComponent = { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 95, unit: "mm[Hg]", code: "mm[Hg]" } };
+
+test("review #787: the baseline panel is written as exactly two readings", () => {
+  assert.deepEqual(exported(bpPanel()), { exams: 2, lab: false, why: "" });
+});
+
+test("review #787: a panel with no time of day is not written: midnight would be a time it never stated", () => {
+  for (const when of ["2025", "2025-06", "2025-06-01"]) {
+    const r = exported(bpPanel({ effectiveDateTime: when }));
+    assert.equal(r.exams, 0, when);
+    assert.match(r.why, /no time of day/, when);
+  }
+});
+
+test("review #787: `issued` is when it was recorded, never the reading's time", () => {
+  const r = exported(bpPanel({ effectiveDateTime: undefined, issued: "2025-06-03T15:30:00Z" }));
+  assert.equal(r.exams, 0);
+  assert.match(r.why, /no time of day/);
+});
+
+test("review #787: a comparator is not a value, and a unit that is not UCUM mm[Hg] is not written", () => {
+  const lessThan = exported(bpPanel({ components: [sysComponent({ value: 130, comparator: "<", unit: "mm[Hg]", code: "mm[Hg]" }), diaComponent] }));
+  assert.deepEqual([lessThan.exams, /comparator/.test(lessThan.why)], [0, true]);
+  const mmHg = exported(bpPanel({ components: [sysComponent({ value: 130, unit: "mmHg" }), diaComponent] }));
+  assert.deepEqual([mmHg.exams, /mm\[Hg\]/.test(mmHg.why)], [0, true]);
+});
+
+test("review #787: all or nothing: half a panel, two systolics, or no components writes nothing and says why", () => {
+  const half = exported(bpPanel({ components: [sysComponent({ value: 130, unit: "mm[Hg]", code: "mm[Hg]" })] }));
+  assert.deepEqual([half.exams, /exactly one systolic and one diastolic/.test(half.why)], [0, true]);
+  const twice = exported(bpPanel({ components: [sysComponent({ value: 130, unit: "mm[Hg]", code: "mm[Hg]" }), sysComponent({ value: 120, unit: "mm[Hg]", code: "mm[Hg]" }), diaComponent] }));
+  assert.equal(twice.exams, 0);
+  const none = exported(bpPanel({ status: "preliminary", components: [] }));
+  assert.deepEqual([none.exams, none.lab, /not final/.test(none.why)], [0, false, true], "and never as a lab test");
+});
+
+test("review #787 (import): a third reading at the same instant, spelled with another offset, keeps the pair ambiguous", () => {
+  const other = exam({ id: "s2", code: "8480-6", time: "<effectiveTime value='20250219121000-0500'/>", value: `<value xsi:type="PQ" value="150" unit="mm[Hg]"/>` });
+  const { panels, unpaired } = paired(sys({ time: "<effectiveTime value='20250219171000+0000'/>" }), dia({ time: "<effectiveTime value='20250219171000+0000'/>" }), other);
+  assert.deepEqual([panels.length, unpaired], [0, 3]);
+});
+
+test("review #787: a reading's time is the panel's effective[x] alone, never another time field it carries", () => {
+  // A stray `performedPeriod` (no Observation field, but third-party data has anything) must not move it.
+  const translation = translateQdm({
+    resourceType: "Bundle",
+    entry: [sourceBundle.entry[0]!, { resource: bpPanel({ performedPeriod: { start: "2025-01-01T00:00:00Z" }, issued: "2025-01-02T00:00:00Z" }) }],
+  });
+  const times = translation.entries.filter((e) => e.includes("2.16.840.1.113883.10.20.24.3.59")).map((e) => /<effectiveTime value="(\d+)/.exec(e)?.[1]);
+  assert.deepEqual(times, ["20250601100000", "20250601100000"]);
+});
+
+test("§4A.8: the same instant written in two time zones is one time, and pairs (Codex, #787)", () => {
+  const { panels, unpaired } = paired(
+    sys({ time: "<effectiveTime value='20250219171000+0000'/>" }),
+    dia({ time: "<effectiveTime value='20250219121000-0500'/>" }),
+  );
+  assert.deepEqual([panels.length, unpaired], [1, 0]);
+});
+
+test("§4A.8: two blood pressures a fraction of a second apart are two times, each its own panel (Codex, #787)", () => {
+  const at = (t: string) => `<effectiveTime value='${t}'/>`;
+  const { panels, unpaired } = paired(
+    exam({ id: "s1", code: "8480-6", time: at("20250219171000.100") }),
+    exam({ id: "d1", code: "8462-4", time: at("20250219171000.1") }),
+    exam({ id: "s2", code: "8480-6", time: at("20250219171000.900") }),
+    exam({ id: "d2", code: "8462-4", time: at("20250219171000.9") }),
+  );
+  assert.deepEqual([panels.length, unpaired], [2, 0]);
 });
