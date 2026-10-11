@@ -484,25 +484,44 @@ function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | unde
 }
 
 /**
- * The reading's time, as the key two halves must share: an instant or a low/high pair, and only when it
- * carries a time of day. A date alone says nothing about whether two readings were taken together.
+ * The reading's time AS THE DOCUMENT WROTE IT, the key two halves must share: the same instant, or the
+ * same low and high, and only when it carries a time of day. Read off the CDA `<effectiveTime>`, not the
+ * FHIR value built from it, because that conversion is lossy: an instant and an interval whose high is
+ * `nullFlavor="UNK"` both become one `effectiveDateTime`, and are not the same statement (Codex, #787).
+ * A date alone says nothing about whether two readings were taken together.
  */
-function timeKeyOf(o: ObservationShape): string | undefined {
-  if (o.effectiveDateTime) return o.effectiveDateTime.includes("T") ? `at ${o.effectiveDateTime}` : undefined;
-  const start = o.effectivePeriod?.start;
-  return start?.includes("T") ? `from ${start} to ${o.effectivePeriod?.end ?? ""}` : undefined;
+function timeKeyOf(node: CdaNode): string | undefined {
+  const time = child(node, "effectiveTime");
+  if (!time) return undefined;
+  const raw = (n: CdaNode | undefined) => (n ? { value: n.attrs.value ?? null, nullFlavor: n.attrs.nullFlavor ?? null } : null);
+  const low = child(time, "low");
+  // A time of day is at least the hour: YYYYMMDDHH.
+  const start = time.attrs.value ?? low?.attrs.value;
+  if (!start || !/^\d{10}/.test(start)) return undefined;
+  return JSON.stringify({ at: raw(time), low: raw(low), high: raw(child(time, "high")) });
 }
 
-/** What a reading states about who, how, where and with what. Two halves of one panel state the same. */
+/** A coded element exactly as stated, mapped or not, so an unrecognised code never reads as an absent one. */
+function statedCodeOf(node: CdaNode | undefined): unknown {
+  if (!node) return null;
+  const attrs = (n: CdaNode) => [n.attrs.code ?? null, n.attrs.codeSystem ?? null, n.attrs.nullFlavor ?? null];
+  return [attrs(node), ...childrenNamed(node, "translation").map(attrs)];
+}
+
+/**
+ * What a reading states about who, how, where and with what. Two halves of one panel state the same.
+ * Compared as written (`statedCodeOf`), never through the import's code-system map: a method in a system
+ * the map does not carry is still a stated method, and two different ones are still different (Codex, #787).
+ */
 function statedContextOf(node: CdaNode): string {
-  const ids = (n: CdaNode) => descendants(n, "id").map((id) => `${id.attrs.root ?? ""}|${id.attrs.extension ?? ""}`);
+  const ids = (n: CdaNode) => descendants(n, "id").map((id) => `${id.attrs.root ?? ""}|${id.attrs.extension ?? ""}|${id.attrs.nullFlavor ?? ""}`);
   return JSON.stringify({
     performers: childrenNamed(node, "performer").map(ids),
-    method: concept(child(node, "methodCode")) ?? null,
-    sites: childrenNamed(node, "targetSiteCode").map((site) => concept(site) ?? null),
+    method: statedCodeOf(child(node, "methodCode")),
+    sites: childrenNamed(node, "targetSiteCode").map(statedCodeOf),
     devices: childrenNamed(node, "participant")
       .filter((p) => p.attrs.typeCode === "DEV")
-      .map((p) => concept(child(descendants(p, "playingDevice")[0], "code")) ?? ids(p)),
+      .map((p) => [statedCodeOf(child(descendants(p, "playingDevice")[0], "code")), ids(p)]),
   });
 }
 
@@ -526,7 +545,7 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, readings: Blo
   const byTime = new Map<string, BloodPressureReading[]>();
   let unpaired = 0;
   for (const reading of readings) {
-    const key = timeKeyOf(entries[reading.index]!.resource as ObservationShape);
+    const key = timeKeyOf(reading.node);
     if (key === undefined) unpaired++;
     else byTime.set(key, [...(byTime.get(key) ?? []), reading]);
   }

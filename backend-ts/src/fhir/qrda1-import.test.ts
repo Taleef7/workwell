@@ -1501,3 +1501,18 @@ test("§4A.8: a panel round-trips through export and import as one panel, never 
   assert.equal(panels.length, 1);
   assert.deepEqual(panels[0]!.component.map((c: { valueQuantity: { value: number } }) => c.valueQuantity.value), [128, 78]);
 });
+
+test("§4A.8: an instant and an interval with the same low and an unknown high are not the same time (Codex, #787)", () => {
+  // Both become one FHIR effectiveDateTime on import, so the time must be compared as the document wrote it.
+  const open = "<effectiveTime><low value='20250219171000'/><high nullFlavor='UNK'/></effectiveTime>";
+  const { panels, unpaired } = paired(sys(), dia({ time: open }));
+  assert.deepEqual([panels.length, unpaired], [0, 2]);
+  assert.equal(paired(sys({ time: open }), dia({ time: open })).panels.length, 1, "the same open interval on both pairs");
+});
+
+test("§4A.8: a method in a code system the importer does not map is still a stated method (Codex, #787)", () => {
+  const unknown = (code: string) => `<methodCode code="${code}" codeSystem="1.2.3.4.5"/>`;
+  assert.equal(paired(sys({ extra: unknown("A") }), dia()).panels.length, 0, "stated on one, absent on the other");
+  assert.equal(paired(sys({ extra: unknown("A") }), dia({ extra: unknown("B") })).panels.length, 0, "two different methods");
+  assert.equal(paired(sys({ extra: unknown("A") }), dia({ extra: unknown("A") })).panels.length, 1, "the same method on both");
+});
