@@ -22,8 +22,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   at 120/70 then 128/78 scored OVERDUE. Now only readings in LOINC's own system are stamped (US Core fixes
   the same system). The corpus codes them so, as do the trial instance's real readings (2026-07-23) and the
   dev-database shim, so no live result moves.
-- Proposed to the owner: a §4A.8 amendment stating the conditions the code enforces, and follow-ups for
-  defects the reviews found outside #787 (the largest: every imported time is converted to UTC).
+- §4A.8 now states every condition the code enforces (owner decision today): a systolic is 8480-6 and a
+  diastolic 8462-4, and a stated value is not judged (0/0 pairs). The defects the reviews found outside
+  #787 are #788-#795; the largest is #788 (every other imported time is converted to UTC), and #789 (one
+  non-UCUM blood-pressure unit fails cms165 for its whole batch) matters once cms165 runs on WebChart.
 
 ## 2026-10-10
 

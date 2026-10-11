@@ -55,19 +55,28 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
 7. **Which staff member works each provider's panel is kept in WorkWell**, not taken from WebChart
    departments; MIE data may only seed it through a reviewed import (owner decision, 2026-09-12).
 8. **A QRDA I blood pressure becomes one US Core panel only when the document states exactly one**
-   (owner decision, 2026-10-10). Pairing is a mapping, not an invention: two Physical Exam, Performed
-   readings become one Observation (code 85354-9, category `vital-signs`, `status: final`, the two stated
-   readings as its components; preparation then stamps `us-core-blood-pressure` from those codes) only when
-   ALL of these hold:
-   - both are positive (not negated) entries in one document;
-   - one states 8480-6 and the other 8462-4, each kept verbatim as its component's code;
-   - they share an identical time that includes a time of day: the same instant, or the same low and high
-     (never a date alone);
-   - they are the only systolic and the only diastolic at that time;
-   - both values are numeric `PQ` in mm[Hg] (a `nullFlavor`, a unitless value or another unit is never paired);
-   - they state the same performer, method, site and device, or none.
+   (owner decision, 2026-10-10; conditions completed 2026-10-11). Pairing is a mapping, not an invention:
+   two Physical Exam, Performed readings become one Observation (code 85354-9, category `vital-signs`,
+   `status: final`, the two stated readings as its components; preparation then stamps
+   `us-core-blood-pressure` from those codes) only when ALL of these hold:
+   - both are positive (not negated) entries in one document, each its entry's own act (not inside an
+     organizer or another act) and each an event that happened (`EVN`, `completed`);
+   - one states 8480-6 and the other 8462-4, each kept verbatim as its component's code (a reading stating
+     both is neither). A systolic is 8480-6 and a diastolic 8462-4, the codes CMS165 reads: a reading under
+     another code (sitting, standing, invasive, SNOMED) neither pairs nor blocks;
+   - they share an identical time that includes a time of day: the same instant, or the same closed low and
+     high (never a date alone or an open interval), stated at the same precision (a tenth of a second is not
+     a thousandth) and both with or both without an offset;
+   - no other systolic or diastolic, of any template, states a time that could fall within theirs, judged
+     across time zones (a date with no zone could be any zone's day);
+   - each states exactly one value of its own, a numeric `PQ` in mm[Hg] (a `nullFlavor`, a unitless value,
+     another unit, a second value, or a Result coded as the other half is never paired). A stated value is
+     not judged: 0/0 pairs;
+   - they state the same performer, participants (QDM Performer and devices included), method and site, or
+     none.
 
-   The panel replaces both readings and keeps both source ids. Anything short of that stays as separate
+   The panel replaces both readings and keeps both source ids, their time in its stated offset with its
+   fraction as written, and their shared site and method. Anything short of that stays as separate
    readings, which CMS165 cannot see, and is counted in the import diagnostics. No half-panel is emitted
    and no `Observation.encounter` is inferred. This does not lift the PHI gate: cms165 over real data still
    needs §4A.2's and §4A.5's conditions (#591, #572).
