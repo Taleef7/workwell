@@ -39,7 +39,7 @@
  * `AgeInYearsAt(...)`, so picking one silently can move a person between age bands. Review of the C2
  * harness reproduced exactly that — a MATCH printed while a birthdate the sender supplied was discarded.
  */
-import { importQrda1Document, type Qrda1Import } from "./qrda1-import.ts";
+import { importQrda1Document, unpairedBloodPressureReadingsIn, type Qrda1Import } from "./qrda1-import.ts";
 import { child, childrenNamed, parseXml, type CdaNode } from "./cda-parse.ts";
 
 export interface ResolvedSubject {
@@ -52,8 +52,9 @@ export interface ResolvedSubject {
   /** Union of every source document's untranslated QDM templates. */
   untranslatedTemplates: string[];
   /**
-   * Blood-pressure readings the source documents left unpaired, summed. Pairing happens per document
-   * (LOCKED §4A.8), so a reading whose other half sits in another document stays unpaired.
+   * Blood-pressure readings left unpaired in the merged bundle, each counted once however many documents
+   * state it. Pairing happens per document (LOCKED §4A.8), so a reading whose other half sits in another
+   * document stays unpaired.
    */
   unpairedBloodPressureReadings: number;
   /** Union of the measure identities the source documents reference. */
@@ -299,7 +300,9 @@ function merge(
     subjectId: canonical.imported.patientId,
     bundle: { resourceType: "Bundle", type: "collection", entry },
     untranslatedTemplates: [...new Set(members.flatMap((m) => m.imported.untranslatedTemplates))],
-    unpairedBloodPressureReadings: members.reduce((n, m) => n + m.imported.unpairedBloodPressureReadings, 0),
+    // Counted on the merged bundle: a reading two of the person's documents both state is one reading
+    // (review, #787).
+    unpairedBloodPressureReadings: unpairedBloodPressureReadingsIn(clinical),
     // BOTH identity kinds, exactly as `/evaluate` checks them. Dropping `localMeasureId` left an
     // authored-measure export — which carries `urn:workwell:measure` and no published identifier — with
     // nothing to check against, so re-importing one under the WRONG authored measure passed silently on

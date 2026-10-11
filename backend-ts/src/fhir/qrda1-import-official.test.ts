@@ -278,3 +278,13 @@ test("official CMS165 does not see the same readings 59 seconds apart: nothing i
   assert.notEqual(moved, xml, "the fixture must move the diastolic reading");
   assert.equal(await cms165OutcomeOf(moved), "OVERDUE", "no blood pressure CMS165 can read is not controlled");
 });
+
+test("official CMS165 reads an imported blood pressure's day in the document's own offset (review, #787)", { skip: skipCms165 }, async () => {
+  const xml = buildQrda1Document(run, "cms165", cms165Outcome, hypertensiveBundle);
+  const at = (value: string) => xml.replace(/<effectiveTime value="20250601100000"\/>/g, `<effectiveTime value="${value}"/>`);
+  assert.equal((xml.match(/<effectiveTime value="20250601100000"\/>/g) ?? []).length, 2, "the fixture must restate both readings' time");
+  // The panel's only reading. In UTC the first is 1 January 2026 and the second 31 December 2025, so a panel
+  // converted to UTC scored each the wrong way round.
+  assert.equal(await cms165OutcomeOf(at("20251231200000-0500")), "COMPLIANT", "20:00 on 31 December in New York is a 2025 reading");
+  assert.equal(await cms165OutcomeOf(at("20260101030000+0500")), "OVERDUE", "03:00 on 1 January in Karachi is a 2026 reading");
+});

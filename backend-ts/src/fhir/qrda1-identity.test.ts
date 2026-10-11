@@ -431,3 +431,25 @@ test("a blood-pressure panel repeated in a person's two documents merges once, o
   assert.equal(panels.length, 1, "the same panel, asserted twice, is one panel");
   assert.equal(resolution.subjects[0]!.unpairedBloodPressureReadings, 0);
 });
+
+test("the batch counts an unpaired blood-pressure reading once, however many of the person's documents state it (review, #787)", () => {
+  const reading = (id: string, code: string, value: number) => `<entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="${MRN_ROOT}" extension="${id}"/>
+      <code code="${code}" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime value='20240331080500'/>
+      <value xsi:type="PQ" value="${value}" unit="mm[Hg]" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
+    </observation></entry>`;
+  const withReadings = (xml: string, readings: string[]) => xml.replace("  </section>", `    ${readings.join("\n    ")}\n  </section>`);
+  const person = (mrn: string, readings: string[]) => withReadings(doc({ mrn, mbi: "8UA6K41TH72" }), readings);
+  const lone = [reading("bp-s", "8480-6", 132)];
+  const twice = resolveQrda1Documents([person("mrn-a", lone), person("mrn-b", lone)]).subjects[0]!;
+  assert.equal(twice.unpairedBloodPressureReadings, 1, "one lone systolic, stated in two documents");
+  // Two systolics and a diastolic at one time: none pairs, in any of the three documents.
+  const ambiguous = [reading("bp-s", "8480-6", 132), reading("bp-s2", "8480-6", 150), reading("bp-d", "8462-4", 84)];
+  const thrice = resolveQrda1Documents([person("mrn-a", ambiguous), person("mrn-b", ambiguous), person("mrn-c", ambiguous)]).subjects[0]!;
+  assert.equal(thrice.unpairedBloodPressureReadings, 3);
+  const observations = thrice.bundle.entry.filter((e) => (e.resource as { resourceType?: string }).resourceType === "Observation");
+  assert.equal(observations.length, 3, "and the merged bundle holds those three readings once each");
+});

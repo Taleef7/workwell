@@ -184,13 +184,17 @@ const LOINC_DIASTOLIC = "8462-4";
 
 /** LOINC by any of the spellings real bundles use — the canonical URL, a trailing slash, the OID, or
  *  (as `normalize.ts` also allows) an absent system on a code that is unambiguously LOINC. */
-function isLoinc(system: unknown): boolean {
+export function isLoinc(system: unknown): boolean {
   if (typeof system !== "string") return system === undefined || system === null;
   return /loinc/i.test(system) || system === "urn:oid:2.16.840.1.113883.6.1";
 }
 
-/** The LOINC codes on one CodeableConcept — NOT flattened across a resource and its components. */
-function codesOf(concept: unknown): string[] {
+/**
+ * The LOINC codes on one CodeableConcept — NOT flattened across a resource and its components. Exported so
+ * the QRDA I exporter recognises a blood pressure exactly as this file does: a reading the engine counts is
+ * a reading the document carries (review, #787).
+ */
+export function loincCodesOf(concept: unknown): string[] {
   const coding = (concept as { coding?: Array<{ system?: unknown; code?: unknown }> } | undefined)?.coding;
   const out: string[] = [];
   for (const c of coding ?? []) if (isLoinc(c?.system) && typeof c?.code === "string") out.push(c.code);
@@ -225,10 +229,10 @@ function codesOf(concept: unknown): string[] {
  * so the third does not have to.
  */
 function isBloodPressure(resource: Record<string, unknown>): boolean {
-  if (!codesOf(resource.code).some((c) => LOINC_BP_PANEL.has(c))) return false;
+  if (!loincCodesOf(resource.code).some((c) => LOINC_BP_PANEL.has(c))) return false;
   const components = (resource.component as Array<{ code?: unknown; valueQuantity?: { value?: unknown } }> | undefined) ?? [];
   const measured = (loinc: string) =>
-    components.filter((c) => codesOf(c?.code).includes(loinc) && typeof c?.valueQuantity?.value === "number");
+    components.filter((c) => loincCodesOf(c?.code).includes(loinc) && typeof c?.valueQuantity?.value === "number");
   // EXACTLY one of each, each carrying a NUMERIC value. Not "at least one": cms165 reads the systolic
   // out with `singleton from`, which THROWS on two — a bilateral reading or a duplicated flowsheet row —
   // and a throw mid-run is the failure the per-measure profile work exists to prevent. And a component

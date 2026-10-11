@@ -38,6 +38,7 @@
  * FHIR/QI-Core column is what we execute; QDM is a translation at the reporting edge).
  */
 import { FHIR_RESOURCE_ID_ROOT, LOINC, esc, hl7TsOrNull } from "./qrda-common.ts";
+import { loincCodesOf } from "../wiring/qicore-preparation.ts";
 
 /** Code systems a QDM entry can carry. Keyed by FHIR system URL — the only mapping direction we need. */
 const CODE_SYSTEMS: Record<string, { oid: string; name: string }> = {
@@ -80,6 +81,13 @@ interface FhirResource {
   patient?: { reference?: string };
   effectiveDateTime?: string;
   effectivePeriod?: { start?: string; end?: string };
+  /** Observation's other two `effective[x]` types; only a blood pressure reads them (#787). */
+  effectiveInstant?: string;
+  effectiveTiming?: unknown;
+  /** Observation fields a blood-pressure reading writes (`method`) or names as not written (#787). */
+  method?: FhirCodeableConcept;
+  performer?: unknown;
+  encounter?: unknown;
   performedDateTime?: string;
   performedPeriod?: { start?: string; end?: string };
   period?: { start?: string; end?: string };
@@ -168,11 +176,14 @@ function effectiveTime(resource: FhirResource, indent: string, ts: (iso: unknown
 }
 
 /**
- * `hl7TsOrNull` for a blood-pressure reading: a stated instant, to its fraction of a second, or null.
+ * A FHIR dateTime as a blood-pressure reading's HL7 timestamp, or null when it is not a real one.
  * - The date and time must be real as written: `Date` rolls 30 February over to 2 March and hour 24 into
  *   the next day, a time the panel never stated (Codex, #787).
- * - A time with no zone (the corpus writes its readings so) is written as stated, a timestamp with no
- *   offset as HL7 allows; `Date` would read it in the exporting machine's own zone.
+ * - A time with a zone is written in UTC with no offset, as every entry in the document is (CMS_0121: a
+ *   document states offsets everywhere or nowhere), always with a four-digit year: a UTC year outside
+ *   0001-9999 has no HL7 form and is refused (review, #787).
+ * - A time with no zone (the corpus writes its readings so) is written as stated; `Date` would read it in
+ *   the exporting machine's own zone.
  * - The fraction is kept: two panels a fraction of a second apart written at the same whole second would
  *   come back as four readings at one instant, and neither would pair (Codex, #787). An offset is whole
  *   minutes, so the fraction survives the move to UTC.
@@ -182,12 +193,19 @@ function hl7TsKeepingFraction(iso: unknown): string | null {
   if (!m) return null;
   const stated = m.slice(1, 7).map((part) => part ?? "00");
   const [y, mo, d, h, mi, s] = stated.map(Number) as [number, number, number, number, number, number];
-  const parsed = new Date(Date.UTC(y, mo - 1, d, h, mi, s));
-  // `Date.UTC` maps years 0-99 to 1900-1999, so a two-digit year fails here too.
-  const real = [parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate(), parsed.getUTCHours(), parsed.getUTCMinutes(), parsed.getUTCSeconds()];
-  if (real.some((part, i) => part !== [y, mo, d, h, mi, s][i])) return null;
-  const whole = m[8] === undefined ? stated.join("") : hl7TsOrNull(iso);
-  if (whole === null) return null;
+  // `setUTCFullYear`, not `Date.UTC`, which reads the years 0-99 as 1900-1999.
+  const check = new Date(0);
+  check.setUTCFullYear(y, mo - 1, d);
+  check.setUTCHours(h, mi, s, 0);
+  const real = [check.getUTCFullYear(), check.getUTCMonth() + 1, check.getUTCDate(), check.getUTCHours(), check.getUTCMinutes(), check.getUTCSeconds()];
+  if (y < 1 || real.some((part, i) => part !== [y, mo, d, h, mi, s][i])) return null;
+  let whole = stated.join("");
+  if (m[8] !== undefined) {
+    const utc = new Date(iso as string);
+    if (Number.isNaN(utc.getTime()) || utc.getUTCFullYear() < 1 || utc.getUTCFullYear() > 9999) return null;
+    const p = (n: number, width = 2) => String(n).padStart(width, "0");
+    whole = `${p(utc.getUTCFullYear(), 4)}${p(utc.getUTCMonth() + 1)}${p(utc.getUTCDate())}${p(utc.getUTCHours())}${p(utc.getUTCMinutes())}${p(utc.getUTCSeconds())}`;
+  }
   const fraction = m[7]?.replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : whole;
 }
@@ -369,20 +387,26 @@ const READING_CODES = new Set(["8480-6", "8462-4"]);
 /** Statuses that mean the result is final; anything else is not a completed reading. */
 const FINAL_STATUSES = new Set(["final", "amended", "corrected"]);
 
+/**
+ * Recognised exactly as preparation recognises one (`loincCodesOf`: LOINC in any spelling real bundles use,
+ * or with no system), so a blood pressure the engine counts is one the document carries (review, #787).
+ */
 function isBloodPressurePanel(r: FhirResource): boolean {
-  return (r.code?.coding ?? []).some((c) => c.system === "http://loinc.org" && BLOOD_PRESSURE_PANELS.has(c.code ?? ""));
+  return loincCodesOf(r.code).some((c) => BLOOD_PRESSURE_PANELS.has(c));
 }
 
 /** A panel's component that is the systolic or the diastolic reading, by its stated LOINC code. */
 function readingComponents(r: FhirResource, code: string) {
-  return (r.component ?? []).filter((c) =>
-    (c.code?.coding ?? []).some((coding) => coding.system === "http://loinc.org" && coding.code === code),
-  );
+  return (r.component ?? []).filter((c) => loincCodesOf(c.code).includes(code));
 }
 
-/** A panel's own time: `effective[x]` alone, never `issued` (the effectiveTime helper falls back to it). */
+/**
+ * A panel's own time: `effective[x]` alone, never `issued` (the effectiveTime helper falls back to it). An
+ * `effectiveInstant` is an instant as a dateTime is; an `effectiveTiming` is a schedule, which no reading is.
+ */
 function bloodPressureTime(r: FhirResource): Pick<FhirResource, "effectiveDateTime" | "effectivePeriod"> {
-  return r.effectiveDateTime !== undefined ? { effectiveDateTime: r.effectiveDateTime } : { effectivePeriod: r.effectivePeriod };
+  const instant = r.effectiveDateTime ?? r.effectiveInstant;
+  return instant !== undefined ? { effectiveDateTime: instant } : { effectivePeriod: r.effectivePeriod };
 }
 
 /**
@@ -402,6 +426,12 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
   }
   const time = bloodPressureTime(r);
   const notReal = "a blood pressure whose time is not a real date and time is not written";
+  if (time.effectiveDateTime === undefined && time.effectivePeriod === undefined) {
+    return r.effectiveTiming !== undefined
+      ? "a blood pressure timed by a schedule (effectiveTiming) is not written: a reading is taken at a time"
+      : "a blood pressure with no stated time (effective[x]) is not written: `issued` is when it was recorded, not measured";
+  }
+  if (time.effectivePeriod && time.effectivePeriod.start === undefined) return "a blood pressure over a period with no start is not written";
   const when = time.effectiveDateTime ?? time.effectivePeriod?.start;
   if (!when?.includes("T")) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
   const start = hl7TsKeepingFraction(when);
@@ -412,6 +442,10 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
     if (!time.effectivePeriod.end?.includes("T")) return "a blood pressure over a period with no end, or an end with no time of day, is not written";
     const end = hl7TsKeepingFraction(time.effectivePeriod.end);
     if (end === null) return notReal;
+    // A bound in a stated zone and a bound in none are in two frames: they cannot be ordered or written as
+    // one period (review, #787).
+    const zoned = (t: string) => /(Z|[+-]\d{2}:\d{2})$/.test(t);
+    if (zoned(when) !== zoned(time.effectivePeriod.end)) return "a blood pressure over a period with a time zone on only one bound is not written";
     const whole = [start.slice(0, 14), end.slice(0, 14)];
     if (whole[0]! > whole[1]! || (whole[0] === whole[1] && Number(`0${start.slice(14)}`) > Number(`0${end.slice(14)}`))) {
       return "a blood pressure whose period ends before it starts is not written";
@@ -437,24 +471,54 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
 
 /**
  * A blood-pressure panel as QDM states it: one Physical Exam, Performed per reading, each with its own
- * code (8480-6, 8462-4) and value, at the panel's own time (#591). The inverse of the import's pairing
+ * code (8480-6, 8462-4) and value, at the panel's own time (#591), with the panel's method and body site
+ * (QDM's method and Anatomical Location Site, the same on both). The inverse of the import's pairing
  * (LOCKED §4A.8), so a panel exported and imported again is one panel again: written only when
- * `bloodPressureExportProblem` finds nothing, and then as both readings or neither. What the round trip
- * cannot carry is `Observation.encounter`: QDM's Physical Exam has no link to it. `null` when the resource
- * is not a blood-pressure panel, so the caller routes it as any other Observation.
+ * `bloodPressureExportProblem` finds nothing, and then as both readings or neither. The systolic reading
+ * carries the panel's own id and the diastolic `<id>-8462-4`, so a round trip gives the panel its id back
+ * (review, #787). What QDM's Physical Exam has no place for here (another component, the performer, the
+ * recorded time, the encounter link) is named in `notes`, never dropped silently (review, #787). `null`
+ * when the resource is not a blood-pressure panel, so the caller routes it as any other Observation.
  */
-function bloodPressureReadings(r: FhirResource, i: number, pad: string): string[] | null {
+function bloodPressureReadings(r: FhirResource, i: number, pad: string, notes: string[]): string[] | null {
   if (!isBloodPressurePanel(r)) return null;
   if (bloodPressureExportProblem(r) !== null) return [];
   const timed: FhirResource = { resourceType: "Observation", ...bloodPressureTime(r) };
+  const id = r.id ?? `observation-${i}`;
+  const name = `blood pressure ${r.id ?? `#${i}`}`;
+  const written = new Set([readingComponents(r, "8480-6")[0], readingComponents(r, "8462-4")[0]]);
+  for (const other of (r.component ?? []).filter((c) => !written.has(c))) {
+    const codes = (other.code?.coding ?? []).map((c) => c.code).filter(Boolean).join("/") || "uncoded";
+    notes.push(`${name}: its component ${codes} is not written; QDM states a blood pressure as its two readings`);
+  }
+  if (Array.isArray(r.performer) ? r.performer.length > 0 : r.performer !== undefined) notes.push(`${name}: its performer is not written`);
+  if (r.issued !== undefined) notes.push(`${name}: its recorded time (issued) is not written`);
+  if (r.encounter !== undefined) notes.push(`${name}: its encounter link is not written; QDM's Physical Exam has no place for it`);
+  // An Observation states one body site and one method; a list is read as written.
+  const sites = Array.isArray(r.bodySite) ? r.bodySite : r.bodySite ? [r.bodySite as unknown as FhirCodeableConcept] : [];
+  const methods = r.method ? [r.method] : [];
+  if (sites.some((site) => cdaCodes(site).length === 0)) notes.push(`${name}: a body site in no code system CDA carries is not written`);
+  if (methods.some((method) => cdaCodes(method).length === 0)) notes.push(`${name}: a method in no code system CDA carries is not written`);
+  const methodCodes = methods
+    .map((method) => cdaCodes(method))
+    .filter((codes) => codes.length > 0)
+    .map(([first, ...rest]) =>
+      rest.length === 0
+        ? `\n${pad}    <methodCode ${first}/>`
+        : `\n${pad}    <methodCode ${first}>${rest.map((t) => `\n${pad}      <translation ${t}/>`).join("")}\n${pad}    </methodCode>`,
+    )
+    .join("");
+  const siteCodes = targetSites({ bodySite: sites }, `${pad}    `);
   return (["8480-6", "8462-4"] as const).map((readingCode) => {
     const component = readingComponents(r, readingCode)[0]!;
-    // The reading's own LOINC code first, every other mapped coding as a translation, so the import still
-    // recognises the reading whatever order the codings came in (Codex, #787).
+    // The reading's code as LOINC first, however the source spelled LOINC's system, then every other mapped
+    // coding as a translation, so the import recognises the reading whatever the codings' order or
+    // spelling (Codex + review, #787).
     const codings = component.code?.coding ?? [];
-    const own = codings.filter((c) => c.system === "http://loinc.org" && c.code === readingCode);
-    const [code, ...translations] = cdaCodes({ coding: [...own, ...codings.filter((c) => !own.includes(c))] });
-    const entryResource = { ...r, id: `${r.id ?? `observation-${i}`}-${readingCode}` };
+    const own = codings.filter((c) => loincCodesOf({ coding: [c] }).includes(readingCode));
+    const loinc = { system: "http://loinc.org", code: readingCode, ...(own[0]?.display ? { display: own[0].display } : {}) };
+    const [code, ...translations] = cdaCodes({ coding: [loinc, ...codings.filter((c) => !own.includes(c))] });
+    const entryResource = { ...r, id: readingCode === "8480-6" ? id : `${id}-${readingCode}` };
     return `${pad}<entry typeCode="DRIV">
 ${pad}  <observation classCode="OBS" moodCode="EVN">
 ${pad}    <templateId root="2.16.840.1.113883.10.20.22.4.13" extension="2014-06-09"/>
@@ -464,7 +528,7 @@ ${pad}    ${translations.length === 0 ? `<code ${code}/>` : `<code ${code}>${tra
 ${pad}    <text>Physical Exam, Performed</text>
 ${pad}    ${COMPLETED}
 ${pad}    ${effectiveTime(timed, `${pad}    `, hl7TsKeepingFraction)}
-${pad}    <value xsi:type="PQ" value="${esc(String(component.valueQuantity!.value))}" unit="mm[Hg]"/>
+${pad}    <value xsi:type="PQ" value="${esc(String(component.valueQuantity!.value))}" unit="mm[Hg]"/>${methodCodes}${siteCodes}
 ${pad}  </observation>
 ${pad}</entry>`;
   });
@@ -540,14 +604,17 @@ export function translateQdm(bundle: unknown, pad = "          "): QdmTranslatio
     const resource = (item as { resource?: FhirResource } | null)?.resource;
     const type = resource?.resourceType;
     let produced: string[] = [];
+    // What a written entry could not carry (a blood pressure's third component, its performer, ...).
+    const notes: string[] = [];
     try {
-      produced = entryFor(item, i, pad);
+      produced = entryFor(item, i, pad, notes);
     } catch {
       if (type) untranslatable.push(`${type}: could not be translated (malformed field)`);
       return;
     }
     if (produced.length > 0) {
       entries.push(...produced);
+      untranslatable.push(...notes.map((note) => `${type}: ${note}`));
       return;
     }
     // Nothing produced. Say WHY, for the cases an operator can act on; stay silent for the ones that are
@@ -572,7 +639,7 @@ export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {
  * malformed date or a numeric id used to reach the worker's catch-all and turn a 500-subject export into
  * `{"error":"internal_error"}`, losing the 499 documents that were fine (review, #361).
  */
-function entryFor(item: unknown, i: number, pad: string): string[] {
+function entryFor(item: unknown, i: number, pad: string, notes: string[]): string[] {
   const out: string[] = [];
   {
     const resource = (item as { resource?: FhirResource } | null)?.resource;
@@ -590,7 +657,7 @@ function entryFor(item: unknown, i: number, pad: string): string[] {
         out.push(procedurePerformed(resource, i, pad) ?? "");
         break;
       case "Observation": {
-        const readings = bloodPressureReadings(resource, i, pad);
+        const readings = bloodPressureReadings(resource, i, pad, notes);
         if (readings !== null) {
           out.push(...readings);
           break;
