@@ -417,12 +417,14 @@ test("import: EVERY translatable datatype in an entry is taken, not just the fir
         <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2021-08-01"/>
         <id root="urn:workwell:fhir" extension="lab-A"/>
         <code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
         <effectiveTime value="20250601100000"/>
       </observation>
       <observation classCode="OBS" moodCode="EVN">
         <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2021-08-01"/>
         <id root="urn:workwell:fhir" extension="lab-B"/>
         <code code="2345-7" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
         <effectiveTime value="20250601100000"/>
       </observation>
     </organizer></entry>
@@ -444,6 +446,7 @@ test("import: an out-of-range date does not become a FHIR field (review, #362)",
     <entry typeCode="DRIV"><procedure classCode="PROC" moodCode="EVN">
       <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-01"/>
       <code code="77067" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
       <effectiveTime value="20250510100000"/>
     </procedure></entry>
   </section></component></structuredBody></component>
@@ -688,6 +691,7 @@ test("import NAMES the DATATYPE template, not the nested attribute template insi
     <entry><procedure classCode="PROC" moodCode="EVN">
       <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-01"/>
       <code code="0HTT0ZZ" codeSystem="2.16.840.1.113883.6.4"/>
+      <statusCode code="completed"/>
       <effectiveTime value='20240220080000'/>
     </procedure></entry>
   </section></component></structuredBody></component>
@@ -791,6 +795,7 @@ test("import: the untranslated diagnostic names the datatype even when a WRAPPER
     <entry><procedure classCode="PROC" moodCode="EVN">
       <templateId root="2.16.840.1.113883.10.20.24.3.64" extension="2021-08-01"/>
       <code code="0HTT0ZZ" codeSystem="2.16.840.1.113883.6.4"/>
+      <statusCode code="completed"/>
       <effectiveTime value='20240220080000'/>
     </procedure></entry>
   </section></component></structuredBody></component>
@@ -856,6 +861,7 @@ const diagnosisDocument = (effectiveTime: string) => `<ClinicalDocument xmlns="u
     <entry typeCode="DRIV"><observation classCode="OBS" moodCode="EVN">
       <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
       <code code="282291009" codeSystem="2.16.840.1.113883.6.96"/>
+      <statusCode code="completed"/>
       ${effectiveTime}
       <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"
              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>
@@ -970,6 +976,7 @@ const deckDocument = `<?xml version="1.0" encoding="UTF-8"?>
       <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
         <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
         <code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
         <value xsi:type="ST">Negative</value>
       </observation></entryRelationship>
     </observation></entry>
@@ -1082,6 +1089,7 @@ test("import: EVERY mapper keeps its entry's source identifier", () => {
         <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
         <id root="1.3.6.1.4.1.115" extension="dx-standalone"/>
         <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
         <effectiveTime><low value='20240101080000'/></effectiveTime>
         <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/>
       </observation></entryRelationship>
@@ -1113,6 +1121,80 @@ test("import: a TEXT result is kept as valueString — CMS130 asks only that the
   const fobt = deckResources().byId("fobt-1");
   assert.ok(fobt);
   assert.equal(fobt!.valueString, "Negative");
+});
+
+// ---------------------------------------------------------------------------------------------------
+// #790: an entry is translated only when it states its template's own mood and status. Every Cypress
+// document states exactly those (measured over both decks); anything else did not happen, or was only
+// intended, and imported with the mapper's `finished` / `completed` / `final` it could count toward a measure.
+// ---------------------------------------------------------------------------------------------------
+
+/** `xml` with the entry whose id is `id` restated: its `moodCode`, or its `statusCode`. */
+const restated = (xml: string, id: string, what: "mood" | "status", value: string) => {
+  const at = xml.indexOf(`extension="${id}"`);
+  assert.ok(at > 0, `no entry ${id}`);
+  const [start, attribute] = what === "mood" ? [xml.lastIndexOf('moodCode="', at), 'moodCode="'] : [xml.indexOf('<statusCode code="', at), '<statusCode code="'];
+  const end = xml.indexOf('"', start + attribute.length);
+  return `${xml.slice(0, start + attribute.length)}${value}${xml.slice(end)}`;
+};
+
+const TEMPLATE = "2.16.840.1.113883.10.20.24.3.";
+/** Each translated datatype, by an entry of a Cypress-shaped fixture, with its template and what it is not. */
+const DATATYPE_ENTRIES = [
+  { doc: "exclusion", id: "assess-1", template: "144", type: "Observation", otherMood: "INT", otherStatuses: ["aborted", "cancelled", "active"] },
+  { doc: "exclusion", id: "symptom-1", template: "136", type: "Observation", otherMood: "INT", otherStatuses: ["nullified"] },
+  { doc: "exclusion", id: "intervention-1", template: "32", type: "Procedure", otherMood: "INT", otherStatuses: ["aborted", "cancelled", "new"] },
+  { doc: "exclusion", id: "order-1", template: "31", type: "ServiceRequest", otherMood: "PRP", otherStatuses: ["cancelled", "nullified"] },
+  { doc: "exclusion", id: "device-1", template: "9", type: "DeviceRequest", otherMood: "INT", otherStatuses: ["cancelled"] },
+  { doc: "exclusion", id: "med-1", template: "41", type: "MedicationRequest", otherMood: "INT", otherStatuses: ["completed", "suspended"] },
+  { doc: "exclusion", id: "enc-inpatient", template: "23", type: "Encounter", otherMood: "INT", otherStatuses: ["active", "cancelled"] },
+  { doc: "exclusion", id: "proc-icd10pcs", template: "64", type: "Procedure", otherMood: "RQO", otherStatuses: ["aborted", "nullified"] },
+  { doc: "deck", id: "fobt-1", template: "38", type: "Observation", otherMood: "RQO", otherStatuses: ["nullified", "active"] },
+  { doc: "deck", id: "sys-lone", template: "59", type: "Observation", otherMood: "INT", otherStatuses: ["aborted"] },
+  { doc: "deck", id: "medorder-1", template: "47", type: "MedicationRequest", otherMood: "EVN", otherStatuses: ["cancelled", "completed"] },
+  { doc: "deck", id: "noscreen-1", template: "144", type: "Observation", otherMood: "INT", otherStatuses: ["aborted"] },
+] as const;
+
+test("#790: an entry whose mood or status is not its template's is not translated, and is named", () => {
+  for (const entry of DATATYPE_ENTRIES) {
+    const source = entry.doc === "exclusion" ? exclusionDocument : deckDocument;
+    const imports = (xml: string) => {
+      const imported = importQrda1Document(xml);
+      const present = imported.bundle.entry.some((e) => (e.resource as { id?: string }).id === entry.id);
+      return { present, named: imported.untranslatedTemplates.includes(`${TEMPLATE}${entry.template}`) };
+    };
+    assert.deepEqual(imports(source), { present: true, named: false }, `${entry.id} imports as written`);
+    for (const [what, value] of [["mood", entry.otherMood], ...entry.otherStatuses.map((s) => ["status", s] as const)] as const) {
+      const xml = restated(source, entry.id, what, value);
+      assert.notEqual(xml, source, `${entry.id}: the fixture must change its ${what}`);
+      assert.deepEqual(imports(xml), { present: false, named: true }, `${entry.id} with ${what} ${value}`);
+    }
+  }
+});
+
+test("#790: every datatype the importer translates is checked, and a Diagnosis and a Study too", () => {
+  // The table above covers each template the walk maps except Diagnosis and Diagnostic Study, checked here.
+  const covered = new Set<string>(DATATYPE_ENTRIES.map((e) => e.template));
+  for (const t of ["23", "38", "64", "32", "31", "9", "41", "47", "144", "59", "136"]) assert.ok(covered.has(t), t);
+  const diagnosis = (status: string) => diagnosisDocument("<effectiveTime><low value='20240101'/></effectiveTime>").replace('<statusCode code="completed"/>', `<statusCode code="${status}"/>`);
+  assert.ok(conditionFromDoc("<effectiveTime><low value='20240101'/></effectiveTime>"), "a completed Diagnosis imports");
+  assert.throws(() => importQrda1Document(diagnosis("nullified")), /1 untranslated: 2\.16\.840\.1\.113883\.10\.20\.24\.3\.135/);
+  const study = deckDocument.replace('root="2.16.840.1.113883.10.20.24.3.38"', 'root="2.16.840.1.113883.10.20.24.3.18"');
+  assert.notEqual(study, deckDocument);
+  assert.equal(deckResources(study).byId("fobt-1")?.category[0].coding[0].code, "imaging", "a completed Study imports");
+  assert.equal(deckResources(restated(study, "fobt-1", "status", "aborted")).byId("fobt-1"), undefined, "an aborted Study does not");
+});
+
+test("#790: a Result that did not happen states no value", () => {
+  const aborted = deckDocument.replace(
+    '<code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>\n        <statusCode code="completed"/>\n        <value xsi:type="ST">Negative</value>',
+    '<code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>\n        <statusCode code="aborted"/>\n        <value xsi:type="ST">Negative</value>',
+  );
+  assert.notEqual(aborted, deckDocument, "the fixture must change the Result's status");
+  const fobt = deckResources(aborted).byId("fobt-1")!;
+  assert.equal(fobt.status, "final", "the test itself was completed");
+  assert.equal(fobt.valueString, undefined, "its aborted Result is no result");
+  assert.equal(deckResources().byId("fobt-1")!.valueString, "Negative", "a completed Result is");
 });
 
 test("import: a blood pressure stated as two readings at one time is one US Core panel; a lone reading stays a reading (LOCKED §4A.8)", () => {
@@ -1213,6 +1295,7 @@ test("import: a generated diagnosis id never shadows a Condition the document it
         <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
         <id root="1.3.6.1.4.1.115" extension="enc-dx-dx-1"/>
         <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
         <effectiveTime><low value='20240101080000'/></effectiveTime>
         <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/>
       </observation></entryRelationship>
@@ -1259,6 +1342,7 @@ const sitedDocument = (entries: string) => `<ClinicalDocument xmlns="urn:hl7-org
 const sitedDiagnosis = (sites: string) => `<entry typeCode="DRIV"><observation classCode="OBS" moodCode="EVN">
       <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
       <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
       <effectiveTime><low value="20200301"/><high nullFlavor="UNK"/></effectiveTime>
       <value xsi:type="CD" code="248802009" codeSystem="${SNOMED_OID}"/>
       ${sites}
@@ -1267,6 +1351,7 @@ const sitedDiagnosis = (sites: string) => `<entry typeCode="DRIV"><observation c
 const sitedProcedure = (sites: string, template = "2.16.840.1.113883.10.20.24.3.64") => `<entry typeCode="DRIV"><procedure classCode="PROC" moodCode="EVN">
       <templateId root="${template}" extension="2021-08-01"/>
       <code code="172043006" codeSystem="${SNOMED_OID}"/>
+      <statusCode code="completed"/>
       <effectiveTime value="20240405083000"/>
       ${sites}
     </procedure></entry>`;
@@ -1669,12 +1754,27 @@ test("review #787: a reading's value is its own, never a Result nested inside an
 });
 
 test("review #787: an aborted or nullified reading, or an intent, never pairs", () => {
+  // Since #790 such a reading is not imported at all; the procedure keeps the document importable.
+  const procedure = sitedProcedure("");
   for (const status of ["nullified", "aborted"]) {
     const nullified = (o: Parameters<typeof exam>[0]) => exam(o).replace('<statusCode code="completed"/>', `<statusCode code="${status}"/>`);
-    assert.equal(paired(nullified({ id: "s", code: "8480-6" }), nullified({ id: "d", code: "8462-4" })).panels.length, 0, status);
+    const result = paired(nullified({ id: "s", code: "8480-6" }), nullified({ id: "d", code: "8462-4" }), procedure);
+    assert.deepEqual([result.panels.length, result.readings], [0, 0], status);
   }
   const intent = (o: Parameters<typeof exam>[0]) => exam(o).replace('moodCode="EVN"', 'moodCode="INT"');
-  assert.equal(paired(intent({ id: "s", code: "8480-6" }), intent({ id: "d", code: "8462-4" })).panels.length, 0, "an intent is not a reading");
+  const result = paired(intent({ id: "s", code: "8480-6" }), intent({ id: "d", code: "8462-4" }), procedure);
+  assert.deepEqual([result.panels.length, result.readings], [0, 0], "an intent is not a reading");
+});
+
+test("#790: a reading that did not happen still keeps a pair at its time from forming (§4A.8 counts every stated reading)", () => {
+  const aborted = exam({ id: "s2", code: "8480-6" }).replace('<statusCode code="completed"/>', '<statusCode code="aborted"/>');
+  const intended = exam({ id: "s2", code: "8480-6" }).replace('moodCode="EVN"', 'moodCode="INT"');
+  for (const [label, third] of [["aborted", aborted], ["intended", intended]] as const) {
+    assert.notEqual(third, exam({ id: "s2", code: "8480-6" }), `the ${label} fixture must change the reading`);
+    const result = paired(sys(), dia(), third);
+    assert.deepEqual([result.panels.length, result.readings, result.unpaired], [0, 2, 2], `${label}: the pair stays two readings; the third is not imported`);
+  }
+  assert.equal(paired(sys(), dia()).panels.length, 1, "without it the two pair");
 });
 
 test("review #787: a value carrying a nullFlavor is no value, whatever number sits beside it", () => {
@@ -2164,6 +2264,7 @@ test("review #787: a Result is a reading's value only when it states that readin
   const result = (code: string, value: number) => `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
         <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
         <code code="${code}" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
         <value xsi:type="PQ" value="${value}" unit="mm[Hg]"/>
       </observation></entryRelationship>`;
   assert.equal(paired(sys({ value: "", extra: result("8462-4", 80) }), dia()).panels.length, 0, "a systolic carrying a diastolic's result");

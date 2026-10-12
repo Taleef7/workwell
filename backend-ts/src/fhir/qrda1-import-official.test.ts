@@ -208,6 +208,28 @@ test("official CMS125 does not exclude the same patient when the conditions carr
 });
 
 /**
+ * A screening the document says did not happen is no screening (#790). The mammogram is exported as QDM
+ * states it, then its `statusCode` is restated `aborted`: imported with the mapper's `final` it satisfied the
+ * numerator; now it is not imported, and the patient stays a gap.
+ */
+const outcomeOfDocument = async (xml: string): Promise<string | undefined> => {
+  const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
+  const results = await executor.evaluateBatch(MEASURE, [{ subjectId: "rt-subject", patientBundle: importQrda1Document(xml).bundle }], EVAL);
+  return results.get("rt-subject")?.outcome;
+};
+
+test("official CMS125: an aborted mammogram is no screening (#790)", { skip }, async () => {
+  const xml = buildQrda1Document(run, MEASURE, outcome, sourceBundle);
+  const at = xml.indexOf('extension="obs-mg"');
+  const status = xml.indexOf('<statusCode code="completed"/>', at);
+  assert.ok(at > 0 && status > at, "the exported mammogram states its status");
+  const aborted = `${xml.slice(0, status)}<statusCode code="aborted"/>${xml.slice(status + '<statusCode code="completed"/>'.length)}`;
+  assert.equal(await outcomeOfDocument(xml), "COMPLIANT", "as exported, the mammogram counts");
+  assert.ok(!importQrda1Document(aborted).bundle.entry.some((e) => (e.resource as { id?: string }).id === "obs-mg"));
+  assert.equal(await outcomeOfDocument(aborted), "OVERDUE", "aborted, it does not");
+});
+
+/**
  * A blood pressure through the QRDA I route reaches CMS165 (#591, LOCKED §4A.8). The panel is exported as
  * QDM's two readings and imported back as one panel, which is the only shape CMS165FHIR v1.0.000 reads.
  * The control moves the diastolic reading 59 seconds: the two are no longer one blood pressure, nothing is

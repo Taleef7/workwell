@@ -5,6 +5,18 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-12
+
+- **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The
+  importer wrote every encounter `finished`, every procedure `completed` and every observation `final`
+  whatever the document said, so an aborted, cancelled or nullified procedure, or a screening only
+  intended, counted as done. Through official CMS125, an exported mammogram restated `aborted` now scores
+  OVERDUE (COMPLIANT before). Such an entry is named as untranslated, as a negated one is, and a Result that
+  did not happen states no value. Every entry in both Cypress decks states its template's values, so the
+  decks and C2 are unchanged. A blood-pressure reading that did not happen still blocks a pair at its time,
+  so §4A.8's pairing is unchanged.
+- The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
+
 ## 2026-10-11
 
 - **#787 had two more review passes before merge** (four reviewers on the whole PR, then two on the

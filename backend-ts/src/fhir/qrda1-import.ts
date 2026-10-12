@@ -109,6 +109,40 @@ const T = {
 } as const;
 
 /**
+ * The mood and status each translated datatype's template fixes: an event that happened (`EVN`,
+ * `completed`), a medication being taken (`EVN`, `active`), or an order (`RQO`, `active`). Every entry in the
+ * 1,472 documents of both Cypress decks states exactly these, and the exporter writes `EVN` and `completed`
+ * on each entry it writes.
+ *
+ * The mappers below write the FHIR status these values mean (`finished`, `completed`, `final`, `active`), so
+ * an entry stating anything else is not translated (#790): an aborted, cancelled or nullified procedure, or
+ * an intended (`INT`) screening, imported as done could satisfy a numerator or exclusion it should not. Like
+ * a negated one, it is named in `untranslatedTemplates` when nothing else in its entry translates.
+ */
+const STATED_AS: ReadonlyArray<readonly [template: string, mood: string, status: string]> = [
+  [T.encounterPerformed, "EVN", "completed"],
+  [T.diagnosis, "EVN", "completed"],
+  [T.labPerformed, "EVN", "completed"],
+  [T.studyPerformed, "EVN", "completed"],
+  [T.procedurePerformed, "EVN", "completed"],
+  [T.interventionPerformed, "EVN", "completed"],
+  [T.assessmentPerformed, "EVN", "completed"],
+  [T.physicalExamPerformed, "EVN", "completed"],
+  [T.symptom, "EVN", "completed"],
+  [T.medicationActive, "EVN", "active"],
+  [T.interventionOrder, "RQO", "active"],
+  [T.deviceOrder, "RQO", "active"],
+  [T.medicationOrder, "RQO", "active"],
+];
+
+/** Whether an element states the mood and status of every datatype template it carries (`STATED_AS`). */
+function statesItsTemplatesMoodAndStatus(node: CdaNode): boolean {
+  return STATED_AS.filter(([template]) => hasTemplate(node, template)).every(
+    ([, mood, status]) => node.attrs.moodCode === mood && child(node, "statusCode")?.attrs.code === status,
+  );
+}
+
+/**
  * QDM templates that describe an ATTRIBUTE of an entry rather than a datatype.
  *
  * Used only to name what was dropped. The previous diagnostic reported the LAST `templateId` found
@@ -445,8 +479,9 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
   if (!code) return undefined;
   const t = times(child(node, "effectiveTime"));
   // A Laboratory Test carries its result in a nested Result observation; a Diagnostic Study carries an
-  // outer `value` which is `nullFlavor="NA"` for a study with no coded result (ADR-050).
-  const nested = ownResultsOf(node)[0];
+  // outer `value` which is `nullFlavor="NA"` for a study with no coded result (ADR-050). Only a Result
+  // that happened states one: an aborted, cancelled or nullified Result is no value (#790).
+  const nested = ownResultsOf(node).find((result) => result.attrs.moodCode === "EVN" && child(result, "statusCode")?.attrs.code === "completed");
   const valueNode = child(nested ?? node, "value") ?? child(node, "value");
   // Only a value that IS a number. `Number("")` and `Number(" ")` are 0, so an empty `value` attribute
   // would otherwise import as a result of zero, a fact the document never stated (Codex, #787).
@@ -527,7 +562,10 @@ type ObservationShape = {
   valueQuantity?: { value?: number; unit?: string };
 };
 
-/** A blood-pressure-coded Observation the walk imported: its index in the import's entries, and its CDA element. */
+/**
+ * A blood-pressure-coded Observation the walk read: its index in the import's entries (-1 for one it did not
+ * import because the entry did not happen, which can only block a pair), and its CDA element.
+ */
 interface BloodPressureReading {
   index: number;
   node: CdaNode;
@@ -768,8 +806,8 @@ function statedContentOf(node: CdaNode): unknown {
  *   (review, #787);
  * - each states exactly one value, a number in mm[Hg] (a second value, or a value from a Result beside its
  *   own, is not one blood pressure, review #787);
- * - each is an event that happened (`moodCode="EVN"`, `statusCode="completed"`), and both state the same
- *   performer, participants, method and site.
+ * - each is an event that happened (`moodCode="EVN"`, `statusCode="completed"`: the walk imports a Physical
+ *   Exam reading only then, #790), and both state the same performer, participants, method and site.
  * The panel takes the systolic's place and id, keeps both readings' source identifiers (the batch merge
  * recognises a repeated entry by them) and their shared site and method when one of each is stated, and
  * states nothing the two readings did not: their codes and values, their time in its stated offset,
@@ -803,9 +841,7 @@ function pairBloodPressures(entries: Array<{ resource: unknown }>, candidates: B
       const resultsAreOwn = ownResultsOf(r.node).every((result) => bloodPressureHalfOf({ code: concept(child(result, "code")) }) === half(r));
       return statedValuesOf(r.node).length === 1 && resultsAreOwn && typeof q?.value === "number" && Number.isFinite(q.value) && q.unit === "mm[Hg]";
     };
-    // A reading that happened: an event (not an intent), completed (not aborted or nullified) (review, #787).
-    const happened = (r: BloodPressureReading) => r.node.attrs.moodCode === "EVN" && child(r.node, "statusCode")?.attrs.code === "completed";
-    if (!mmHg(s.reading) || !mmHg(d.reading) || !happened(s.reading) || !happened(d.reading)) continue;
+    if (!mmHg(s.reading) || !mmHg(d.reading)) continue;
     if (statedContextOf(s.reading.node) !== statedContextOf(d.reading.node)) continue;
     const sys = entries[s.reading.index]!.resource as ObservationShape;
     const dia = entries[d.reading.index]!.resource as ObservationShape;
@@ -1177,7 +1213,8 @@ export function importQrda1Document(xml: string): Qrda1Import {
       // `"true"` does, and read as positive it would import a negated reading as a fact (Codex, #787).
       if (underNegation.has(candidate)) continue;
       if (isNegatedNode(candidate)) {
-        const notDone = hasTemplate(candidate, T.assessmentPerformed) ? assessmentNotDoneFrom(candidate, key) : undefined;
+        const notDone =
+          hasTemplate(candidate, T.assessmentPerformed) && statesItsTemplatesMoodAndStatus(candidate) ? assessmentNotDoneFrom(candidate, key) : undefined;
         if (notDone !== undefined) {
           entries.push({ resource: notDone });
           translated++;
@@ -1207,6 +1244,17 @@ export function importQrda1Document(xml: string): Qrda1Import {
         : undefined;
       // An Encounter brings its diagnosis Conditions with it.
       const produced = (Array.isArray(resource) ? resource : [resource]).filter((r) => r !== undefined);
+      if (produced.length > 0 && !statesItsTemplatesMoodAndStatus(candidate)) {
+        // Not translated: an entry that did not happen, or only was intended, is not what its mapper's status
+        // says (#790). A blood-pressure reading among it still keeps a pair at its time from forming, as it
+        // did when it was imported: §4A.8 counts every stated systolic and diastolic, of any template.
+        for (const r of produced) {
+          if ((r as { resourceType?: unknown }).resourceType === "Observation" && bloodPressureHalfOf(r) !== undefined) {
+            bloodPressureReadings.push({ index: -1, node: candidate });
+          }
+        }
+        continue;
+      }
       if (produced.length > 0) {
         // A Physical Exam reading may pair only when it is its entry's own act: one inside an organizer or
         // another act can take a performer, a device or a status from its wrapper (review, #787).
