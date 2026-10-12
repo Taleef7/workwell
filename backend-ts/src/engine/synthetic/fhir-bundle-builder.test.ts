@@ -278,3 +278,22 @@ test("multi-alternative series: Hep B partial (OVERDUE) emits doses below the ro
     assert.equal(result.outcome, "MISSING_DATA", `${externalId}: a partial series is canonically MISSING_DATA`);
   }
 });
+
+/** Every date-and-time string in a bundle, wherever it sits. */
+const timesIn = (value: unknown): string[] =>
+  typeof value === "string"
+    ? /^\d{4}-\d{2}-\d{2}T/.test(value) ? [value] : []
+    : value && typeof value === "object"
+      ? Object.values(value).flatMap(timesIn)
+      : [];
+
+test("#795: every time of day the synthetic bundles write states its zone, as FHIR requires", () => {
+  const employee = employeeById("emp-001")!;
+  for (const binding of Object.values(MEASURE_BINDINGS)) {
+    for (const target of ["COMPLIANT", "OVERDUE", "DUE_SOON", "MISSING_DATA", "EXCLUDED"] as TargetOutcome[]) {
+      const times = timesIn(buildSyntheticBundle(employee, deriveExamConfig(binding, target), "2026-10-12"));
+      assert.ok(times.length > 0, `${binding.rateKey}/${target}`);
+      assert.deepEqual(times.filter((t) => !t.endsWith("Z")), [], `${binding.rateKey}/${target}`);
+    }
+  }
+});

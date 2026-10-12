@@ -57,14 +57,17 @@ const QICORE_PROFILES = {
 export function dateInMeasurementPeriod(evaluationDate: string, daysAgo: number): string {
   const periodStart = `${evaluationDate.slice(0, 4)}-01-01`;
   const target = dateMinusDays(evaluationDate, daysAgo).slice(0, 10);
-  return `${target < periodStart ? periodStart : target}T00:00:00`;
+  return `${target < periodStart ? periodStart : target}T00:00:00Z`;
 }
 
-/** evaluationDate is "YYYY-MM-DD"; returns the FHIR dateTime `daysAgo` before it. */
+/**
+ * evaluationDate is "YYYY-MM-DD"; returns the FHIR dateTime `daysAgo` before it, in UTC. FHIR requires a zone
+ * whenever a time is given, and every synthetic time is UTC, as the corpus's are (#795).
+ */
 function dateMinusDays(evaluationDate: string, daysAgo: number): string {
   const d = new Date(`${evaluationDate}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - daysAgo);
-  return `${d.toISOString().slice(0, 10)}T00:00:00`;
+  return `${d.toISOString().slice(0, 10)}T00:00:00Z`;
 }
 
 /** Deterministic birth year — mid-range adult (ages ~26–45 at 2026) for non-eCQM measures. */
@@ -147,7 +150,7 @@ function officeVisit(externalId: string, evaluationDate: string, daysAgo = 90): 
     class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" },
     subject: { reference: `Patient/${externalId}` },
     type: [{ coding: [ECQM_CANONICAL_CODES.officeVisit] }],
-    period: { start: `${day}T09:00:00`, end: `${day}T09:30:00` },
+    period: { start: `${day}T09:00:00Z`, end: `${day}T09:30:00Z` },
   };
 }
 

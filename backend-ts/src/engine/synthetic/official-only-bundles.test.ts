@@ -113,3 +113,21 @@ for (const evaluationDate of ["2027-01-01", "2027-01-15", "2027-02-15", "2027-03
     }
   });
 }
+
+/** Every date-and-time string in a bundle, wherever it sits. */
+const timesIn = (value: unknown): string[] =>
+  typeof value === "string"
+    ? /^\d{4}-\d{2}-\d{2}T/.test(value) ? [value] : []
+    : value && typeof value === "object"
+      ? Object.values(value).flatMap(timesIn)
+      : [];
+
+test("#795: every time of day the official-only bundles write states its zone, as FHIR requires", () => {
+  for (const id of ["cms2", "cms130", "cms165"] as const) {
+    for (const target of ["COMPLIANT", "OVERDUE", "EXCLUDED", "MISSING_DATA", "DUE_SOON"] as const) {
+      const times = timesIn(buildOfficialOnlyBundle(e, id, target, EVAL));
+      assert.ok(times.length > 0, `${id}/${target}`);
+      assert.deepEqual(times.filter((t) => !t.endsWith("Z")), [], `${id}/${target}`);
+    }
+  }
+});
