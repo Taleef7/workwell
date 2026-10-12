@@ -248,6 +248,10 @@ Evidence downloads write `EVIDENCE_DOWNLOADED`.
   continues.
 - A routed measure's batch failure (including "nothing retrieved for anybody") reaches every subject
   of that measure through the same per-subject isolation. Other measures are unaffected.
+- The exception is a calculation that threw on its input (`OfficialCalculationError`, #789): one
+  patient's unreadable data, such as a blood pressure in `mmHg`. That batch's subjects are evaluated one
+  at a time, so only the patient the engine refuses fails. After 25 such failures in one measure, its
+  later failed batches fail every subject again for the rest of the run.
 - A terminal run (`COMPLETED`, `PARTIAL_FAILURE`, `FAILED`, `CANCELLED`) takes no new outcomes:
   `POST /api/runs/:id/evaluate` answers 409.
 - `RunStore.finalizeRun` moves only QUEUED or RUNNING runs. `failStuckRuns` sweeps stuck runs and

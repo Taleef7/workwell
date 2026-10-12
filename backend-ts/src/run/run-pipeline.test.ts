@@ -31,6 +31,7 @@ import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts
 import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/live-directory.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
+import { OfficialCalculationError } from "../wiring/official-calculation-error.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -1381,7 +1382,16 @@ interface BatchProbe {
  */
 function batchProbe(
   batchable: Set<string>,
-  opts: { failOn?: string; ipp?: boolean; omit?: Set<string>; singleIpp?: boolean } = {},
+  opts: {
+    failOn?: string;
+    /** #789: the batch's calculation throws on its input, as one patient's `mmHg` makes it. */
+    calcFailOn?: string;
+    /** #789: these subjects' own evaluation throws too. */
+    singleFailFor?: Set<string>;
+    ipp?: boolean;
+    omit?: Set<string>;
+    singleIpp?: boolean;
+  } = {},
 ): BatchProbe {
   const batches: Array<{ measureId: string; size: number }> = [];
   const singles: string[] = [];
@@ -1403,6 +1413,8 @@ function batchProbe(
         batchable.has(measureId) ? { version: "official-fqm:1.0.000:artifact-sha:terminology-sha", kind: "official" as const, warning: null } : undefined,
       async evaluate(input) {
         singles.push(`${input.measureId}`);
+        const failing = [...(opts.singleFailFor ?? [])].find((id) => JSON.stringify(input.patientBundle).includes(`"${id}"`));
+        if (failing) throw new Error(`Invalid UCUM unit: 'mmHg' (${failing})`);
         return {
           subjectId: "ignored",
           measure: input.measureId,
@@ -1417,6 +1429,9 @@ function batchProbe(
         if (!batchable.has(measureId)) return undefined;
         const subjects = subjectsFactory();
         batches.push({ measureId, size: subjects.length });
+        if (opts.calcFailOn === measureId) {
+          throw new OfficialCalculationError("The following error occurred in the cql-execution engine: Invalid UCUM unit: 'mmHg'");
+        }
         if (opts.failOn === measureId) {
           throw new Error(`${measureId}: the official artifact retrieved NOTHING for any of ${subjects.length} subjects`);
         }
@@ -1430,7 +1445,7 @@ function batchProbe(
   };
 }
 
-async function runWithProbe(probe: BatchProbe, scope: Parameters<typeof executeManualRun>[1]) {
+async function runWithProbe(probe: BatchProbe, scope: Parameters<typeof executeManualRun>[1], extra: Partial<RunPipelineDeps> = {}) {
   const p = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
   const db = await createSqliteD1(p);
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\n/g, " "));
@@ -1441,6 +1456,7 @@ async function runWithProbe(probe: BatchProbe, scope: Parameters<typeof executeM
     outcomeStore,
     engine: probe.engine,
     employees: [employeeById("emp-001")!, employeeById("emp-002")!, employeeById("emp-003")!],
+    ...extra,
   };
   const res = await executeManualRun(deps, scope);
   return {
@@ -1625,6 +1641,56 @@ test("PR-8: a failed batch fails ITS measure loudly and leaves the rest of the r
     outcomes.filter((o) => o.measureId !== "audiogram").every((o) => o.status !== "MISSING_DATA"),
     "one measure's batch failure must not contaminate the others",
   );
+  assert.equal(probe.singles.filter((m) => m === "audiogram").length, 0, "a refusal is never retried one patient at a time (#789)");
+});
+
+test("#789: a batch whose calculation threw is evaluated one patient at a time, and only the patient the engine refuses fails", async () => {
+  // One blood pressure in `mmHg` makes cql-execution reject fqm's whole call. Retried alone, every other
+  // patient gets their own result; the one whose data the engine refuses fails with its own reason.
+  const probe = batchProbe(new Set(["audiogram"]), { calcFailOn: "audiogram", singleFailFor: new Set(["emp-002"]) });
+  const { res, outcomes, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+  const audiogram = outcomes.filter((o) => o.measureId === "audiogram");
+  assert.ok(audiogram.length >= 2, `the fixture needs more than one subject, got ${audiogram.length}`);
+  assert.equal(probe.singles.filter((m) => m === "audiogram").length, audiogram.length, "each subject is evaluated alone");
+  const bad = audiogram.find((o) => o.subjectId === "emp-002")!;
+  assert.equal(bad.status, "MISSING_DATA");
+  assert.match((bad.evidence as { message?: string }).message ?? "", /Invalid UCUM unit: 'mmHg' \(emp-002\)/, "its own reason, not the batch's");
+  for (const o of audiogram.filter((o) => o.subjectId !== "emp-002")) {
+    assert.equal((o.evidence as { via?: string }).via, "single", `${o.subjectId} keeps its result`);
+  }
+  assert.equal(res.status, "PARTIAL_FAILURE", "the patient who failed still makes the run partial");
+  assert.ok(logs.some((l) => l.level === "ERROR" && /official batch evaluation failed .* one at a time/.test(l.message)));
+});
+
+test("#789: past the limit, a measure stops retrying alone, in this chunk and the run's later chunks", async () => {
+  // Data wrong for many patients (a source writing every reading in `mmHg`) must not double the run. A
+  // limit of two over three patients, so the count has to carry from one failure to the next.
+  const everyone = new Set(["emp-001", "emp-002", "emp-003"]);
+  const ownReasons = (outcomes: Array<{ measureId: string; evidence: unknown }>) =>
+    outcomes.filter((o) => o.measureId === "audiogram").map((o) => (o.evidence as { message?: string }).message ?? "");
+  // In one chunk: once two patients have failed alone, the chunk's third gets the batch's error.
+  const oneChunk = batchProbe(new Set(["audiogram"]), { calcFailOn: "audiogram", singleFailFor: everyone });
+  const inChunk = await runWithProbe(oneChunk, MEASURE_SCOPE, { individualRetryFailureLimit: 2 });
+  assert.equal(ownReasons(inChunk.outcomes).length, 3, "three subjects");
+  assert.equal(oneChunk.batches.filter((b) => b.measureId === "audiogram").length, 1, "one chunk");
+  assert.equal(oneChunk.singles.filter((m) => m === "audiogram").length, 2, "the chunk stops retrying at the second failure");
+  assert.deepEqual(ownReasons(inChunk.outcomes).map((m) => /\(emp-00\d\)/.test(m)).sort(), [false, true, true]);
+  // Across chunks: once the run has stopped retrying, a later chunk's failed batch is not retried at all.
+  process.env.WORKWELL_RUN_CHUNK_SIZE = "1";
+  try {
+    const probe = batchProbe(new Set(["audiogram"]), { calcFailOn: "audiogram", singleFailFor: everyone });
+    const { res, outcomes, logs } = await runWithProbe(probe, MEASURE_SCOPE, { individualRetryFailureLimit: 2 });
+    assert.equal(probe.batches.filter((b) => b.measureId === "audiogram").length, 3, "one chunk per subject");
+    assert.equal(probe.singles.filter((m) => m === "audiogram").length, 2, "two failures are evaluated alone, then no more");
+    const reasons = ownReasons(outcomes);
+    assert.equal(reasons.filter((m) => /\(emp-00\d\)/.test(m)).length, 2, "two subjects' own reasons");
+    assert.ok(reasons.filter((m) => !/\(emp-00\d\)/.test(m)).every((m) => /cql-execution engine/.test(m)), "the third carries the batch's");
+    assert.equal(res.status, "PARTIAL_FAILURE");
+    assert.equal(logs.filter((l) => /one at a time/.test(l.message)).length, 2, "the third chunk's log does not claim a retry");
+    assert.ok(logs.some((l) => /2 subject\(s\) failed on their own after their batch failed/.test(l.message)));
+  } finally {
+    delete process.env.WORKWELL_RUN_CHUNK_SIZE;
+  }
 });
 
 test("PR-8: a failed run-log write cannot turn a SUCCESSFUL batch into a failed measure", async () => {

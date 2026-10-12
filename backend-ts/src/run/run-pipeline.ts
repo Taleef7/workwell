@@ -63,6 +63,7 @@ import type { EvalStateStore } from "../stores/eval-state-store.ts";
 import type { ValueSetStore } from "../stores/value-set-store.ts";
 import type { AppendAuditInput, CaseEventStore } from "../stores/case-event-store.ts";
 import { materializeRun } from "../quality/materialize-run.ts";
+import { isOfficialCalculationError } from "../wiring/official-calculation-error.ts";
 import { IncrementalCache } from "./incremental/incremental-eval.ts";
 import {
   alertForTerminalRun,
@@ -177,7 +178,21 @@ export interface RunPipelineDeps {
   valueSets?: Pick<ValueSetStore, "listAll">;
   /** Subject-bundle seam (Task 2): injectable for tests; defaults to the env-composed composite. */
   bundleSource?: SubjectBundleSource;
+  /** #789 — tests only: `DEFAULT_INDIVIDUAL_RETRY_FAILURE_LIMIT` otherwise. */
+  individualRetryFailureLimit?: number;
 }
+
+/**
+ * How many patients of one measure may fail on their own, after their batch's calculation threw, before the
+ * run stops evaluating that measure's failed batches one patient at a time (#789).
+ *
+ * A batch that throws on one patient's data (one blood pressure in `mmHg`) is retried patient by patient,
+ * so only that patient fails; measured on the dev host, a patient alone costs about eight times its share of
+ * a batch. When the data is wrong for many patients (a source that writes every reading in `mmHg`), that
+ * would double the run for no gain. So once this many have failed alone, the measure's later failed batches
+ * fail every patient with the batch's error, as before #789, and the run log says so.
+ */
+export const DEFAULT_INDIVIDUAL_RETRY_FAILURE_LIMIT = 25;
 
 export interface WebChartRunEnv extends DataSourceEnv {
   WORKWELL_WEBCHART_ENROLLMENT_JSON?: string;
@@ -770,6 +785,15 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   const ippByMeasure = new Map<string, boolean[]>();
 
   /**
+   * Per measure, the patients who failed on their own after their batch's calculation threw (#789), and
+   * the measures that have reached `DEFAULT_INDIVIDUAL_RETRY_FAILURE_LIMIT` and stopped retrying. Run-wide,
+   * so a measure whose data is wrong for many patients pays the one-at-a-time cost once, not per chunk.
+   */
+  const failedAlone = new Map<string, number>();
+  const retryLimit = deps.individualRetryFailureLimit ?? DEFAULT_INDIVIDUAL_RETRY_FAILURE_LIMIT;
+  const stoppedRetrying = new Set<string>();
+
+  /**
    * The provider → assignee map, read ONCE for the whole run (ADR-080 d2).
    *
    * Not per chunk and not per case: it is a few dozen rows, and re-reading it would make a mapping
@@ -852,6 +876,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     // pre-pass would evaluate some subjects whose result then goes unused — wasteful, never wrong.
     const prefetched = new Map<string, MeasureOutcome>();
     const batchFailure = new Map<string, Error>();
+    // Measures whose batch calculation threw on its input: the loop evaluates their patients one at a time,
+    // so one patient's unreadable data fails only that patient (#789). The error is kept for the breaker.
+    const retryAlone = new Map<string, Error>();
     /**
      * Per-measure initial-population membership, as REPORTED by whichever path produced each outcome
      * (ADR-043). Read after the evaluation loop, never during it.
@@ -948,9 +975,23 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           // failure channel. Other measures are unaffected. Normalized to an Error so the loop can test
           // PRESENCE rather than truthiness — a rejection with a falsy value would otherwise be stored and
           // then silently ignored, disabling the very refusal this exists for (review #4).
-          batchFailure.set(measureId, err instanceof Error ? err : new Error(String(err)));
+          //
+          // #789: a calculation that threw on its input (one patient's `mmHg`) is the exception. Its patients
+          // are left unread here, so the loop evaluates each alone, exactly as it does a patient a batch
+          // omits; only the patient whose data the engine refuses fails. A refusal, an artifact or
+          // terminology problem, or a crashed worker still fails the whole batch, and so does a measure
+          // that has already had `retryLimit` patients fail alone this run.
+          const error = err instanceof Error ? err : new Error(String(err));
+          const alone = isOfficialCalculationError(error) && !stoppedRetrying.has(measureId);
+          if (alone) retryAlone.set(measureId, error);
+          else batchFailure.set(measureId, error);
           await deps.runStore
-            .appendLog(runId, "ERROR", `${measureId}: official batch evaluation failed — ${String((err as Error)?.message ?? err)}`)
+            .appendLog(
+              runId,
+              "ERROR",
+              `${measureId}: official batch evaluation failed — ${error.message}` +
+                (alone ? ` — evaluating its ${forMeasure.length} subject(s) one at a time` : ""),
+            )
             .catch(() => {});
         }
         // #563 — emitted for the batched AND failed paths alike, and outside the `try` for the same
@@ -1061,9 +1102,33 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           // batch that FAILED re-throws here, once per subject, so a batch-level refusal (notably "nothing
           // was retrieved for anybody") reaches exactly the isolation a single subject's failure does.
           if (batchFailed) throw batchFailure.get(item.measureId)!;
-          const result =
-            prefetched.get(`${item.employee.externalId}|${item.measureId}`) ??
-            (await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate }));
+          // #789: a patient of a batch whose calculation threw is evaluated alone, below. Once the measure has
+          // had `retryLimit` patients fail alone this run, the rest get the batch's error, as before.
+          const threwInBatch = retryAlone.get(item.measureId);
+          if (threwInBatch && stoppedRetrying.has(item.measureId)) throw threwInBatch;
+          let result: MeasureOutcome;
+          try {
+            result =
+              prefetched.get(`${item.employee.externalId}|${item.measureId}`) ??
+              (await deps.engine.evaluate({ measureId: item.measureId, patientBundle: bundle, evaluationDate: evalDate }));
+          } catch (aloneError) {
+            if (threwInBatch) {
+              const count = (failedAlone.get(item.measureId) ?? 0) + 1;
+              failedAlone.set(item.measureId, count);
+              if (count >= retryLimit && !stoppedRetrying.has(item.measureId)) {
+                stoppedRetrying.add(item.measureId);
+                await deps.runStore
+                  .appendLog(
+                    runId,
+                    "ERROR",
+                    `${item.measureId}: ${count} subject(s) failed on their own after their batch failed; ` +
+                      `its other failed batches in this run fail every subject with the batch's error`,
+                  )
+                  .catch(() => {});
+              }
+            }
+            throw aloneError;
+          }
           status = result.outcome;
           evidence = result.evidence;
           // Read off the executor's own flag, and ONLY for an officially routed measure (ADR-078). The

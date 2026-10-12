@@ -118,6 +118,7 @@ import { artifactKey, artifactKind, effectivePeriodCovers, loadOfficialArtifact,
 import { officialMeasureSemantics, trustedProfilesOf } from "./official-measure-semantics.ts";
 import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.ts";
 import type { BatchCalculator } from "./fqm-worker.ts";
+import { isOfficialCalculationError, OfficialCalculationError } from "./official-calculation-error.ts";
 
 /**
  * Expand one value-set OID to its codes, for the artifact being executed.
@@ -657,10 +658,19 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       // at true when no retrieve matches, so the green gate run lands on true for the profile-tagged
       // test-case bundles. It says nothing about our own data shape either way.
     };
+    // A calculation that throws on its input is marked so a run can retry its patients one at a time
+    // (#789). The worker marks its own; in process, everything this call throws is the calculation's.
     const { bySubject, retrieveSignal } =
       deps.calculateBatch && !deps.calculate
         ? await deps.calculateBatch(calculationInput)
-        : await calculateOfficialWithSignal({ ...calculationInput, ...(deps.calculate ? { calculate: deps.calculate } : {}) });
+        : await calculateOfficialWithSignal({ ...calculationInput, ...(deps.calculate ? { calculate: deps.calculate } : {}) }).catch(
+            (err: unknown) => {
+              if (isOfficialCalculationError(err)) throw err;
+              const error = new OfficialCalculationError(String((err as Error)?.message ?? err));
+              if ((err as Error)?.stack) error.stack = (err as Error).stack;
+              throw error;
+            },
+          );
 
     // The batch-level safety net (roadmap §7.4). fqm does not error when every retrieve comes back
     // empty: it returns a complete-looking result with nobody in any population, which reads downstream

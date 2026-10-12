@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { __resetSharedFqmWorker, createFqmPool, createFqmWorker, fqmWorkerCount, sharedFqmPoolSize, sharedFqmWorker } from "./fqm-worker.ts";
 import { officialMeasureExecutor } from "./official-executor-adapter.ts";
+import { isOfficialCalculationError } from "./official-calculation-error.ts";
 import { officialTerminologyExpander, loadOfficialTerminology } from "./official-terminology.ts";
 import { loadOfficialArtifact } from "./official-artifacts.ts";
 import { corpusBundleSource } from "./corpus-bundle-source.ts";
@@ -41,6 +42,15 @@ test("an error in the calculation rejects with its message; a crashed worker rej
     await assert.rejects(() => worker.calculate(input([{ mode: "exit" }])), /exited \(code 3\) with a chunk in flight/);
     const after = await worker.calculate(input([{}, {}]));
     assert.equal(after.bySubject.size, 2, "a fresh worker served the next chunk");
+    // #789: only the calculation's own throw is marked, so only it is retried one patient at a time. A worker
+    // that crashed, threw outside the calculation or was closed would only be loaded further by that.
+    const kindOf = (chunk: Promise<unknown>) => chunk.then(() => "resolved", (e: unknown) => (isOfficialCalculationError(e) ? "calculation" : "other"));
+    assert.equal(await kindOf(worker.calculate(input([{ mode: "throw" }]))), "calculation");
+    assert.equal(await kindOf(worker.calculate(input([{ mode: "exit" }]))), "other");
+    assert.equal(await kindOf(worker.calculate(input([{ mode: "uncaught" }]))), "other");
+    const closing = worker.calculate(input([{ mode: "busy", cpuMs: 500 }]));
+    await worker.close();
+    assert.equal(await kindOf(closing), "other");
   } finally {
     await worker.close();
   }
@@ -72,6 +82,61 @@ for (const measureId of ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137
     }
   });
 }
+
+/** A hypertensive patient with one blood pressure, its readings in `unit` (UCUM's is `mm[Hg]`). */
+const hypertensive = (id: string, unit: string) => ({
+  resourceType: "Bundle",
+  type: "collection",
+  entry: [
+    { resource: { resourceType: "Patient", id, gender: "female", birthDate: "1960-04-01", extension: [{ url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex", valueCode: "248152002" }] } },
+    { resource: { resourceType: "Encounter", id: `${id}-e`, status: "finished", type: [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213" }] }], period: { start: "2025-04-02T09:00:00Z", end: "2025-04-02T09:30:00Z" } } },
+    {
+      resource: {
+        resourceType: "Condition", id: `${id}-c`,
+        clinicalStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "active" }] },
+        verificationStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-ver-status", code: "confirmed" }] },
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-category", code: "problem-list-item" }] }],
+        code: { coding: [{ system: "http://snomed.info/sct", code: "59621000" }] },
+        onsetDateTime: "2024-01-01T00:00:00Z",
+      },
+    },
+    {
+      resource: {
+        resourceType: "Observation", id: `${id}-bp`, status: "final",
+        meta: { profile: ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure"] },
+        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs" }] }],
+        code: { coding: [{ system: "http://loinc.org", code: "85354-9" }] },
+        effectiveDateTime: "2025-10-01T09:00:00Z",
+        component: [
+          { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] }, valueQuantity: { value: 130, unit, system: "http://unitsofmeasure.org", code: unit } },
+          { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 80, unit, system: "http://unitsofmeasure.org", code: unit } },
+        ],
+      },
+    },
+  ],
+});
+
+test("#789: one patient's blood pressure in `mmHg` rejects official cms165's batch as a CALCULATION error, in process and in the worker", { skip: skipWithout("cms165") }, async () => {
+  const subjects = [
+    { subjectId: "ok", patientBundle: hypertensive("ok", "mm[Hg]") },
+    { subjectId: "bad", patientBundle: hypertensive("bad", "mmHg") },
+  ];
+  const expand = officialTerminologyExpander(loadOfficialArtifact);
+  const worker = createFqmWorker();
+  try {
+    for (const executor of [officialMeasureExecutor({ expand }), officialMeasureExecutor({ expand, calculateBatch: worker.calculate })]) {
+      const error = await executor.evaluateBatch("cms165", subjects, "2025-12-31").then(() => undefined, (e: unknown) => e);
+      assert.ok(isOfficialCalculationError(error), `marked as the calculation's: ${String(error)}`);
+      assert.match(String((error as Error).message), /Invalid UCUM unit: 'mmHg'/);
+      // Alone, the patient whose units are UCUM's is scored; only the other fails.
+      assert.equal((await executor.evaluate({ measureId: "cms165", patientBundle: subjects[0]!.patientBundle, evaluationDate: "2025-12-31" })).outcome, "COMPLIANT");
+      await assert.rejects(() => executor.evaluate({ measureId: "cms165", patientBundle: subjects[1]!.patientBundle, evaluationDate: "2025-12-31" }), /Invalid UCUM unit/);
+    }
+    assert.ok(worker.requests >= 1, "the second executor really calculated in the worker");
+  } finally {
+    await worker.close();
+  }
+});
 
 test("a crashed worker's exit does not fail the next chunk, already sent to its replacement (#604, Codex)", async () => {
   const worker = createFqmWorker({ calculatorModule: FIXTURE });

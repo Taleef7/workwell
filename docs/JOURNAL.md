@@ -5,6 +5,18 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-12
+
+- **One patient's unreadable data no longer fails a whole batch (#789).** fqm-execution scores a chunk
+  of 500 patients in one call, so one blood pressure in `mmHg` (UCUM's is `mm[Hg]`) made cql-execution
+  reject the call and every patient in the chunk lost their CMS165 result. A calculation that throws on
+  its input is now marked, and its patients are evaluated one at a time: only the patient the engine
+  refuses fails (MISSING_DATA with its own reason, the run PARTIAL_FAILURE). A refusal ("retrieved nothing
+  for anyone"), an artifact or terminology problem, or a crashed worker still fails the batch. Alone, a
+  patient costs about eight times its share of a batch, so after 25 such failures a measure stops retrying
+  for the rest of the run. WebChart's readings carry `mmHg`, so CMS165 over WebChart data still needs the
+  unit fixed at the source (#591); this keeps it from costing everyone else.
+
 ## 2026-10-11
 
 - **#787 had two more review passes before merge** (four reviewers on the whole PR, then two on the
