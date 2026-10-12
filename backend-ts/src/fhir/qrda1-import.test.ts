@@ -260,11 +260,11 @@ test("import REFUSES a document whose every entry is a datatype we cannot transl
   assert.throws(() => importQrda1Document(onlyPayer), /2\.16\.840\.1\.113883\.10\.20\.24\.3\.55/);
 });
 
-test("import applies an HL7 TIMEZONE OFFSET rather than discarding it (Codex, #362)", () => {
-  // `20251231230000-0500` is 2026-01-01T04:00:00Z — a different day AND year. A measurement period is
-  // a half-open interval on exactly that boundary, so dropping the offset moves events between
-  // populations. Base HL7 asks for the offset (CONF:81-10130) even though the CMS Hospital IG asks for
-  // its absence (CMS_0121), so a conformant document may well carry one.
+test("import KEEPS an HL7 TIMEZONE OFFSET as stated, neither discarding it (Codex, #362) nor converting to UTC (#788)", () => {
+  // `20251231230000-0500` is 23:00 on 31 December in its own offset, and 04:00 on 1 January in UTC. Dropping
+  // the offset moves the instant; converting to UTC moves the day and the year, which CMS's FHIR logic can
+  // read in the value's own offset. Base HL7 asks for the offset (CONF:81-10130) even though the CMS
+  // Hospital IG asks for its absence (CMS_0121), so a conformant document may well carry one.
   // Target the PROCEDURE's own timestamp: `.replace` with a string hits only the first match, and the
   // imaging Observation shares that instant in the shared fixture.
   const doc = buildQrda1Document(run, "cms125", outcome(officialEvidence), {
@@ -273,7 +273,21 @@ test("import applies an HL7 TIMEZONE OFFSET rather than discarding it (Codex, #3
   }).replace('value="20250510100000"', 'value="20251231230000-0500"');
   const imported = importQrda1Document(doc);
   const procedure = imported.bundle.entry.map((e) => e.resource as Record<string, unknown>).find((r) => r.resourceType === "Procedure")!;
-  assert.equal(procedure.performedDateTime, "2026-01-01T04:00:00Z");
+  assert.equal(procedure.performedDateTime, "2025-12-31T23:00:00-05:00");
+});
+
+test("#788: an offset beyond ±14:00 is no zone FHIR can state, so it is no timestamp; ±14:00 is", () => {
+  const timed = (value: string) =>
+    importedOfType(sitedDocument(sitedProcedure("").replace('value="20240405083000"', `value="${value}"`)), "Procedure")[0]!.performedDateTime;
+  assert.equal(timed("20240405083000+1400"), "2024-04-05T08:30:00+14:00");
+  assert.equal(timed("20240405083000-1400"), "2024-04-05T08:30:00-14:00");
+  assert.equal(timed("20240405083000+1401"), undefined);
+  assert.equal(timed("20240405083000-1500"), undefined);
+  assert.equal(timed("20240405083000"), "2024-04-05T08:30:00Z", "no offset is read as UTC, as before");
+  // A reading whose time cannot be placed could be any time, so it keeps a pair from forming (§4A.8).
+  const beyond = sys({ id: "s2", time: "<effectiveTime value='20250601120000+1500'/>" });
+  assert.equal(paired(sys(), dia(), beyond).panels.length, 0, "a systolic at +1500 is no placeable time");
+  assert.equal(paired(sys(), dia()).panels.length, 1);
 });
 
 test("import keeps an Observation INTERVAL as a period, not an instant (Codex, #362)", () => {
@@ -672,6 +686,26 @@ test("import: every exclusion datatype in a Cypress-shaped document translates �
   assert.deepEqual(imported.untranslatedTemplates, [], "a dropped exclusion input is a wrong answer, not a gap");
 });
 
+test("#788: every mapper keeps a time's stated offset, at the clock time the document states", () => {
+  // The Cypress-shaped fixture, each time of day stated in Maui's offset (a date alone cannot carry one).
+  const restated = exclusionDocument.replace(/(<(?:effectiveTime|low|high|time)\b[^>]*?\bvalue=)(['"])(\d{12,14})\2/g, "$1$2$3-1000$2");
+  assert.notEqual(restated, exclusionDocument);
+  const resources = importQrda1Document(restated).bundle.entry.map((e) => e.resource as Record<string, any>);
+  const times: string[] = [];
+  const collect = (v: unknown): void => {
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) times.push(v);
+    else if (v && typeof v === "object") Object.values(v).forEach(collect);
+  };
+  resources.forEach(collect);
+  assert.ok(times.length >= 10, `every mapper's times are read, got ${times.length}`);
+  assert.deepEqual(times.filter((t) => !t.endsWith("-10:00")), [], "each in its stated offset, none converted");
+  const byId = (id: string) => resources.find((r) => r.id === id)!;
+  assert.deepEqual(byId("enc-inpatient").period, { start: "2024-08-13T08:00:00-10:00", end: "2024-08-25T08:15:00-10:00" });
+  assert.equal(byId("order-1").authoredOn, "2024-03-14T08:30:00-10:00");
+  assert.deepEqual(byId("med-1").dispenseRequest.validityPeriod, { start: "2023-08-20T08:00:00-10:00" });
+  assert.equal(resources.find((r) => r.resourceType === "Patient")!.birthDate, "1950-12-24", "a birth date stays a date");
+});
+
 test("import NAMES the DATATYPE template, not the nested attribute template inside it", () => {
   // `untranslatedTemplates` used to report the LAST templateId found anywhere in the entry, and QDM
   // nests attribute templates (Author dateTime, Rank) inside the element carrying the datatype — so it
@@ -827,8 +861,8 @@ test("import: every code system we map is spelled the way the ARTIFACTS spell it
 });
 
 test("import: a birthTime with an OFFSET keeps its own calendar day, not the UTC one", () => {
-  // `Patient.birthDate` is a local calendar fact, not an instant. `isoFromHl7` normalizes to UTC, so
-  // truncating ITS output gives the wrong day near midnight: `20000101010000+1400` is
+  // `Patient.birthDate` is a local calendar fact, not an instant. While `isoFromHl7` normalized to UTC
+  // (until #788), truncating ITS output gave the wrong day near midnight: `20000101010000+1400` was
   // `1999-12-31T11:00:00Z`. On a measure boundary that moves a patient between age bands, which is a
   // population change from a formatting decision (Codex, #388).
   const shifted = exclusionDocument.replace("<birthTime value='19501224203000'/>", "<birthTime value='20000101010000+1400'/>");
@@ -1727,7 +1761,7 @@ test("an impossible calendar date is no date: it is not rolled over to the next 
   const [reading] = importedOfType(sitedDocument(sys({ time: feb30 })), "Observation");
   assert.equal(reading!.effectiveDateTime, undefined, "no date the document did not state");
   const [real] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='20250228120000-0500'/>" })), "Observation");
-  assert.equal(real!.effectiveDateTime, "2025-02-28T17:00:00Z", "a real date with an offset still parses");
+  assert.equal(real!.effectiveDateTime, "2025-02-28T12:00:00-05:00", "a real date with an offset still parses");
 });
 
 test("negationInd=\"1\" is a negation, exactly as \"true\" is (Codex, #787)", () => {
@@ -1887,12 +1921,17 @@ test("review #787: a negation in any case, or on an act around the readings, is 
 });
 
 test("review #787: a malformed offset or trailing text makes no timestamp rather than another instant", () => {
-  for (const value of ["20250219171000+05:00", "20250219171000-05", "20250219171000-05000", "20250219171000+0500junk", "00000101120000"]) {
+  // An impossible date or offset minutes past 59 with an offset too: nothing is rolled over, and no
+  // `-05:75` is written (review, #788).
+  for (const value of [
+    "20250219171000+05:00", "20250219171000-05", "20250219171000-05000", "20250219171000+0500junk", "00000101120000",
+    "20250230120000-1000", "20250101120000-0575", "20250101120000+0060",
+  ]) {
     const [reading] = importedOfType(sitedDocument(sys({ time: `<effectiveTime value='${value}'/>` })), "Observation");
     assert.equal(reading!.effectiveDateTime, undefined, value);
   }
   const [ok] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='20250219171000.123-0500'/>" })), "Observation");
-  assert.equal(ok!.effectiveDateTime, "2025-02-19T22:10:00Z", "a fraction and a well-formed offset still parse");
+  assert.equal(ok!.effectiveDateTime, "2025-02-19T17:10:00-05:00", "a fraction and a well-formed offset still parse");
 });
 
 test("review #787: a panel names a source id once, even when both readings share it", () => {

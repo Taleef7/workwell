@@ -18,6 +18,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   longer a Condition. Every entry in both Cypress decks states its template's values, so the decks and C2
   are unchanged. A blood-pressure reading that did not happen still blocks a pair at its time, so §4A.8's
   pairing is unchanged.
+- **A QRDA I time keeps the offset the document states (#788).** The importer converted every time to
+  UTC, so a Maui visit at 5 pm on 31 December (03:00 UTC on 1 January) left the measurement year: CMS's
+  FHIR logic reads an event's day in its own offset, and official CMS125 now keeps that patient in 2025's
+  population. With both Cypress decks restated in -10:00 at the same clock times, the UTC conversion lost
+  one patient each on cms130, cms165 and cms2; keeping the offset restores every report. The original
+  decks state no offsets, so they and C2 are unchanged. A time with no offset is still read as UTC. Mixed offsets
+  within hours of each other can now meet cql-execution's text sort of DateTimes, which the official
+  measures use too: #750, widened today, holds the engine-level fix.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11

@@ -203,13 +203,14 @@ const ACT_CLASSES = new Set(["act", "observation", "procedure", "encounter", "su
 /**
  * HL7 `YYYYMMDDHHMMSS[±ZZZZ]` → ISO-8601, or undefined when absent/nullFlavored/unparseable.
  *
- * The **offset is applied, not discarded** (Codex, #362). `20251231230000-0500` is
- * `2026-01-01T04:00:00Z`, a different day and a different YEAR — and a measurement period is a
- * half-open interval on exactly that boundary, so dropping the offset silently moves events in and out
- * of populations. C-CDA's US Realm Date and Time asks for an offset (CONF:81-10130, a SHOULD) and CMS_0121
- * asks a document to state offsets everywhere or nowhere, so a conformant document may well carry one.
- * A blood-pressure panel keeps the stated offset instead (`statedTimestamp`): CMS165 reads a reading's day
- * in its own offset (review, #787).
+ * The **offset is kept as stated** (#788): `20251231200000-1000` is `2025-12-31T20:00:00-10:00`, the
+ * instant the document states, on the day it states. Dropping the offset would move the instant (Codex,
+ * #362). Converting to UTC kept the instant but moved the day, and the year on 31 December: CMS's FHIR logic
+ * can read an event's day in its own offset, so a Maui visit at 5 pm on 31 December (03:00 UTC on 1
+ * January) left the measurement year and took the patient out of the population. C-CDA's US Realm Date
+ * and Time asks for an offset (CONF:81-10130, a SHOULD) and CMS_0121 asks a document to state offsets
+ * everywhere or nowhere, so a conformant document may well carry one. A time with no offset is read as UTC
+ * (`Z`), as before. An offset beyond ±14:00 is no zone FHIR can state, so it makes the value no timestamp.
  */
 function isoFromHl7(value: string | undefined): string | undefined {
   // The WHOLE value must be an HL7 TS: a date, an optional time to the second with an optional fraction,
@@ -238,9 +239,11 @@ function isoFromHl7(value: string | undefined): string | undefined {
   // The components must survive the parse. `new Date` rolls an impossible day over instead of failing
   // (`20250230120000` became 2 March), which would import a date the document never stated (Codex, #787).
   const offsetMinutes = offset ? (offset[1] === "-" ? -1 : 1) * (Number(offset[2]) * 60 + Number(offset[3])) : 0;
+  // Written as stated, so checked here rather than left to what `new Date` happens to refuse (review, #788).
+  if (Math.abs(offsetMinutes) > 14 * 60 || (offset && Number(offset[3]) > 59)) return undefined;
   const local = new Date(parsed.getTime() + offsetMinutes * 60_000).toISOString().slice(0, 19);
   if (local !== `${y}-${mo}-${d}T${h}:${mi}:${s}`) return undefined;
-  return parsed.toISOString().replace(/\.\d{3}Z$/, "Z");
+  return `${local}${zone}`;
 }
 
 /** A CDA coded element → a FHIR CodeableConcept, or undefined when it is nullFlavored/unmapped. */
@@ -1090,11 +1093,12 @@ function symptomFrom(node: CdaNode, i: string): unknown {
  *
  * Two things this must not do, and the obvious implementation does both. `Patient.birthDate` is a FHIR
  * **date**, so the full timestamp `isoFromHl7` returns is invalid there — that is what this used to
- * write. But truncating `isoFromHl7`'s output is also wrong, because that value has been NORMALIZED to
- * UTC: `20000101010000+1400` is `1999-12-31T11:00:00Z`, so slicing gives the wrong calendar day, and a
- * birth date is a local calendar fact rather than an instant. On a measure boundary that moves a patient
- * between age bands (Codex, #388). So the date is read from the leading digits and validated as a real
- * calendar date — the same round-trip check `isoFromHl7` applies to its own date-only branch.
+ * write. Truncating `isoFromHl7`'s output was wrong too while it NORMALIZED to UTC (until #788):
+ * `20000101010000+1400` became `1999-12-31T11:00:00Z`, the wrong calendar day, and a birth date is a local
+ * calendar fact rather than an instant. On a measure boundary that moves a patient between age bands
+ * (Codex, #388). So the date is read from the leading digits and validated as a real calendar date — the
+ * same round-trip check `isoFromHl7` applies to its own date-only branch — and a birth time whose time of
+ * day `isoFromHl7` refuses still gives its date.
  */
 function calendarDate(value: string | undefined): string | undefined {
   if (!value || !/^\d{8}/.test(value)) return undefined;
