@@ -182,6 +182,25 @@ test("official CMS125 reads an imported visit's day in the document's own offset
 });
 
 /**
+ * The export half (#791). A WebChart-shaped bundle states Maui's visit at 5 pm on 31 December in -10:00. The
+ * exporter wrote it as the UTC instant with no offset (`20260101030000`), so a recalculation from the
+ * document put the patient in 2026, though the run itself counted them in 2025. Written in its own offset,
+ * the round trip keeps them in 2025's population.
+ */
+test("official CMS125: a Maui visit on 31 December survives export and import in its own offset (#791)", { skip }, async () => {
+  const lateVisit = {
+    ...sourceBundle,
+    entry: sourceBundle.entry.map((e) =>
+      e.resource.resourceType === "Encounter" ? { resource: { ...e.resource, period: { start: "2025-12-31T17:00:00-10:00", end: "2025-12-31T17:30:00-10:00" } } } : e,
+    ),
+  };
+  assert.equal(await inIpp(lateVisit), true, "the run counts the visit in 2025");
+  const xml = buildQrda1Document(run, MEASURE, outcome, lateVisit);
+  assert.match(xml, /<low value="20251231170000-1000"\/>/);
+  assert.equal(await inIpp(importQrda1Document(xml).bundle), true, "and so does a recalculation from its document");
+});
+
+/**
  * The body site moves CMS125's 2026 answer (#784). CMS125FHIR v1.0.000 counts an "Unilateral
  * Mastectomy, Unspecified Laterality" condition (`…198.12.1071`) as a left or right mastectomy by its
  * `bodySite` qualifier, so one on each side is a bilateral mastectomy and a denominator exclusion.

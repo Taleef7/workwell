@@ -68,10 +68,11 @@ SVRL = {"svrl": "http://purl.oclc.org/dsdl/svrl"}
 #   CMS_0115-0120  NPI and TIN validity (10 digits, all-digits, Luhn checksum, @extension xor
 #                  @nullFlavor). A malformed national identifier is malformed under any programme.
 #
-# Deliberately NOT included: CMS_0121 ("a UTC offset should not be used anywhere in a QRDA Category I"),
-# which directly CONTRADICTS base HL7's CONF:81-10130 ("if more precise than day, SHOULD include
-# time-zone offset"). That one is genuinely CMS policy, and it is the clearest evidence that this
-# partition is doing real work rather than bookkeeping.
+# Deliberately NOT included: CMS_0121 ("a UTC offset should not be used anywhere in a QRDA Category I"
+# unless it is used everywhere a time is given; Reporting Parameters are exempt), which pulls against base
+# HL7's CONF:81-10130 ("if more precise than day, SHOULD include time-zone offset"). That one is genuinely
+# CMS policy, and it is the clearest evidence that this partition is doing real work rather than
+# bookkeeping. The exporter meets it both ways: no offset anywhere, or one on every time of day (#791).
 GENERIC_CMS_RULES = re.compile(r"^a-CMS_(010[5-9]|011[0-3]|011[5-9]|0120)\b")
 
 

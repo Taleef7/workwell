@@ -26,6 +26,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   decks state no offsets, so they and C2 are unchanged. A time with no offset is still read as UTC. Mixed offsets
   within hours of each other can now meet cql-execution's text sort of DateTimes, which the official
   measures use too: #750, widened today, holds the engine-level fix.
+- **The QRDA I export writes each time as its FHIR value states it (#791).** It wrote every time through
+  JavaScript's `Date`: a year became midnight on 1 January, 30 February became 2 March, a time with no
+  zone was read in the exporting machine's zone, and a zoned time became the UTC instant with no offset,
+  so a Maui visit at 5 pm on 31 December came back from its own document in 2026 (official CMS125 now
+  keeps it in 2025 both ways). Times are now written at their stated precision and in their stated
+  offset. CMS_0121 asks for offsets everywhere or nowhere: when any time of day is in a zone other than
+  UTC, every time of day states one (a time with no zone as `+0000`, the zone it is read in, named as a
+  caveat); otherwise none does. The corpus export is byte-identical (it states no zones).
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11

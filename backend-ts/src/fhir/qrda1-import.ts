@@ -217,6 +217,13 @@ function isoFromHl7(value: string | undefined): string | undefined {
   // and, after a time, an optional ±HHMM offset (the CDA schema allows none on a date). A colon in the
   // offset or anything trailing makes it no timestamp, rather than a different instant than the one stated
   // (review, #787).
+  // A year or a month as stated: FHIR has both precisions, and the export writes them so (#791).
+  const partial = value ? /^(\d{4})(\d{2})?$/.exec(value) : null;
+  if (partial) {
+    const [, year, month] = partial;
+    if (year === "0000" || (month !== undefined && (Number(month) < 1 || Number(month) > 12))) return undefined;
+    return month !== undefined ? `${year}-${month}` : year;
+  }
   if (!value || !/^\d{8}(\d{2}(\d{2}(\d{2}(\.\d+)?)?)?([+-]\d{4})?)?$/.test(value)) return undefined;
   const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
   if (y === "0000") return undefined; // FHIR has no year zero
@@ -1101,6 +1108,8 @@ function symptomFrom(node: CdaNode, i: string): unknown {
  * day `isoFromHl7` refuses still gives its date.
  */
 function calendarDate(value: string | undefined): string | undefined {
+  // A birth year or month alone is a FHIR date at that precision, as the export writes it (#791).
+  if (value && /^\d{4}(\d{2})?$/.test(value)) return isoFromHl7(value);
   if (!value || !/^\d{8}/.test(value)) return undefined;
   const [y, mo, d] = [value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
   const probe = new Date(`${y}-${mo}-${d}T00:00:00Z`);

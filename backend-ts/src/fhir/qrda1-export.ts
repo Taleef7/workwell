@@ -54,11 +54,11 @@ import {
   EMPLOYEE_ID_ROOT,
   LOINC,
   esc,
-  hl7Date,
+  hl7DateAsStated,
   hl7Ts,
   qrdaMeasureReference,
 } from "./qrda-common.ts";
-import { qdmEntriesFor, translateQdm, type QdmTranslation } from "./qdm-entries.ts";
+import { translateQdm, type QdmTranslation } from "./qdm-entries.ts";
 
 /**
  * The run evaluated a bundle this document does NOT reproduce, and that has to be said out loud.
@@ -168,8 +168,9 @@ function recordTarget(subjectId: string, bundle: unknown): string {
   const patient = patientOf(bundle);
   const { given, family } = nameOf(subjectId, patient);
   const sex = SEX_CONCEPTS[patient?.gender ?? ""];
-  // The BUNDLE wins on birth date for the same reason it wins on name: it is the record evaluated.
-  const birthDate = patient?.birthDate ?? employeeById(subjectId)?.dateOfBirth;
+  // The BUNDLE wins on birth date for the same reason it wins on name: it is the record evaluated. Written
+  // at the precision stated, a year as a year (#791); one that is no real date is unknown.
+  const birthDate = hl7DateAsStated(patient?.birthDate ?? employeeById(subjectId)?.dateOfBirth);
   const gender = sex
     ? `<administrativeGenderCode nullFlavor="OTH">
           <translation code="${sex.code}" displayName="${sex.display}" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMEDCT"/>
@@ -186,7 +187,7 @@ function recordTarget(subjectId: string, bundle: unknown): string {
           <family>${esc(family)}</family>
         </name>
         ${gender}
-        ${birthDate ? `<birthTime value="${hl7Date(birthDate)}"/>` : `<birthTime nullFlavor="UNK"/>`}
+        ${birthDate ? `<birthTime value="${birthDate}"/>` : `<birthTime nullFlavor="UNK"/>`}
         <raceCode nullFlavor="UNK"/>
         <ethnicGroupCode nullFlavor="UNK"/>
         <languageCommunication>
@@ -244,12 +245,15 @@ export function buildQrda1Document(
   outcome: OutcomeRecord,
   patientBundle?: unknown,
   /** Pre-computed by the batch path so each subject is translated once, never twice. */
-  precomputed?: { entries: string[]; reference: string },
+  precomputed?: { entries: string[]; reference: string; zoned?: boolean },
 ): string {
-  const now = hl7Ts(new Date().toISOString());
+  const translation = precomputed ?? (patientBundle ? translateQdm(patientBundle) : { entries: [], zoned: false });
+  const entries = translation.entries;
+  // CMS_0121: offsets everywhere or nowhere (#791). When the entries state them, so do the document's own
+  // times, which are UTC instants. The measurement period is day-specific and exempt.
+  const now = `${hl7Ts(new Date().toISOString())}${translation.zoned ? "+0000" : ""}`;
   const low = hl7Ts(run.measurementPeriodStart);
   const high = hl7Ts(run.measurementPeriodEnd);
-  const entries = precomputed?.entries ?? (patientBundle ? qdmEntriesFor(patientBundle) : []);
   const reference = precomputed?.reference ?? measureReference(measureId, outcome.evidence);
   const official = reference.includes(EMEASURE_ID_ROOT);
   // The eMeasure Reference `<externalDocument>` below carries NO `<text>`. It used to carry
@@ -450,6 +454,17 @@ export function qrda1Caveats(measureId: string, bundle: unknown): string[] {
 }
 
 /**
+ * A document that states offsets writes a time stated with no zone as `+0000` (CMS_0121, #791): the zone the
+ * import and the engine already read it in, but one its source did not state, so it is named.
+ */
+function zoneCaveat(translation: QdmTranslation): string[] {
+  const n = translation.zoneAssumed ?? 0;
+  return n > 0
+    ? [`${n} time(s) stated with no time zone written as UTC (+0000), the zone they are read in: the document states an offset on every time because another time states one`]
+    : [];
+}
+
+/**
  * Every subject's document for one run, in outcome order.
  *
  * `bundleFor` resolves a subject's FHIR bundle; subjects it cannot resolve still get a document, marked
@@ -473,10 +488,14 @@ export function buildQrda1Documents(
     const nonConformanceReasons = nonConformanceFrom(measureId, translation, reference, degradationMessage);
     return {
       subjectId: outcome.subjectId,
-      xml: buildQrda1Document(run, measureId, outcome, bundle, { entries: translation.entries, reference }),
+      xml: buildQrda1Document(run, measureId, outcome, bundle, { entries: translation.entries, reference, zoned: translation.zoned ?? false }),
       conformant: nonConformanceReasons.length === 0,
       nonConformanceReasons,
-      caveats: [...qrda1Caveats(measureId, bundle), ...tallied(translation.caveats ?? [], "not carried")],
+      caveats: [
+        ...qrda1Caveats(measureId, bundle),
+        ...tallied(translation.caveats ?? [], "not carried"),
+        ...zoneCaveat(translation),
+      ],
     };
   });
 }

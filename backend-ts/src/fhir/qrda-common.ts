@@ -81,25 +81,70 @@ export const hl7Ts = (iso: string): string => {
   );
 };
 
-/** ISO date → HL7 `YYYYMMDD` (a birth date carries no time of day). */
-export const hl7Date = (iso: string): string => hl7Ts(iso).slice(0, 8);
+/** A FHIR date or dateTime from OUTSIDE, as an HL7 TS states it (`statedHl7Time`). */
+export interface StatedHl7Time {
+  /** The digits as stated, at the stated precision: `2025`, `202506`, `20250601`, `202506011000`, `20250601100000.25`. */
+  digits: string;
+  /** Whether it states a time of day: only then can it carry an offset. */
+  hasTime: boolean;
+  /** The stated zone as an HL7 offset (`Z` is `+0000`), or undefined when none is stated. */
+  offset?: string;
+  /** For ordering: the first instant it covers, in ms since the epoch (UTC when no zone is stated), and its fraction. */
+  epochMs: number;
+  fraction: string;
+}
+
+const FHIR_TIME =
+  /^(\d{4})(?:-(\d{2})(?:-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|([+-])(\d{2}):(\d{2}))?)?)?)?$/;
 
 /**
- * `hl7Ts` for values that came from OUTSIDE — returns null instead of throwing.
+ * A FHIR date or dateTime from OUTSIDE as an HL7 TS, exactly as stated, or null when it is not a real one (#791).
  *
- * `hl7Ts` throws on purpose: a run's own measurement period producing `NaN` in a regulatory artifact
- * should fail loudly at build time. But QDM entries are translated from third-party FHIR, where a
- * MariaDB zero-date (`0000-00-00`) or a malformed string is a data-quality event, not a programming
- * error — and throwing there would lose every OTHER subject's document too. The caller degrades that
- * one field to `nullFlavor` instead.
+ * Third-party values are written at the precision they state: a year stays `2025` and a month `202506`,
+ * never an instant at midnight on the 1st. The date and time must be real as written (30 February is
+ * refused, not rolled over to 2 March), the year 0001-9999, an offset no wider than ±14:00 with minutes
+ * under 60, and at most nine digits of a second. A time with no zone is written as stated, never read in
+ * the exporting machine's zone. A null degrades that one field to `nullFlavor` rather than losing every
+ * other subject's document (#361).
+ *
+ * Whether the offset is written is the document's choice (CMS_0121: offsets everywhere or nowhere), so it
+ * is returned beside the digits rather than in them.
  */
-export const hl7TsOrNull = (iso: unknown): string | null => {
-  if (typeof iso !== "string" || iso === "") return null;
-  try {
-    return hl7Ts(iso);
-  } catch {
-    return null;
+export function statedHl7Time(iso: unknown): StatedHl7Time | null {
+  const m = typeof iso === "string" ? FHIR_TIME.exec(iso) : null;
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s, fraction, zone, sign, oh, om] = m;
+  const year = Number(y);
+  if (year < 1) return null;
+  const parts = [year, Number(mo ?? 1), Number(d ?? 1), Number(h ?? 0), Number(mi ?? 0), Number(s ?? 0)] as const;
+  // `setUTCFullYear`, not `Date.UTC`, which reads the years 0-99 as 1900-1999.
+  const check = new Date(0);
+  check.setUTCFullYear(parts[0], parts[1] - 1, parts[2]);
+  check.setUTCHours(parts[3], parts[4], parts[5], 0);
+  const real = [check.getUTCFullYear(), check.getUTCMonth() + 1, check.getUTCDate(), check.getUTCHours(), check.getUTCMinutes(), check.getUTCSeconds()];
+  if (real.some((part, i) => part !== parts[i])) return null;
+  let offsetMinutes = 0;
+  if (sign !== undefined) {
+    offsetMinutes = (sign === "-" ? -1 : 1) * (Number(oh) * 60 + Number(om));
+    if (Number(om) > 59 || Math.abs(offsetMinutes) > 14 * 60) return null;
   }
+  const digits = `${y}${mo ?? ""}${d ?? ""}${h ?? ""}${mi ?? ""}${s ?? ""}${fraction !== undefined ? `.${fraction}` : ""}`;
+  return {
+    digits,
+    hasTime: h !== undefined,
+    ...(zone !== undefined ? { offset: zone === "Z" ? "+0000" : `${sign}${oh}${om}` } : {}),
+    epochMs: check.getTime() - offsetMinutes * 60_000,
+    fraction: fraction ?? "",
+  };
+}
+
+/**
+ * A FHIR date as an HL7 date at its stated precision, or null. A birth date has no time of day; one written
+ * with a time anyway keeps the date it states, never the UTC one.
+ */
+export const hl7DateAsStated = (date: unknown): string | null => {
+  const t = statedHl7Time(date);
+  return t === null ? null : t.hasTime ? t.digits.slice(0, 8) : t.digits;
 };
 
 /**
