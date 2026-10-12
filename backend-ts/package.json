@@ -75,6 +75,9 @@
     ],
     "overrides": {
       "better-sqlite3": "^12.0.0"
+    },
+    "patchedDependencies": {
+      "cql-execution@3.3.2": "patches/cql-execution@3.3.2.patch"
     }
   }
 }

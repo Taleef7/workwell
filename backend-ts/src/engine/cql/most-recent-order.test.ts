@@ -12,6 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { MEASURES } from "./measure-registry.ts";
 import { buildSyntheticBundle } from "../synthetic/fhir-bundle-builder.ts";
@@ -92,4 +93,49 @@ test("authored cms122: the most recent HbA1c decides poor control, not the first
   };
   assert.equal(await outcomeOf("cms122", withOlder(bundle, [older], false)), "COMPLIANT", "newest first");
   assert.equal(await outcomeOf("cms122", withOlder(bundle, [older], true)), "COMPLIANT", "oldest first");
+});
+
+// ---------------------------------------------------------------------------------------------------
+// #750: cql-execution sorted two DateTimes by their text, which ends in the offset, so close times in
+// different offsets sorted out of instant order. Patched (`patches/cql-execution@3.3.2.patch`): the second is
+// converted to the first's offset, as the library's own comparisons do.
+// ---------------------------------------------------------------------------------------------------
+
+test("#750: a newer result stated in another offset is the most recent, whichever order the results arrive in", async () => {
+  // 23:00 on 13 May at -10:00 is 09:00 UTC on 14 May: newer than 02:00 UTC on 14 May, though its text sorts first.
+  const bundle = buildSyntheticBundle(EMPLOYEES[0]!, deriveExamConfig(MEASURE_BINDINGS["cms122"]!, "COMPLIANT"), EVAL) as Bundle;
+  const obs = bundle.entry.find((e) => e.resource.resourceType === "Observation")!;
+  const recent: Entry = {
+    resource: { ...obs.resource, effectiveDateTime: "2026-05-13T23:00:00-10:00", valueQuantity: { value: 7.5, unit: "%", system: "http://unitsofmeasure.org", code: "%" } },
+  };
+  const older: Entry = {
+    resource: {
+      ...obs.resource,
+      id: `${String(obs.resource.id)}-older`,
+      effectiveDateTime: "2026-05-14T02:00:00+00:00",
+      valueQuantity: { value: 10.5, unit: "%", system: "http://unitsofmeasure.org", code: "%" },
+    },
+  };
+  const base = { ...bundle, entry: bundle.entry.map((e) => (e === obs ? recent : e)) };
+  assert.equal(await outcomeOf("cms122", withOlder(base, [older], false)), "COMPLIANT", "newest first");
+  assert.equal(await outcomeOf("cms122", withOlder(base, [older], true)), "COMPLIANT", "oldest first");
+});
+
+test("#750: cql-execution's sort orders DateTimes in different offsets as instants, and one offset as before", async () => {
+  // The engine's own copy, the one the patch applies to (backend-ts depends on it through the measure engine).
+  const engineRequire = createRequire(new URL("../../../packages/measure-engine/package.json", import.meta.url));
+  const { ByDirection, ByExpression } = engineRequire("cql-execution/lib/elm/query.js");
+  const { DateTime } = engineRequire("cql-execution/lib/datatypes/datetime.js");
+  const ascending = new ByDirection({ direction: "asc" });
+  const later = DateTime.parse("2025-01-01T20:00:00.000-10:00"); // 06:00 UTC on 2 January
+  const earlier = DateTime.parse("2025-01-02T05:00:00.000+00:00");
+  assert.equal(await ascending.exec({}, later, earlier), 1, "the -10:00 reading is later, though its text sorts first");
+  assert.equal(await ascending.exec({}, earlier, later), -1);
+  const sameZone = [DateTime.parse("2025-01-02T05:00:00.000+00:00"), DateTime.parse("2025-01-02T06:00:00.000+00:00")];
+  assert.equal(await ascending.exec({}, sameZone[0], sameZone[1]), -1, "one offset: unchanged");
+  // `sort by` an expression: the same rule, through the clause the measures use.
+  const byIdentity = new ByExpression({ direction: "desc", expression: { type: "AliasRef", name: "$this" } });
+  byIdentity.expression = { execute: async (ctx: { value: unknown }) => ctx.value };
+  const ctx = { childContext: (value: unknown) => ({ value }) };
+  assert.equal(await byIdentity.exec(ctx, later, earlier), -1, "descending: the later reading first");
 });

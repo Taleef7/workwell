@@ -7,6 +7,11 @@ settings:
 overrides:
   better-sqlite3: ^12.0.0
 
+patchedDependencies:
+  cql-execution@3.3.2:
+    hash: d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad
+    path: patches/cql-execution@3.3.2.patch
+
 importers:
 
   .:
@@ -146,16 +151,16 @@ importers:
     dependencies:
       cql-exec-fhir:
         specifier: ^2.1.6
-        version: 2.1.6(cql-execution@3.3.2)
+        version: 2.1.6(cql-execution@3.3.2(patch_hash=d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad))
       cql-execution:
         specifier: ^3.3.2
-        version: 3.3.2
+        version: 3.3.2(patch_hash=d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad)
 
   packages/official-executor:
     dependencies:
       cql-exec-fhir:
         specifier: 2.1.6
-        version: 2.1.6(cql-execution@3.3.2)
+        version: 2.1.6(cql-execution@3.3.2(patch_hash=d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad))
       fqm-execution:
         specifier: 1.8.5
         version: 1.8.5(typescript@5.9.3)
@@ -2390,12 +2395,12 @@ snapshots:
 
   core-util-is@1.0.3: {}
 
-  cql-exec-fhir@2.1.6(cql-execution@3.3.2):
+  cql-exec-fhir@2.1.6(cql-execution@3.3.2(patch_hash=d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad)):
     dependencies:
-      cql-execution: 3.3.2
+      cql-execution: 3.3.2(patch_hash=d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad)
       xml2js: 0.6.2
 
-  cql-execution@3.3.2:
+  cql-execution@3.3.2(patch_hash=d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad):
     dependencies:
       '@lhncbc/ucum-lhc': 7.1.6
       immutable: 5.1.9
@@ -2669,8 +2674,8 @@ snapshots:
       axios: 1.18.1
       commander: 6.2.1
       core-js: 3.49.0
-      cql-exec-fhir: 2.1.6(cql-execution@3.3.2)
-      cql-execution: 3.3.2
+      cql-exec-fhir: 2.1.6(cql-execution@3.3.2(patch_hash=d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad))
+      cql-execution: 3.3.2(patch_hash=d48724dd31bb2c961fdedc6515563b18e74a51fd696f3cabbc6418f6f232cdad)
       fhir-spec-tools: 0.4.0(typescript@5.9.3)
       handlebars: 4.7.9
       lodash: 4.18.1

@@ -1,0 +1,40 @@
+diff --git a/lib/elm/query.js b/lib/elm/query.js
+index cc76d4965e5b7ab2facbfb936984c74122c0ef94..cd5240c10ec7af6e961cd15405ece9fb5d12dae0 100644
+--- a/lib/elm/query.js
++++ b/lib/elm/query.js	
+@@ -54,6 +54,17 @@ exports.Without = Without;
+ class Sort extends expression_1.UnimplementedExpression {
+ }
+ exports.Sort = Sort;
++// WorkWell patch (#750): two DateTimes stated in different timezone offsets are compared in one offset.
++// `<` on two DateTime objects compares their toString(), which ends in the offset, so close times in
++// different offsets sorted out of instant order and `Last(... sort by ...)` could pick an older reading. The
++// second is converted to the first's offset with the library's own convertToTimezoneOffset, as
++// sameAs/before/after already do; DateTimes in one offset are compared exactly as before.
++function sortComparable(a, b) {
++    if (a != null && b != null && a.isDateTime && b.isDateTime && a.timezoneOffset != null && b.timezoneOffset != null && a.timezoneOffset !== b.timezoneOffset) {
++        return b.convertToTimezoneOffset(a.timezoneOffset);
++    }
++    return b;
++}
+ class ByDirection extends expression_1.Expression {
+     constructor(json) {
+         super(json);
+@@ -75,7 +86,7 @@ class ByDirection extends expression_1.Expression {
+                 return this.high_order;
+             }
+         }
+-        else if (a < b) {
++        else if (a < sortComparable(a, b)) {
+             return this.low_order;
+         }
+         else {
+@@ -109,7 +120,7 @@ class ByExpression extends expression_1.Expression {
+             return a_val.before(b_val) ? this.low_order : this.high_order;
+         }
+         else {
+-            return a_val < b_val ? this.low_order : this.high_order;
++            return a_val < sortComparable(a_val, b_val) ? this.low_order : this.high_order;
+         }
+     }
+ }
