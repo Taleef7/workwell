@@ -131,6 +131,14 @@ function instantOf(value: string): string {
   return m && !Number.isNaN(ms) ? `instant:${ms}|${m[1]!.length}|${m[2] ?? ""}` : value;
 }
 
+/**
+ * The elements the importer states a time in: a Period's bounds, each `…DateTime`, `authoredOn` and `issued`.
+ * Only these are read as instants. Any other string (an identifier's value, a code, a text) keeps its exact
+ * spelling, so two entries whose ids merely look like the same instant stay two (Codex, #797).
+ */
+const isTemporalKey = (key: string): boolean =>
+  key === "start" || key === "end" || key === "authoredOn" || key === "issued" || key.endsWith("DateTime");
+
 /** JSON with object keys sorted, so two equal resources stringify the same whatever their key order. */
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -172,14 +180,14 @@ export function mergeMemberResources(members: ReadonlyArray<{ index: number; res
     const factOf = (r: { resourceType?: string; id?: string }, depth = 0): string => {
       const known = facts.get(r);
       if (known !== undefined) return known;
-      const resolve = (value: unknown): unknown => {
-        if (Array.isArray(value)) return value.map(resolve);
-        if (typeof value === "string") return instantOf(value);
+      const resolve = (value: unknown, key?: string): unknown => {
+        if (Array.isArray(value)) return value.map((v) => resolve(v, key));
+        if (typeof value === "string") return key !== undefined && isTemporalKey(key) ? instantOf(value) : value;
         if (value === null || typeof value !== "object") return value;
         const o: Record<string, unknown> = {};
-        for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
-          const target = key === "reference" && typeof v === "string" ? byRef.get(v) : undefined;
-          o[key] = target && depth < 8 ? `fact:${factOf(target, depth + 1)}` : resolve(v);
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          const target = k === "reference" && typeof v === "string" ? byRef.get(v) : undefined;
+          o[k] = target && depth < 8 ? `fact:${factOf(target, depth + 1)}` : resolve(v, k);
         }
         return o;
       };

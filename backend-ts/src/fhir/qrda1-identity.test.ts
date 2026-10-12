@@ -211,6 +211,17 @@ test("#788: a visit restated in another offset is still the same visit; another 
   assert.equal(encountersOf([first, later]).encounters.length, 2, "an hour later is another event");
 });
 
+test("#797: only a time is read as an instant; an id that looks like one keeps its exact spelling", () => {
+  // Two entries whose source ids happen to be the same instant in different offsets are two entries: the
+  // merge's contract is the same ASSERTED identifier (Codex, #797).
+  const encounters = encountersOf([
+    doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "2024-03-31T08:00:00-05:00" }),
+    doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "2024-03-31T09:00:00-04:00" }),
+  ]).encounters;
+  assert.equal(encounters.length, 2);
+  assert.deepEqual(encounters.map((e) => e.identifier[0].value).sort(), ["2024-03-31T08:00:00-05:00", "2024-03-31T09:00:00-04:00"]);
+});
+
 test("the same visit with a DIFFERENT diagnosis is not a duplicate: a fact includes what it references", () => {
   const { encounters, conditions } = encountersOf([
     doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }),
