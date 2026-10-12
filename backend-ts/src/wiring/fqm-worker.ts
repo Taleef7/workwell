@@ -29,7 +29,7 @@
  */
 import { Worker } from "node:worker_threads";
 import { availableParallelism } from "node:os";
-import { OfficialCalculationError } from "./official-calculation-error.ts";
+import { calculationFailure } from "./official-calculation-error.ts";
 import type { OfficialBatchResult, OfficialCalculationInput, OfficialSubjectResult } from "@work-well/official-executor";
 
 /** What crosses to the worker: the calculation input minus the injectable function, which cannot be cloned. */
@@ -122,12 +122,10 @@ export function createFqmWorker(options: { calculatorModule?: string; idleMs?: n
       if (response.ok) {
         waiter.resolve({ bySubject: new Map(response.bySubject), retrieveSignal: response.retrieveSignal });
       } else {
-        // The calculation itself threw on its input, so it is marked as one (#789). A crashed, exited or
-        // closed worker below stays a plain Error: retrying its chunk one patient at a time would only load
-        // the pool further.
-        const error = new OfficialCalculationError(response.message);
-        if (response.stack) error.stack = response.stack;
-        waiter.reject(error);
+        // Marked only when cql-execution raised it on the patients' data (#789); a calculation that could
+        // not start stays plain (Codex, #798), as does a crashed, exited or closed worker below: retrying
+        // its chunk one patient at a time would only load the pool further.
+        waiter.reject(calculationFailure(response.message, response.stack));
       }
     });
     w.on("error", (err) => {

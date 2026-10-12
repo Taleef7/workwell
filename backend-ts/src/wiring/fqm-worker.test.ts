@@ -45,7 +45,8 @@ test("an error in the calculation rejects with its message; a crashed worker rej
     // #789: only the calculation's own throw is marked, so only it is retried one patient at a time. A worker
     // that crashed, threw outside the calculation or was closed would only be loaded further by that.
     const kindOf = (chunk: Promise<unknown>) => chunk.then(() => "resolved", (e: unknown) => (isOfficialCalculationError(e) ? "calculation" : "other"));
-    assert.equal(await kindOf(worker.calculate(input([{ mode: "throw" }]))), "calculation");
+    assert.equal(await kindOf(worker.calculate(input([{ mode: "data" }]))), "calculation");
+    assert.equal(await kindOf(worker.calculate(input([{ mode: "throw" }]))), "other", "a calculation that could not start (Codex, #798)");
     assert.equal(await kindOf(worker.calculate(input([{ mode: "exit" }]))), "other");
     assert.equal(await kindOf(worker.calculate(input([{ mode: "uncaught" }]))), "other");
     const closing = worker.calculate(input([{ mode: "busy", cpuMs: 500 }]));

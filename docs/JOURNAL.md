@@ -9,8 +9,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 - **One patient's unreadable data no longer fails a whole batch (#789).** fqm-execution scores a chunk
   of 500 patients in one call, so one blood pressure in `mmHg` (UCUM's is `mm[Hg]`) made cql-execution
-  reject the call and every patient in the chunk lost their CMS165 result. A calculation that throws on
-  its input is now marked, and its patients are evaluated one at a time: only the patient the engine
+  reject the call and every patient in the chunk lost their CMS165 result. An error cql-execution raises on
+  the patients' data is now marked, and its patients are evaluated one at a time: only the patient the engine
   refuses fails (MISSING_DATA with its own reason, the run PARTIAL_FAILURE). A refusal ("retrieved nothing
   for anyone"), an artifact or terminology problem, or a crashed worker still fails the batch. Alone, a
   patient costs about nine times its share of a batch, so per measure and run the retry stops after 25
