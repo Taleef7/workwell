@@ -119,6 +119,18 @@ function withReferencesRenamed(value: unknown, renamed: ReadonlyMap<string, stri
   return out;
 }
 
+/**
+ * A FHIR dateTime with a time of day, as the instant it names and the precision it is stated to; anything
+ * else unchanged. The import keeps each time in the offset its document states (#788), so a sender that
+ * restates an entry in another offset (`-04:00` once daylight saving starts, `Z` in a re-export) states the
+ * same instant in a different spelling, and the merge still recognises it as the same entry (review, #788).
+ */
+function instantOf(value: string): string {
+  const m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?)(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  const ms = m ? Date.parse(`${m[1]}${m[3]}`) : Number.NaN;
+  return m && !Number.isNaN(ms) ? `instant:${ms}|${m[1]!.length}|${m[2] ?? ""}` : value;
+}
+
 /** JSON with object keys sorted, so two equal resources stringify the same whatever their key order. */
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -162,6 +174,7 @@ export function mergeMemberResources(members: ReadonlyArray<{ index: number; res
       if (known !== undefined) return known;
       const resolve = (value: unknown): unknown => {
         if (Array.isArray(value)) return value.map(resolve);
+        if (typeof value === "string") return instantOf(value);
         if (value === null || typeof value !== "object") return value;
         const o: Record<string, unknown> = {};
         for (const [key, v] of Object.entries(value as Record<string, unknown>)) {

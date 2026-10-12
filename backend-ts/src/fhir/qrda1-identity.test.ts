@@ -191,6 +191,26 @@ test("only the repeated facts are dropped: a duplicate document's NEW facts surv
   assert.deepEqual(encounters.map((e) => e.type[0].coding[0].code).sort(), ["99213", "99214"]);
 });
 
+test("#788: a visit restated in another offset is still the same visit; another instant is not", () => {
+  // The import keeps each time in its document's offset, so one instant can arrive spelled two ways: a
+  // sender that applies daylight saving at export time, or a re-export in UTC (review, #788).
+  const at = (low: string, high: string) => (xml: string) => {
+    const restated = xml.replace("<low value='20240331080000'/><high value='20240331081500'/>", `<low value='${low}'/><high value='${high}'/>`);
+    assert.notEqual(restated, xml, "the fixture must restate the visit's time");
+    return restated;
+  };
+  const first = at("20240331080000-0500", "20240331081500-0500")(doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1" }));
+  for (const [label, low, high] of [
+    ["daylight saving", "20240331090000-0400", "20240331091500-0400"],
+    ["UTC", "20240331130000+0000", "20240331131500+0000"],
+  ] as const) {
+    const second = at(low, high)(doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "e1" }));
+    assert.equal(encountersOf([first, second]).encounters.length, 1, label);
+  }
+  const later = at("20240331090000-0500", "20240331091500-0500")(doc({ mrn: "mrn-b", mbi: "MBI-1", encounterId: "e1" }));
+  assert.equal(encountersOf([first, later]).encounters.length, 2, "an hour later is another event");
+});
+
 test("the same visit with a DIFFERENT diagnosis is not a duplicate: a fact includes what it references", () => {
   const { encounters, conditions } = encountersOf([
     doc({ mrn: "mrn-a", mbi: "MBI-1", encounterId: "e1", diagnosis: "75544000" }),

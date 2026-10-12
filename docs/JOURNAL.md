@@ -5,6 +5,15 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-12
+
+- **A QRDA I time keeps the offset the document states (#788).** The importer converted every time to
+  UTC, so a Maui visit at 5 pm on 31 December (03:00 UTC on 1 January) left the measurement year: CMS's
+  FHIR logic reads an event's day in its own offset, and official CMS125 now keeps that patient in 2025's
+  population. With both Cypress decks restated in -10:00 at the same clock times, the UTC conversion lost
+  one patient each on cms130, cms165 and cms2; keeping the offset restores every report. The original
+  decks state no offsets, so they and C2 are unchanged. A time with no offset is still read as UTC.
+
 ## 2026-10-11
 
 - **#787 had two more review passes before merge** (four reviewers on the whole PR, then two on the
