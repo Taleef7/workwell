@@ -4,3 +4,6 @@
 # the hash platform-dependent: green on the machine that vendored the deck, red on CI. Marking the
 # decks binary is what makes "the bytes CMS published" mean the same thing on every checkout.
 backend-ts/measures/official/*/tests/** -text
+# pnpm hashes a patch's bytes into the lockfile and applies it to LF package files: a CRLF checkout on
+# Windows would change the hash and can fail to apply (#750).
+backend-ts/patches/*.patch -text
