@@ -45,6 +45,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   UTC, every time of day that states a zone is written with its offset; otherwise none does. A time whose
   source states no zone is never given one (nothing invents data): beside zoned times it is written as
   stated and the document is reported non-conformant to CMS_0121. The corpus export is byte-identical (it states no zones).
+- **The measure engine orders dates in different time zones as instants (#750, owner-approved patch).**
+  cql-execution sorted two DateTimes by their text, which ends in the offset, so close times in different
+  offsets sorted out of order: the official measures' `Last(... sort by ...)` (CMS2's screening, the
+  housing-status exclusion in CMS122/125/130/165) and the authored "most recent" could pick an older
+  result. A `pnpm patch` of cql-execution 3.3.2 converts the second DateTime to the first's offset before
+  comparing, as the library's own comparisons do; one offset compares exactly as before, so the decks, C2
+  and the corpus cannot move. The published measure-engine package does not carry the patch.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11

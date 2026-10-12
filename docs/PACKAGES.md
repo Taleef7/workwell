@@ -110,6 +110,12 @@ has tested.
   ADR-059.
 - **`cql-execution`'s own behaviour.** It is a caret range (`^3.3.2`). Our measured conformance figures
   are against a specific version and are re-measured, not assumed, on upgrade (ADR-060).
+- **The worker's patch of `cql-execution` 3.3.2** (`backend-ts/patches/`, #750). Its query sort compared
+  two DateTimes by their text, so close times stated in different offsets sorted out of instant order and
+  `Last(... sort by ...)` could pick an older result. The worker patches it (a DateTime in another offset
+  is converted to the first's before comparing, as the library's own comparisons do). A consumer of the
+  published package installs `cql-execution` unpatched and keeps that behaviour; the patch goes upstream
+  or is dropped on the next upgrade, re-measured either way.
 
 ---
 
