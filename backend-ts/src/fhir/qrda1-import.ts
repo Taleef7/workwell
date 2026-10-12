@@ -148,14 +148,19 @@ function statesItsTemplatesMoodAndStatus(node: CdaNode): boolean {
 const resultHappened = (result: CdaNode) => result.attrs.moodCode === "EVN" && child(result, "statusCode")?.attrs.code === "completed";
 
 /**
- * Whether an entry happened as its document states it: its template's own mood and status, and, when it
- * states Results of its own, at least one that happened. A lab whose only result is preliminary, aborted or
- * nullified is no result: imported `final` with no value, CMS122 would read it as the most recent HbA1c with
- * none, and score the patient poorly controlled (review, #790).
+ * Whether an entry happened as its document states it: its template's own mood and status, and, for a
+ * Laboratory Test, Performed, a result. A lab test IS its result: one whose own Results are all preliminary,
+ * aborted or nullified, and which states no value of its own, is no result. Imported `final` with no value,
+ * CMS122 would read it as the most recent HbA1c with none and score the patient poorly controlled (review,
+ * #790). Any other datatype states the act itself (a study, an assessment, an exam): a Result of its that did
+ * not happen only gives no value, and the act is still imported (Codex, #796).
  */
 function happenedAsStated(node: CdaNode): boolean {
+  if (!statesItsTemplatesMoodAndStatus(node)) return false;
+  if (!hasTemplate(node, T.labPerformed)) return true;
   const results = ownResultsOf(node);
-  return statesItsTemplatesMoodAndStatus(node) && (results.length === 0 || results.some(resultHappened));
+  const ownValue = childrenNamed(node, "value").some((value) => value.attrs.nullFlavor === undefined);
+  return results.length === 0 || results.some(resultHappened) || ownValue;
 }
 
 /**

@@ -1210,6 +1210,27 @@ test("#790: a test whose own Results all did not happen is not imported, and is 
   assert.equal(deckResources().byId("fobt-1")!.valueString, "Negative", "a completed Result is the value");
 });
 
+test("#796: only a LAB is its result; a study keeps its act, and an entry's own value stays its value", () => {
+  // Codex on #796: the Result gate dropped a whole Diagnostic Study, Assessment or Physical Exam over a
+  // pending nested Result, though those state the act itself and may state their own value.
+  const resultStated = '<code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>\n        <statusCode code="completed"/>\n        <value xsi:type="ST">Negative</value>';
+  const pending = deckDocument.replace(resultStated, resultStated.replace('"completed"', '"active"'));
+  assert.notEqual(pending, deckDocument);
+  const asStudy = (xml: string) => xml.replace('root="2.16.840.1.113883.10.20.24.3.38"', 'root="2.16.840.1.113883.10.20.24.3.18"');
+  const withOwnValue = (xml: string) =>
+    xml.replace("<effectiveTime value='20250622143000'/>", `<effectiveTime value='20250622143000'/>\n      <value xsi:type="ST">Positive</value>`);
+  assert.notEqual(asStudy(pending), pending);
+  assert.notEqual(withOwnValue(pending), pending);
+  const study = deckResources(asStudy(pending)).byId("fobt-1");
+  assert.deepEqual([study?.status, study?.valueString], ["final", undefined], "a study whose result is pending was still performed");
+  assert.equal(deckResources(withOwnValue(asStudy(pending))).byId("fobt-1")?.valueString, "Positive", "a study keeps its own value");
+  assert.equal(deckResources(withOwnValue(pending)).byId("fobt-1")?.valueString, "Positive", "so does a lab that states one");
+  assert.equal(deckResources(pending).byId("fobt-1"), undefined, "a lab whose only result is pending is still not imported");
+  const nullValue = pending.replace("<effectiveTime value='20250622143000'/>", `<effectiveTime value='20250622143000'/>\n      <value xsi:type="ST" nullFlavor="NA"/>`);
+  assert.notEqual(nullValue, pending);
+  assert.equal(deckResources(nullValue).byId("fobt-1"), undefined, "a null-flavored value of its own is no value either");
+});
+
 test("#790: an encounter's diagnosis is imported only as a stated fact", () => {
   const diagnosis = '<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">\n        <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.168"/>';
   assert.ok(deckDocument.includes(diagnosis));
