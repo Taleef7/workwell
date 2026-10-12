@@ -230,6 +230,73 @@ test("official CMS125: an aborted mammogram is no screening (#790)", { skip }, a
 });
 
 /**
+ * A preliminary result is not a result (#790). A Laboratory Test, Performed is `completed`, and its Result says
+ * whether the value is final: `active` is how a preliminary one is sent. Read as final, a later preliminary
+ * 9.5% made this patient poorly controlled; imported as a test with no value, it did too (review, #790). Not
+ * imported, the most recent final HbA1c is March's 6.0%.
+ */
+const skipCms122 =
+  officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122" }).length > 0
+    ? "official cms122 artifact or terminology sidecar unavailable (gitignored; fetched at build)"
+    : false;
+
+const hba1c = (id: string, when: string, resultStatus: string, value: string) => `<entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2019-12-01"/>
+      <id root="1.3.6.1.4.1.115" extension="${id}"/>
+      <code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value="${when}"/><high value="${when}"/></effectiveTime>
+      <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
+        <code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="${resultStatus}"/>
+        <effectiveTime value="${when}"/>
+        <value xsi:type="PQ" value="${value}" unit="%"/>
+      </observation></entryRelationship>
+    </observation></entry>`;
+
+const diabeticDocument = (labs: string) => `<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <recordTarget><patientRole><id root="urn:workwell:employee" extension="rt-subject"/>
+    <patient><administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"><translation code="248152002" codeSystem="2.16.840.1.113883.6.96"/></administrativeGenderCode>
+    <birthTime value="19700401"/></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry><encounter classCode="ENC" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.23" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="enc-1"/>
+      <code code="99213" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value="20250402090000"/><high value="20250402093000"/></effectiveTime>
+    </encounter></entry>
+    <entry><act classCode="ACT" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.24.3.137" extension="2019-12-01"/>
+      <code code="CONC" codeSystem="2.16.840.1.113883.5.6"/><statusCode code="active"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="dx-1"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
+        <effectiveTime><low value="20200101"/><high nullFlavor="UNK"/></effectiveTime>
+        <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/>
+      </observation></entryRelationship>
+    </act></entry>
+    ${labs}
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+const cms122OutcomeOf = async (xml: string): Promise<string | undefined> => {
+  const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
+  const results = await executor.evaluateBatch("cms122", [{ subjectId: "rt-subject", patientBundle: importQrda1Document(xml).bundle }], EVAL);
+  return results.get("rt-subject")?.outcome;
+};
+
+test("official CMS122: a later PRELIMINARY HbA1c is not the most recent result (review, #790)", { skip: skipCms122 }, async () => {
+  const march = hba1c("a1", "20250301100000", "completed", "6.0");
+  assert.equal(await cms122OutcomeOf(diabeticDocument(march + hba1c("a2", "20251001100000", "completed", "9.5"))), "OVERDUE", "a final 9.5% in October is poor control");
+  assert.equal(await cms122OutcomeOf(diabeticDocument(march + hba1c("a2", "20251001100000", "active", "9.5"))), "COMPLIANT", "a preliminary one is not read");
+  assert.equal(await cms122OutcomeOf(diabeticDocument(march + hba1c("a2", "20251001100000", "aborted", "9.5"))), "COMPLIANT", "nor an aborted one");
+});
+
+/**
  * A blood pressure through the QRDA I route reaches CMS165 (#591, LOCKED §4A.8). The panel is exported as
  * QDM's two readings and imported back as one panel, which is the only shape CMS165FHIR v1.0.000 reads.
  * The control moves the diastolic reading 59 seconds: the two are no longer one blood pressure, nothing is

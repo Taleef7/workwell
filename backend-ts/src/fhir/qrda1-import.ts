@@ -135,11 +135,27 @@ const STATED_AS: ReadonlyArray<readonly [template: string, mood: string, status:
   [T.medicationOrder, "RQO", "active"],
 ];
 
-/** Whether an element states the mood and status of every datatype template it carries (`STATED_AS`). */
+/**
+ * Whether an element carries a datatype template `STATED_AS` lists and states the mood and status of each
+ * it carries. One with no listed template fails, so a mapper added without its row imports nothing.
+ */
 function statesItsTemplatesMoodAndStatus(node: CdaNode): boolean {
-  return STATED_AS.filter(([template]) => hasTemplate(node, template)).every(
-    ([, mood, status]) => node.attrs.moodCode === mood && child(node, "statusCode")?.attrs.code === status,
-  );
+  const own = STATED_AS.filter(([template]) => hasTemplate(node, template));
+  return own.length > 0 && own.every(([, mood, status]) => node.attrs.moodCode === mood && child(node, "statusCode")?.attrs.code === status);
+}
+
+/** A Result (…24.3.87) that happened: an event, completed. A preliminary one is `active` (#790). */
+const resultHappened = (result: CdaNode) => result.attrs.moodCode === "EVN" && child(result, "statusCode")?.attrs.code === "completed";
+
+/**
+ * Whether an entry happened as its document states it: its template's own mood and status, and, when it
+ * states Results of its own, at least one that happened. A lab whose only result is preliminary, aborted or
+ * nullified is no result: imported `final` with no value, CMS122 would read it as the most recent HbA1c with
+ * none, and score the patient poorly controlled (review, #790).
+ */
+function happenedAsStated(node: CdaNode): boolean {
+  const results = ownResultsOf(node);
+  return statesItsTemplatesMoodAndStatus(node) && (results.length === 0 || results.some(resultHappened));
 }
 
 /**
@@ -341,11 +357,18 @@ function identifierOf(node: CdaNode): { identifier?: Array<{ system: string; val
  * Condition ids are unique within the document even when a sender repeats an encounter id: the library
  * resolves each reference with `singleton from`, which throws on two matches. `conditionIds` is the
  * document's running set.
+ *
+ * A diagnosis is the encounter's own (a direct relationship, where the template places it) and stated as a
+ * fact: an event (`EVN`, its template's mood), never negated and never under a negated relationship. A
+ * history code stated as ruled out or only intended would otherwise read as CMS137's earlier episode
+ * (review, #790).
  */
 function encounterFrom(node: CdaNode, i: string, conditionIds: Set<string>): unknown[] {
   const id = idOf(node, `qrda1-encounter-${i}`);
-  const diagnoses = descendants(node, "observation")
-    .filter((n) => hasTemplate(n, T.encounterDiagnosis))
+  const diagnoses = childrenNamed(node, "entryRelationship")
+    .filter((relationship) => !isNegatedNode(relationship))
+    .map((relationship) => child(relationship, "observation"))
+    .filter((n): n is CdaNode => n !== undefined && hasTemplate(n, T.encounterDiagnosis) && !isNegatedNode(n) && n.attrs.moodCode === "EVN")
     .map((n) => {
       const code = concept(child(n, "value"));
       if (!code) return undefined;
@@ -479,9 +502,9 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
   if (!code) return undefined;
   const t = times(child(node, "effectiveTime"));
   // A Laboratory Test carries its result in a nested Result observation; a Diagnostic Study carries an
-  // outer `value` which is `nullFlavor="NA"` for a study with no coded result (ADR-050). Only a Result
-  // that happened states one: an aborted, cancelled or nullified Result is no value (#790).
-  const nested = ownResultsOf(node).find((result) => result.attrs.moodCode === "EVN" && child(result, "statusCode")?.attrs.code === "completed");
+  // outer `value` which is `nullFlavor="NA"` for a study with no coded result (ADR-050). The value is the
+  // first Result that happened (`happenedAsStated` admits no entry whose Results all did not, #790).
+  const nested = ownResultsOf(node).find(resultHappened);
   const valueNode = child(nested ?? node, "value") ?? child(node, "value");
   // Only a value that IS a number. `Number("")` and `Number(" ")` are 0, so an empty `value` attribute
   // would otherwise import as a result of zero, a fact the document never stated (Codex, #787).
@@ -1244,7 +1267,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
         : undefined;
       // An Encounter brings its diagnosis Conditions with it.
       const produced = (Array.isArray(resource) ? resource : [resource]).filter((r) => r !== undefined);
-      if (produced.length > 0 && !statesItsTemplatesMoodAndStatus(candidate)) {
+      if (produced.length > 0 && !happenedAsStated(candidate)) {
         // Not translated: an entry that did not happen, or only was intended, is not what its mapper's status
         // says (#790). A blood-pressure reading among it still keeps a pair at its time from forming, as it
         // did when it was imported: §4A.8 counts every stated systolic and diastolic, of any template.

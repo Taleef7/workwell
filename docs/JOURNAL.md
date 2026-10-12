@@ -11,10 +11,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   importer wrote every encounter `finished`, every procedure `completed` and every observation `final`
   whatever the document said, so an aborted, cancelled or nullified procedure, or a screening only
   intended, counted as done. Through official CMS125, an exported mammogram restated `aborted` now scores
-  OVERDUE (COMPLIANT before). Such an entry is named as untranslated, as a negated one is, and a Result that
-  did not happen states no value. Every entry in both Cypress decks states its template's values, so the
-  decks and C2 are unchanged. A blood-pressure reading that did not happen still blocks a pair at its time,
-  so §4A.8's pairing is unchanged.
+  OVERDUE (COMPLIANT before). Such an entry is named as untranslated, as a negated one is. So is a lab whose
+  own results are all preliminary, aborted or nullified: through official CMS122, a later preliminary 9.5%
+  HbA1c no longer reads as poor control. An encounter's diagnosis stated as negated or only intended is no
+  longer a Condition. Every entry in both Cypress decks states its template's values, so the decks and C2
+  are unchanged. A blood-pressure reading that did not happen still blocks a pair at its time, so §4A.8's
+  pairing is unchanged.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11

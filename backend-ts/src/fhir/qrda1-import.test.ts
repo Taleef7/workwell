@@ -1185,16 +1185,54 @@ test("#790: every datatype the importer translates is checked, and a Diagnosis a
   assert.equal(deckResources(restated(study, "fobt-1", "status", "aborted")).byId("fobt-1"), undefined, "an aborted Study does not");
 });
 
-test("#790: a Result that did not happen states no value", () => {
-  const aborted = deckDocument.replace(
-    '<code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>\n        <statusCode code="completed"/>\n        <value xsi:type="ST">Negative</value>',
-    '<code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>\n        <statusCode code="aborted"/>\n        <value xsi:type="ST">Negative</value>',
-  );
-  assert.notEqual(aborted, deckDocument, "the fixture must change the Result's status");
-  const fobt = deckResources(aborted).byId("fobt-1")!;
-  assert.equal(fobt.status, "final", "the test itself was completed");
-  assert.equal(fobt.valueString, undefined, "its aborted Result is no result");
-  assert.equal(deckResources().byId("fobt-1")!.valueString, "Negative", "a completed Result is");
+test("#790: a test whose own Results all did not happen is not imported, and is named; one that did gives its value", () => {
+  const resultStated = '<code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>\n        <statusCode code="completed"/>\n        <value xsi:type="ST">Negative</value>';
+  assert.ok(deckDocument.includes(resultStated));
+  // A preliminary result is `active`; imported `final` with no value, it read as a result-less test (review, #790).
+  for (const status of ["active", "aborted", "nullified"]) {
+    const xml = deckDocument.replace(resultStated, resultStated.replace('"completed"', `"${status}"`));
+    const { imported, byId } = deckResources(xml);
+    assert.equal(byId("fobt-1"), undefined, status);
+    assert.ok(imported.untranslatedTemplates.includes(`${TEMPLATE}38`), status);
+  }
+  // Two Results: the value is the one that happened, wherever it sits.
+  const secondResult = `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
+        <code code="2335-8" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
+        <value xsi:type="ST">Positive</value>
+      </observation></entryRelationship>
+    </observation></entry>`;
+  const twoResults = deckDocument
+    .replace(resultStated, resultStated.replace('"completed"', '"aborted"'))
+    .replace("      </observation></entryRelationship>\n    </observation></entry>", `      </observation></entryRelationship>\n      ${secondResult}`);
+  assert.equal(deckResources(twoResults).byId("fobt-1")?.valueString, "Positive", "the aborted first Result is passed over");
+  assert.equal(deckResources().byId("fobt-1")!.valueString, "Negative", "a completed Result is the value");
+});
+
+test("#790: an encounter's diagnosis is imported only as a stated fact", () => {
+  const diagnosis = '<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">\n        <templateId extension="2021-08-01" root="2.16.840.1.113883.10.20.24.3.168"/>';
+  assert.ok(deckDocument.includes(diagnosis));
+  const conditions = (xml: string) => deckResources(xml).all.filter((r) => r.resourceType === "Condition").length;
+  assert.equal(conditions(deckDocument), 1, "as written, the encounter's diagnosis is a Condition");
+  for (const [label, restatedDiagnosis] of [
+    ["negated", diagnosis.replace('moodCode="EVN">', 'moodCode="EVN" negationInd="true">')],
+    ["intended", diagnosis.replace('moodCode="EVN">', 'moodCode="INT">')],
+    ["under a negated relationship", diagnosis.replace('typeCode="REFR">', 'typeCode="REFR" negationInd="true">')],
+  ] as const) {
+    assert.notEqual(restatedDiagnosis, diagnosis, label);
+    assert.equal(conditions(deckDocument.replace(diagnosis, restatedDiagnosis)), 0, label);
+  }
+});
+
+test("#790: a skipped entry blocks a pair only as a blood-pressure reading, wherever it sits in the document", () => {
+  // An aborted procedure states no time, which as a reading could be any time; it is no reading.
+  const untimed = sitedProcedure("").replace('<effectiveTime value="20240405083000"/>', "").replace('<statusCode code="completed"/>', '<statusCode code="aborted"/>');
+  assert.equal(paired(sys(), dia(), untimed, sitedProcedure("")).panels.length, 1, "a non-reading never blocks");
+  // Before the pair, a skipped reading's place is taken by the next one imported; it still blocks.
+  const aborted = exam({ id: "s0", code: "8480-6" }).replace('<statusCode code="completed"/>', '<statusCode code="aborted"/>');
+  assert.equal(paired(aborted, sys(), dia()).panels.length, 0, "an aborted systolic before the pair");
+  assert.equal(paired(sys(), dia(), aborted).panels.length, 0, "and after it");
 });
 
 test("import: a blood pressure stated as two readings at one time is one US Core panel; a lone reading stays a reading (LOCKED §4A.8)", () => {
@@ -2057,6 +2095,7 @@ test("review #787: a reading's value is its own: a negated Result is not its val
   const result = (value: number, negated = false) => `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN"${negated ? ' negationInd="true"' : ""}>
         <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
         <code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
         <value xsi:type="PQ" value="${value}" unit="mm[Hg]"/>
       </observation></entryRelationship>`;
   const negated = paired(sys({ extra: result(150, true) }), dia());
