@@ -439,3 +439,24 @@ test("official CMS165: a reading spelled outside LOINC's own system is neither s
     assert.equal(await cms165OutcomeOf(buildQrda1Document(run, "cms165", cms165Outcome, bundle)), "COMPLIANT", `${systolic}/${diastolic}: and so does its QRDA`);
   }
 });
+
+test("official CMS165 reads a blood pressure stated with a date alone, and its QRDA now states it (#792)", { skip: skipCms165 }, async () => {
+  const [patientEntry, encounter, hypertensionEntry, early] = hypertensiveBundle.entry;
+  // A source bundle states what the importer would add: the patient's US Core sex and the diagnosis's status.
+  const patient = { resource: { ...(patientEntry!.resource as Record<string, unknown>), extension: [{ url: "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex", valueCode: "248152002" }] } };
+  const hypertension = {
+    resource: { ...(hypertensionEntry!.resource as Record<string, unknown>), clinicalStatus: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/condition-clinical", code: "active" }] } },
+  };
+  const reading = (code: string, value: number) => ({ code: { coding: [{ system: "http://loinc.org", code }] }, valueQuantity: { value, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } });
+  // The fixture's 128/78 on 1 June, then 150/95 stated on 1 September with no time of day.
+  const late = { resource: { ...(early!.resource as Record<string, unknown>), id: "bp-late", effectiveDateTime: "2025-09-01", component: [reading("8480-6", 150), reading("8462-4", 95)] } };
+  const bundle = { ...hypertensiveBundle, entry: [patient, encounter!, hypertension, early!, late] };
+  assert.equal(await cms165OutcomeOfBundle(bundle), "OVERDUE", "the run reads the later reading");
+  // Before, the export refused it, so the document's latest reading was the controlled one.
+  const xml = buildQrda1Document(run, "cms165", cms165Outcome, bundle);
+  const exams = xml.split("<entry ").filter((e) => e.includes('root="2.16.840.1.113883.10.20.24.3.59"') && e.includes('<effectiveTime value="20250901"/>'));
+  assert.deepEqual(exams.map((e) => /<value xsi:type="PQ" value="(\d+)" unit="mm\[Hg\]"\/>/.exec(e)?.[1]), ["150", "95"], "the document states it at its date");
+  // WorkWell's own import pairs only a time of day (LOCKED §4A.8), so its recalculation still reads only the
+  // controlled reading; a QDM receiver reads both readings as stated.
+  assert.equal(await cms165OutcomeOf(xml), "COMPLIANT");
+});

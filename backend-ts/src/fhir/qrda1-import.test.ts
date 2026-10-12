@@ -1972,18 +1972,82 @@ test("review #787: the baseline panel is written as exactly two readings", () =>
   assert.deepEqual(exported(bpPanel()), { exams: 2, lab: false, why: "" });
 });
 
-test("review #787: a panel with no time of day is not written: midnight would be a time it never stated", () => {
-  for (const when of ["2025", "2025-06", "2025-06-01"]) {
-    const r = exported(bpPanel({ effectiveDateTime: when }));
-    assert.equal(r.exams, 0, when);
-    assert.match(r.why, /no time of day/, when);
+test("#792: a panel stated with a date alone is written at that date, named, and not paired back", () => {
+  for (const [when, written] of [["2025", "2025"], ["2025-06", "202506"], ["2025-06-01", "20250601"]] as const) {
+    const panel = bpPanel({ effectiveDateTime: when });
+    const translation = translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: panel }] });
+    const exams = translation.entries.filter((e) => e.includes("2.16.840.1.113883.10.20.24.3.59"));
+    assert.deepEqual(exams.map((e) => /<effectiveTime value="([^"]+)"\/>/.exec(e)?.[1]), [written, written], when);
+    assert.deepEqual(exams.map((e) => /<value xsi:type="PQ" value="(\d+)"/.exec(e)?.[1]), ["150", "95"], when);
+    assert.deepEqual(translation.untranslatable, [], when);
+    assert.ok(translation.caveats?.some((c) => /date alone or an open period .*nor any other blood pressure whose time could fall within its own/.test(c)), when);
+    // §4A.8 pairs only a time of day: the readings come back apart, and are counted.
+    const back = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), { resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: panel }] }));
+    const observations = back.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation");
+    assert.deepEqual([observations.filter((o) => JSON.stringify(o.code).includes("85354-9")).length, back.unpairedBloodPressureReadings], [0, 2], when);
   }
+  // Nor does it pair a panel at a time of day within its own, which before was written alone and paired:
+  // §4A.8 cannot tell which readings belong together, and the caveat says so (review, #792).
+  const timedThatDay = bpPanel({ id: "bp-timed", effectiveDateTime: "2025-06-01T10:00:00Z" });
+  const both = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), { resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: timedThatDay }, { resource: bpPanel({ effectiveDateTime: "2025-06-01" }) }] }));
+  assert.deepEqual([both.bundle.entry.filter((e) => JSON.stringify(e.resource).includes("85354-9")).length, both.unpairedBloodPressureReadings], [0, 4]);
+  // A panel at a time of day carries no such caveat.
+  const timed = translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: bpPanel() }] });
+  assert.ok(!timed.caveats?.some((c) => /date alone or an open period/.test(c)));
+});
+
+test("#793: what the run could not read as a blood pressure is not written, and says why", () => {
+  const vital = [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs" }] }];
+  const translate = (...resources: unknown[]) => translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, ...resources.map((resource) => ({ resource }))] });
+  const lone = (id: string, system: string, code: string, value: number) => ({
+    resourceType: "Observation", id, status: "final", category: vital, code: { coding: [{ system, code }] },
+    effectiveDateTime: "2025-06-01T10:00:00Z", valueQuantity: { value, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" },
+  });
+  // Two lone readings at one time: before, two Laboratory Tests; written as Physical Exams, the import would
+  // pair them into a panel the run never read.
+  const readings = [lone("s", "http://loinc.org", "8480-6", 150), lone("d", "urn:oid:2.16.840.1.113883.6.1", "8462-4", 95)];
+  const loneTranslation = translate(...readings);
+  assert.deepEqual(loneTranslation.entries, []);
+  assert.equal(loneTranslation.untranslatable.filter((u) => /^Observation: a lone systolic or diastolic reading is not written/.test(u)).length, 2);
+  const back = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), { resourceType: "Bundle", entry: [...sourceBundle.entry, ...readings.map((resource) => ({ resource }))] }));
+  assert.deepEqual(back.bundle.entry.filter((e) => /8480-6|8462-4|85354-9/.test(JSON.stringify(e.resource))), []);
+  assert.equal(back.unpairedBloodPressureReadings, 0);
+  // A panel under 35094-2 is not one CMS165 reads either.
+  const older = translate(bpPanel({ code: { coding: [{ system: "http://loinc.org", code: "35094-2" }] } }));
+  assert.deepEqual([older.entries.length, older.untranslatable], [0, ["Observation: a blood pressure panel coded 35094-2 is not written: CMS165 reads a panel coded 85354-9 or 55284-4 only, so it did not read this one"]]);
+});
+
+test("#793: LOINC spelled other than http://loinc.org is named, and written only beside the canonical spelling", () => {
+  const lab = (...coding: Array<{ system: string; code: string }>) => ({
+    resourceType: "Observation", id: "a1c", status: "final", effectiveDateTime: "2025-06-01T10:00:00Z", code: { coding },
+    category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+    valueQuantity: { value: 7.1, unit: "%" },
+  });
+  const translate = (resource: unknown) => translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource }] });
+  for (const system of ["urn:oid:2.16.840.1.113883.6.1", "http://loinc.org/"]) {
+    const t = translate(lab({ system, code: "4548-4" }));
+    assert.deepEqual([t.entries.length, t.untranslatable], [0, [`Observation: LOINC spelled ${system}, not http://loinc.org, is not written: CQL matches a code's system exactly, so the run did not read it`]], system);
+  }
+  const both = translate(lab({ system: "urn:oid:2.16.840.1.113883.6.1", code: "4548-4" }, { system: "http://loinc.org", code: "4548-4" }));
+  assert.deepEqual([both.entries.length, both.untranslatable], [1, []]);
+  // LOINC's own system with no code is no code, and a spelling and a system CDA cannot carry are each named.
+  assert.deepEqual(translate(lab({ system: "http://loinc.org" } as { system: string; code: string })).untranslatable, ["Observation: no code to carry — CDA needs a coded value"]);
+  assert.deepEqual(translate(lab({ system: "urn:oid:2.16.840.1.113883.6.1", code: "4548-4" }, { system: "http://example.org/local", code: "A1C" })).untranslatable, [
+    "Observation: LOINC spelled urn:oid:2.16.840.1.113883.6.1, not http://loinc.org, is not written: CQL matches a code's system exactly, so the run did not read it; no CDA code system OID for http://example.org/local — CDA cannot carry it",
+  ]);
+  // Another system CDA cannot carry keeps its own reason.
+  assert.match(translate(lab({ system: "http://example.org/local", code: "x" })).untranslatable[0]!, /no CDA code system OID for http:\/\/example\.org\/local/);
 });
 
 test("review #787: `issued` is when it was recorded, never the reading's time", () => {
   const r = exported(bpPanel({ effectiveDateTime: undefined, issued: "2025-06-03T15:30:00Z" }));
   assert.equal(r.exams, 0);
   assert.match(r.why, /no stated time \(effective\[x\]\)/);
+  // A null period, or null in place of a time, states no time either (Codex, #801).
+  for (const time of [{ effectivePeriod: null }, { effectiveDateTime: null }, { effectiveDateTime: null, effectivePeriod: null }]) {
+    const n = exported(bpPanel({ effectiveDateTime: undefined, ...time }));
+    assert.deepEqual([n.exams, /no stated time \(effective\[x\]\)/.test(n.why)], [0, true], JSON.stringify(time));
+  }
 });
 
 test("review #787: a comparator is not a value, and a unit that is not UCUM mm[Hg] is not written", () => {
@@ -2097,10 +2161,18 @@ test("export: a blood pressure at an impossible time is not written, never rolle
   }
 });
 
-test("export: a blood pressure over a period is written only when the period is closed, and comes back as the same period (Codex, #787)", () => {
+test("export: a blood pressure over a period is written unless it runs backwards or mixes zones, and a closed one comes back as the same period (Codex, #787; #792)", () => {
   for (const [period, why] of [
-    [{ start: "2025-06-01T10:00:00Z" }, /no end/],
-    [{ start: "2025-06-01T10:00:00Z", end: "2025-06-01" }, /no time of day/],
+    [{}, /neither a start nor an end/],
+    [{ start: "2025-06-01T10:00:00Z", end: "2025-06-01" }, /time zone on only one bound \(a date states none\)/],
+    [{ start: "2025-06-02", end: "2025-06-01" }, /ends before it starts/],
+    [{ start: "2025-06-01T10:00:00", end: "2025-05-31" }, /ends before it starts/],
+    // Ordered as the import orders them, by each bound's first instant: the import reads a period whose high
+    // starts before its low as any time at all (review, #792).
+    [{ start: "2025-06-01T10:00:00", end: "2025-06-01" }, /ends before it starts/],
+    [{ start: "2025-06-15", end: "2025-06" }, /ends before it starts/],
+    [{ start: "2025-06-01T10:00:00.15Z", end: "2025-06-01T10:00:00.1Z" }, /ends before it starts/],
+    [{ start: "2025-06-01T10:00:30Z", end: "2025-06-01T10:00Z" }, /ends before it starts/],
     [{ start: "2025-06-01T10:05:00Z", end: "2025-06-01T10:00:00Z" }, /ends before it starts/],
     [{ start: "2025-06-01T10:00:00.9Z", end: "2025-06-01T10:00:00.1Z" }, /ends before it starts/],
     // Ordered as instants, not digits, now each bound is written in its own offset (#791): 10:00 at -05:00 is
@@ -2116,6 +2188,17 @@ test("export: a blood pressure over a period is written only when the period is 
   const back = importQrda1Document(buildQrda1Document(run, "cms125", outcome(officialEvidence), bundle));
   const panels = back.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9"));
   assert.deepEqual(panels.map((p) => p.effectivePeriod), [closed]);
+  // An open side is written as QDM states one, and bounds at two precisions are written as stated (#792).
+  const effective = (p: Record<string, string>) => {
+    const t = translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: bpPanel({ effectiveDateTime: undefined, effectivePeriod: p }) }] });
+    assert.deepEqual(t.untranslatable, [], JSON.stringify(p));
+    return t.entries.filter((e) => e.includes("2.16.840.1.113883.10.20.24.3.59")).map((e) => /<effectiveTime>([\s\S]*?)<\/effectiveTime>/.exec(e)?.[1]?.replace(/\s+/g, ""));
+  };
+  assert.deepEqual(effective({ start: "2025-06-01T10:00:00Z" }), Array(2).fill('<lowvalue="20250601100000"/><highnullFlavor="NA"/>'));
+  assert.deepEqual(effective({ end: "2025-06-01T10:00:00Z" }), Array(2).fill('<lownullFlavor="UNK"/><highvalue="20250601100000"/>'));
+  assert.deepEqual(effective({ start: "2025-06-01", end: "2025-06-01T10:00:00" }), Array(2).fill('<lowvalue="20250601"/><highvalue="20250601100000"/>'));
+  assert.deepEqual(effective({ start: "2025-06", end: "2025-06-01" }), Array(2).fill('<lowvalue="202506"/><highvalue="20250601"/>'));
+  assert.deepEqual(effective({ start: "2025-06-01", end: "2025-06-03" }), Array(2).fill('<lowvalue="20250601"/><highvalue="20250603"/>'));
 });
 
 // ---------------------------------------------------------------------------------------------------
@@ -2258,7 +2341,7 @@ test("export: a panel's own code may spell LOINC any way; its readings are writt
 test("export: every blood-pressure time is either written or refused with its real reason (review, #787)", () => {
   const period = (start: string | undefined, end: string) => exported(bpPanel({ effectiveDateTime: undefined, effectivePeriod: { ...(start ? { start } : {}), end } }));
   assert.match(period("2025-06-01T10:00:00-05:00", "2025-06-01T11:00:00").why, /time zone on only one bound/);
-  assert.match(period(undefined, "2025-06-01T11:00:00Z").why, /no start/);
+  assert.deepEqual(period(undefined, "2025-06-01T11:00:00Z"), { exams: 2, lab: false, why: "" }, "an open start is written (#792)");
   assert.match(exported(bpPanel({ effectiveDateTime: undefined, effectiveTiming: { event: ["2025-06-01T10:00:00Z"] } })).why, /schedule/);
   assert.equal(exported(bpPanel({ effectiveDateTime: undefined, effectiveInstant: "2025-06-01T10:00:00.123Z" })).exams, 2, "an instant is a time");
 });
