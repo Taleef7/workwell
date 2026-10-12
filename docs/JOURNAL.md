@@ -26,6 +26,16 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   decks state no offsets, so they and C2 are unchanged. A time with no offset is still read as UTC. Mixed offsets
   within hours of each other can now meet cql-execution's text sort of DateTimes, which the official
   measures use too: #750, widened today, holds the engine-level fix.
+- **One patient's unreadable data no longer fails a whole batch (#789).** fqm-execution scores a chunk
+  of 500 patients in one call, so one blood pressure in `mmHg` (UCUM's is `mm[Hg]`) made cql-execution
+  reject the call and every patient in the chunk lost their CMS165 result. An error cql-execution raises on
+  the patients' data is now marked, and its patients are evaluated one at a time: only the patient the engine
+  refuses fails (MISSING_DATA with its own reason, the run PARTIAL_FAILURE). A refusal ("retrieved nothing
+  for anyone"), an artifact or terminology problem, or a crashed worker still fails the batch. Alone, a
+  patient costs about nine times its share of a batch, so per measure and run the retry stops after 25
+  patients fail alone or 1,000 have been retried (review: sparse bad data, one patient per chunk, could
+  otherwise double a nightly); each retried chunk's counts and time are logged. WebChart's readings carry `mmHg`, so CMS165 over WebChart data still needs the
+  unit fixed at the source (#591); this keeps it from costing everyone else.
 - **The QRDA I export writes each time as its FHIR value states it (#791).** It wrote every time through
   JavaScript's `Date`: a year became midnight on 1 January, 30 February became 2 March, a time with no
   zone was read in the exporting machine's zone, and a zoned time became the UTC instant with no offset,

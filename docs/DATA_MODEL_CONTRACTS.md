@@ -29,7 +29,9 @@ run (`compliance/live-cell.ts`).
 `closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA from a completed evaluation opens one.
 - **A failed evaluation never changes a case.** An engine or batch error persists MISSING_DATA with
 `evaluationError` and marks the run PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
-over for that (subject, measure); the run logs a WARN with the count. A failed rerun-to-verify audits its
+over for that (subject, measure); the run logs a WARN with the count. A batch whose calculation threw on
+one patient's data is first retried one subject at a time (#789), so only the subjects that fail alone carry
+the error. A failed rerun-to-verify audits its
 attempt as `CASE_RERUN_FAILED`, leaves the case as it was, and answers 500 `verification_failed` with the run id.
 - **Dispositions** (`UpsertedCase`): `CREATED|UPDATED|REOPENED|RESOLVED|EXCLUDED|UNCHANGED`; each but
 `UNCHANGED` emits its `CASE_*` event. A re-confirm whose persisted `next_action` string changed (new

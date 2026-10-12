@@ -20,6 +20,7 @@ import { normalizePeriodEnd } from "@work-well/official-executor";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { OFFICIAL_MEASURE_SEMANTICS, officialMeasureSemantics } from "./official-measure-semantics.ts";
 import { loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
+import { isOfficialCalculationError } from "./official-calculation-error.ts";
 import type { FqmCalculate } from "@work-well/official-executor";
 
 const IPP = "initial-population";
@@ -650,6 +651,27 @@ test("PR-8: a batch that retrieved NOTHING for anybody refuses instead of report
     ),
     /retrieved NOTHING for any of 3 subjects/,
   );
+});
+
+test("#789: only an error cql-execution raised on the data is marked, so neither the refusal nor a failed start is retried alone", async () => {
+  // Retried alone, "retrieved nothing" is an ordinary answer for each patient and would hide the
+  // misconfiguration the refusal exists to catch; a calculation that could not start fails the same way for
+  // every patient (Codex, #798). Only an error raised while executing over the patients' data is marked.
+  const subjects = ["s1", "s2", "s3"].map((subjectId) => ({ subjectId, patientBundle: patientBundle(subjectId) }));
+  const outcomeOf = (calculate: Parameters<typeof batchExecutor>[0]) =>
+    batchExecutor(calculate).evaluateBatch("cms125", subjects, "2026-07-25").then(() => undefined, (e: unknown) => e);
+  const refusal = await outcomeOf(calculatorFor(["s1", "s2", "s3"], { retrieved: false }).calculate);
+  assert.match(String((refusal as Error)?.message), /retrieved NOTHING/);
+  assert.equal(isOfficialCalculationError(refusal), false, "the refusal is not the data's");
+  const throwing = (message: string) =>
+    (async () => {
+      throw new Error(message);
+    }) as unknown as Parameters<typeof batchExecutor>[0];
+  const onData = await outcomeOf(throwing("The following error occurred in the cql-execution engine: Invalid UCUM unit: 'mmHg'"));
+  assert.ok(isOfficialCalculationError(onData), "an error cql-execution raised on the data is");
+  assert.match(String((onData as Error).message), /Invalid UCUM unit: 'mmHg'/, "with its own message, which the evidence carries");
+  const notStarted = await outcomeOf(throwing("Missing the following valuesets: 2.16.840.1.113883.3.464.1003.101.12.1001"));
+  assert.ok(notStarted instanceof Error && !isOfficialCalculationError(notStarted), "a calculation that could not start is not");
 });
 
 test("ADR-043: a whole roster out of the IPP is REPORTED, not refused — a zero-denominator run is valid", async () => {
