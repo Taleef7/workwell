@@ -250,7 +250,10 @@ function isoFromHl7(value: string | undefined): string | undefined {
   if (Math.abs(offsetMinutes) > 14 * 60 || (offset && Number(offset[3]) > 59)) return undefined;
   const local = new Date(parsed.getTime() + offsetMinutes * 60_000).toISOString().slice(0, 19);
   if (local !== `${y}-${mo}-${d}T${h}:${mi}:${s}`) return undefined;
-  return `${local}${zone}`;
+  // A fraction of a second as written, as the export writes it (review, #791); FHIR states at most nine digits.
+  const fraction = digits.slice(14);
+  if (fraction.length > 10) return undefined;
+  return `${local}${fraction}${zone}`;
 }
 
 /** A CDA coded element → a FHIR CodeableConcept, or undefined when it is nullFlavored/unmapped. */

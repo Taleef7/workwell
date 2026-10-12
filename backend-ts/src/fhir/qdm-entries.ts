@@ -696,12 +696,17 @@ function translateItems(items: unknown[], pad: string, entries: string[], untran
     let produced: string[] = [];
     // What a written entry does not carry (a blood pressure's third component, its performer, ...).
     const notCarried: string[] = [];
+    // The times this item writes. One that throws, or writes nothing, takes its times with it: a time no
+    // entry carries must not decide whether the document states offsets (review, #791).
+    const timesBefore = writtenTimes?.length ?? 0;
     try {
       produced = entryFor(item, i, pad, notCarried);
     } catch {
+      if (writtenTimes) writtenTimes.length = timesBefore;
       if (type) untranslatable.push(`${type}: could not be translated (malformed field)`);
       return;
     }
+    if (produced.length === 0 && writtenTimes) writtenTimes.length = timesBefore;
     if (produced.length > 0) {
       entries.push(...produced);
       // Once per resource: two uncoded components are one panel's caveat, not two resources'.

@@ -62,7 +62,14 @@ export const MEASURE_CRITERION_ID_ROOT = "9f3b1c07-2e5a-4d18-b6a4-70c9e8d5a231";
  * export (review, #361). Coercion is safe because every call site interpolates into XML anyway.
  */
 export const esc = (s: unknown): string =>
-  String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  String(s ?? "")
+    // XML 1.0 forbids the C0 control characters but tab, LF and CR, even escaped: one left in made the
+    // document not well-formed, and since #791 it could also forge an export's time placeholder (review).
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 
 /**
  * ISO-8601 → HL7 `YYYYMMDDHHMMSS`, in UTC.

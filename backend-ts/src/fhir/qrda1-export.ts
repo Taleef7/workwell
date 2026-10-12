@@ -164,13 +164,19 @@ function nameOf(subjectId: string, patient: HeaderPatient | undefined): { given:
  * `nullFlavor="UNK"` — measured, not assumed. The synthetic directory holds neither, and inventing a
  * race for a patient is exactly the fabrication ADR-037 forbids.
  */
+/**
+ * The birth date as written: the BUNDLE wins, for the same reason it wins on name (it is the record
+ * evaluated), at the precision stated, a year as a year (#791); one that is no real date is unknown.
+ */
+function birthTimeOf(subjectId: string, bundle: unknown): string | null {
+  return hl7DateAsStated(patientOf(bundle)?.birthDate ?? employeeById(subjectId)?.dateOfBirth);
+}
+
 function recordTarget(subjectId: string, bundle: unknown): string {
   const patient = patientOf(bundle);
   const { given, family } = nameOf(subjectId, patient);
   const sex = SEX_CONCEPTS[patient?.gender ?? ""];
-  // The BUNDLE wins on birth date for the same reason it wins on name: it is the record evaluated. Written
-  // at the precision stated, a year as a year (#791); one that is no real date is unknown.
-  const birthDate = hl7DateAsStated(patient?.birthDate ?? employeeById(subjectId)?.dateOfBirth);
+  const birthDate = birthTimeOf(subjectId, bundle);
   const gender = sex
     ? `<administrativeGenderCode nullFlavor="OTH">
           <translation code="${sex.code}" displayName="${sex.display}" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMEDCT"/>
@@ -249,11 +255,13 @@ export function buildQrda1Document(
 ): string {
   const translation = precomputed ?? (patientBundle ? translateQdm(patientBundle) : { entries: [], zoned: false });
   const entries = translation.entries;
-  // CMS_0121: offsets everywhere or nowhere (#791). When the entries state them, so do the document's own
-  // times, which are UTC instants. The measurement period is day-specific and exempt.
-  const now = `${hl7Ts(new Date().toISOString())}${translation.zoned ? "+0000" : ""}`;
-  const low = hl7Ts(run.measurementPeriodStart);
-  const high = hl7Ts(run.measurementPeriodEnd);
+  // CMS_0121: offsets everywhere or nowhere (#791). When the entries state them, so does every other time of
+  // day in the document: its own time and the measurement period, which are UTC instants. The rule exempts
+  // only a value of eight characters or fewer (a date), not the Reporting Parameters element (review, #791).
+  const utc = translation.zoned ? "+0000" : "";
+  const now = `${hl7Ts(new Date().toISOString())}${utc}`;
+  const low = `${hl7Ts(run.measurementPeriodStart)}${utc}`;
+  const high = `${hl7Ts(run.measurementPeriodEnd)}${utc}`;
   const reference = precomputed?.reference ?? measureReference(measureId, outcome.evidence);
   const official = reference.includes(EMEASURE_ID_ROOT);
   // The eMeasure Reference `<externalDocument>` below carries NO `<text>`. It used to carry
@@ -495,6 +503,11 @@ export function buildQrda1Documents(
         ...qrda1Caveats(measureId, bundle),
         ...tallied(translation.caveats ?? [], "not carried"),
         ...zoneCaveat(translation),
+        // HL7 asks for a birth date to the day (a SHOULD, CONF:1198-5300); a year or a month is written as
+        // stated rather than padded to the 1st (review, #791).
+        ...((birthTimeOf(outcome.subjectId, bundle)?.length ?? 8) < 8
+          ? ["the birth date is written at the year or month its source states; HL7 asks for a day"]
+          : []),
       ],
     };
   });

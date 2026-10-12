@@ -1931,7 +1931,7 @@ test("review #787: a malformed offset or trailing text makes no timestamp rather
     assert.equal(reading!.effectiveDateTime, undefined, value);
   }
   const [ok] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='20250219171000.123-0500'/>" })), "Observation");
-  assert.equal(ok!.effectiveDateTime, "2025-02-19T17:10:00-05:00", "a fraction and a well-formed offset still parse");
+  assert.equal(ok!.effectiveDateTime, "2025-02-19T17:10:00.123-05:00", "a fraction and a well-formed offset still parse, the fraction kept (#791)");
 });
 
 test("review #787: a panel names a source id once, even when both readings share it", () => {
@@ -2497,11 +2497,10 @@ test("#791: one time in a non-UTC zone puts an offset on every time of day in th
   // and the condition's onset is a date.
   const bundle = timedBundle({ visit: ["2025-12-31T17:00:00-10:00", "2025-12-31T17:30:00-10:00"], lab: "2025-06-01T10:00:00", onset: "2019-06-15" });
   const xml = exportOf(bundle);
-  // The measurement period (Reporting Parameters) is day-specific, and the IG exempts it from CMS_0121.
-  const reporting = /<section>(?:(?!<\/section>)[\s\S])*?Reporting Parameters[\s\S]*?<\/section>/.exec(xml)?.[0] ?? "";
-  assert.ok(reporting.includes("Observation Parameters"), "the fixture must find the Reporting Parameters section");
-  const timesOfDay = valuesIn(xml.replace(reporting, "")).filter((v) => /^\d{12}/.test(v));
-  assert.ok(timesOfDay.length >= 6, `the entries' and the header's times, got ${timesOfDay.length}`);
+  // CMS_0121 as its schematron asserts it: once the document's own effectiveTime states an offset, every time
+  // value longer than eight characters does too, the measurement period included (review, #791).
+  const timesOfDay = valuesIn(xml).filter((v) => v.length > 8);
+  assert.ok(timesOfDay.length >= 8, `the entries', the header's and the measurement period's times, got ${timesOfDay.length}`);
   assert.deepEqual(timesOfDay.filter((v) => !/[+-]\d{4}$/.test(v)), [], "every time of day states an offset (CMS_0121)");
   assert.ok(timesOfDay.includes("20251231170000-1000"), "the visit in its own offset, on its own day");
   assert.ok(timesOfDay.includes("20250510100000+0000"), "a UTC time as +0000");
@@ -2524,4 +2523,50 @@ test("#791: a document whose times are all in UTC or no zone states no offset an
   assert.ok(valuesIn(xml).includes("20250601100000"), "a UTC time as its UTC digits, read back as UTC");
   const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => bundle);
   assert.ok(!doc!.caveats.some((c) => /no time zone/.test(c)), "nothing is assumed");
+});
+
+test("#791: third-party text cannot forge a time, and an XML-forbidden character is dropped", () => {
+  const forged = {
+    ...sourceBundle,
+    entry: sourceBundle.entry.map((e) =>
+      (e.resource as { resourceType: string }).resourceType === "Encounter"
+        ? { resource: { ...(e.resource as object), id: "\u00010\u0001", type: [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213", display: "\u000199\u0001 visit" }] }] } }
+        : e,
+    ),
+  };
+  const xml = exportOf(forged);
+  assert.doesNotMatch(xml, /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/, "no control character reaches the document");
+  assert.match(xml, /displayName="99 visit"/, "the text is kept, without the character");
+});
+
+test("#791: only a time an entry writes decides whether the document states offsets", () => {
+  // The condition states -10:00 but is dropped after its time was written (a malformed site throws), so
+  // nothing written states a zone.
+  const bundle = timedBundle({ onset: "2025-06-01T08:00:00-10:00", visit: ["2025-04-02T09:00:00", "2025-04-02T09:30:00"] });
+  (bundle.entry[2]!.resource as Record<string, unknown>).bodySite = { coding: [] };
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => bundle);
+  assert.ok(doc!.nonConformanceReasons.some((r) => /Condition: could not be translated/.test(r)), "the fixture must drop the condition");
+  assert.deepEqual(valuesIn(doc!.xml).filter((v) => /[+-]\d{4}$/.test(v)), []);
+  assert.ok(!doc!.caveats.some((c) => /no time zone/.test(c)));
+});
+
+test("#791: a birth date coarser than a day is named; a fraction of a second comes back as written", () => {
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => timedBundle({ birthDate: "1975-03" }));
+  assert.ok(doc!.caveats.some((c) => /birth date is written at the year or month/.test(c)), JSON.stringify(doc!.caveats));
+  const [day] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => timedBundle({}));
+  assert.ok(!day!.caveats.some((c) => /birth date/.test(c)));
+  const xml = exportOf(timedBundle({ lab: "2025-06-01T10:00:00.250-10:00" }));
+  assert.ok(valuesIn(xml).includes("20250601100000.250-1000"));
+  assert.equal(resourceBack(xml, "Observation").effectiveDateTime, "2025-06-01T10:00:00.250-10:00");
+});
+
+test("#791: a year or month that is not one is no date, and -00:00 is UTC", () => {
+  for (const low of ["202513", "202500", "0000"]) {
+    const doc = diagnosisDocument(`<effectiveTime><low value='${low}'/><high nullFlavor="UNK"/></effectiveTime>`);
+    assert.equal((conditionFromDoc(`<effectiveTime><low value='${low}'/><high nullFlavor="UNK"/></effectiveTime>`) as { onsetDateTime?: string } | undefined)?.onsetDateTime, undefined, low);
+    assert.ok(doc.includes(low));
+  }
+  assert.equal((conditionFromDoc(`<effectiveTime><low value='202512'/><high nullFlavor="UNK"/></effectiveTime>`) as { onsetDateTime?: string } | undefined)?.onsetDateTime, "2025-12");
+  const utcOnly = exportOf(timedBundle({ lab: "2025-06-01T10:00:00-00:00", visit: ["2025-04-02T09:00:00+00:00", "2025-04-02T09:30:00Z"] }));
+  assert.deepEqual(valuesIn(utcOnly).filter((v) => /[+-]\d{4}$/.test(v)), [], "a document in UTC however spelled states no offset");
 });
