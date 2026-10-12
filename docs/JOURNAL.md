@@ -13,8 +13,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   its input is now marked, and its patients are evaluated one at a time: only the patient the engine
   refuses fails (MISSING_DATA with its own reason, the run PARTIAL_FAILURE). A refusal ("retrieved nothing
   for anyone"), an artifact or terminology problem, or a crashed worker still fails the batch. Alone, a
-  patient costs about eight times its share of a batch, so after 25 such failures a measure stops retrying
-  for the rest of the run. WebChart's readings carry `mmHg`, so CMS165 over WebChart data still needs the
+  patient costs about nine times its share of a batch, so per measure and run the retry stops after 25
+  patients fail alone or 1,000 have been retried (review: sparse bad data, one patient per chunk, could
+  otherwise double a nightly); each retried chunk's counts and time are logged. WebChart's readings carry `mmHg`, so CMS165 over WebChart data still needs the
   unit fixed at the source (#591); this keeps it from costing everyone else.
 
 ## 2026-10-11

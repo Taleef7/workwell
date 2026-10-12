@@ -1385,9 +1385,10 @@ function batchProbe(
   opts: {
     failOn?: string;
     /** #789: the batch's calculation throws on its input, as one patient's `mmHg` makes it. */
-    calcFailOn?: string;
-    /** #789: these subjects' own evaluation throws too. */
+    calcFailOn?: string | Set<string>;
+    /** #789: these subjects' own evaluation throws too (in `singleFailMeasure` only, when it is set). */
     singleFailFor?: Set<string>;
+    singleFailMeasure?: string;
     ipp?: boolean;
     omit?: Set<string>;
     singleIpp?: boolean;
@@ -1413,7 +1414,10 @@ function batchProbe(
         batchable.has(measureId) ? { version: "official-fqm:1.0.000:artifact-sha:terminology-sha", kind: "official" as const, warning: null } : undefined,
       async evaluate(input) {
         singles.push(`${input.measureId}`);
-        const failing = [...(opts.singleFailFor ?? [])].find((id) => JSON.stringify(input.patientBundle).includes(`"${id}"`));
+        const failing =
+          opts.singleFailMeasure !== undefined && opts.singleFailMeasure !== input.measureId
+            ? undefined
+            : [...(opts.singleFailFor ?? [])].find((id) => JSON.stringify(input.patientBundle).includes(`"${id}"`));
         if (failing) throw new Error(`Invalid UCUM unit: 'mmHg' (${failing})`);
         return {
           subjectId: "ignored",
@@ -1429,7 +1433,7 @@ function batchProbe(
         if (!batchable.has(measureId)) return undefined;
         const subjects = subjectsFactory();
         batches.push({ measureId, size: subjects.length });
-        if (opts.calcFailOn === measureId) {
+        if (typeof opts.calcFailOn === "string" ? opts.calcFailOn === measureId : opts.calcFailOn?.has(measureId)) {
           throw new OfficialCalculationError("The following error occurred in the cql-execution engine: Invalid UCUM unit: 'mmHg'");
         }
         if (opts.failOn === measureId) {
@@ -1664,33 +1668,117 @@ test("#789: a batch whose calculation threw is evaluated one patient at a time, 
 
 test("#789: past the limit, a measure stops retrying alone, in this chunk and the run's later chunks", async () => {
   // Data wrong for many patients (a source writing every reading in `mmHg`) must not double the run. A
-  // limit of two over three patients, so the count has to carry from one failure to the next.
-  const everyone = new Set(["emp-001", "emp-002", "emp-003"]);
-  const ownReasons = (outcomes: Array<{ measureId: string; evidence: unknown }>) =>
+  // limit of two, so the count has to carry from one failure to the next.
+  const twelve = EMPLOYEES.slice(0, 12);
+  const everyone = new Set(twelve.map((e) => e.externalId));
+  const ownReason = /\(emp-\d{3}\)/;
+  const reasonsOf = (outcomes: Array<{ measureId: string; evidence: unknown }>) =>
     outcomes.filter((o) => o.measureId === "audiogram").map((o) => (o.evidence as { message?: string }).message ?? "");
-  // In one chunk: once two patients have failed alone, the chunk's third gets the batch's error.
+  // In one chunk: once two patients have failed alone, the chunk's rest get the batch's error.
   const oneChunk = batchProbe(new Set(["audiogram"]), { calcFailOn: "audiogram", singleFailFor: everyone });
-  const inChunk = await runWithProbe(oneChunk, MEASURE_SCOPE, { individualRetryFailureLimit: 2 });
-  assert.equal(ownReasons(inChunk.outcomes).length, 3, "three subjects");
+  const inChunk = await runWithProbe(oneChunk, MEASURE_SCOPE, { individualRetryFailureLimit: 2, employees: twelve });
+  const n = reasonsOf(inChunk.outcomes).length;
+  assert.ok(n >= 5, `the fixture needs at least five audiogram subjects, got ${n}`);
   assert.equal(oneChunk.batches.filter((b) => b.measureId === "audiogram").length, 1, "one chunk");
   assert.equal(oneChunk.singles.filter((m) => m === "audiogram").length, 2, "the chunk stops retrying at the second failure");
-  assert.deepEqual(ownReasons(inChunk.outcomes).map((m) => /\(emp-00\d\)/.test(m)).sort(), [false, true, true]);
-  // Across chunks: once the run has stopped retrying, a later chunk's failed batch is not retried at all.
-  process.env.WORKWELL_RUN_CHUNK_SIZE = "1";
+  assert.equal(reasonsOf(inChunk.outcomes).filter((m) => ownReason.test(m)).length, 2);
+  assert.ok(
+    inChunk.logs.some((l) => l.message.includes(`0 answered, 2 failed, ${n - 2} given the batch's error after the limit`)),
+    "the pass is logged with its counts",
+  );
+  // Across chunks of two: after the first chunk's two failures, no later chunk is retried at all.
+  process.env.WORKWELL_RUN_CHUNK_SIZE = "2";
   try {
     const probe = batchProbe(new Set(["audiogram"]), { calcFailOn: "audiogram", singleFailFor: everyone });
-    const { res, outcomes, logs } = await runWithProbe(probe, MEASURE_SCOPE, { individualRetryFailureLimit: 2 });
-    assert.equal(probe.batches.filter((b) => b.measureId === "audiogram").length, 3, "one chunk per subject");
+    const { res, outcomes, logs } = await runWithProbe(probe, MEASURE_SCOPE, { individualRetryFailureLimit: 2, employees: twelve });
+    assert.ok(probe.batches.filter((b) => b.measureId === "audiogram").length >= 3, "several chunks");
     assert.equal(probe.singles.filter((m) => m === "audiogram").length, 2, "two failures are evaluated alone, then no more");
-    const reasons = ownReasons(outcomes);
-    assert.equal(reasons.filter((m) => /\(emp-00\d\)/.test(m)).length, 2, "two subjects' own reasons");
-    assert.ok(reasons.filter((m) => !/\(emp-00\d\)/.test(m)).every((m) => /cql-execution engine/.test(m)), "the third carries the batch's");
+    const reasons = reasonsOf(outcomes);
+    assert.equal(reasons.filter((m) => ownReason.test(m)).length, 2, "two subjects' own reasons");
+    assert.ok(reasons.filter((m) => !ownReason.test(m)).every((m) => /cql-execution engine/.test(m)), "the rest carry the batch's");
     assert.equal(res.status, "PARTIAL_FAILURE");
-    assert.equal(logs.filter((l) => /one at a time/.test(l.message)).length, 2, "the third chunk's log does not claim a retry");
+    assert.equal(logs.filter((l) => /evaluating its \d+ subject\(s\) one at a time/.test(l.message)).length, 1, "only the first chunk is retried");
+    assert.ok(logs.some((l) => /not evaluated one at a time: 2 subject\(s\) already failed on their own this run/.test(l.message)));
     assert.ok(logs.some((l) => /2 subject\(s\) failed on their own after their batch failed/.test(l.message)));
   } finally {
     delete process.env.WORKWELL_RUN_CHUNK_SIZE;
   }
+});
+
+test("#789: a measure retries at most its budget of patients per run, so sparse bad data cannot double the run", async () => {
+  // One bad patient per chunk: each retried chunk fails only once, so the failure limit never trips; the
+  // budget is what bounds the cost (review, #789).
+  const twelve = EMPLOYEES.slice(0, 12);
+  process.env.WORKWELL_RUN_CHUNK_SIZE = "2";
+  try {
+    const probe = batchProbe(new Set(["audiogram"]), { calcFailOn: "audiogram", singleFailFor: new Set(["emp-001"]) });
+    const { logs } = await runWithProbe(probe, MEASURE_SCOPE, { individualRetryBudget: 2, employees: twelve });
+    assert.ok(probe.batches.filter((b) => b.measureId === "audiogram").length >= 3, "several chunks");
+    assert.equal(probe.singles.filter((m) => m === "audiogram").length, 2, "one chunk of two fits the budget, the next does not");
+    assert.ok(logs.some((l) => /not evaluated one at a time: 2 of this run's 2 retries are spent/.test(l.message)));
+  } finally {
+    delete process.env.WORKWELL_RUN_CHUNK_SIZE;
+  }
+});
+
+test("#789: the limit is each measure's own: one measure's bad data does not stop another's retries", async () => {
+  const twelve = EMPLOYEES.slice(0, 12);
+  // Which batched measures these twelve are evaluated for, from a clean run.
+  const candidates = ["audiogram", "hazwoper", "tb_surveillance", "flu_vaccine"];
+  const dry = batchProbe(new Set(candidates));
+  const clean = await runWithProbe(dry, { scopeType: "ALL_PROGRAMS", evaluationDate: "2026-06-15" }, { employees: twelve });
+  const sizes = new Map<string, number>();
+  for (const o of clean.outcomes) if (candidates.includes(o.measureId)) sizes.set(o.measureId, (sizes.get(o.measureId) ?? 0) + 1);
+  const [bad, good] = [...sizes.entries()].filter(([, k]) => k >= 3).map(([m]) => m);
+  assert.ok(bad && good, `two batched measures with three or more subjects, got ${JSON.stringify([...sizes])}`);
+  // Chunks of two patients, so the good measure still has batches to retry after the bad one has stopped.
+  process.env.WORKWELL_RUN_CHUNK_SIZE = "2";
+  try {
+    const probe = batchProbe(new Set([bad!, good!]), {
+      calcFailOn: new Set([bad!, good!]),
+      singleFailFor: new Set(twelve.map((e) => e.externalId)),
+      singleFailMeasure: bad,
+    });
+    await runWithProbe(probe, { scopeType: "ALL_PROGRAMS", evaluationDate: "2026-06-15" }, { employees: twelve, individualRetryFailureLimit: 2 });
+    assert.equal(probe.singles.filter((m) => m === bad).length, 2, `${bad} stops at its own limit`);
+    // Every batch of the good measure that holds more than one patient is retried, before and after.
+    const goodBatches = probe.batches.filter((b) => b.measureId === good && b.size >= 2);
+    assert.ok(goodBatches.length >= 2, `${good} needs batches in more than one chunk`);
+    assert.equal(
+      probe.singles.filter((m) => m === good).length,
+      goodBatches.reduce((sum, b) => sum + b.size, 0),
+      `${good} still retries every batch it can`,
+    );
+  } finally {
+    delete process.env.WORKWELL_RUN_CHUNK_SIZE;
+  }
+});
+
+test("#789: a refusal is never retried one patient at a time, however many patients its batch holds", async () => {
+  // Alone, "retrieved nothing" is an ordinary answer for each patient and would hide the misconfiguration.
+  const probe = batchProbe(new Set(["audiogram"]), { failOn: "audiogram" });
+  const { outcomes } = await runWithProbe(probe, MEASURE_SCOPE);
+  const audiogram = outcomes.filter((o) => o.measureId === "audiogram");
+  assert.ok(audiogram.length >= 2, "a batch of more than one");
+  assert.equal(probe.singles.filter((m) => m === "audiogram").length, 0);
+  assert.ok(audiogram.every((o) => /retrieved NOTHING/.test((o.evidence as { message?: string }).message ?? "")));
+});
+
+test("#789: a retried batch whose every subject is answered alone leaves a clean run", async () => {
+  const probe = batchProbe(new Set(["audiogram"]), { calcFailOn: "audiogram" });
+  const { res, outcomes, logs } = await runWithProbe(probe, MEASURE_SCOPE);
+  const audiogram = outcomes.filter((o) => o.measureId === "audiogram");
+  assert.ok(audiogram.length >= 2 && audiogram.every((o) => (o.evidence as { via?: string }).via === "single"));
+  assert.equal(res.status, "COMPLETED", "a batch the engine could not run, whose patients it then could, is no failure");
+  assert.ok(logs.some((l) => l.message.includes(`${audiogram.length} answered, 0 failed, 0 given the batch's error`)));
+});
+
+test("#789: a batch of one is not retried: its patient alone is the same call", async () => {
+  const probe = batchProbe(new Set(["audiogram"]), { calcFailOn: "audiogram" });
+  const { outcomes, logs } = await runWithProbe(probe, { scopeType: "EMPLOYEE", employeeExternalId: "emp-001", evaluationDate: "2026-06-15" });
+  assert.equal(probe.singles.filter((m) => m === "audiogram").length, 0);
+  assert.equal(outcomes.find((o) => o.measureId === "audiogram")?.status, "MISSING_DATA");
+  assert.ok(logs.some((l) => /not evaluated one at a time: a batch of one is already its subject alone/.test(l.message)));
 });
 
 test("PR-8: a failed run-log write cannot turn a SUCCESSFUL batch into a failed measure", async () => {
