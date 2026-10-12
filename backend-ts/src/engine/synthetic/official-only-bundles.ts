@@ -59,11 +59,11 @@ export const OFFICIAL_ONLY_CONVERGENCE: Record<
 const QICORE = "http://hl7.org/fhir/us/qicore/StructureDefinition/";
 const USCORE = "http://hl7.org/fhir/us/core/StructureDefinition/";
 
-/** evaluationDate is "YYYY-MM-DD"; returns the FHIR dateTime `daysAgo` before it. */
+/** evaluationDate is "YYYY-MM-DD"; returns the FHIR dateTime `daysAgo` before it, in UTC (#795). */
 function dateMinusDays(evaluationDate: string, daysAgo: number): string {
   const d = new Date(`${evaluationDate}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - daysAgo);
-  return `${d.toISOString().slice(0, 10)}T00:00:00`;
+  return `${d.toISOString().slice(0, 10)}T00:00:00Z`;
 }
 
 /** Birth date for the eCQM age gates (eval year derived from evaluationDate). */
@@ -95,7 +95,7 @@ function officeVisit(e: EmployeeProfile, evaluationDate: string, daysAgo: number
     class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" },
     subject: { reference: `Patient/${e.externalId}` },
     type: [{ coding: [ECQM_CANONICAL_CODES.officeVisit] }],
-    period: { start: `${day}T09:00:00`, end: `${day}T09:30:00` },
+    period: { start: `${day}T09:00:00Z`, end: `${day}T09:30:00Z` },
   };
 }
 

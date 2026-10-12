@@ -67,7 +67,7 @@ const isType = (r: { resourceType?: string }, t: string) => r.resourceType === t
 function dateMinusDays(anchorDate: string, daysAgo: number): string {
   const d = new Date(`${anchorDate}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - daysAgo);
-  return `${d.toISOString().slice(0, 10)}T00:00:00`;
+  return `${d.toISOString().slice(0, 10)}T00:00:00Z`;
 }
 
 /**

@@ -63,6 +63,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   written, each with its own reason: a lone systolic or diastolic, or a panel coded 35094-2 (before, each
   was a Laboratory Test), and LOINC spelled other than `http://loinc.org`, since CQL matches a code's
   system exactly (before, reported as "no CDA code system"). Decks, C2 and the corpus export unchanged.
+- **The synthetic builders write their times in UTC (#795).** The builders behind TWH's employees, the
+  scale tenant and the cms2/cms130/cms165 synthetic bundles wrote times of day with no zone, which FHIR
+  forbids (the Maui corpus already wrote `Z`). They now write `Z`. Every TWH subject on every measure TWH
+  runs, scale-tenant subjects on every authored measure and the official-only bundles score identically
+  before and after, on three evaluation dates and in three host time zones; the stored evidence is unchanged.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11
