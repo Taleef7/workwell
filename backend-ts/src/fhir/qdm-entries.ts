@@ -180,11 +180,12 @@ function effectiveTime(resource: FhirResource, indent: string, ts: (iso: unknown
  * The times a translation writes, so its document states offsets everywhere or nowhere (CMS_0121, #791).
  *
  * While `translateQdm` builds its entries, each time is written as a placeholder and kept here; once it knows
- * them all, it fills every placeholder. When any written time of day states a zone, every time of day states
- * an offset: its own, as written (the clock time the document gave, never moved to UTC, which moved an
- * evening's day), or `+0000` for one stated with no zone, the zone the import and the engine already read it
- * in. Otherwise no time states one. A date never carries an offset. Outside a translation a time is written
- * with none.
+ * them all, it fills every placeholder. When any written time of day states a zone other than UTC, every time
+ * of day that states one is written with its own offset, as written (the clock time the document gave, never
+ * moved to UTC, which moved an evening's day; `Z` as `+0000`). A time whose source stated no zone keeps none:
+ * writing one would invent it (Codex, #799), so such a document is reported non-conformant to CMS_0121.
+ * Otherwise no time states one. A date never carries an offset. Outside a translation a time is written with
+ * none.
  */
 let writtenTimes: StatedHl7Time[] | undefined;
 const PLACEHOLDER = /\u0001(\d+)\u0001/g;
@@ -654,8 +655,12 @@ export interface QdmTranslation {
    * they write states a zone. The document's own times follow it.
    */
   zoned?: boolean;
-  /** How many times of day stated with no zone were written `+0000` because the document is zoned. */
-  zoneAssumed?: number;
+  /**
+   * How many times of day stated with no zone sit in a zoned document. They are written as stated, with no
+   * offset: the source gave none, and writing one would invent it (Codex, #799). That breaks CMS_0121, so the
+   * document is reported non-conformant.
+   */
+  zoneUnstated?: number;
 }
 
 /** Entries plus the reasons anything was dropped — see `QdmTranslation.untranslatable`. */
@@ -679,14 +684,14 @@ export function translateQdm(bundle: unknown, pad = "          "): QdmTranslatio
   const isUtc = (offset: string) => offset === "+0000" || offset === "-0000";
   const zoned = times.some((t) => t.hasTime && t.offset !== undefined && !isUtc(t.offset));
   // Counted by what was stated: a lab writes its one time on the test and on its result.
-  const zoneAssumed = zoned ? new Set(times.filter((t) => t.hasTime && t.offset === undefined).map((t) => t.digits)).size : 0;
+  const zoneUnstated = zoned ? new Set(times.filter((t) => t.hasTime && t.offset === undefined).map((t) => t.digits)).size : 0;
   const written = entries.map((entry) =>
     entry.replace(PLACEHOLDER, (_, i: string) => {
       const t = times[Number(i)]!;
-      return zoned && t.hasTime ? `${t.digits}${t.offset ?? "+0000"}` : t.digits;
+      return zoned && t.hasTime ? `${t.digits}${t.offset ?? ""}` : t.digits;
     }),
   );
-  return { entries: written, untranslatable, caveats, zoned, ...(zoneAssumed > 0 ? { zoneAssumed } : {}) };
+  return { entries: written, untranslatable, caveats, zoned, ...(zoneUnstated > 0 ? { zoneUnstated } : {}) };
 }
 
 function translateItems(items: unknown[], pad: string, entries: string[], untranslatable: string[], caveats: string[]): void {

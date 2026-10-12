@@ -2493,9 +2493,9 @@ test("#791: a time with no zone is written as stated, whatever zone the exportin
 });
 
 test("#791: one time in a non-UTC zone puts an offset on every time of day in the document, the header included", () => {
-  // A Maui visit at 5 pm on 31 December; the lab states no zone, the mammogram and procedure are in UTC,
+  // A Maui visit at 5 pm on 31 December; the lab states -10:00 too, the mammogram and procedure are in UTC,
   // and the condition's onset is a date.
-  const bundle = timedBundle({ visit: ["2025-12-31T17:00:00-10:00", "2025-12-31T17:30:00-10:00"], lab: "2025-06-01T10:00:00", onset: "2019-06-15" });
+  const bundle = timedBundle({ visit: ["2025-12-31T17:00:00-10:00", "2025-12-31T17:30:00-10:00"], lab: "2025-06-01T10:00:00-10:00", onset: "2019-06-15" });
   const xml = exportOf(bundle);
   // CMS_0121 as its schematron asserts it: once the document's own effectiveTime states an offset, every time
   // value longer than eight characters does too, the measurement period included (review, #791).
@@ -2504,16 +2504,28 @@ test("#791: one time in a non-UTC zone puts an offset on every time of day in th
   assert.deepEqual(timesOfDay.filter((v) => !/[+-]\d{4}$/.test(v)), [], "every time of day states an offset (CMS_0121)");
   assert.ok(timesOfDay.includes("20251231170000-1000"), "the visit in its own offset, on its own day");
   assert.ok(timesOfDay.includes("20250510100000+0000"), "a UTC time as +0000");
-  assert.ok(timesOfDay.includes("20250601100000+0000"), "a time with no zone as +0000, the zone it is read in");
+  assert.ok(timesOfDay.includes("20250601100000-1000"), "the lab in its own offset");
   assert.match(xml, /<low value="20190615"\/>/, "a date carries no offset");
   assert.match(xml, /<ClinicalDocument[\s\S]*?<effectiveTime value="\d{14}\+0000"\/>/, "the document's own time");
   assert.match(xml, /<author>\s*<time value="\d{14}\+0000"\/>/, "the author's time");
   assert.match(xml, /<birthTime value="19750312"\/>/, "a date carries none");
   // Round trip: the visit comes back on the day and in the offset it was stated in.
   assert.equal(resourceBack(xml, "Encounter").period.start, "2025-12-31T17:00:00-10:00");
-  // And the zone-less time written as UTC is named.
   const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => bundle);
-  assert.ok(doc!.caveats.some((c) => /^1 time\(s\) stated with no time zone written as UTC \(\+0000\)/.test(c)), JSON.stringify(doc!.caveats));
+  assert.ok(!doc!.nonConformanceReasons.some((r) => /CMS_0121/.test(r)), "every time states its zone: it conforms");
+});
+
+test("#799: a time whose source states no zone is never given one; beside zoned times it makes the document non-conformant", () => {
+  // Nothing invents clinical data (CLAUDE.md): `+0000` on a zone-less lab would assert an instant the source
+  // never gave (Codex, #799). It is written as stated, and the document says it cannot meet CMS_0121.
+  const bundle = timedBundle({ visit: ["2025-12-31T17:00:00-10:00", "2025-12-31T17:30:00-10:00"], lab: "2025-06-01T10:00:00" });
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => bundle);
+  const values = valuesIn(doc!.xml);
+  assert.ok(values.includes("20250601100000"), "the lab as stated, with no offset");
+  assert.ok(!values.some((v) => v.startsWith("20250601100000") && /[+-]\d{4}$/.test(v)), "no zone is invented for it");
+  assert.ok(values.includes("20251231170000-1000"), "the visit keeps its own");
+  assert.equal(doc!.conformant, false);
+  assert.ok(doc!.nonConformanceReasons.some((r) => /^1 time\(s\) whose source states no time zone, beside times that state one \(CMS_0121\)/.test(r)), JSON.stringify(doc!.nonConformanceReasons));
 });
 
 test("#791: a document whose times are all in UTC or no zone states no offset anywhere", () => {

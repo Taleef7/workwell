@@ -442,6 +442,13 @@ function nonConformanceFrom(
   // and a WebChart bundle of a few hundred observations produced 300 near-identical strings — 31 KB per
   // subject of the same three sentences (review, #362).
   reasons.push(...tallied(translation.untranslatable, "not exported"));
+  // CMS_0121: offsets everywhere or nowhere. A time whose source stated no zone, beside one that did, is
+  // written with none rather than given an invented one (Codex, #799), so the document cannot meet it.
+  if ((translation.zoneUnstated ?? 0) > 0) {
+    reasons.push(
+      `${translation.zoneUnstated} time(s) whose source states no time zone, beside times that state one (CMS_0121): written as stated, with no offset invented`,
+    );
+  }
   if (!reference.includes(EMEASURE_ID_ROOT)) {
     reasons.push(`measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was evaluated from authored logic`);
   }
@@ -459,17 +466,6 @@ function nonConformanceFrom(
 export function qrda1Caveats(measureId: string, bundle: unknown): string[] {
   // Bundles are supplied only on the live path today, which is also the only path that stamps.
   return bundle !== undefined && ROSTER_ELIGIBLE_MEASURES.has(measureId) ? [rosterEvidenceCaveat(measureId)] : [];
-}
-
-/**
- * A document that states offsets writes a time stated with no zone as `+0000` (CMS_0121, #791): the zone the
- * import and the engine already read it in, but one its source did not state, so it is named.
- */
-function zoneCaveat(translation: QdmTranslation): string[] {
-  const n = translation.zoneAssumed ?? 0;
-  return n > 0
-    ? [`${n} time(s) stated with no time zone written as UTC (+0000), the zone they are read in: the document states an offset on every time because another time states one`]
-    : [];
 }
 
 /**
@@ -502,7 +498,6 @@ export function buildQrda1Documents(
       caveats: [
         ...qrda1Caveats(measureId, bundle),
         ...tallied(translation.caveats ?? [], "not carried"),
-        ...zoneCaveat(translation),
         // HL7 asks for a birth date to the day (a SHOULD, CONF:1198-5300); a year or a month is written as
         // stated rather than padded to the 1st (review, #791).
         ...((birthTimeOf(outcome.subjectId, bundle)?.length ?? 8) < 8
