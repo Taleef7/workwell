@@ -18,6 +18,8 @@ export async function calculate(
     return { results: [{ patientId: "p0", detailedResults: [{ populationResults: [{ populationType: "initial-population", result: true, read }] }] }] };
   }
   if (first.mode === "throw") throw new Error("fqm could not parse the measure");
+  // fqm-execution's wording for an error cql-execution raised on the patients' data (#789).
+  if (first.mode === "data") throw new Error("The following error occurred in the cql-execution engine: Invalid UCUM unit: 'mmHg'");
   if (first.mode === "exit") process.exit(3); // in a worker this ends the thread, as a fatal crash would
   if (first.mode === "uncaught") {
     // An exception outside any promise the worker awaits: the thread emits `error`, then `exit`.
