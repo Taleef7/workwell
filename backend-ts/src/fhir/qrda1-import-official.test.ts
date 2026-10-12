@@ -166,6 +166,22 @@ test(
 );
 
 /**
+ * A visit at 5 pm on 31 December in Maui (`-1000`) is a 2025 visit (#788). CMS125 reads the encounter's day
+ * in its own offset: kept as stated, the patient is in 2025's initial population. The same instant in UTC,
+ * 03:00 on 1 January, is what the import produced before #788, and it is not.
+ */
+test("official CMS125 reads an imported visit's day in the document's own offset (#788)", { skip }, async () => {
+  const exported = buildQrda1Document(run, MEASURE, outcome, sourceBundle);
+  const visitAt = (low: string, high: string) => {
+    const doc = exported.replace('value="20250402090000"', `value="${low}"`).replace('value="20250402093000"', `value="${high}"`);
+    assert.notEqual(doc, exported, "the fixture must move the visit");
+    return importQrda1Document(doc).bundle;
+  };
+  assert.equal(await inIpp(visitAt("20251231170000-1000", "20251231173000-1000")), true, "31 December in its own offset");
+  assert.equal(await inIpp(visitAt("20260101030000", "20260101033000")), false, "the same instant in UTC is 2026");
+});
+
+/**
  * The body site moves CMS125's 2026 answer (#784). CMS125FHIR v1.0.000 counts an "Unilateral
  * Mastectomy, Unspecified Laterality" condition (`…198.12.1071`) as a left or right mastectomy by its
  * `bodySite` qualifier, so one on each side is a bilateral mastectomy and a denominator exclusion.
@@ -205,6 +221,95 @@ test("official CMS125 excludes a round-tripped patient whose two unspecified-lat
 test("official CMS125 does not exclude the same patient when the conditions carry no side (#784)", { skip }, async () => {
   // The control: without it, the test above could pass on the conditions' codes alone.
   assert.equal(await outcomeAfterRoundTrip(withMastectomies(false)), "COMPLIANT");
+});
+
+/**
+ * A screening the document says did not happen is no screening (#790). The mammogram is exported as QDM
+ * states it, then its `statusCode` is restated `aborted`: imported with the mapper's `final` it satisfied the
+ * numerator; now it is not imported, and the patient stays a gap.
+ */
+const outcomeOfDocument = async (xml: string): Promise<string | undefined> => {
+  const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
+  const results = await executor.evaluateBatch(MEASURE, [{ subjectId: "rt-subject", patientBundle: importQrda1Document(xml).bundle }], EVAL);
+  return results.get("rt-subject")?.outcome;
+};
+
+test("official CMS125: an aborted mammogram is no screening (#790)", { skip }, async () => {
+  const xml = buildQrda1Document(run, MEASURE, outcome, sourceBundle);
+  const at = xml.indexOf('extension="obs-mg"');
+  const status = xml.indexOf('<statusCode code="completed"/>', at);
+  assert.ok(at > 0 && status > at, "the exported mammogram states its status");
+  const aborted = `${xml.slice(0, status)}<statusCode code="aborted"/>${xml.slice(status + '<statusCode code="completed"/>'.length)}`;
+  assert.equal(await outcomeOfDocument(xml), "COMPLIANT", "as exported, the mammogram counts");
+  assert.ok(!importQrda1Document(aborted).bundle.entry.some((e) => (e.resource as { id?: string }).id === "obs-mg"));
+  assert.equal(await outcomeOfDocument(aborted), "OVERDUE", "aborted, it does not");
+});
+
+/**
+ * A preliminary result is not a result (#790). A Laboratory Test, Performed is `completed`, and its Result says
+ * whether the value is final: `active` is how a preliminary one is sent. Read as final, a later preliminary
+ * 9.5% made this patient poorly controlled; imported as a test with no value, it did too (review, #790). Not
+ * imported, the most recent final HbA1c is March's 6.0%.
+ */
+const skipCms122 =
+  officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: "cms122" }).length > 0
+    ? "official cms122 artifact or terminology sidecar unavailable (gitignored; fetched at build)"
+    : false;
+
+const hba1c = (id: string, when: string, resultStatus: string, value: string) => `<entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2019-12-01"/>
+      <id root="1.3.6.1.4.1.115" extension="${id}"/>
+      <code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value="${when}"/><high value="${when}"/></effectiveTime>
+      <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
+        <code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="${resultStatus}"/>
+        <effectiveTime value="${when}"/>
+        <value xsi:type="PQ" value="${value}" unit="%"/>
+      </observation></entryRelationship>
+    </observation></entry>`;
+
+const diabeticDocument = (labs: string) => `<ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <recordTarget><patientRole><id root="urn:workwell:employee" extension="rt-subject"/>
+    <patient><administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"><translation code="248152002" codeSystem="2.16.840.1.113883.6.96"/></administrativeGenderCode>
+    <birthTime value="19700401"/></patient></patientRole></recordTarget>
+  <component><structuredBody><component><section>
+    <templateId root="2.16.840.1.113883.10.20.24.2.1" extension="2021-08-01"/>
+    <entry><encounter classCode="ENC" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.23" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="enc-1"/>
+      <code code="99213" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
+      <effectiveTime><low value="20250402090000"/><high value="20250402093000"/></effectiveTime>
+    </encounter></entry>
+    <entry><act classCode="ACT" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.24.3.137" extension="2019-12-01"/>
+      <code code="CONC" codeSystem="2.16.840.1.113883.5.6"/><statusCode code="active"/>
+      <entryRelationship typeCode="SUBJ"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.135" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="dx-1"/>
+        <code code="29308-4" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
+        <effectiveTime><low value="20200101"/><high nullFlavor="UNK"/></effectiveTime>
+        <value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/>
+      </observation></entryRelationship>
+    </act></entry>
+    ${labs}
+  </section></component></structuredBody></component>
+</ClinicalDocument>`;
+
+const cms122OutcomeOf = async (xml: string): Promise<string | undefined> => {
+  const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
+  const results = await executor.evaluateBatch("cms122", [{ subjectId: "rt-subject", patientBundle: importQrda1Document(xml).bundle }], EVAL);
+  return results.get("rt-subject")?.outcome;
+};
+
+test("official CMS122: a later PRELIMINARY HbA1c is not the most recent result (review, #790)", { skip: skipCms122 }, async () => {
+  const march = hba1c("a1", "20250301100000", "completed", "6.0");
+  assert.equal(await cms122OutcomeOf(diabeticDocument(march + hba1c("a2", "20251001100000", "completed", "9.5"))), "OVERDUE", "a final 9.5% in October is poor control");
+  assert.equal(await cms122OutcomeOf(diabeticDocument(march + hba1c("a2", "20251001100000", "active", "9.5"))), "COMPLIANT", "a preliminary one is not read");
+  assert.equal(await cms122OutcomeOf(diabeticDocument(march + hba1c("a2", "20251001100000", "aborted", "9.5"))), "COMPLIANT", "nor an aborted one");
 });
 
 /**
