@@ -444,7 +444,8 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
     return `a blood pressure whose status is '${r.status ?? "absent"}' is not final, so it is not written as completed readings`;
   }
   const time = bloodPressureTime(r);
-  if (time.effectiveDateTime === undefined && time.effectivePeriod === undefined) {
+  // `null` is as absent as `undefined`: third-party JSON states either (Codex, #801).
+  if (time.effectiveDateTime == null && time.effectivePeriod == null) {
     return r.effectiveTiming !== undefined
       ? "a blood pressure timed by a schedule (effectiveTiming) is not written: a reading is taken at a time"
       : "a blood pressure with no stated time (effective[x]) is not written: `issued` is when it was recorded, not measured";

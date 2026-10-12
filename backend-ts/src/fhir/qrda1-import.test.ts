@@ -2043,6 +2043,11 @@ test("review #787: `issued` is when it was recorded, never the reading's time", 
   const r = exported(bpPanel({ effectiveDateTime: undefined, issued: "2025-06-03T15:30:00Z" }));
   assert.equal(r.exams, 0);
   assert.match(r.why, /no stated time \(effective\[x\]\)/);
+  // A null period, or null in place of a time, states no time either (Codex, #801).
+  for (const time of [{ effectivePeriod: null }, { effectiveDateTime: null }, { effectiveDateTime: null, effectivePeriod: null }]) {
+    const n = exported(bpPanel({ effectiveDateTime: undefined, ...time }));
+    assert.deepEqual([n.exams, /no stated time \(effective\[x\]\)/.test(n.why)], [0, true], JSON.stringify(time));
+  }
 });
 
 test("review #787: a comparator is not a value, and a unit that is not UCUM mm[Hg] is not written", () => {
