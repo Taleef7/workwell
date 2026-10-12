@@ -7,12 +7,26 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-12
 
+- **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The
+  importer wrote every encounter `finished`, every procedure `completed` and every observation `final`
+  whatever the document said, so an aborted, cancelled or nullified procedure, or a screening only
+  intended, counted as done. Through official CMS125, an exported mammogram restated `aborted` now scores
+  OVERDUE (COMPLIANT before). Such an entry is named as untranslated, as a negated one is. So is a lab, which
+  is its result, whose own results are all preliminary, aborted or nullified: through official CMS122, a
+  later preliminary 9.5% HbA1c no longer reads as poor control. A study, assessment or exam with a pending
+  result was still performed and is still imported. An encounter's diagnosis stated as negated or only intended is no
+  longer a Condition. Every entry in both Cypress decks states its template's values, so the decks and C2
+  are unchanged. A blood-pressure reading that did not happen still blocks a pair at its time, so §4A.8's
+  pairing is unchanged.
 - **A QRDA I time keeps the offset the document states (#788).** The importer converted every time to
   UTC, so a Maui visit at 5 pm on 31 December (03:00 UTC on 1 January) left the measurement year: CMS's
   FHIR logic reads an event's day in its own offset, and official CMS125 now keeps that patient in 2025's
   population. With both Cypress decks restated in -10:00 at the same clock times, the UTC conversion lost
   one patient each on cms130, cms165 and cms2; keeping the offset restores every report. The original
-  decks state no offsets, so they and C2 are unchanged. A time with no offset is still read as UTC.
+  decks state no offsets, so they and C2 are unchanged. A time with no offset is still read as UTC. Mixed offsets
+  within hours of each other can now meet cql-execution's text sort of DateTimes, which the official
+  measures use too: #750, widened today, holds the engine-level fix.
+- The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11
 
