@@ -38,7 +38,7 @@
  * FHIR/QI-Core column is what we execute; QDM is a translation at the reporting edge).
  */
 import { FHIR_RESOURCE_ID_ROOT, LOINC, esc, statedHl7Time, type StatedHl7Time } from "./qrda-common.ts";
-import { loincCodesOf } from "../wiring/qicore-preparation.ts";
+import { isLoinc, loincCodesOf } from "../wiring/qicore-preparation.ts";
 
 /** Code systems a QDM entry can carry. Keyed by FHIR system URL — the only mapping direction we need. */
 const CODE_SYSTEMS: Record<string, { oid: string; name: string }> = {
@@ -199,9 +199,13 @@ function timeAsStated(iso: unknown): string | null {
   return `\u0001${writtenTimes.length - 1}\u0001`;
 }
 
-/** Whether `a` names an instant before `b`'s, fractions included: two stated offsets are compared as instants. */
-const before = (a: StatedHl7Time, b: StatedHl7Time): boolean =>
-  a.epochMs < b.epochMs || (a.epochMs === b.epochMs && Number(`0.${a.fraction || "0"}`) < Number(`0.${b.fraction || "0"}`));
+/**
+ * The first instant a stated time names, in nanoseconds, fractions included: a date its midnight, a minute
+ * its first second. Two stated offsets are compared as instants; a time with no zone is placed as if in
+ * UTC, so only two times both with or both without a zone compare. The import orders a period's bounds the
+ * same way, and reads one whose low starts after its high as any time at all (#792).
+ */
+const firstInstantOf = (t: StatedHl7Time): bigint => BigInt(t.epochMs) * 1_000_000n + BigInt(t.fraction.padEnd(9, "0") || "0");
 
 /** The FHIR `category` codings, flattened — `category` is 0..* on Observation but 0..1 in some shims. */
 function categoryCodes(resource: FhirResource): string[] {
@@ -390,6 +394,25 @@ function isBloodPressurePanel(r: FhirResource): boolean {
   return loincCodesOf(r.code).some((c) => BLOOD_PRESSURE_PANELS.has(c));
 }
 
+/**
+ * Why an Observation naming a blood pressure the run could not read is not written, or null (#793). CMS165
+ * reads a blood pressure only as one panel coded 85354-9 or 55284-4 holding both readings (the US Core
+ * profile preparation stamps), so a lone systolic or diastolic, or a panel under another code (35094-2), was
+ * never read by the run. Written as QDM's Physical Exam readings, a receiver would score it, and the import
+ * would pair two lone readings at one time into a panel: the document would recalculate to what the run did
+ * not. Before, each was written as a Laboratory Test, the wrong datatype, with its components dropped.
+ */
+function unreadBloodPressureReason(r: FhirResource): string | null {
+  const codes = loincCodesOf(r.code);
+  if (codes.some((c) => READING_CODES.has(c))) {
+    return "a lone systolic or diastolic reading is not written: CMS165 reads a blood pressure only as one panel holding both, so CMS165 did not read it";
+  }
+  if (codes.includes("35094-2")) {
+    return "a blood pressure panel coded 35094-2 is not written: CMS165 reads a panel coded 85354-9 or 55284-4 only, so it did not read this one";
+  }
+  return null;
+}
+
 /** A panel's component that is the systolic or the diastolic reading, by its stated LOINC code in any spelling. */
 function readingComponents(r: FhirResource, code: string) {
   return (r.component ?? []).filter((c) => loincCodesOf(c.code).includes(code));
@@ -408,9 +431,10 @@ function bloodPressureTime(r: FhirResource): Pick<FhirResource, "effectiveDateTi
  * Why a blood-pressure panel cannot be written as two Physical Exam readings, or null when it can. Every
  * condition guards the round trip against stating what the panel does not (review, #787):
  * - final (a preliminary panel would come back `final` and count);
- * - a time of day in `effective[x]` itself (a date alone would be written as midnight and pair; `issued`
- *   is when it was recorded, not when it was measured), a real date and time, and a period only when
- *   closed, start not after end;
+ * - a time in `effective[x]` itself (`issued` is when it was recorded, not when it was measured), each a
+ *   real date or date and time FHIR can state, a period with at least one bound, both bounds or neither in
+ *   a zone, and not ending before it starts. A date alone or an open period is written as stated (#792):
+ *   an external receiver reads it as the run did, though the import never pairs it;
  * - exactly one systolic and one diastolic component, each a plain number with no comparator ("<130" is
  *   not 130), in UCUM mm[Hg].
  * All or nothing: half a panel is never written, so nothing is dropped without a reason.
@@ -425,23 +449,23 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
       ? "a blood pressure timed by a schedule (effectiveTiming) is not written: a reading is taken at a time"
       : "a blood pressure with no stated time (effective[x]) is not written: `issued` is when it was recorded, not measured";
   }
-  if (time.effectivePeriod && time.effectivePeriod.start === undefined) return "a blood pressure over a period with no start is not written";
-  const when = time.effectiveDateTime ?? time.effectivePeriod?.start;
-  if (!when?.includes("T")) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
-  const start = statedHl7Time(when);
-  if (start === null) return unwritableTimeReason(when);
-  if (time.effectivePeriod) {
-    // The import pairs a period only when it states both bounds (LOCKED §4A.8), and a date-only end would be
-    // written as midnight, a time the panel never stated (Codex, #787).
-    if (!time.effectivePeriod.end?.includes("T")) return "a blood pressure over a period with no end, or an end with no time of day, is not written";
-    const end = statedHl7Time(time.effectivePeriod.end);
-    if (end === null) return unwritableTimeReason(time.effectivePeriod.end);
-    // A bound in a stated zone and a bound in none are in two frames: they cannot be ordered or written as
-    // one period (review, #787).
+  const period = time.effectivePeriod;
+  if (period && period.start === undefined && period.end === undefined) return "a blood pressure over a period with neither a start nor an end is not written";
+  // Each time is written as it is stated (#791): a date as a date, an open period with its open side as
+  // QDM states one (#792). The import pairs neither back into a panel (LOCKED §4A.8), which `caveats` names.
+  const bounds = period ? [period.start, period.end] : [time.effectiveDateTime];
+  for (const bound of bounds) if (bound !== undefined && statedHl7Time(bound) === null) return unwritableTimeReason(bound);
+  if (period?.start !== undefined && period.end !== undefined) {
+    // A bound in a stated zone and a bound in none (a date states none) are in two frames: they cannot be
+    // ordered as one period, and the import reads such a period as any time at all (review, #787).
     const zoned = (t: string) => /(Z|[+-]\d{2}:\d{2})$/.test(t);
-    if (zoned(when) !== zoned(time.effectivePeriod.end)) return "a blood pressure over a period with a time zone on only one bound is not written";
-    // Ordered by the instants they name: each is written in its own offset, so its digits alone do not order.
-    if (before(end, start)) {
+    if (zoned(period.start) !== zoned(period.end)) {
+      return "a blood pressure over a period with a time zone on only one bound (a date states none) is not written";
+    }
+    // Ordered by the first instant each names: each is written in its own offset, so its digits alone do not
+    // order. As the import orders them: a period whose end starts before its start would come back as any
+    // time at all, keeping every other blood pressure in the document from pairing (review, #792).
+    if (firstInstantOf(statedHl7Time(period.end)!) < firstInstantOf(statedHl7Time(period.start)!)) {
       return "a blood pressure whose period ends before it starts is not written";
     }
   }
@@ -497,13 +521,13 @@ const READING_FIELDS_WRITTEN = new Set(["id", "code", "valueQuantity"]);
  * code (8480-6, 8462-4) and value, at the panel's own time (#591), with the panel's method and body site
  * (QDM's method and Anatomical Location Site, the same on both). The inverse of the import's pairing
  * (LOCKED §4A.8): written only when `bloodPressureExportProblem` finds nothing, and then as both readings
- * or neither. Imported again it is one panel again, unless another blood pressure's stated time could fall
- * within its own: §4A.8 then keeps every reading at that time separate (two arms, an orthostatic set), and
- * the import counts them. The systolic reading carries the panel's own id and the diastolic
- * `<id>-8462-4`, so a round trip gives the panel its id back (review, #787). Whatever else the panel states
- * that this exporter does not write (another component, the performer, the recorded time, the encounter
- * link, a note, an amended status, ...) is named in `caveats`, without the panel's id so a run's caveats
- * tally (review, #787). `null` when the resource is not a blood-pressure panel, so the caller routes it as
+ * or neither. Imported again it is one panel again, unless its time is a date alone or an open period
+ * (#792), or another blood pressure's stated time could fall within its own: §4A.8 then keeps every reading
+ * at that time separate (two arms, an orthostatic set), and the import counts them. The systolic reading
+ * carries the panel's own id and the diastolic `<id>-8462-4`, so a round trip gives the panel its id back
+ * (review, #787). Whatever else the panel states that this exporter does not write (another component, the
+ * performer, the recorded time, the encounter link, a note, an amended status, ...) is named in `caveats`,
+ * without the panel's id so a run's caveats tally (review, #787). `null` when the resource is not a blood-pressure panel, so the caller routes it as
  * any other Observation.
  */
 function bloodPressureReadings(r: FhirResource, i: number, pad: string, caveats: string[]): string[] | null {
@@ -527,6 +551,15 @@ function bloodPressureReadings(r: FhirResource, i: number, pad: string, caveats:
     caveats.push("a blood pressure's identifier is not written by this exporter");
   }
   if (r.status !== "final") caveats.push(`a blood pressure whose status is '${r.status}' is written as completed`);
+  // §4A.8 pairs only an identical time of day, an instant or a closed period: a reading stated more loosely
+  // comes back as two readings CMS165 cannot see, and keeps any reading at a time within its own unpaired.
+  const timeOfDay = (t: string | undefined) => t !== undefined && statedHl7Time(t)?.hasTime === true;
+  const p = bloodPressureTime(r).effectivePeriod;
+  if (p ? !(timeOfDay(p.start) && timeOfDay(p.end)) : !timeOfDay(bloodPressureTime(r).effectiveDateTime)) {
+    caveats.push(
+      "a blood pressure stated with a date alone or an open period is written as stated; WorkWell's own import does not pair it back into a panel, nor any other blood pressure whose time could fall within its own (LOCKED §4A.8)",
+    );
+  }
   // The panel's own code is not written (QDM states its readings): anything it says beyond the panel code is
   // named.
   if (r.code?.text !== undefined || (r.code?.coding ?? []).some((c) => !loincCodesOf({ coding: [c] }).some((code) => BLOOD_PRESSURE_PANELS.has(code)))) {
@@ -617,6 +650,8 @@ function dropReason(resource: FhirResource, type: string): string {
   if (type === "Observation" && isBloodPressurePanel(resource)) {
     return bloodPressureExportProblem(resource) ?? "a blood pressure that could not be written";
   }
+  const unread = type === "Observation" ? unreadBloodPressureReason(resource) : null;
+  if (unread !== null) return unread;
   if (type === "Observation") {
     const cats = categoryCodes(resource);
     if (cats.length === 0) return "no category, so its QDM datatype (laboratory vs diagnostic study) is undetermined";
@@ -627,9 +662,18 @@ function dropReason(resource: FhirResource, type: string): string {
   // Read the SAME field the builder reads, or the reason describes a different resource than the one
   // that was dropped.
   const concept = type === "Encounter" ? (resource.type?.[0] ?? resource.code) : resource.code;
-  const systems = [...new Set((concept?.coding ?? []).map((c) => c.system).filter(Boolean))];
+  // Only a coding that states a code: a system with no code is no code to carry (review, #793).
+  const systems = [...new Set((concept?.coding ?? []).filter((c) => c.code).map((c) => c.system).filter(Boolean))];
   if (systems.length === 0) return "no code to carry — CDA needs a coded value";
-  return `no CDA code system OID for ${systems.join(", ")} — CDA cannot carry it`;
+  // LOINC under another spelling (its OID, a trailing slash) is named on its own: CDA could carry it, but the
+  // measures' CQL matches a code's system exactly, so the run never matched it, and a document stating it
+  // would recalculate to what the run did not (#793).
+  const loincSpelled = systems.filter((system) => isLoinc(system) && system !== "http://loinc.org");
+  const unmapped = systems.filter((system) => !loincSpelled.includes(system));
+  return [
+    ...(loincSpelled.length > 0 ? [`LOINC spelled ${loincSpelled.join(", ")}, not http://loinc.org, is not written: CQL matches a code's system exactly, so the run did not read it`] : []),
+    ...(unmapped.length > 0 ? [`no CDA code system OID for ${unmapped.join(", ")} — CDA cannot carry it`] : []),
+  ].join("; ");
 }
 
 export interface QdmTranslation {
@@ -770,6 +814,7 @@ function entryFor(item: unknown, i: number, pad: string, caveats: string[]): str
           out.push(...readings);
           break;
         }
+        if (unreadBloodPressureReason(resource) !== null) break;
         const cats = categoryCodes(resource);
         // Unclassifiable is SKIPPED, not guessed. An Observation with no category could be either
         // datatype, and picking one silently is how a mammogram becomes invisible to a numerator that

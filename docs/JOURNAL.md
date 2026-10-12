@@ -52,6 +52,17 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   result. A `pnpm patch` of cql-execution 3.3.2 converts the second DateTime to the first's offset before
   comparing, as the library's own comparisons do; one offset compares exactly as before, so the decks, C2
   and the corpus cannot move. The published measure-engine package does not carry the patch.
+- **The QRDA I export writes more of the blood pressures CMS165 reads, and nothing the run could not
+  read (#792, #793).** A panel stated with a date alone or over an open period was refused, so when it was
+  a patient's latest reading the run scored it and the document did not carry it (official CMS165: a later
+  date-only 150/95 makes the run OVERDUE). It is now written as stated, with a caveat: §4A.8 pairs only a
+  time of day, so our own import pairs neither it nor any panel whose time could fall within its own,
+  while a QDM receiver reads every reading as stated. A period mixing a zoned and a zoneless bound, or
+  whose end starts before its start, is still refused: the import reads either as any time at all, which
+  would keep every other blood pressure in the document from pairing. What the run could not read is not
+  written, each with its own reason: a lone systolic or diastolic, or a panel coded 35094-2 (before, each
+  was a Laboratory Test), and LOINC spelled other than `http://loinc.org`, since CQL matches a code's
+  system exactly (before, reported as "no CDA code system"). Decks, C2 and the corpus export unchanged.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11
