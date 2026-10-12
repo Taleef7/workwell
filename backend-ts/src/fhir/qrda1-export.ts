@@ -54,11 +54,11 @@ import {
   EMPLOYEE_ID_ROOT,
   LOINC,
   esc,
-  hl7Date,
+  hl7DateAsStated,
   hl7Ts,
   qrdaMeasureReference,
 } from "./qrda-common.ts";
-import { qdmEntriesFor, translateQdm, type QdmTranslation } from "./qdm-entries.ts";
+import { translateQdm, type QdmTranslation } from "./qdm-entries.ts";
 
 /**
  * The run evaluated a bundle this document does NOT reproduce, and that has to be said out loud.
@@ -164,12 +164,19 @@ function nameOf(subjectId: string, patient: HeaderPatient | undefined): { given:
  * `nullFlavor="UNK"` — measured, not assumed. The synthetic directory holds neither, and inventing a
  * race for a patient is exactly the fabrication ADR-037 forbids.
  */
+/**
+ * The birth date as written: the BUNDLE wins, for the same reason it wins on name (it is the record
+ * evaluated), at the precision stated, a year as a year (#791); one that is no real date is unknown.
+ */
+function birthTimeOf(subjectId: string, bundle: unknown): string | null {
+  return hl7DateAsStated(patientOf(bundle)?.birthDate ?? employeeById(subjectId)?.dateOfBirth);
+}
+
 function recordTarget(subjectId: string, bundle: unknown): string {
   const patient = patientOf(bundle);
   const { given, family } = nameOf(subjectId, patient);
   const sex = SEX_CONCEPTS[patient?.gender ?? ""];
-  // The BUNDLE wins on birth date for the same reason it wins on name: it is the record evaluated.
-  const birthDate = patient?.birthDate ?? employeeById(subjectId)?.dateOfBirth;
+  const birthDate = birthTimeOf(subjectId, bundle);
   const gender = sex
     ? `<administrativeGenderCode nullFlavor="OTH">
           <translation code="${sex.code}" displayName="${sex.display}" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMEDCT"/>
@@ -186,7 +193,7 @@ function recordTarget(subjectId: string, bundle: unknown): string {
           <family>${esc(family)}</family>
         </name>
         ${gender}
-        ${birthDate ? `<birthTime value="${hl7Date(birthDate)}"/>` : `<birthTime nullFlavor="UNK"/>`}
+        ${birthDate ? `<birthTime value="${birthDate}"/>` : `<birthTime nullFlavor="UNK"/>`}
         <raceCode nullFlavor="UNK"/>
         <ethnicGroupCode nullFlavor="UNK"/>
         <languageCommunication>
@@ -244,12 +251,17 @@ export function buildQrda1Document(
   outcome: OutcomeRecord,
   patientBundle?: unknown,
   /** Pre-computed by the batch path so each subject is translated once, never twice. */
-  precomputed?: { entries: string[]; reference: string },
+  precomputed?: { entries: string[]; reference: string; zoned?: boolean },
 ): string {
-  const now = hl7Ts(new Date().toISOString());
-  const low = hl7Ts(run.measurementPeriodStart);
-  const high = hl7Ts(run.measurementPeriodEnd);
-  const entries = precomputed?.entries ?? (patientBundle ? qdmEntriesFor(patientBundle) : []);
+  const translation = precomputed ?? (patientBundle ? translateQdm(patientBundle) : { entries: [], zoned: false });
+  const entries = translation.entries;
+  // CMS_0121: offsets everywhere or nowhere (#791). When the entries state them, so does every other time of
+  // day in the document: its own time and the measurement period, which are UTC instants. The rule exempts
+  // only a value of eight characters or fewer (a date), not the Reporting Parameters element (review, #791).
+  const utc = translation.zoned ? "+0000" : "";
+  const now = `${hl7Ts(new Date().toISOString())}${utc}`;
+  const low = `${hl7Ts(run.measurementPeriodStart)}${utc}`;
+  const high = `${hl7Ts(run.measurementPeriodEnd)}${utc}`;
   const reference = precomputed?.reference ?? measureReference(measureId, outcome.evidence);
   const official = reference.includes(EMEASURE_ID_ROOT);
   // The eMeasure Reference `<externalDocument>` below carries NO `<text>`. It used to carry
@@ -430,6 +442,13 @@ function nonConformanceFrom(
   // and a WebChart bundle of a few hundred observations produced 300 near-identical strings — 31 KB per
   // subject of the same three sentences (review, #362).
   reasons.push(...tallied(translation.untranslatable, "not exported"));
+  // CMS_0121: offsets everywhere or nowhere. A time whose source stated no zone, beside one that did, is
+  // written with none rather than given an invented one (Codex, #799), so the document cannot meet it.
+  if ((translation.zoneUnstated ?? 0) > 0) {
+    reasons.push(
+      `${translation.zoneUnstated} time(s) whose source states no time zone, beside times that state one (CMS_0121): written as stated, with no offset invented`,
+    );
+  }
   if (!reference.includes(EMEASURE_ID_ROOT)) {
     reasons.push(`measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was evaluated from authored logic`);
   }
@@ -473,10 +492,18 @@ export function buildQrda1Documents(
     const nonConformanceReasons = nonConformanceFrom(measureId, translation, reference, degradationMessage);
     return {
       subjectId: outcome.subjectId,
-      xml: buildQrda1Document(run, measureId, outcome, bundle, { entries: translation.entries, reference }),
+      xml: buildQrda1Document(run, measureId, outcome, bundle, { entries: translation.entries, reference, zoned: translation.zoned ?? false }),
       conformant: nonConformanceReasons.length === 0,
       nonConformanceReasons,
-      caveats: [...qrda1Caveats(measureId, bundle), ...tallied(translation.caveats ?? [], "not carried")],
+      caveats: [
+        ...qrda1Caveats(measureId, bundle),
+        ...tallied(translation.caveats ?? [], "not carried"),
+        // HL7 asks for a birth date to the day (a SHOULD, CONF:1198-5300); a year or a month is written as
+        // stated rather than padded to the 1st (review, #791).
+        ...((birthTimeOf(outcome.subjectId, bundle)?.length ?? 8) < 8
+          ? ["the birth date is written at the year or month its source states; HL7 asks for a day"]
+          : []),
+      ],
     };
   });
 }

@@ -37,7 +37,7 @@
  * it is the same reason QDM appears ONLY here and never in the evaluation path (locked decision: the
  * FHIR/QI-Core column is what we execute; QDM is a translation at the reporting edge).
  */
-import { FHIR_RESOURCE_ID_ROOT, LOINC, esc, hl7TsOrNull } from "./qrda-common.ts";
+import { FHIR_RESOURCE_ID_ROOT, LOINC, esc, statedHl7Time, type StatedHl7Time } from "./qrda-common.ts";
 import { loincCodesOf } from "../wiring/qicore-preparation.ts";
 
 /** Code systems a QDM entry can carry. Keyed by FHIR system URL — the only mapping direction we need. */
@@ -150,7 +150,7 @@ function targetSites(r: FhirResource, pad: string): string {
  * sample uses it for an ongoing diagnosis) — as against omitting `high`, which asserts nothing about
  * whether the interval is open.
  */
-function effectiveTime(resource: FhirResource, indent: string, ts: (iso: unknown) => string | null = hl7TsOrNull): string {
+function effectiveTime(resource: FhirResource, indent: string, ts: (iso: unknown) => string | null = timeAsStated): string {
   const period = resource.effectivePeriod ?? resource.performedPeriod ?? resource.period ?? resource.onsetPeriod;
   // Every date goes through the non-throwing conversion: these strings come from third-party FHIR, and a
   // MariaDB zero-date must degrade this ONE field rather than lose every subject's document (#361).
@@ -177,41 +177,31 @@ function effectiveTime(resource: FhirResource, indent: string, ts: (iso: unknown
 }
 
 /**
- * A FHIR dateTime as a blood-pressure reading's HL7 timestamp, or null when it is not a real one.
- * - The date and time must be real as written: `Date` rolls 30 February over to 2 March and hour 24 into
- *   the next day, a time the panel never stated (Codex, #787).
- * - A time with a zone is written in UTC with no offset, as every entry in the document is (CMS_0121: a
- *   document states offsets everywhere or nowhere), always with a four-digit year: a UTC year outside
- *   0001-9999 has no HL7 form and is refused (review, #787).
- * - A time with no zone (the corpus writes its readings so) is written as stated; `Date` would read it in
- *   the exporting machine's own zone.
- * - The fraction is kept as written, trailing zeros included: two panels a fraction of a second apart
- *   written at the same whole second would come back as four readings at one instant, and `.000` is a
- *   precision the import compares (Codex + review, #787). An offset is whole minutes, so the fraction
- *   survives the move to UTC. More than nine digits of a second, or an offset FHIR cannot state (beyond
- *   ±14:00), is refused, as the import refuses it (review, #787).
+ * The times a translation writes, so its document states offsets everywhere or nowhere (CMS_0121, #791).
+ *
+ * While `translateQdm` builds its entries, each time is written as a placeholder and kept here; once it knows
+ * them all, it fills every placeholder. When any written time of day states a zone other than UTC, every time
+ * of day that states one is written with its own offset, as written (the clock time the document gave, never
+ * moved to UTC, which moved an evening's day; `Z` as `+0000`). A time whose source stated no zone keeps none:
+ * writing one would invent it (Codex, #799), so such a document is reported non-conformant to CMS_0121.
+ * Otherwise no time states one. A date never carries an offset. Outside a translation a time is written with
+ * none.
  */
-function hl7TsKeepingFraction(iso: unknown): string | null {
-  const m = typeof iso === "string" ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-](\d{2}):(\d{2}))?$/.exec(iso) : null;
-  if (!m) return null;
-  if (m[9] !== undefined && (Number(m[10]) > 59 || Number(m[9]) * 60 + Number(m[10]) > 14 * 60)) return null;
-  const stated = m.slice(1, 7).map((part) => part ?? "00");
-  const [y, mo, d, h, mi, s] = stated.map(Number) as [number, number, number, number, number, number];
-  // `setUTCFullYear`, not `Date.UTC`, which reads the years 0-99 as 1900-1999.
-  const check = new Date(0);
-  check.setUTCFullYear(y, mo - 1, d);
-  check.setUTCHours(h, mi, s, 0);
-  const real = [check.getUTCFullYear(), check.getUTCMonth() + 1, check.getUTCDate(), check.getUTCHours(), check.getUTCMinutes(), check.getUTCSeconds()];
-  if (y < 1 || real.some((part, i) => part !== [y, mo, d, h, mi, s][i])) return null;
-  let whole = stated.join("");
-  if (m[8] !== undefined) {
-    const utc = new Date(iso as string);
-    if (Number.isNaN(utc.getTime()) || utc.getUTCFullYear() < 1 || utc.getUTCFullYear() > 9999) return null;
-    const p = (n: number, width = 2) => String(n).padStart(width, "0");
-    whole = `${p(utc.getUTCFullYear(), 4)}${p(utc.getUTCMonth() + 1)}${p(utc.getUTCDate())}${p(utc.getUTCHours())}${p(utc.getUTCMinutes())}${p(utc.getUTCSeconds())}`;
-  }
-  return m[7] !== undefined ? `${whole}.${m[7]}` : whole;
+let writtenTimes: StatedHl7Time[] | undefined;
+const PLACEHOLDER = /\u0001(\d+)\u0001/g;
+
+/** A third-party FHIR time as an HL7 TS, as stated (`statedHl7Time`), or null when it is not a real one. */
+function timeAsStated(iso: unknown): string | null {
+  const t = statedHl7Time(iso);
+  if (t === null) return null;
+  if (writtenTimes === undefined) return t.digits;
+  writtenTimes.push(t);
+  return `\u0001${writtenTimes.length - 1}\u0001`;
 }
+
+/** Whether `a` names an instant before `b`'s, fractions included: two stated offsets are compared as instants. */
+const before = (a: StatedHl7Time, b: StatedHl7Time): boolean =>
+  a.epochMs < b.epochMs || (a.epochMs === b.epochMs && Number(`0.${a.fraction || "0"}`) < Number(`0.${b.fraction || "0"}`));
 
 /** The FHIR `category` codings, flattened — `category` is 0..* on Observation but 0..1 in some shims. */
 function categoryCodes(resource: FhirResource): string[] {
@@ -285,7 +275,8 @@ function diagnosis(r: FhirResource, i: number, pad: string): string | null {
   const value = cdaCode(r.code);
   if (!value) return null;
   const when = effectiveTime(r, `${pad}      `);
-  const low = /<low value="(\d+)"/.exec(when)?.[1];
+  // The concern opens when the diagnosis does: the same written time, placeholder included (#791).
+  const low = /<low value="([^"]+)"/.exec(when)?.[1];
   return `${pad}<entry typeCode="DRIV">
 ${pad}  <act classCode="ACT" moodCode="EVN">
 ${pad}    <templateId root="2.16.840.1.113883.10.20.22.4.3" extension="2015-08-01"/>
@@ -437,20 +428,20 @@ function bloodPressureExportProblem(r: FhirResource): string | null {
   if (time.effectivePeriod && time.effectivePeriod.start === undefined) return "a blood pressure over a period with no start is not written";
   const when = time.effectiveDateTime ?? time.effectivePeriod?.start;
   if (!when?.includes("T")) return "a blood pressure with no time of day is not written: a date alone is no time two readings share";
-  const start = hl7TsKeepingFraction(when);
+  const start = statedHl7Time(when);
   if (start === null) return unwritableTimeReason(when);
   if (time.effectivePeriod) {
     // The import pairs a period only when it states both bounds (LOCKED §4A.8), and a date-only end would be
     // written as midnight, a time the panel never stated (Codex, #787).
     if (!time.effectivePeriod.end?.includes("T")) return "a blood pressure over a period with no end, or an end with no time of day, is not written";
-    const end = hl7TsKeepingFraction(time.effectivePeriod.end);
+    const end = statedHl7Time(time.effectivePeriod.end);
     if (end === null) return unwritableTimeReason(time.effectivePeriod.end);
     // A bound in a stated zone and a bound in none are in two frames: they cannot be ordered or written as
     // one period (review, #787).
     const zoned = (t: string) => /(Z|[+-]\d{2}:\d{2})$/.test(t);
     if (zoned(when) !== zoned(time.effectivePeriod.end)) return "a blood pressure over a period with a time zone on only one bound is not written";
-    const whole = [start.slice(0, 14), end.slice(0, 14)];
-    if (whole[0]! > whole[1]! || (whole[0] === whole[1] && Number(`0${start.slice(14)}`) > Number(`0${end.slice(14)}`))) {
+    // Ordered by the instants they name: each is written in its own offset, so its digits alone do not order.
+    if (before(end, start)) {
       return "a blood pressure whose period ends before it starts is not written";
     }
   }
@@ -588,7 +579,7 @@ ${pad}    ${cdaId(entryResource, `observation-${i}-${readingCode}`)}
 ${pad}    ${translations.length === 0 ? `<code ${code}/>` : `<code ${code}>${translations.map((t) => `\n${pad}      <translation ${t}/>`).join("")}\n${pad}    </code>`}
 ${pad}    <text>Physical Exam, Performed</text>
 ${pad}    ${COMPLETED}
-${pad}    ${effectiveTime(timed, `${pad}    `, hl7TsKeepingFraction)}
+${pad}    ${effectiveTime(timed, `${pad}    `)}
 ${pad}    <value xsi:type="PQ" value="${esc(String(component.valueQuantity!.value))}" unit="mm[Hg]"/>${methodCodes}${siteCodes}
 ${pad}  </observation>
 ${pad}</entry>`;
@@ -659,6 +650,17 @@ export interface QdmTranslation {
    * failure: the document is valid, and a recalculation from it may still differ from the run (#787).
    */
   caveats?: string[];
+  /**
+   * Whether the entries state offsets (CMS_0121: everywhere or nowhere, #791): true when any time of day
+   * they write states a zone. The document's own times follow it.
+   */
+  zoned?: boolean;
+  /**
+   * How many times of day stated with no zone sit in a zoned document. They are written as stated, with no
+   * offset: the source gave none, and writing one would invent it (Codex, #799). That breaks CMS_0121, so the
+   * document is reported non-conformant.
+   */
+  zoneUnstated?: number;
 }
 
 /** Entries plus the reasons anything was dropped — see `QdmTranslation.untranslatable`. */
@@ -668,18 +670,48 @@ export function translateQdm(bundle: unknown, pad = "          "): QdmTranslatio
   const entries: string[] = [];
   const untranslatable: string[] = [];
   const caveats: string[] = [];
+  const times: StatedHl7Time[] = [];
+  const outer = writtenTimes;
+  writtenTimes = times;
+  try {
+    translateItems(items, pad, entries, untranslatable, caveats);
+  } finally {
+    writtenTimes = outer;
+  }
+  // CMS_0121: offsets everywhere or nowhere, and it prefers nowhere (#791). Only the times the entries
+  // actually write decide it, and only a zone other than UTC needs one: a time in `Z` written with no offset
+  // is read back as UTC, the same instant on the same day.
+  const isUtc = (offset: string) => offset === "+0000" || offset === "-0000";
+  const zoned = times.some((t) => t.hasTime && t.offset !== undefined && !isUtc(t.offset));
+  // Counted by what was stated: a lab writes its one time on the test and on its result.
+  const zoneUnstated = zoned ? new Set(times.filter((t) => t.hasTime && t.offset === undefined).map((t) => t.digits)).size : 0;
+  const written = entries.map((entry) =>
+    entry.replace(PLACEHOLDER, (_, i: string) => {
+      const t = times[Number(i)]!;
+      return zoned && t.hasTime ? `${t.digits}${t.offset ?? ""}` : t.digits;
+    }),
+  );
+  return { entries: written, untranslatable, caveats, zoned, ...(zoneUnstated > 0 ? { zoneUnstated } : {}) };
+}
+
+function translateItems(items: unknown[], pad: string, entries: string[], untranslatable: string[], caveats: string[]): void {
   items.forEach((item, i) => {
     const resource = (item as { resource?: FhirResource } | null)?.resource;
     const type = resource?.resourceType;
     let produced: string[] = [];
     // What a written entry does not carry (a blood pressure's third component, its performer, ...).
     const notCarried: string[] = [];
+    // The times this item writes. One that throws, or writes nothing, takes its times with it: a time no
+    // entry carries must not decide whether the document states offsets (review, #791).
+    const timesBefore = writtenTimes?.length ?? 0;
     try {
       produced = entryFor(item, i, pad, notCarried);
     } catch {
+      if (writtenTimes) writtenTimes.length = timesBefore;
       if (type) untranslatable.push(`${type}: could not be translated (malformed field)`);
       return;
     }
+    if (produced.length === 0 && writtenTimes) writtenTimes.length = timesBefore;
     if (produced.length > 0) {
       entries.push(...produced);
       // Once per resource: two uncoded components are one panel's caveat, not two resources'.
@@ -699,7 +731,6 @@ export function translateQdm(bundle: unknown, pad = "          "): QdmTranslatio
     }
     untranslatable.push(`${type}: ${reason}`);
   });
-  return { entries, untranslatable, caveats };
 }
 
 export function qdmEntriesFor(bundle: unknown, pad = "          "): string[] {

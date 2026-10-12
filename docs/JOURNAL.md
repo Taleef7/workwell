@@ -36,6 +36,15 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   patients fail alone or 1,000 have been retried (review: sparse bad data, one patient per chunk, could
   otherwise double a nightly); each retried chunk's counts and time are logged. WebChart's readings carry `mmHg`, so CMS165 over WebChart data still needs the
   unit fixed at the source (#591); this keeps it from costing everyone else.
+- **The QRDA I export writes each time as its FHIR value states it (#791).** It wrote every time through
+  JavaScript's `Date`: a year became midnight on 1 January, 30 February became 2 March, a time with no
+  zone was read in the exporting machine's zone, and a zoned time became the UTC instant with no offset,
+  so a Maui visit at 5 pm on 31 December came back from its own document in 2026 (official CMS125 now
+  keeps it in 2025 both ways). Times are now written at their stated precision and in their stated
+  offset. CMS_0121 asks for offsets everywhere or nowhere: when any time of day is in a zone other than
+  UTC, every time of day that states a zone is written with its offset; otherwise none does. A time whose
+  source states no zone is never given one (nothing invents data): beside zoned times it is written as
+  stated and the document is reported non-conformant to CMS_0121. The corpus export is byte-identical (it states no zones).
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11

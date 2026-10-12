@@ -1931,7 +1931,7 @@ test("review #787: a malformed offset or trailing text makes no timestamp rather
     assert.equal(reading!.effectiveDateTime, undefined, value);
   }
   const [ok] = importedOfType(sitedDocument(sys({ time: "<effectiveTime value='20250219171000.123-0500'/>" })), "Observation");
-  assert.equal(ok!.effectiveDateTime, "2025-02-19T17:10:00-05:00", "a fraction and a well-formed offset still parse");
+  assert.equal(ok!.effectiveDateTime, "2025-02-19T17:10:00.123-05:00", "a fraction and a well-formed offset still parse, the fraction kept (#791)");
 });
 
 test("review #787: a panel names a source id once, even when both readings share it", () => {
@@ -2053,11 +2053,12 @@ test("export: two blood pressures a fraction of a second apart are written apart
     ],
   };
   const xml = buildQrda1Document(run, "cms125", outcome(officialEvidence), bundle);
-  assert.deepEqual([...new Set([...xml.matchAll(/<effectiveTime value="([^"]+)"/g)].map((m) => m[1]).filter((t) => t!.startsWith("20250601")))], ["20250601100000.100", "20250601100000.9"]);
+  // Each in its own offset since #791: one states -05:00, so the document states an offset on every time.
+  assert.deepEqual([...new Set([...xml.matchAll(/<effectiveTime value="([^"]+)"/g)].map((m) => m[1]).filter((t) => t!.startsWith("20250601")))], ["20250601100000.100+0000", "20250601050000.9-0500"]);
   const back = importQrda1Document(xml);
   assert.equal(back.unpairedBloodPressureReadings, 0);
   const panels = back.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => JSON.stringify(r.code ?? {}).includes("85354-9"));
-  assert.deepEqual(panels.map((p) => p.effectiveDateTime).sort(), ["2025-06-01T10:00:00.100Z", "2025-06-01T10:00:00.9Z"]);
+  assert.deepEqual(panels.map((p) => p.effectiveDateTime).sort(), ["2025-06-01T05:00:00.9-05:00", "2025-06-01T10:00:00.100+00:00"]);
 });
 
 test("export: a blood pressure at an impossible time is not written, never rolled over (Codex, #787)", () => {
@@ -2065,8 +2066,6 @@ test("export: a blood pressure at an impossible time is not written, never rolle
   for (const when of [
     "2025-02-30T10:00:00Z", "2025-04-31T10:00:00Z", "2025-02-28T24:00:00Z", "2025-06-01T10:60:00Z",
     "2025-06-01T10:00:60Z", "2025-02-30T10:00:00", "2025-06-01T10:00:00+0500", "0000-06-01T10:00:00Z",
-    // In UTC this is the year 10000, which has no four-digit form (review, #787).
-    "9999-12-31T23:00:00-05:00",
   ]) {
     const r = exported(bpPanel({ effectiveDateTime: when }));
     assert.equal(r.exams, 0, when);
@@ -2078,9 +2077,12 @@ test("export: a blood pressure at an impossible time is not written, never rolle
     translateQdm({ resourceType: "Bundle", entry: [sourceBundle.entry[0]!, { resource: bpPanel({ effectiveDateTime }) }] })
       .entries.filter((e) => e.includes("2.16.840.1.113883.10.20.24.3.59"))
       .map((e) => /<effectiveTime value="([^"]+)"/.exec(e)?.[1]);
-  // Still written: a real local time whose UTC instant falls on the next day, and a time stated to the minute.
-  assert.deepEqual(readingTimes("2025-02-28T23:30:00-05:00"), ["20250301043000", "20250301043000"]);
-  assert.deepEqual(readingTimes("2025-06-01T10:00Z"), ["20250601100000", "20250601100000"]);
+  // Still written, as stated since #791: a real local time whose UTC instant falls on the next day keeps its
+  // own day and offset (in UTC, 31 December 23:00 at -05:00 was the year 10000 and could not be written at
+  // all), and a time stated to the minute is written to the minute.
+  assert.deepEqual(readingTimes("2025-02-28T23:30:00-05:00"), ["20250228233000-0500", "20250228233000-0500"]);
+  assert.deepEqual(readingTimes("9999-12-31T23:00:00-05:00"), ["99991231230000-0500", "99991231230000-0500"]);
+  assert.deepEqual(readingTimes("2025-06-01T10:00Z"), ["202506011000", "202506011000"]);
   // A year below 1000 keeps its four digits, with a zone or without (review, #787).
   assert.deepEqual(readingTimes("0999-06-01T10:00:00Z"), ["09990601100000", "09990601100000"]);
   assert.deepEqual(readingTimes("0025-06-01T10:00:00"), ["00250601100000", "00250601100000"]);
@@ -2101,6 +2103,9 @@ test("export: a blood pressure over a period is written only when the period is 
     [{ start: "2025-06-01T10:00:00Z", end: "2025-06-01" }, /no time of day/],
     [{ start: "2025-06-01T10:05:00Z", end: "2025-06-01T10:00:00Z" }, /ends before it starts/],
     [{ start: "2025-06-01T10:00:00.9Z", end: "2025-06-01T10:00:00.1Z" }, /ends before it starts/],
+    // Ordered as instants, not digits, now each bound is written in its own offset (#791): 10:00 at -05:00 is
+    // 15:00 UTC, after 11:00 UTC.
+    [{ start: "2025-06-01T10:00:00-05:00", end: "2025-06-01T11:00:00+00:00" }, /ends before it starts/],
   ] as const) {
     const r = exported(bpPanel({ effectiveDateTime: undefined, effectivePeriod: period }));
     assert.equal(r.exams, 0, JSON.stringify(period));
@@ -2430,4 +2435,150 @@ test("export: what a written panel's readings and own code state beyond what is 
     .bundle.entry.map((e) => e.resource).find((r) => JSON.stringify((r as { code?: unknown }).code ?? {}).includes("85354-9"));
   assert.deepEqual(caveatsOf(roundTripped), [], "nothing about a round-tripped panel goes unwritten");
   assert.ok(caveatsOf(bpPanel({ identifier: [{ system: "urn:oid:1.2.3", value: "ehr-77" }] })).some((c) => /identifier is not written/.test(c)));
+});
+
+// ---------------------------------------------------------------------------------------------------
+// #791: the export writes each time as its FHIR value states it: at its precision, never rolled over, never
+// read in the exporting machine's zone, and in its own offset. CMS_0121: a document states offsets everywhere
+// or nowhere, so one non-UTC zone puts an offset on every time of day in the document.
+// ---------------------------------------------------------------------------------------------------
+
+/** The source bundle with the encounter, condition and lab given other times. */
+const timedBundle = (times: { visit?: [string, string]; onset?: string; lab?: string; birthDate?: string }) => {
+  const [patient, encounter, condition, lab, ...rest] = sourceBundle.entry as Array<{ resource: Record<string, unknown> }>;
+  return {
+    ...sourceBundle,
+    entry: [
+      { resource: { ...patient!.resource, ...(times.birthDate !== undefined ? { birthDate: times.birthDate } : {}) } },
+      { resource: { ...encounter!.resource, ...(times.visit ? { period: { start: times.visit[0], end: times.visit[1] } } : {}) } },
+      { resource: { ...condition!.resource, ...(times.onset !== undefined ? { onsetDateTime: times.onset } : {}) } },
+      { resource: { ...lab!.resource, ...(times.lab !== undefined ? { effectiveDateTime: times.lab } : {}) } },
+      ...rest,
+    ],
+  };
+};
+const exportOf = (bundle: unknown) => buildQrda1Document(run, "cms125", outcome(officialEvidence), bundle);
+const valuesIn = (xml: string) => [...xml.matchAll(/<(?:low|high|effectiveTime|time|birthTime) value="([^"]+)"/g)].map((m) => m[1]!);
+const resourceBack = (xml: string, type: string) => importQrda1Document(xml).bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === type)!;
+
+test("#791: a time is written at the precision it states, and comes back at it", () => {
+  for (const [onset, written] of [["2019", "2019"], ["2019-06", "201906"], ["2019-06-15", "20190615"], ["2019-06-15T08:00:00-10:00", "20190615080000-1000"]] as const) {
+    const xml = exportOf(timedBundle({ onset }));
+    // Twice: the Diagnosis Concern Act opens when its diagnosis does.
+    assert.equal(xml.split(`<low value="${written}"/>`).length - 1, 2, onset);
+    assert.equal(resourceBack(xml, "Condition").onsetDateTime, onset, `${onset} comes back as it was stated`);
+  }
+  const birth = exportOf(timedBundle({ birthDate: "1975" }));
+  assert.match(birth, /<birthTime value="1975"\/>/, "a birth year stays a year");
+  assert.equal(resourceBack(birth, "Patient").birthDate, "1975");
+});
+
+test("#791: an impossible date is no date, never rolled over", () => {
+  const xml = exportOf(timedBundle({ onset: "2019-02-30" }));
+  assert.doesNotMatch(xml, /20190302/, "30 February is not 2 March");
+  assert.match(xml, /<low nullFlavor="UNK"\/>/);
+});
+
+test("#791: a time with no zone is written as stated, whatever zone the exporting machine is in", () => {
+  const zone = process.env.TZ;
+  try {
+    process.env.TZ = "Pacific/Honolulu";
+    const xml = exportOf(timedBundle({ lab: "2025-06-01T10:00:00", visit: ["2025-04-02T09:00:00", "2025-04-02T09:30:00"] }));
+    assert.ok(valuesIn(xml).includes("20250601100000"), "the lab's 10:00, not 20:00 UTC");
+    assert.ok(valuesIn(xml).includes("20250402090000"));
+  } finally {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  }
+});
+
+test("#791: one time in a non-UTC zone puts an offset on every time of day in the document, the header included", () => {
+  // A Maui visit at 5 pm on 31 December; the lab states -10:00 too, the mammogram and procedure are in UTC,
+  // and the condition's onset is a date.
+  const bundle = timedBundle({ visit: ["2025-12-31T17:00:00-10:00", "2025-12-31T17:30:00-10:00"], lab: "2025-06-01T10:00:00-10:00", onset: "2019-06-15" });
+  const xml = exportOf(bundle);
+  // CMS_0121 as its schematron asserts it: once the document's own effectiveTime states an offset, every time
+  // value longer than eight characters does too, the measurement period included (review, #791).
+  const timesOfDay = valuesIn(xml).filter((v) => v.length > 8);
+  assert.ok(timesOfDay.length >= 8, `the entries', the header's and the measurement period's times, got ${timesOfDay.length}`);
+  assert.deepEqual(timesOfDay.filter((v) => !/[+-]\d{4}$/.test(v)), [], "every time of day states an offset (CMS_0121)");
+  assert.ok(timesOfDay.includes("20251231170000-1000"), "the visit in its own offset, on its own day");
+  assert.ok(timesOfDay.includes("20250510100000+0000"), "a UTC time as +0000");
+  assert.ok(timesOfDay.includes("20250601100000-1000"), "the lab in its own offset");
+  assert.match(xml, /<low value="20190615"\/>/, "a date carries no offset");
+  assert.match(xml, /<ClinicalDocument[\s\S]*?<effectiveTime value="\d{14}\+0000"\/>/, "the document's own time");
+  assert.match(xml, /<author>\s*<time value="\d{14}\+0000"\/>/, "the author's time");
+  assert.match(xml, /<birthTime value="19750312"\/>/, "a date carries none");
+  // Round trip: the visit comes back on the day and in the offset it was stated in.
+  assert.equal(resourceBack(xml, "Encounter").period.start, "2025-12-31T17:00:00-10:00");
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => bundle);
+  assert.ok(!doc!.nonConformanceReasons.some((r) => /CMS_0121/.test(r)), "every time states its zone: it conforms");
+});
+
+test("#799: a time whose source states no zone is never given one; beside zoned times it makes the document non-conformant", () => {
+  // Nothing invents clinical data (CLAUDE.md): `+0000` on a zone-less lab would assert an instant the source
+  // never gave (Codex, #799). It is written as stated, and the document says it cannot meet CMS_0121.
+  const bundle = timedBundle({ visit: ["2025-12-31T17:00:00-10:00", "2025-12-31T17:30:00-10:00"], lab: "2025-06-01T10:00:00" });
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => bundle);
+  const values = valuesIn(doc!.xml);
+  assert.ok(values.includes("20250601100000"), "the lab as stated, with no offset");
+  assert.ok(!values.some((v) => v.startsWith("20250601100000") && /[+-]\d{4}$/.test(v)), "no zone is invented for it");
+  assert.ok(values.includes("20251231170000-1000"), "the visit keeps its own");
+  assert.equal(doc!.conformant, false);
+  assert.ok(doc!.nonConformanceReasons.some((r) => /^1 time\(s\) whose source states no time zone, beside times that state one \(CMS_0121\)/.test(r)), JSON.stringify(doc!.nonConformanceReasons));
+});
+
+test("#791: a document whose times are all in UTC or no zone states no offset anywhere", () => {
+  const bundle = timedBundle({ lab: "2025-06-01T10:00:00Z", onset: "2019-01-01T08:00:00" });
+  const xml = exportOf(bundle);
+  assert.deepEqual(valuesIn(xml).filter((v) => /[+-]\d{4}$/.test(v)), [], "CMS_0121 prefers none");
+  assert.ok(valuesIn(xml).includes("20250601100000"), "a UTC time as its UTC digits, read back as UTC");
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => bundle);
+  assert.ok(!doc!.caveats.some((c) => /no time zone/.test(c)), "nothing is assumed");
+});
+
+test("#791: third-party text cannot forge a time, and an XML-forbidden character is dropped", () => {
+  const forged = {
+    ...sourceBundle,
+    entry: sourceBundle.entry.map((e) =>
+      (e.resource as { resourceType: string }).resourceType === "Encounter"
+        ? { resource: { ...(e.resource as object), id: "\u00010\u0001", type: [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213", display: "\u000199\u0001 visit" }] }] } }
+        : e,
+    ),
+  };
+  const xml = exportOf(forged);
+  assert.doesNotMatch(xml, /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/, "no control character reaches the document");
+  assert.match(xml, /displayName="99 visit"/, "the text is kept, without the character");
+});
+
+test("#791: only a time an entry writes decides whether the document states offsets", () => {
+  // The condition states -10:00 but is dropped after its time was written (a malformed site throws), so
+  // nothing written states a zone.
+  const bundle = timedBundle({ onset: "2025-06-01T08:00:00-10:00", visit: ["2025-04-02T09:00:00", "2025-04-02T09:30:00"] });
+  (bundle.entry[2]!.resource as Record<string, unknown>).bodySite = { coding: [] };
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => bundle);
+  assert.ok(doc!.nonConformanceReasons.some((r) => /Condition: could not be translated/.test(r)), "the fixture must drop the condition");
+  assert.deepEqual(valuesIn(doc!.xml).filter((v) => /[+-]\d{4}$/.test(v)), []);
+  assert.ok(!doc!.caveats.some((c) => /no time zone/.test(c)));
+});
+
+test("#791: a birth date coarser than a day is named; a fraction of a second comes back as written", () => {
+  const [doc] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => timedBundle({ birthDate: "1975-03" }));
+  assert.ok(doc!.caveats.some((c) => /birth date is written at the year or month/.test(c)), JSON.stringify(doc!.caveats));
+  const [day] = buildQrda1Documents(run, "cms125", [outcome(officialEvidence)], () => timedBundle({}));
+  assert.ok(!day!.caveats.some((c) => /birth date/.test(c)));
+  const xml = exportOf(timedBundle({ lab: "2025-06-01T10:00:00.250-10:00" }));
+  assert.ok(valuesIn(xml).includes("20250601100000.250-1000"));
+  assert.equal(resourceBack(xml, "Observation").effectiveDateTime, "2025-06-01T10:00:00.250-10:00");
+});
+
+test("#791: a year or month that is not one is no date, and -00:00 is UTC", () => {
+  for (const low of ["202513", "202500", "0000"]) {
+    const doc = diagnosisDocument(`<effectiveTime><low value='${low}'/><high nullFlavor="UNK"/></effectiveTime>`);
+    assert.equal((conditionFromDoc(`<effectiveTime><low value='${low}'/><high nullFlavor="UNK"/></effectiveTime>`) as { onsetDateTime?: string } | undefined)?.onsetDateTime, undefined, low);
+    assert.ok(doc.includes(low));
+  }
+  assert.equal((conditionFromDoc(`<effectiveTime><low value='202512'/><high nullFlavor="UNK"/></effectiveTime>`) as { onsetDateTime?: string } | undefined)?.onsetDateTime, "2025-12");
+  const utcOnly = exportOf(timedBundle({ lab: "2025-06-01T10:00:00-00:00", visit: ["2025-04-02T09:00:00+00:00", "2025-04-02T09:30:00Z"] }));
+  assert.deepEqual(valuesIn(utcOnly).filter((v) => /[+-]\d{4}$/.test(v)), [], "a document in UTC however spelled states no offset");
 });
