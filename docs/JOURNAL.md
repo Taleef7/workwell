@@ -28,6 +28,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   pair at its time from forming. No Cypress deck document states a panel this way, so the decks and C2 are
   unchanged and the evidence is the tests.
 
+- **A QRDA I batch import persists each person under the subject id the resolver gave them (#655).** A
+  successful evaluation was stored under the engine's `Patient.id`, which two people share when their
+  identifiers share a shape (one MRN extension under two roots), so the second person's outcome read as
+  the first's; only a failed evaluation used the resolver's `~N` id. C2 unchanged.
+
 ## 2026-10-12
 
 - **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The

@@ -1061,7 +1061,11 @@ export async function handleRuns(
         persisted.push(
           await outcomeStore.recordOutcome({
             runId: importId,
-            subjectId: result.subjectId,
+            // The RESOLVER's subject id, as the failure branch below persists, never the engine's
+            // `Patient.id`: two people whose identifiers share a shape (one MRN extension under two roots,
+            // or no extension at all) carry one `Patient.id`, and only the resolver's `~N` keeps them two
+            // subjects (#655).
+            subjectId: subject.subjectId,
             measureId: body.measureId,
             evaluationPeriod,
             status: result.outcome,
