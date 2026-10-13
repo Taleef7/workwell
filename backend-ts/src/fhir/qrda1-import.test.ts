@@ -524,6 +524,10 @@ test("#794: an Observation carries its author time as issued, and one stated sit
   const none = reading(author("20250219") + site("368209003") + site("368208006") + method + method);
   assert.deepEqual([none.issued, none.bodySite, none.method], [undefined, undefined, undefined]);
   assert.equal(reading(author("20250219171500") + author("20250220090000")).issued, undefined, "two authors' times are two statements");
+  // A minute is not an instant: padding it would invent its second (Codex, #805).
+  assert.equal(reading(author("202502191715")).issued, undefined);
+  // Two times under one author are two statements too.
+  assert.equal(reading(author("20250219171500").replace("</author>", '<time value="20250220090000"/></author>')).issued, undefined);
   // A lab carries them the same way.
   const lab = labsOf(sitedDocument(lab794({ value: '<value xsi:type="PQ" value="7.1" unit="%"/>' + method }).replace("</observation></entry>", `${author("20250602080000")}</observation></entry>`)))[0]!;
   assert.deepEqual([lab.issued, lab.method?.coding?.[0]?.code], ["2025-06-02T08:00:00Z", undefined], "a lab's method is its Result's, not its own");

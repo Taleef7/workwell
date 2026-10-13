@@ -618,17 +618,20 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
 
 /**
  * QDM's Author dateTime (`<author><time>`) → `Observation.issued`, the time the result was recorded (#794).
- * `issued` is an instant, so only a time of day is one (a date alone is not), and only one author's: two
- * authors stating times are two statements with no rule to choose between. Never the entry's own time, which
- * is when it was measured.
+ * `issued` is an instant, known to the second, so only a time stated to the second is one: a date or a minute
+ * is not, and padding it would invent the rest (Codex, #805). Only one stated time, under one author or
+ * several: two are two statements with no rule to choose between. Never the entry's own time, which is when
+ * it was measured.
  */
 function issuedOf(node: CdaNode): { issued?: string } {
   const stated = childrenNamed(node, "author")
-    .map((author) => child(author, "time"))
-    .filter((time): time is CdaNode => time !== undefined && time.attrs.nullFlavor === undefined);
+    .flatMap((author) => childrenNamed(author, "time"))
+    .filter((time) => time.attrs.nullFlavor === undefined);
   if (stated.length !== 1) return {};
-  const time = isoFromHl7(stated[0]!.attrs.value);
-  return time?.includes("T") ? { issued: time } : {};
+  const value = stated[0]!.attrs.value;
+  if (value === undefined || !/^\d{14}/.test(value)) return {};
+  const time = isoFromHl7(value);
+  return time ? { issued: time } : {};
 }
 
 /**
