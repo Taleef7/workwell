@@ -68,6 +68,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   forbids (the Maui corpus already wrote `Z`). They now write `Z`. Every TWH subject on every measure TWH
   runs, scale-tenant subjects on every authored measure and the official-only bundles score identically
   before and after, on three evaluation dates and in three host time zones; the stored evidence is unchanged.
+- **The QRDA I importer refuses what is not XML and reads nothing from what states nothing (#794,
+  parser).** An attribute stated twice made the last value win, so `negationInd="true" negationInd="false"`
+  imported a negated act as done; such a document is now refused, as any XML parser refuses it (a batch
+  reports it and keeps the others). An entry stating its code, status or time twice (a medication: two
+  periods beside its frequencies), or a diagnosis its value twice, is not translated and is named; a bound
+  stated twice is no time; a nullFlavored code or id is no code or id; and `xsi:type` is read by its
+  namespace whatever prefix the document binds to it. §4A.8 still counts every time and code a reading
+  writes, so none of these lets a pair form that did not before. Decks and C2 unchanged.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11
