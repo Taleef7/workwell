@@ -5,6 +5,14 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-13
+
+- **An imported QRDA I Observation carries its author time, site and method (#794, Physical Exam
+  attributes).** QDM's Author dateTime becomes `issued` (only one time, stated to the second), and
+  one stated Anatomical Location Site or Method becomes `bodySite` or `method`. Before, only a paired
+  blood-pressure panel carried site and method; unpaired readings and every other Observation lost them.
+  The performer is still not imported (no Practitioner is). Decks and C2 unchanged.
+
 ## 2026-10-12
 
 - **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The
