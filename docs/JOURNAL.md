@@ -28,6 +28,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   pair at its time from forming. No Cypress deck document states a panel this way, so the decks and C2 are
   unchanged and the evidence is the tests.
 
+- **CI pulls its Postgres service from Google's mirror of Docker Hub's official images (owner choice
+  today).** AWS's public mirror's anonymous data limit ("toomanyrequests: Data limit exceeded") failed a
+  backend shard or the MADiE gate three times today before any test ran; no registry login was possible
+  (the AWS account is suspended, and the repo holds no registry credentials). The deploy Dockerfiles still
+  pull their Node base images from AWS's mirror.
+
 ## 2026-10-12
 
 - **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The
