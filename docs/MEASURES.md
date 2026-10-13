@@ -105,7 +105,9 @@ the frailty edit), each listed and explained; 22 hand-built patients test every 
 > `qicore-encounter`, both Condition profiles and more, which only the corpus stamps, so every QRDA-imported
 > or WebChart patient threw. On the same data the narrowed trust is identical to it: CMS's 68 MADiE cases,
 > and all 20,000 corpus patients. QRDA states a blood pressure as two readings, a systolic and a diastolic at
-> one time; the importer makes them one panel only under LOCKED §4A.8's conditions. With both changes the
+> one time; the importer makes them one panel only under LOCKED §4A.8's conditions. A document may instead
+> state one Physical Exam coded 85354-9 with its two readings as QDM Components: that is imported as the
+> panel it states, under §4A.8's value rule (#794). With both changes the
 > Cypress deck scores 42 of 44, from 0 (both years). The two left are readings taken during an ED visit or
 > an inpatient stay: CMS's draft leaves those out only through `Observation.encounter`, which QRDA does not
 > carry and the importer does not infer.

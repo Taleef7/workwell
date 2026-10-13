@@ -16,6 +16,17 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   QI-Core requires it, and so does the US Core blood-pressure profile preparation stamps on a paired
   panel, so the stamp claimed what the resource did not meet. A batch points a person's documents at the
   one Patient it keeps, so an entry two documents repeat is still merged once. Decks and C2 unchanged.
+- **A blood pressure a QRDA I document states as one panel is imported as that panel (#794, QDM
+  Components; owner decision and CLAUDE.md line today).** A Physical Exam coded 85354-9 stating its two
+  readings as QDM Components came in as a code-only Observation, silently, and CMS165 could not see it. It
+  is now that panel when it states exactly one 8480-6 and one 8462-4, each one numeric value in mm[Hg]
+  (§4A.8's value rule), states at least a day, and is its entry's own act; only the `vital-signs` category
+  (and the UCUM system on each unit) is supplied. The reference QRDA generator's empty value on the exam
+  states none, so its documents qualify. Through official CMS165, 128/78 so stated scores COMPLIANT and
+  150/78 OVERDUE. Anything short of that, or readings stated as Components under another code (55284-4) or
+  template, is not translated (and named when nothing else in its entry is), and its readings still keep a
+  pair at its time from forming. No Cypress deck document states a panel this way, so the decks and C2 are
+  unchanged and the evidence is the tests.
 
 ## 2026-10-12
 

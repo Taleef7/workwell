@@ -106,6 +106,7 @@ const T = {
   patientDataSection: "2.16.840.1.113883.10.20.24.2.1",
   measureSection: "2.16.840.1.113883.10.20.24.2.2",
   eMeasureReference: "2.16.840.1.113883.10.20.24.3.97",
+  component: "2.16.840.1.113883.10.20.24.3.149",
 } as const;
 
 /**
@@ -205,6 +206,7 @@ const ATTRIBUTE_TEMPLATES = new Set([
   "2.16.840.1.113883.10.20.24.3.138", // Symptom Concern Act (wrapper)
   "2.16.840.1.113883.10.20.24.3.130", // Device Order Act (wrapper; the datatype is on the <supply>)
   T.result,
+  T.component,
 ]);
 
 /** SNOMED sex concept → FHIR `Patient.gender`, inverting the export's `SEX_CONCEPTS`. */
@@ -663,6 +665,77 @@ function statedValuesOf(node: CdaNode): CdaNode[] {
 }
 
 /**
+ * The QDM Components (…24.3.149) an entry states directly, through a `REFR` relationship (the IG's, and the
+ * one the reference generator writes) that is not negated. A negated Component states that its reading was
+ * not taken: like a negated reading of its own, it is no reading at all, and blocks nothing (Codex, #807).
+ */
+function componentsOf(node: CdaNode): CdaNode[] {
+  return childrenNamed(node, "entryRelationship")
+    .filter((relationship) => relationship.attrs.typeCode === "REFR" && !isNegatedNode(relationship))
+    .flatMap((relationship) => childrenNamed(relationship, "observation"))
+    .filter((n) => hasTemplate(n, T.component) && !isNegatedNode(n));
+}
+
+/** Whether an entry states a systolic or a diastolic as one of its Components, whatever its own code or template. */
+function statesBloodPressureComponents(node: CdaNode): boolean {
+  return componentsOf(node).some((component) => writtenHalfOf(component) !== undefined);
+}
+
+/** Whether an entry is a Physical Exam coded as a blood-pressure panel (85354-9) that states Components. */
+function statesBloodPressurePanel(node: CdaNode): boolean {
+  if (!hasTemplate(node, T.physicalExamPerformed) || componentsOf(node).length === 0) return false;
+  return (concept(child(node, "code"))?.coding ?? []).some((c) => c.system === LOINC && c.code === BLOOD_PRESSURE_PANEL);
+}
+
+/**
+ * The two readings of a blood pressure the document states as ONE Physical Exam coded 85354-9, its
+ * readings as QDM Components (#794; CLAUDE.md, "Nothing invents clinical data"), as US Core panel
+ * components, or undefined when it is not exactly that. Every code is the document's own; only the UCUM
+ * system on the unit is added, as preparation adds a missing system. It holds only when:
+ * - the exam states no value of its own (a panel's values are its readings'); a nullFlavored one states
+ *   none, and is what the reference QRDA generator writes on every exam without a result (review, #794);
+ * - it states its time to at least a day: US Core's vital signs need one (vs-1), and the profile
+ *   preparation stamps on the panel would otherwise claim a conformance it does not have (review, #794);
+ * - it states exactly two Components that are not negated, each an event (`EVN` or no mood) stating no status
+ *   other than `completed` and no time of its own (a Component is part of its exam, at its exam's time);
+ * - one states 8480-6 and the other 8462-4, each in exactly one `code` and neither stating both halves
+ *   (`writtenHalfOf`, as §4A.8 reads a reading's code), each kept verbatim;
+ * - each states exactly one value of its own, a numeric `PQ` in mm[Hg] with no nullFlavor (§4A.8's value
+ *   rule; a stated value is not judged), and nests nothing: a Component is a code and a value, as the IG and
+ *   the reference generator write it, and a Result inside one would be a statement whose own status and
+ *   code this would have to judge (Codex, #807).
+ * Anything else, a third Component included (a mean arterial pressure would be dropped), is not a panel.
+ */
+function statedPanelComponents(node: CdaNode): Array<{ code: unknown; valueQuantity: unknown }> | undefined {
+  if (statedValuesOf(node).some((value) => value.attrs.nullFlavor === undefined)) return undefined;
+  const t = times(child(node, "effectiveTime"));
+  const day = t.point ?? t.start;
+  if (day === undefined || day.length < 10) return undefined;
+  const components = componentsOf(node);
+  if (components.length !== 2) return undefined;
+  const read = components.map((c) => {
+    if (c.attrs.moodCode !== undefined && c.attrs.moodCode !== "EVN") return undefined;
+    const status = childrenNamed(c, "statusCode");
+    if (status.length > 1 || (status.length === 1 && status[0]!.attrs.code !== "completed")) return undefined;
+    if (childrenNamed(c, "effectiveTime").length > 0) return undefined;
+    if (childrenNamed(c, "code").length !== 1) return undefined;
+    const half = writtenHalfOf(c);
+    if (childrenNamed(c, "entryRelationship").length > 0) return undefined;
+    const values = childrenNamed(c, "value");
+    if (values.length !== 1) return undefined;
+    const v = values[0]!;
+    if (v.attrs["xsi:type"] !== "PQ" || v.attrs.nullFlavor !== undefined || v.attrs.unit !== "mm[Hg]") return undefined;
+    const value = decimalOf(v.attrs.value);
+    const code = concept(child(c, "code"));
+    if (value === undefined || !code) return undefined;
+    return { half, component: { code, valueQuantity: { value, unit: "mm[Hg]", system: UCUM, code: "mm[Hg]" } } };
+  });
+  const systolic = read.find((r) => r?.half === "systolic");
+  const diastolic = read.find((r) => r?.half === "diastolic");
+  return systolic && diastolic ? [systolic.component, diastolic.component] : undefined;
+}
+
+/**
  * The number a CDA REAL / PQ value states, or undefined when it states none: the lexical form is a decimal,
  * optionally signed, optionally with an exponent; one too large for a double is no number, and one too small
  * is not zero (review, #787).
@@ -680,6 +753,7 @@ const DECIMAL = /^\s*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/;
 const LOINC = "http://loinc.org";
 const UCUM = "http://unitsofmeasure.org";
 const SYSTOLIC = "8480-6";
+const BLOOD_PRESSURE_PANEL = "85354-9";
 const DIASTOLIC = "8462-4";
 
 type ObservationShape = {
@@ -736,8 +810,9 @@ function writtenHalfOf(node: CdaNode): "systolic" | "diastolic" | "both" | undef
  */
 export function unpairedBloodPressureReadingsIn(resources: readonly unknown[]): number {
   return resources.filter((r) => {
-    const o = r as { resourceType?: unknown; status?: unknown } | null;
-    return o?.resourceType === "Observation" && o.status !== "cancelled" && bloodPressureHalfOf(r) !== undefined;
+    const o = r as { resourceType?: unknown; status?: unknown; component?: unknown } | null;
+    // A panel is not a reading, whatever translation its own code carries (review, #794).
+    return o?.resourceType === "Observation" && o.status !== "cancelled" && o.component === undefined && bloodPressureHalfOf(r) !== undefined;
   }).length;
 }
 
@@ -1403,6 +1478,13 @@ export function importQrda1Document(xml: string): Qrda1Import {
       if (written !== undefined && !produced.some(isReading) && STATED_AS.some(([template]) => hasTemplate(candidate, template))) {
         bloodPressureReadings.push({ index: -1, node: candidate });
       }
+      // A blood pressure stated as one panel states both its readings at its time: like any stated systolic and
+      // diastolic, they keep a pair whose time could fall within its own from forming (§4A.8).
+      const panel = statesBloodPressurePanel(candidate);
+      // Components stating a systolic or diastolic, under any code or template, state readings at the entry's
+      // time: they keep a pair whose time could fall within it from forming (§4A.8, "of any template").
+      const bloodPressureComponents = statesBloodPressureComponents(candidate);
+      if (panel || bloodPressureComponents) bloodPressureReadings.push({ index: -1, node: candidate });
       if (produced.length > 0 && !happenedAsStated(candidate)) {
         // Not translated: an entry that did not happen, or only was intended, is not what its mapper's status
         // says (#790). A blood-pressure reading among it still keeps a pair at its time from forming, as it
@@ -1416,6 +1498,16 @@ export function importQrda1Document(xml: string): Qrda1Import {
         // A Physical Exam reading may pair only when it is its entry's own act: one inside an organizer or
         // another act can take a performer, a device or a status from its wrapper (review, #787).
         const pairs = hasTemplate(candidate, T.physicalExamPerformed) && entry.children.includes(candidate);
+        if (panel || bloodPressureComponents) {
+          // Imported as the panel it states, when it is exactly one (`statedPanelComponents`) and its entry's
+          // own act, as a pair's readings must be; otherwise not translated (and named when nothing else in
+          // its entry translates), rather than imported without the readings it states: a panel under
+          // another code (55284-4) or template included, which the approved mapping does not name.
+          const components = panel && pairs ? statedPanelComponents(candidate) : undefined;
+          if (!components) continue;
+          const { valueQuantity: _q, valueCodeableConcept: _c, valueString: _s, ...exam } = produced[0] as Record<string, unknown>;
+          produced[0] = { ...exam, category: [{ coding: [{ system: OBSERVATION_CATEGORY, code: "vital-signs" }] }], component: components };
+        }
         for (const r of produced) {
           if (isReading(r)) {
             const reading = { index: entries.length, node: candidate };

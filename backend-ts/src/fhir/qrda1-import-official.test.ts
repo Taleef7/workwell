@@ -460,3 +460,36 @@ test("official CMS165 reads a blood pressure stated with a date alone, and its Q
   // controlled reading; a QDM receiver reads both readings as stated.
   assert.equal(await cms165OutcomeOf(xml), "COMPLIANT");
 });
+
+test("official CMS165 reads a blood pressure stated as one panel, its readings as QDM Components (#794)", { skip: skipCms165 }, async () => {
+  // The fixture without its paired readings: the encounter and the hypertension alone.
+  const withoutReadings = { ...hypertensiveBundle, entry: hypertensiveBundle.entry.filter((e) => (e.resource as { id?: string }).id !== "bp-1") };
+  const base = buildQrda1Document(run, "cms165", cms165Outcome, withoutReadings);
+  const section = /<templateId root="2\.16\.840\.1\.113883\.10\.20\.24\.2\.1"[^>]*\/>/;
+  assert.match(base, section, "the fixture must have a patient data section");
+  const component = (code: string, value: string) => `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+          <templateId root="2.16.840.1.113883.10.20.24.3.149" extension="2017-08-01"/>
+          <code code="${code}" codeSystem="2.16.840.1.113883.6.1"/>
+          <value xsi:type="PQ" value="${value}" unit="mm[Hg]"/>
+        </observation></entryRelationship>`;
+  const panel = (systolic: string, unit = "mm[Hg]") => `<entry typeCode="DRIV"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.22.4.13" extension="2014-06-09"/>
+        <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+        <id root="1.3.6.1.4.1.115" extension="bp-stated"/>
+        <code code="85354-9" codeSystem="2.16.840.1.113883.6.1"/>
+        <statusCode code="completed"/>
+        <effectiveTime value="20250601100000"/>
+        ${component("8480-6", systolic).replace('unit="mm[Hg]"', `unit="${unit}"`)}
+        ${component("8462-4", "78")}
+      </observation></entry>`;
+  const withPanel = (entry: string) => base.replace(section, (m) => `${m}
+${entry}`);
+  assert.equal(await cms165OutcomeOf(withPanel(panel("128"))), "COMPLIANT", "128/78 stated as one panel is controlled");
+  // As the reference QRDA generator writes it: a nullFlavored value on the exam, which states none (review, #794).
+  const generated = panel("128").replace('<effectiveTime value="20250601100000"/>', '<effectiveTime value="20250601100000"/><value xsi:type="CD" nullFlavor="UNK"/>');
+  assert.notEqual(generated, panel("128"), "the fixture must add the value");
+  assert.equal(await cms165OutcomeOf(withPanel(generated)), "COMPLIANT");
+  assert.equal(await cms165OutcomeOf(withPanel(panel("150"))), "OVERDUE", "150/78 is not");
+  // A reading in another unit is not a panel: no blood pressure CMS165 can read.
+  assert.equal(await cms165OutcomeOf(withPanel(panel("128", "mmHg"))), "OVERDUE");
+});
