@@ -28,6 +28,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   pair at its time from forming. No Cypress deck document states a panel this way, so the decks and C2 are
   unchanged and the evidence is the tests.
 
+- **QRDA III writes no performance rate (nullFlavor NA) when no one is left in the denominator (#655).**
+  It wrote `0`, which CMS's validation refuses there (CYPRESS-2051): a rate over nobody is undefined, not
+  zero, and the summary MeasureReport already omits its score in the same case. A denominator with no one
+  in the numerator still writes `0.0000`.
+
 ## 2026-10-12
 
 - **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The
