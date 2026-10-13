@@ -471,6 +471,43 @@ test("#794 (review): the patient's id is the first id stating one", () => {
   assert.equal(patient.id, "emp-006");
 });
 
+test("#794: a period that ends before it starts is no time, on every datatype that carries one", () => {
+  const encounter = (time: string) => `<entry typeCode="DRIV"><encounter classCode="ENC" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.23" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="enc-r"/>
+      <code code="99213" codeSystem="2.16.840.1.113883.6.12"/>
+      <statusCode code="completed"/>
+      ${time}
+    </encounter></entry>`;
+  const diagnosis = (time: string) => sitedDiagnosis("").replace(/<effectiveTime>[\s\S]*?<\/effectiveTime>/, time);
+  const imported = (entries: string) => importQrda1Document(sitedDocument(entries)).bundle.entry.map((e) => e.resource as Record<string, any>);
+  const of = (resources: Record<string, any>[], type: string) => resources.find((r) => r.resourceType === type)!;
+  const reversed = "<effectiveTime><low value='20250602100000'/><high value='20250601100000'/></effectiveTime>";
+  const both = imported(encounter(reversed) + diagnosis(reversed));
+  assert.equal(of(both, "Encounter").period, undefined);
+  const condition = of(both, "Condition");
+  assert.deepEqual([condition.onsetDateTime, condition.abatementDateTime, condition.clinicalStatus], [undefined, undefined, undefined], "silence, never an active diagnosis");
+  // Compared as instants in their own offsets: 20:00 at -10:00 on 1 June is 06:00 UTC on 2 June.
+  const zoned = "<effectiveTime><low value='20250602050000+0000'/><high value='20250601200000-1000'/></effectiveTime>";
+  assert.deepEqual(of(imported(encounter(zoned)), "Encounter").period, { start: "2025-06-02T05:00:00+00:00", end: "2025-06-01T20:00:00-10:00" });
+  const backwards = "<effectiveTime><low value='20250602070000+0000'/><high value='20250601200000-1000'/></effectiveTime>";
+  assert.equal(of(imported(encounter(backwards)), "Encounter").period, undefined);
+  // Past the millisecond: a time states up to nine digits of a second (Codex, #803).
+  const nanos = "<effectiveTime><low value='20250601100000.123456+0000'/><high value='20250601100000.123455+0000'/></effectiveTime>";
+  assert.equal(of(imported(encounter(nanos)), "Encounter").period, undefined);
+  const ordered = "<effectiveTime><low value='20250601100000.123455+0000'/><high value='20250601100000.123456+0000'/></effectiveTime>";
+  assert.deepEqual(of(imported(encounter(ordered)), "Encounter").period, { start: "2025-06-01T10:00:00.123455+00:00", end: "2025-06-01T10:00:00.123456+00:00" });
+  // Beside a date, compared as dates at the coarser precision.
+  for (const [low, high, kept] of [["2025", "20250601100000", true], ["20250601", "20250601", true], ["20250602", "20250601235959", false], ["202506", "20250530", false], ["20250615", "202506", true]] as const) {
+    const period = of(imported(encounter(`<effectiveTime><low value='${low}'/><high value='${high}'/></effectiveTime>`)), "Encounter").period;
+    assert.equal(period !== undefined, kept, `${low} to ${high}`);
+  }
+  // A time whose UTC year leaves 0001-9999 is still a FHIR dateTime, kept in its own offset (#788 did it).
+  for (const [value, fhir] of [["99991231235959-1400", "9999-12-31T23:59:59-14:00"], ["00010101000000+0100", "0001-01-01T00:00:00+01:00"]] as const) {
+    assert.deepEqual(of(imported(encounter(`<effectiveTime value='${value}'/>`)), "Encounter").period, { start: fhir }, value);
+  }
+});
+
 test("import NAMES an untranslated QDM datatype rather than counting it", () => {
   // An operator needs to know WHICH datatype was dropped to judge whether the recalculation can be
   // trusted; a bare count reads as "a few things we don't support".

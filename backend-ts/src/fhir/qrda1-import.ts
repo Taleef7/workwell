@@ -340,8 +340,13 @@ function times(node: CdaNode | undefined): { point?: string; start?: string; end
   // understand, and that status can put the condition into a measure population. A malformed value is
   // neither a closed interval nor an open one: it is a parse failure, and it says nothing.
   const endUnknown = end === undefined && typeof high?.attrs.nullFlavor === "string" && high.attrs.nullFlavor.length > 0;
+  const start = isoFromHl7(child(node, "low")?.attrs.value);
+  // A period that ends before it starts is no period FHIR can hold (per-1), and cql-execution compares with
+  // it rather than refusing it. Like a malformed value it says nothing, so it is no time at all, as the
+  // blood-pressure pairing already reads it (#794).
+  if (start !== undefined && end !== undefined && endsBeforeItStarts(start, end)) return {};
   return {
-    start: isoFromHl7(child(node, "low")?.attrs.value),
+    start,
     end,
     ...(endUnknown ? { endUnknown: true } : {}),
   };
@@ -349,6 +354,23 @@ function times(node: CdaNode | undefined): { point?: string; start?: string; end
 
 /** An `<id>` that states an extension: one with a nullFlavor states that it has none, whatever sits beside it (#794). */
 const statedId = (n: CdaNode): boolean => n.attrs.extension !== undefined && n.attrs.extension !== "" && n.attrs.nullFlavor === undefined;
+
+/** A stated time as nanoseconds: `Date.parse` keeps only milliseconds, and a time may state nine digits (Codex, #803). */
+function instantOf(time: string): bigint {
+  const fraction = /\.(\d+)/.exec(time)?.[1] ?? "";
+  return BigInt(Date.parse(time.replace(/\.\d+/, ""))) * 1_000_000n + BigInt(fraction.padEnd(9, "0") || "0");
+}
+
+/**
+ * Whether a period's end comes before its start. Two times are compared as the instants their offsets
+ * state; a date states no time and no zone, so beside a date the two are compared as the dates they state,
+ * at the coarser precision (`2025` does not end before `2025-06-01T10:00:00Z`).
+ */
+function endsBeforeItStarts(start: string, end: string): boolean {
+  if (start.includes("T") && end.includes("T")) return instantOf(end) < instantOf(start);
+  const n = Math.min(start.split("T")[0]!.length, end.split("T")[0]!.length);
+  return end.slice(0, n) < start.slice(0, n);
+}
 
 /**
  * The FHIR `id` this entry was exported under.
