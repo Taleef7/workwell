@@ -484,3 +484,18 @@ test("the batch counts an unpaired blood-pressure reading once, however many of 
   const observations = thrice.bundle.entry.filter((e) => (e.resource as { resourceType?: string }).resourceType === "Observation");
   assert.equal(observations.length, 3, "and the merged bundle holds those three readings once each");
 });
+
+test("two people sharing an MRN extension keep their own subject ids whatever order the documents arrive in (Codex, #809)", () => {
+  const a = doc({ mrn: "mrn-x", given: "ANNA" });
+  const b = doc({ mrn: "mrn-x", given: "BELLA" }).replace(`extension="mrn-x" root="${MRN_ROOT}"`, `extension="mrn-x" root="2.16.840.1.113883.19.5"`);
+  assert.notEqual(b, doc({ mrn: "mrn-x", given: "BELLA" }), "the fixture must move the second MRN to another root");
+  const idsBy = (documents: string[]) => {
+    const resolution = resolveQrda1Documents(documents);
+    return new Map(resolution.subjects.map((s) => [documents[s.documentIndexes[0]!]!, s.subjectId]));
+  };
+  const forward = idsBy([a, b]);
+  const reverse = idsBy([b, a]);
+  assert.deepEqual([...new Set(forward.values())].sort(), ["mrn-x", "mrn-x~2"]);
+  assert.equal(reverse.get(a), forward.get(a), "the first person keeps their id");
+  assert.equal(reverse.get(b), forward.get(b), "and so does the second");
+});

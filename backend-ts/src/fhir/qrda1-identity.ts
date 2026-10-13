@@ -375,9 +375,14 @@ export function resolveQrda1Documents(documents: readonly string[]): Qrda1Resolu
     }
   });
 
+  const identityOf = new Map<object, string>();
   const subjects = group(members.map((m) => m.identifiers)).map((indexes) => {
     const groupMembers = indexes.map((i) => members[i]!);
-    return { ...merge(groupMembers), documentIndexes: groupMembers.map((m) => m.index) };
+    const subject = { ...merge(groupMembers), documentIndexes: groupMembers.map((m) => m.index) };
+    // The group's root-aware identity, independent of the order the documents arrived in: every
+    // identifier its documents state, sorted, then their text for a group that states none.
+    identityOf.set(subject, `${[...new Set(groupMembers.flatMap((m) => m.identifiers))].sort().join(",")}|${groupMembers.map((m) => m.text).sort().join("\u0000")}`);
+    return subject;
   });
   // Grouping is root-AWARE; `importQrda1Document`'s patient id is deliberately root-AGNOSTIC (the first
   // `<id>` carrying an extension, whatever the root) and falls back to a constant. So two documents that
@@ -388,8 +393,13 @@ export function resolveQrda1Documents(documents: readonly string[]): Qrda1Resolu
   // per-subject MeasureReport, the roster) attributes one person's data to another. Measured in review
   // (#389). Disambiguated rather than refused: the documents are fine, our id derivation is lossy, and a
   // suffix keeps both people countable and distinguishable.
+  //
+  // The suffix follows the groups' identity, never the documents' order (Codex, #809): the outcome is
+  // persisted under this id, so a batch listing the same two people the other way round must give each the
+  // id it had. Groups sharing an id are numbered in the order of their root-aware identity. (A batch with a
+  // different set of colliding people can still number them differently; only a root-aware id would not.)
   const seen = new Map<string, number>();
-  for (const subject of subjects) {
+  for (const subject of [...subjects].sort((a, b) => (identityOf.get(a)! < identityOf.get(b)! ? -1 : identityOf.get(a)! > identityOf.get(b)! ? 1 : 0))) {
     const count = (seen.get(subject.subjectId) ?? 0) + 1;
     seen.set(subject.subjectId, count);
     if (count > 1) subject.subjectId = `${subject.subjectId}~${count}`;
