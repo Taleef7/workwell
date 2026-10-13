@@ -32,6 +32,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   successful evaluation was stored under the engine's `Patient.id`, which two people share when their
   identifiers share a shape (one MRN extension under two roots), so the second person's outcome read as
   the first's; only a failed evaluation used the resolver's `~N` id. C2 unchanged.
+- **QRDA III writes no performance rate (nullFlavor NA) when no one is left in the denominator (#655).**
+  It wrote `0`, which CMS's validation refuses there (CYPRESS-2051): a rate over nobody is undefined, not
+  zero, and the summary MeasureReport already omits its score in the same case. A denominator with no one
+  in the numerator still writes `0.0000`.
 
 ## 2026-10-12
 
