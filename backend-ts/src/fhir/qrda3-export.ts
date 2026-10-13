@@ -162,12 +162,17 @@ export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: 
   return buildQrda3DocumentFromCounts(run, measureId, rates.length > 1 ? rates : rates[0]!, official, strata);
 }
 
-/** The eCQM proportion performance rate, as the fixed-4 string the document carries. */
-function performanceRate(c: PopulationCounts): string {
-  // Must match `buildSummaryMeasureReportFromCounts` exactly — the two exporters describe the same
-  // run and are compared against each other by the certification loop (M-B).
+/**
+ * The eCQM proportion performance rate as the document's `<value>`: a fixed-4 REAL, or `nullFlavor="NA"`
+ * when no one is left in the denominator once exclusions and exceptions are taken out. A rate there is not
+ * zero but undefined; CMS's validation (Cypress) refuses `0` and asks for NA (CYPRESS-2051), and the summary
+ * MeasureReport (`buildSummaryMeasureReportFromCounts`) omits its score in the same case (#655).
+ */
+function performanceRateValue(c: PopulationCounts): string {
   const effectiveDenominator = c.denom - c.denex - c.denexcep;
-  return effectiveDenominator > 0 ? (c.numer / effectiveDenominator).toFixed(4) : "0";
+  return effectiveDenominator > 0
+    ? `<value xsi:type="REAL" value="${(c.numer / effectiveDenominator).toFixed(4)}"/>`
+    : `<value xsi:type="REAL" nullFlavor="NA"/>`;
 }
 
 /** A Reporting Stratum (V2) for one stratum of one population — nested inside the Measure Data observation. */
@@ -252,7 +257,7 @@ export function buildQrda3DocumentFromCounts(
                   <templateId root="2.16.840.1.113883.10.20.27.3.30" extension="2016-09-01"/>
                   <code code="72510-1" codeSystem="${LOINC}" codeSystemName="LOINC" displayName="Performance Rate"/>
                   <statusCode code="completed"/>
-                  <value xsi:type="REAL" value="${performanceRate(counts)}"/>
+                  ${performanceRateValue(counts)}
                   <reference typeCode="REFR">
                     <externalObservation classCode="OBS" moodCode="EVN">
                       ${numeratorReference}

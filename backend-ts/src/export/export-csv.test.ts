@@ -189,7 +189,8 @@ const testScript = `
       payload: {},
     }],
   };
-  const fakeAuditCaseStore = { getCase: async () => cases[0] };
+  // Every id resolves to the fixture case, read in one batch as the export now reads each page of cases (#619).
+  const fakeAuditCaseStore = { getCases: async (ids) => ids.map((id) => ({ ...cases[0], id })) };
   const csvAudit = await auditCsv(fakeAuditEventStore, fakeAuditCaseStore);
 
   console.log(JSON.stringify({

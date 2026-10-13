@@ -196,10 +196,13 @@ export interface AuthzDecision {
  * **This exists because the CM/ADMIN gate on `/api/subject-lists/**` was otherwise a guard that could
  * not fire for the read that matters most.** Five of the six surfaces that accept `?listId=` are
  * AUTHENTICATED (the roster, the work list, the cases route and both CSV exports), so a VIEWER holding
- * a list id could ask `GET /api/exports/cases?format=csv&listId=<uuid>` and receive the membership —
- * names, provider, payer and per-measure status — which is strictly MORE than the members endpoint the
- * gate protects. And the id is not a secret by construction: it sits in the query string of every
- * filtered screen, so it reaches shareable URLs, browser history and access logs.
+ * a list id could ask `GET /api/exports/cases?format=csv&listId=<uuid>` and learn exactly which patients
+ * the list holds. What the gate protects is that MEMBERSHIP: which patients the ACO attributed is the
+ * ACO's own assertion, confidential whatever patient data goes with it. It is not a matter of volume: a
+ * VIEWER can read more patient data without `listId` (the whole cases export) than with it, and whether
+ * a VIEWER may take that bulk export is a separate decision (#624). And the id is not a secret by
+ * construction: it sits in the query string of every filtered screen, so it reaches shareable URLs,
+ * browser history and access logs.
  *
  * Enforced once in the worker rather than per route, for the reason `compliance/subject-list-filter.ts`
  * gives for resolving the parameter in one place: six copies of an authorization rule is five chances

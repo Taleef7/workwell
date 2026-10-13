@@ -89,9 +89,9 @@ test("a VIEWER is refused the list metadata, not only the members", async () => 
 });
 
 test("a VIEWER cannot narrow ANY surface to a list — the gate the membership actually leaks through", async () => {
-  // Without this the CM/ADMIN gate above reads as present and cannot fire for the widest read. The
-  // CSV export is the worst case: it returns names, provider, payer and per-measure status for exactly
-  // the list's members, which is strictly MORE than the members endpoint that was gated.
+  // Without this the CM/ADMIN gate above reads as present and cannot fire for the widest read. Each of
+  // these narrowed to a list would tell a VIEWER exactly which patients the ACO attributed: the list's
+  // membership, which the gate protects whatever patient data goes with it (#624).
   const viewer = await login("viewer@workwell.dev");
   for (const path of [
     `/api/exports/cases?format=csv&listId=${ABSENT_LIST}`,
