@@ -8,7 +8,7 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 ## 2026-10-13
 
 - **An imported QRDA I Observation carries its author time, site and method (#794, Physical Exam
-  attributes).** QDM's Author dateTime becomes `issued` (only a time of day, and only one author's), and
+  attributes).** QDM's Author dateTime becomes `issued` (only one time, stated to the second), and
   one stated Anatomical Location Site or Method becomes `bodySite` or `method`. Before, only a paired
   blood-pressure panel carried site and method; unpaired readings and every other Observation lost them.
   The performer is still not imported (no Practitioner is). Decks and C2 unchanged.
