@@ -333,6 +333,11 @@ test("#794: a period that ends before it starts is no time, on every datatype th
   assert.deepEqual(of(imported(encounter(zoned)), "Encounter").period, { start: "2025-06-02T05:00:00+00:00", end: "2025-06-01T20:00:00-10:00" });
   const backwards = "<effectiveTime><low value='20250602070000+0000'/><high value='20250601200000-1000'/></effectiveTime>";
   assert.equal(of(imported(encounter(backwards)), "Encounter").period, undefined);
+  // Past the millisecond: a time states up to nine digits of a second (Codex, #803).
+  const nanos = "<effectiveTime><low value='20250601100000.123456+0000'/><high value='20250601100000.123455+0000'/></effectiveTime>";
+  assert.equal(of(imported(encounter(nanos)), "Encounter").period, undefined);
+  const ordered = "<effectiveTime><low value='20250601100000.123455+0000'/><high value='20250601100000.123456+0000'/></effectiveTime>";
+  assert.deepEqual(of(imported(encounter(ordered)), "Encounter").period, { start: "2025-06-01T10:00:00.123455+00:00", end: "2025-06-01T10:00:00.123456+00:00" });
   // Beside a date, compared as dates at the coarser precision.
   for (const [low, high, kept] of [["2025", "20250601100000", true], ["20250601", "20250601", true], ["20250602", "20250601235959", false], ["202506", "20250530", false], ["20250615", "202506", true]] as const) {
     const period = of(imported(encounter(`<effectiveTime><low value='${low}'/><high value='${high}'/></effectiveTime>`)), "Encounter").period;

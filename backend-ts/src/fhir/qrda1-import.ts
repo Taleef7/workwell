@@ -323,13 +323,19 @@ function times(node: CdaNode | undefined): { point?: string; start?: string; end
   };
 }
 
+/** A stated time as nanoseconds: `Date.parse` keeps only milliseconds, and a time may state nine digits (Codex, #803). */
+function instantOf(time: string): bigint {
+  const fraction = /\.(\d+)/.exec(time)?.[1] ?? "";
+  return BigInt(Date.parse(time.replace(/\.\d+/, ""))) * 1_000_000n + BigInt(fraction.padEnd(9, "0") || "0");
+}
+
 /**
  * Whether a period's end comes before its start. Two times are compared as the instants their offsets
  * state; a date states no time and no zone, so beside a date the two are compared as the dates they state,
  * at the coarser precision (`2025` does not end before `2025-06-01T10:00:00Z`).
  */
 function endsBeforeItStarts(start: string, end: string): boolean {
-  if (start.includes("T") && end.includes("T")) return Date.parse(end) < Date.parse(start);
+  if (start.includes("T") && end.includes("T")) return instantOf(end) < instantOf(start);
   const n = Math.min(start.split("T")[0]!.length, end.split("T")[0]!.length);
   return end.slice(0, n) < start.slice(0, n);
 }
