@@ -7,6 +7,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-13
 
+- **An imported QRDA I Observation carries its author time, site and method (#794, Physical Exam
+  attributes).** QDM's Author dateTime becomes `issued` (only one time, stated to the second), and
+  one stated Anatomical Location Site or Method becomes `bodySite` or `method`. Before, only a paired
+  blood-pressure panel carried site and method; unpaired readings and every other Observation lost them.
+  The performer is still not imported (no Practitioner is). Decks and C2 unchanged.
 - **Every imported QRDA I resource names its patient (#794, subject).** None carried `subject`, though
   QI-Core requires it, and so does the US Core blood-pressure profile preparation stamps on a paired
   panel, so the stamp claimed what the resource did not meet. A batch points a person's documents at the

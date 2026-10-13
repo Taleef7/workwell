@@ -524,6 +524,31 @@ test("#794: every imported clinical resource names its patient, a paired panel i
   assert.deepEqual([...new Set(merged.subjects.map((s) => s.split(":")[1]))], [`Patient/${merged.id}`]);
 });
 
+test("#794: an Observation carries its author time as issued, and one stated site and method", () => {
+  const author = (time: string) => `<author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value="${time}"/><assignedAuthor><id nullFlavor="NA"/></assignedAuthor></author>`;
+  const site = (code: string) => `<targetSiteCode code="${code}" codeSystem="2.16.840.1.113883.6.96"/>`;
+  const method = `<methodCode code="37931006" codeSystem="2.16.840.1.113883.6.96"/>`;
+  const reading = (extra: string) => {
+    const imported = importQrda1Document(sitedDocument(exam({ id: "s-only", code: "8480-6", extra })));
+    return imported.bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === "Observation")!;
+  };
+  const all = reading(author("20250219171500") + site("368209003") + method);
+  assert.deepEqual([all.issued, all.bodySite?.coding?.[0]?.code, all.method?.coding?.[0]?.code], ["2025-02-19T17:15:00Z", "368209003", "37931006"]);
+  // Its own time stays its effective time: the author time is when it was recorded.
+  assert.equal(all.effectiveDateTime, "2025-02-19T17:10:00Z");
+  // What it cannot hold once, or as an instant, is left out.
+  const none = reading(author("20250219") + site("368209003") + site("368208006") + method + method);
+  assert.deepEqual([none.issued, none.bodySite, none.method], [undefined, undefined, undefined]);
+  assert.equal(reading(author("20250219171500") + author("20250220090000")).issued, undefined, "two authors' times are two statements");
+  // A minute is not an instant: padding it would invent its second (Codex, #805).
+  assert.equal(reading(author("202502191715")).issued, undefined);
+  // Two times under one author are two statements too.
+  assert.equal(reading(author("20250219171500").replace("</author>", '<time value="20250220090000"/></author>')).issued, undefined);
+  // A lab carries them the same way.
+  const lab = labsOf(sitedDocument(lab794({ value: '<value xsi:type="PQ" value="7.1" unit="%"/>' + method }).replace("</observation></entry>", `${author("20250602080000")}</observation></entry>`)))[0]!;
+  assert.deepEqual([lab.issued, lab.method?.coding?.[0]?.code], ["2025-06-02T08:00:00Z", undefined], "a lab's method is its Result's, not its own");
+});
+
 test("import NAMES an untranslated QDM datatype rather than counting it", () => {
   // An operator needs to know WHICH datatype was dropped to judge whether the recalculation can be
   // trusted; a bare count reads as "a few things we don't support".
