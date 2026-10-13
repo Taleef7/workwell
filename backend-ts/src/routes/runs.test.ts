@@ -1107,6 +1107,25 @@ test("import → finalize → export: a batch of documents becomes a reportable 
   assert.match(await qrda!.text(), /<ClinicalDocument/);
 });
 
+test("import: two people whose identifiers share an extension are persisted as two subjects (#655)", async () => {
+  // One MRN extension under two assigning authorities: grouping keeps the two people apart, but both
+  // documents give the engine the same Patient.id. Persisted under it, the second person's outcome would
+  // read as the first's on every per-subject surface.
+  const created = await post("/api/runs", importRun);
+  const run = (await created!.json()) as { id: string };
+  const otherRoot = importableDocument("mrn-x", undefined, "e2").replace('extension="mrn-x" root="1.3.6.1.4.1.115"', 'extension="mrn-x" root="2.16.840.1.113883.19.5"');
+  assert.notEqual(otherRoot, importableDocument("mrn-x", undefined, "e2"), "the fixture must move the second MRN to another root");
+  const imported = await post(`/api/runs/${run.id}/import`, {
+    measureId: "audiogram",
+    evaluationDate: "2026-06-12",
+    qrda1: [importableDocument("mrn-x", undefined, "e1"), otherRoot],
+  });
+  assert.equal(imported?.status, 201);
+  const result = (await imported!.json()) as { subjects: number; outcomes: Array<{ subjectId: string }> };
+  assert.equal(result.subjects, 2);
+  assert.deepEqual(result.outcomes.map((o) => o.subjectId).sort(), ["mrn-x", "mrn-x~2"]);
+});
+
 test("finalize REFUSES a run whose outcomes did not come from imported documents", async () => {
   // The load-bearing guard. A population run is advanced by the pipeline, which knows when its fan-out
   // is done; finalizing one from outside would mark a partial roster COMPLETED and make it exportable —

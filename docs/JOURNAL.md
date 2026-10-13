@@ -28,6 +28,26 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   pair at its time from forming. No Cypress deck document states a panel this way, so the decks and C2 are
   unchanged and the evidence is the tests.
 
+- **A QRDA I batch import persists each person under the subject id the resolver gave them (#655).** A
+  successful evaluation was stored under the engine's `Patient.id`, which two people share when their
+  identifiers share a shape (one MRN extension under two roots), so the second person's outcome read as
+  the first's; only a failed evaluation used the resolver's `~N` id. C2 unchanged.
+- **QRDA III writes no performance rate (nullFlavor NA) when no one is left in the denominator (#655).**
+  It wrote `0`, which CMS's validation refuses there (CYPRESS-2051): a rate over nobody is undefined, not
+  zero, and the summary MeasureReport already omits its score in the same case. A denominator with no one
+  in the numerator still writes `0.0000`.
+- **A staff-closed case whose winning run failed reads `liveState: UNKNOWN`, not GAP (#655).** A failed
+  evaluation persists MISSING_DATA, the bucket that opens a case, so the cases CSV, the case list's
+  "still counted by CQL" note and the roster's staff-closure marker read it as a gap. A failure is not a
+  finding: such a cell is now marked as failed, and its live state is UNKNOWN ("current CQL status
+  unavailable").
+- **The audit-events CSV export finishes (#619, #655).** It paged the ledger by OFFSET, so each page made
+  the database skip every row already sent, and it looked up each page's cases one at a time; on the pilot's
+  ledger it stalled until a proxy cut it off. It now pages by keyset on the export's own order
+  (`occurred_at`, then id; the cursor keeps Postgres's microseconds) and reads each page's cases in one
+  batch. Local Postgres 16, 1,000,000 rows: a page at row 900,000 takes 0.5 ms (448 ms by OFFSET), paging
+  the whole ledger 2.8 s (117 s by OFFSET), and the whole CSV streams in 6.3 s with every row once.
+
 ## 2026-10-12
 
 - **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The

@@ -61,10 +61,14 @@ test("buildQrda3Document: aggregate counts reconcile with countPopulations", () 
   assert.ok(xml.includes('value="0.6667"'), "performance rate 6/(10-1)");
 });
 
-test("buildQrda3Document: all-excluded → performance rate 0, no divide-by-zero", () => {
+test("buildQrda3Document: all-excluded → no performance rate (nullFlavor NA), never 0 (#655)", () => {
+  // An empty denominator has no rate: CMS's validation refuses 0 there and asks for NA (CYPRESS-2051).
   const xml = buildQrda3Document(run, "audiogram", [oc("EXCLUDED"), oc("EXCLUDED")]);
-  assert.ok(xml.includes('xsi:type="REAL" value="0"'), "perf rate 0 when DENOM 0");
+  assert.ok(xml.includes('<value xsi:type="REAL" nullFlavor="NA"/>'), "NA when DENOM - DENEX - DENEXCEP is 0");
+  assert.ok(!xml.includes('xsi:type="REAL" value="0"'));
   assert.ok(!xml.includes("NaN") && !xml.includes("Infinity"));
+  // A denominator with no one in the numerator is a rate of zero, which is a number.
+  assert.ok(buildQrda3Document(run, "audiogram", [oc("OVERDUE"), oc("OVERDUE")]).includes('xsi:type="REAL" value="0.0000"'));
 });
 
 test("PR-3: exceptions are absent for authored measures and emitted + scored for official ones", () => {

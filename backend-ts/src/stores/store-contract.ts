@@ -2499,6 +2499,41 @@ export function caseEventStoreContract(
     assert.ok(page1.length === 2 && page2.length === all.length - 2);
   });
 
+  test(`[${label}] listAuditEventsAfter pages the ledger by keyset in listAuditEvents' order, ties included (#619)`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const c = (await newCase(caseStore))!;
+    // One batch: the rows share an occurred_at wherever the clock does not move between them, so the id
+    // decides their order and a page edge can fall between two rows of one instant.
+    await eventStore.appendAudits(
+      ["a", "b", "c", "d", "e", "f", "g"].map((actor) => ({
+        eventType: "CASE_ASSIGNED",
+        entityType: "case",
+        entityId: c.id,
+        actor,
+        refRunId: c.lastRunId,
+        refCaseId: c.id,
+        refMeasureVersionId: c.measureId,
+        payload: { actor },
+      })),
+    );
+    const all = await eventStore.listAuditEvents();
+    for (const size of [1, 2, 3, all.length, all.length + 1]) {
+      const paged: string[] = [];
+      let cursor: Awaited<ReturnType<typeof eventStore.listAuditEventsAfter>>["next"];
+      let pages = 0;
+      do {
+        const page = await eventStore.listAuditEventsAfter(size, cursor);
+        paged.push(...page.rows.map((e) => `${e.occurredAt}|${e.actor}|${e.eventType}`));
+        cursor = page.next;
+        assert.ok(++pages <= all.length + 2, "the paging ends");
+      } while (cursor);
+      assert.deepEqual(paged, all.map((e) => `${e.occurredAt}|${e.actor}|${e.eventType}`), `page size ${size}: no row repeated, none skipped`);
+    }
+    // A short page carries no cursor; a full one at the very end leads to an empty page with none.
+    const one = await eventStore.listAuditEventsAfter(all.length + 1);
+    assert.equal(one.next, undefined);
+  });
+
   test(`[${label}] auditEventsByRun / auditEventsByMeasureVersion filter the ledger by ref`, async () => {
     const { caseStore, eventStore } = await fresh();
     const c = (await newCase(caseStore))!;

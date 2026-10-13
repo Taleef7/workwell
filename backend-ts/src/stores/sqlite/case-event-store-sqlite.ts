@@ -10,6 +10,7 @@ import type { CloudDatabase } from "@mieweb/cloud";
 import type {
   AppendAuditInput,
   AuditEventRow,
+  AuditPageCursor,
   CaseEventStore,
   InsertActionInput,
   PacketExportInput,
@@ -205,6 +206,22 @@ export class SqliteCaseEventStore implements CaseEventStore {
       .bind(limit, offset)
       .all<AuditRow>();
     return (results ?? []).map(toAuditEventRow);
+  }
+
+  async listAuditEventsAfter(limit: number, after?: AuditPageCursor): Promise<{ rows: AuditEventRow[]; next?: AuditPageCursor }> {
+    const columns = `id AS page_id, occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json`;
+    const statement = after
+      ? this.db
+          .prepare(
+            `SELECT ${columns} FROM audit_events
+              WHERE occurred_at >= ? AND (occurred_at > ? OR id > ?)
+              ORDER BY occurred_at ASC, id ASC LIMIT ?`,
+          )
+          .bind(after.at, after.at, Number(after.id), limit)
+      : this.db.prepare(`SELECT ${columns} FROM audit_events ORDER BY occurred_at ASC, id ASC LIMIT ?`).bind(limit);
+    const results = (await statement.all<AuditRow & { page_id: number }>()).results ?? [];
+    const last = results[results.length - 1];
+    return { rows: results.map(toAuditEventRow), ...(results.length === limit && last ? { next: { at: last.occurred_at, id: String(last.page_id) } } : {}) };
   }
 
   async recentAuditEventsByType(eventType: string, limit: number): Promise<AuditEventRow[]> {
