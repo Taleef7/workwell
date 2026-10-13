@@ -14,6 +14,7 @@ import { buildQrda1Document, buildQrda1Documents } from "./qrda1-export.ts";
 import { translateQdm } from "./qdm-entries.ts";
 import { importQrda1Document, Qrda1ImportError, SYSTEM_FOR_OID } from "./qrda1-import.ts";
 import { parseXml, decodeEntities, child, descendants, hasTemplate } from "./cda-parse.ts";
+import { resolveQrda1Documents } from "./qrda1-identity.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 
@@ -310,6 +311,164 @@ test("import keeps an Observation INTERVAL as a period, not an instant (Codex, #
   const observation = importQrda1Document(doc).bundle.entry.map((e) => e.resource as Record<string, unknown>).find((r) => r.resourceType === "Observation")!;
   assert.deepEqual(observation.effectivePeriod, { start: "2025-06-01T10:00:00Z", end: "2025-06-02T10:00:00Z" });
   assert.equal(observation.effectiveDateTime, undefined, "an interval must not collapse to an instant");
+});
+
+// #794, parser group: what is not XML is refused, and what states nothing is read as nothing.
+const lab794 = (o: { id?: string; code?: string; status?: string; times?: string; value?: string; root?: string; resultStatus?: string } = {}) => `<entry><observation classCode="OBS" moodCode="EVN"${o.root ?? ""}>
+      <templateId root="2.16.840.1.113883.10.20.24.3.38" extension="2019-12-01"/>
+      ${o.id ?? '<id root="1.3.6.1.4.1.115" extension="lab-1"/>'}
+      ${o.code ?? '<code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>'}
+      ${o.status ?? '<statusCode code="completed"/>'}
+      ${o.times ?? '<effectiveTime value="20250601100000"/>'}
+      <entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN">
+        <templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/>
+        <code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>
+        ${o.resultStatus ?? '<statusCode code="completed"/>'}
+        <effectiveTime value="20250601100000"/>
+        ${o.value ?? '<value xsi:type="PQ" value="7.1" unit="%"/>'}
+      </observation></entryRelationship>
+    </observation></entry>`;
+const labsOf = (xml: string) => importQrda1Document(xml).bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation");
+
+test("#794: an attribute stated twice is not XML, and the document is refused, never read with the last value", () => {
+  assert.throws(() => importQrda1Document(sitedDocument(lab794({ root: ' negationInd="true" negationInd="false"' }))), /not well-formed XML: <observation> states its attribute 'negationInd' twice/);
+  // Twice after resolving a prefix to the XML Schema instance namespace is twice too.
+  const twice = sitedDocument(lab794({ value: '<value xsi:type="PQ" s:type="CD" xmlns:s="http://www.w3.org/2001/XMLSchema-instance" value="7.1" unit="%"/>' }));
+  assert.throws(() => importQrda1Document(twice), /states its attribute 's:type' twice/);
+  // The batch reports such a document and keeps the others.
+  const batch = resolveQrda1Documents([sitedDocument(lab794({ root: ' moodCode="EVN"' })), sitedDocument(lab794())]);
+  assert.deepEqual([batch.failures.map((f) => f.index), batch.subjects.length], [[0], 1]);
+});
+
+test("#794: xsi:type is read by its namespace, whatever prefix the document binds to it", () => {
+  const value = (v: string) => labsOf(sitedDocument(lab794({ value: v })))[0]!.valueQuantity;
+  assert.deepEqual(value('<value xsi:type="PQ" value="7.1" unit="%"/>'), { value: 7.1, unit: "%" }, "the control");
+  assert.deepEqual(value('<value s:type="PQ" xmlns:s="http://www.w3.org/2001/XMLSchema-instance" value="7.1" unit="%"/>'), { value: 7.1, unit: "%" });
+  // `xsi:` bound to another namespace is not the schema-instance type.
+  assert.equal(value('<value xsi:type="PQ" xmlns:xsi="urn:example:not-xsi" value="7.1" unit="%"/>'), undefined);
+});
+
+test("#794: a nullFlavored code or id states none, whatever sits beside it", () => {
+  // The primary code is not read; a translation still is (nullFlavor OTH with a translation is CDA's idiom).
+  const translated = labsOf(sitedDocument(lab794({ code: '<code nullFlavor="OTH" code="2345-7" codeSystem="2.16.840.1.113883.6.1"><translation code="4548-4" codeSystem="2.16.840.1.113883.6.1"/></code>' })));
+  assert.deepEqual(translated[0]!.code.coding.map((c: { code: string }) => c.code), ["4548-4"]);
+  // A diagnosis beside it, so the document has something to import.
+  assert.deepEqual(labsOf(sitedDocument(lab794({ code: '<code nullFlavor="UNK" code="4548-4" codeSystem="2.16.840.1.113883.6.1"/>' }) + sitedDiagnosis(""))), []);
+  // An id with a nullFlavor names nothing: the resource takes a generated id and no identifier.
+  const unnamed = labsOf(sitedDocument(lab794({ id: '<id nullFlavor="UNK" root="1.3.6.1.4.1.115" extension="lab-1"/>' })))[0]!;
+  assert.deepEqual([unnamed.id === "lab-1", unnamed.identifier], [false, undefined]);
+});
+
+test("#794: an entry stating its code, status or time twice is not translated, and is named", () => {
+  for (const [field, o] of [
+    ["status", { status: '<statusCode code="completed"/><statusCode code="aborted"/>' }],
+    ["time", { times: '<effectiveTime value="20250601100000"/><effectiveTime value="20240601100000"/>' }],
+    ["code", { code: '<code code="4548-4" codeSystem="2.16.840.1.113883.6.1"/><code code="2345-7" codeSystem="2.16.840.1.113883.6.1"/>' }],
+    // A lab is its result: its only Result stating two statuses is no result that happened.
+    ["result status", { resultStatus: '<statusCode code="completed"/><statusCode code="active"/>' }],
+  ] as const) {
+    // A diagnosis beside it, so the document has something to import.
+    const imported = importQrda1Document(sitedDocument(lab794(o) + sitedDiagnosis("")));
+    assert.deepEqual(imported.bundle.entry.filter((e) => (e.resource as { resourceType: string }).resourceType === "Observation"), [], field);
+    assert.ok(imported.untranslatedTemplates.length > 0, field);
+  }
+  // A medication's schema allows several timings (an interval and a frequency): it is still imported.
+  const medication = `<entry><substanceAdministration classCode="SBADM" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.41" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="med-1"/>
+      <statusCode code="active"/>
+      <effectiveTime xsi:type="IVL_TS"><low value='20230820080000'/><high nullFlavor='UNK'/></effectiveTime>
+      <effectiveTime xsi:type="PIVL_TS" institutionSpecified="true" operator="A"><period value="24" unit="h"/></effectiveTime>
+      <consumable><manufacturedProduct classCode="MANU">
+        <manufacturedMaterial><code code="1100184" codeSystem="2.16.840.1.113883.6.88"/></manufacturedMaterial>
+      </manufacturedProduct></consumable>
+    </substanceAdministration></entry>`;
+  const types = importQrda1Document(sitedDocument(medication)).bundle.entry.map((e) => (e.resource as { resourceType: string }).resourceType);
+  assert.ok(types.some((t) => t.startsWith("Medication")), types.join(","));
+});
+
+test("#794 (review): a prefix is in scope from its declaration to its element's end, and parsing stays linear", () => {
+  const XSI_NS = "http://www.w3.org/2001/XMLSchema-instance";
+  const valueIn = (entries: string, sectionAttrs = "") => {
+    const doc = sitedDocument(entries).replace("<section>", `<section${sectionAttrs}>`);
+    return labsOf(doc)[0]!.valueQuantity;
+  };
+  const lab = (value: string, wrap = (e: string) => e) => wrap(lab794({ value }));
+  // Declared on an ancestor.
+  assert.deepEqual(valueIn(lab('<value s:type="PQ" value="7.1" unit="%"/>'), ` xmlns:s="${XSI_NS}"`), { value: 7.1, unit: "%" });
+  // Redeclared on the entry, for the entry only.
+  assert.equal(valueIn(lab('<value s:type="PQ" value="7.1" unit="%"/>').replace("<entry>", '<entry xmlns:s="urn:example:other">'), ` xmlns:s="${XSI_NS}"`), undefined);
+  // An element's declaration ends with it: the next entry is in the section's scope again.
+  const redeclared = lab('<value s:type="CD" code="x" codeSystem="2.16.840.1.113883.6.1"/>').replace("<entry>", '<entry xmlns:s="urn:example:other">');
+  const after = lab794({ id: '<id root="1.3.6.1.4.1.115" extension="lab-2"/>', value: '<value s:type="PQ" value="7.1" unit="%"/>' });
+  const labs = labsOf(sitedDocument(redeclared + after).replace("<section>", `<section xmlns:s="${XSI_NS}">`));
+  assert.deepEqual(labs.find((r) => r.id === "lab-2")!.valueQuantity, { value: 7.1, unit: "%" });
+  // A self-closing element's declaration ends with it.
+  assert.deepEqual(valueIn('<x xmlns:s="urn:example:other"/>' + lab('<value s:type="PQ" value="7.1" unit="%"/>'), ` xmlns:s="${XSI_NS}"`), { value: 7.1, unit: "%" });
+  // Two prefixes for two namespaces are two attributes, not one stated twice.
+  assert.deepEqual(valueIn(lab(`<value xmlns:xsi="urn:example:other" xmlns:s="${XSI_NS}" xsi:type="X" s:type="PQ" value="7.1" unit="%"/>`)), { value: 7.1, unit: "%" });
+  // A prefix bound to "" is unbound: `xsi:` is then read as written, as it always was.
+  assert.deepEqual(valueIn(lab('<value xmlns:xsi="" xsi:type="PQ" value="7.1" unit="%"/>')), { value: 7.1, unit: "%" });
+  // 20,000 nested declarations: linear, where a scope copied onto every element exhausted the heap.
+  const depth = 20_000;
+  const nested = Array.from({ length: depth }, (_, k) => `<e xmlns:q${k}="urn:example:${k}">`).join("") + "</e>".repeat(depth);
+  const started = performance.now();
+  assert.ok(parseXml(`<root>${nested}</root>`, []));
+  assert.ok(performance.now() - started < 5_000, "parsed in under five seconds");
+});
+
+test("#794 (review): §4A.8 counts every time and code a reading writes", () => {
+  const third = (o: Partial<Parameters<typeof exam>[0]>) => exam({ id: "s3", code: "8480-6", value: '<value xsi:type="PQ" value="150" unit="mm[Hg]"/>', ...o });
+  assert.equal(paired(sys(), dia()).panels.length, 1, "the control");
+  // A second time: any time, whichever comes first.
+  for (const time of ["<effectiveTime value='20240101120000'/><effectiveTime value='20250219171000'/>", "<effectiveTime value='20250219171000'/><effectiveTime value='20240101120000'/>"]) {
+    assert.equal(paired(sys(), dia(), third({ time })).panels.length, 0, time);
+  }
+  // A lab's bound stated twice is no time for it either.
+  const twice = labsOf(sitedDocument(lab794({ times: "<effectiveTime><low value='20250601'/><low value='20250602'/><high value='20250603'/></effectiveTime>" })))[0]!;
+  assert.deepEqual([twice.effectiveDateTime, twice.effectivePeriod], [undefined, undefined]);
+  // A bound stated twice.
+  assert.equal(paired(sys(), dia(), third({ time: "<effectiveTime><low value='20250219171500'/><low value='20250219170000'/><high value='20250219180000'/></effectiveTime>" })).panels.length, 0);
+  // A second code still states a systolic.
+  assert.equal(paired(sys(), dia(), third({ code: "8310-5" }).replace('<code code="8310-5" codeSystem="2.16.840.1.113883.6.1"/>', '<code code="8310-5" codeSystem="2.16.840.1.113883.6.1"/><code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>')).panels.length, 0);
+  // A nullFlavored code states none, whatever sits beside it (Codex, #804): it neither blocks...
+  assert.equal(paired(sys(), dia(), third({}).replace('<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>', '<code nullFlavor="UNK" code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>')).panels.length, 1);
+  // ...nor makes its translation a second half: a systolic stated only in the translation pairs as one.
+  const translated = sys().replace('<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>', '<code nullFlavor="OTH" code="8462-4" codeSystem="2.16.840.1.113883.6.1"><translation code="8480-6" codeSystem="2.16.840.1.113883.6.1"/></code>');
+  assert.equal(paired(translated, dia()).panels.length, 1);
+  // Its codes stating both halves (two codes), it is neither: imported as its first, it does not pair.
+  const twoCodes = sys().replace('<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>', '<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/><code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>');
+  assert.equal(paired(twoCodes, dia({ id: "d2" })).panels.length, 0);
+});
+
+test("#794 (review): a medication states one period beside its frequencies; a diagnosis one value", () => {
+  const medication = (times: string) => `<entry><substanceAdministration classCode="SBADM" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.24.3.41" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="med-1"/>
+      <statusCode code="active"/>
+      ${times}
+      <consumable><manufacturedProduct classCode="MANU">
+        <manufacturedMaterial><code code="1100184" codeSystem="2.16.840.1.113883.6.88"/></manufacturedMaterial>
+      </manufacturedProduct></consumable>
+    </substanceAdministration></entry>`;
+  const requests = (entries: string) => importQrda1Document(sitedDocument(entries + sitedDiagnosis(""))).bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "MedicationRequest");
+  const pivl = '<effectiveTime xsi:type="PIVL_TS" institutionSpecified="true" operator="A"><period value="24" unit="h"/></effectiveTime>';
+  const ivl = (low: string, high: string) => `<effectiveTime xsi:type="IVL_TS"><low value='${low}'/><high value='${high}'/></effectiveTime>`;
+  // Its period, read even when a frequency is stated first.
+  assert.deepEqual(requests(medication(pivl + ivl("20250101", "20250201")))[0]!.dispenseRequest.validityPeriod, { start: "2025-01-01", end: "2025-02-01" });
+  // Two periods are two statements.
+  assert.deepEqual(requests(medication(ivl("20250101", "20250201") + ivl("20200101", "20201231"))), []);
+  // A diagnosis's value, stated twice.
+  const twoValues = sitedDiagnosis("").replace('<value xsi:type="CD" code="248802009"', '<value xsi:type="CD" code="44054006" codeSystem="2.16.840.1.113883.6.96"/><value xsi:type="CD" code="248802009"');
+  assert.notEqual(twoValues, sitedDiagnosis(""), "the fixture must add a value");
+  const conditions = importQrda1Document(sitedDocument(twoValues + lab794())).bundle.entry.filter((e) => (e.resource as { resourceType: string }).resourceType === "Condition");
+  assert.deepEqual(conditions, []);
+});
+
+test("#794 (review): the patient's id is the first id stating one", () => {
+  const doc = sitedDocument(lab794()).replace('<id root="urn:workwell:employee" extension="emp-006"/>', '<id nullFlavor="UNK" root="urn:workwell:employee" extension="ghost"/><id root="urn:workwell:employee" extension="emp-006"/>');
+  const patient = importQrda1Document(doc).bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === "Patient")!;
+  assert.equal(patient.id, "emp-006");
 });
 
 test("#794: a period that ends before it starts is no time, on every datatype that carries one", () => {

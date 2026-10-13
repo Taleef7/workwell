@@ -9,7 +9,8 @@
  *
  * ## What it deliberately does NOT do
  *
- * No DTD, no entity declarations, no namespace resolution, no XPath, no validation. Element names are
+ * No DTD, no entity declarations, no XPath, no validation, and namespaces resolved only for the XML
+ * Schema instance attributes (`xsi:type`, whatever prefix a document binds to it). Element names are
  * kept **verbatim including any prefix**, and lookups match on the local name, because CDA documents in
  * the wild appear both as `<ClinicalDocument xmlns="urn:hl7-org:v3">` and as `<cda:ClinicalDocument>`.
  * That is a deliberate simplification, not an oversight: a document that binds `cda:` to something other
@@ -30,7 +31,7 @@
  * explicit stack because recursion blew at ~5 000 nesting levels, which is a ~30 KB document.
  *
  * Deliberate omissions worth naming: unquoted attribute values (`<a b=1/>`) are dropped — they are not
- * well-formed XML — and namespace prefixes are matched by local name rather than resolved.
+ * well-formed XML — and element prefixes are matched by local name rather than resolved.
  */
 
 /**
@@ -81,24 +82,76 @@ interface MutableNode {
   attrs: Record<string, string>;
   children: MutableNode[];
   text: string;
+  /** The prefixes it declares (`xmlns:p`), popped from the parse's scope when it closes. Not exposed. */
+  declared: readonly string[];
 }
 
 const ATTR = /([A-Za-z_:][\w.:-]*)\s*=\s*("([^"]*)"|'([^']*)')/g;
 
-function parseAttrs(raw: string): Record<string, string> {
-  const attrs: Record<string, string> = {};
-  ATTR.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = ATTR.exec(raw)) !== null) attrs[m[1]!] = decodeEntities(m[3] ?? m[4] ?? "");
-  return attrs;
-}
+/** The XML Schema instance namespace, whose `type` is how CDA states a value's datatype. */
+const XSI = "http://www.w3.org/2001/XMLSchema-instance";
 
 /**
- * Parse an XML document into a tree. Returns the root element, or null if there is none.
- *
- * Comments, processing instructions, DOCTYPE and CDATA sections are handled; CDATA content becomes
- * literal text (undecoded, which is what CDATA means).
+ * The namespace prefixes in scope while parsing: each prefix's bindings, innermost last. An element pushes
+ * its own declarations when it opens and pops them when it closes, so the cost is linear in the document,
+ * as a SAX parser's is; a map copied onto every element was quadratic (review, #794: 0.45 MB of nested
+ * declarations exhausted the heap). A binding of `""` unbinds (XML Namespaces 1.1; an error in 1.0).
  */
+type PrefixScope = Map<string, string[]>;
+
+const bindingOf = (scope: PrefixScope, prefix: string): string | undefined => {
+  const bindings = scope.get(prefix);
+  const uri = bindings?.[bindings.length - 1];
+  return uri === "" ? undefined : uri;
+};
+
+/**
+ * An element's attributes, and the prefixes it declares (already pushed onto `scope`; the caller pops them
+ * when the element closes, at once for a self-closing one).
+ *
+ * An attribute in the XML Schema instance namespace is keyed `xsi:<name>` whatever prefix the document
+ * binds to it (`<value s:type="PQ">` with `xmlns:s` bound to it is a PQ), and one written `xsi:` but bound
+ * elsewhere is not keyed so (#794); `xsi:` bound nowhere is read as written, as it always was. An attribute
+ * stated twice, by name or as the same schema-instance attribute under two prefixes, makes the document not
+ * XML, and is named in `problems`. Two prefixes bound to one other namespace are not resolved: nothing reads
+ * such an attribute.
+ */
+function parseAttrs(raw: string, element: string, scope: PrefixScope, problems: string[] | undefined): { attrs: Record<string, string>; declared: string[] } {
+  const stated: Array<[string, string]> = [];
+  ATTR.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = ATTR.exec(raw)) !== null) stated.push([m[1]!, decodeEntities(m[3] ?? m[4] ?? "")]);
+  const declared: string[] = [];
+  for (const [name, value] of stated) {
+    if (!name.startsWith("xmlns:")) continue;
+    const prefix = name.slice(6);
+    const bindings = scope.get(prefix);
+    if (bindings) bindings.push(value);
+    else scope.set(prefix, [value]);
+    declared.push(prefix);
+  }
+  const attrs: Record<string, string> = {};
+  const names = new Set<string>();
+  const keys = new Set<string>();
+  for (const [name, value] of stated) {
+    const colon = name.indexOf(":");
+    const prefix = colon > 0 ? name.slice(0, colon) : undefined;
+    const bound = prefix !== undefined && prefix !== "xmlns" ? bindingOf(scope, prefix) : undefined;
+    const key =
+      bound === XSI ? `xsi:${name.slice(colon + 1)}` : prefix === "xsi" && bound !== undefined ? `{${bound}}${name.slice(colon + 1)}` : name;
+    if (names.has(name) || keys.has(key)) problems?.push(`<${element}> states its attribute '${name}' twice`);
+    names.add(name);
+    keys.add(key);
+    attrs[key] = value;
+  }
+  return { attrs, declared };
+}
+
+/** Pop the prefixes an element declared, when it closes. */
+const popDeclared = (scope: PrefixScope, node: MutableNode) => {
+  for (const prefix of node.declared) scope.get(prefix)?.pop();
+};
+
 /**
  * The index of the `>` that closes the tag starting at `lt`, honouring quoted attribute values.
  *
@@ -124,8 +177,16 @@ function tagEnd(xml: string, lt: number): number {
   return -1;
 }
 
-export function parseXml(xml: string): CdaNode | null {
+/**
+ * Parse an XML document into a tree. Returns the root element, or null if there is none.
+ *
+ * Comments, processing instructions, DOCTYPE and CDATA sections are handled; CDATA content becomes
+ * literal text (undecoded, which is what CDATA means). What makes the document not XML and would change
+ * what it says (an attribute stated twice) is named in `problems`, for the caller to refuse (#794).
+ */
+export function parseXml(xml: string, problems?: string[]): CdaNode | null {
   const stack: MutableNode[] = [];
+  const scope: PrefixScope = new Map();
   // How many elements of each NAME are currently open. A close tag matching nothing is then an O(1)
   // lookup instead of a full stack scan — the difference between linear and quadratic on a document of
   // unmatched close tags.
@@ -185,6 +246,7 @@ export function parseXml(xml: string): CdaNode | null {
           for (let k = d; k < stack.length; k++) {
             const n = stack[k]!.name;
             openCount.set(n, (openCount.get(n) ?? 1) - 1);
+            popDeclared(scope, stack[k]!);
           }
           stack.length = d;
           break;
@@ -198,19 +260,23 @@ export function parseXml(xml: string): CdaNode | null {
     const nameMatch = /^([A-Za-z_:][\w.:-]*)/.exec(body);
     if (!nameMatch) continue;
     const name = nameMatch[1]!;
+    const parent = stack[stack.length - 1];
+    const { attrs, declared } = parseAttrs(body.slice(name.length), name, scope, problems);
     const node: MutableNode = {
       name,
       local: name.includes(":") ? name.slice(name.indexOf(":") + 1) : name,
-      attrs: parseAttrs(body.slice(name.length)),
+      attrs,
       children: [],
       text: "",
+      declared,
     };
-    const parent = stack[stack.length - 1];
     if (parent) parent.children.push(node);
     else if (!root) root = node;
     if (!selfClosing) {
       stack.push(node);
       openCount.set(name, (openCount.get(name) ?? 0) + 1);
+    } else {
+      popDeclared(scope, node);
     }
     if (++elements >= MAX_ELEMENTS) break; // bounded work, not best effort — see MAX_ELEMENTS
   }

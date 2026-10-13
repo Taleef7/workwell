@@ -74,6 +74,15 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   malformed date is, and as the blood-pressure pairing already read it. Two times compare as instants in
   their own offsets; beside a date, as dates at the coarser precision. #794's out-of-range years were fixed
   by #788. Decks and C2 unchanged.
+- **The QRDA I importer refuses what is not XML and reads nothing from what states nothing (#794,
+  parser).** An attribute stated twice made the last value win, so `negationInd="true" negationInd="false"`
+  imported a negated act as done; such a document is now refused, as any XML parser refuses it (a batch
+  reports it and keeps the others). An entry stating its code, status or time twice (a medication: two
+  periods beside its frequencies), or a diagnosis its value twice, is not translated and is named; a bound
+  stated twice is no time; a nullFlavored code or id is no code or id; and `xsi:type` is read by its
+  namespace whatever prefix the document binds to it. §4A.8 still counts every time and every code a
+  reading states, a second one included; a nullFlavored code states none, so it no longer blocks a pair or
+  makes its translation a second half. Decks and C2 unchanged.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11

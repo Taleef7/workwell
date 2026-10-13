@@ -141,11 +141,35 @@ const STATED_AS: ReadonlyArray<readonly [template: string, mood: string, status:
  */
 function statesItsTemplatesMoodAndStatus(node: CdaNode): boolean {
   const own = STATED_AS.filter(([template]) => hasTemplate(node, template));
-  return own.length > 0 && own.every(([, mood, status]) => node.attrs.moodCode === mood && child(node, "statusCode")?.attrs.code === status);
+  return (
+    own.length > 0 &&
+    statesEachOnce(node) &&
+    own.every(([, mood, status]) => node.attrs.moodCode === mood && child(node, "statusCode")?.attrs.code === status)
+  );
 }
 
-/** A Result (…24.3.87) that happened: an event, completed. A preliminary one is `active` (#790). */
-const resultHappened = (result: CdaNode) => result.attrs.moodCode === "EVN" && child(result, "statusCode")?.attrs.code === "completed";
+/**
+ * Whether an act states each element CDA's schema allows it once at most once: its code and its status;
+ * its time, where a medication or a supply may also state frequencies beside it (`operator="A"`), but only
+ * one period; and a Diagnosis's or Symptom's value, which its template fixes at one. Two of them are two
+ * statements with no rule to choose between, and reading the first made the document say what it might not
+ * (#794); such an entry is not translated, and is named.
+ */
+function statesEachOnce(node: CdaNode): boolean {
+  if (childrenNamed(node, "code").length > 1 || childrenNamed(node, "statusCode").length > 1) return false;
+  if (timesOf(node).length > 1) return false;
+  return !((hasTemplate(node, T.diagnosis) || hasTemplate(node, T.symptom)) && childrenNamed(node, "value").length > 1);
+}
+
+/** An act's own times; on a medication or a supply, its periods, not the frequencies (`operator="A"`) beside them. */
+function timesOf(node: CdaNode): CdaNode[] {
+  const times = childrenNamed(node, "effectiveTime");
+  return node.local === "substanceAdministration" || node.local === "supply" ? times.filter((t) => t.attrs.operator?.trim() !== "A") : times;
+}
+
+/** A Result (…24.3.87) that happened: an event, completed, stated once. A preliminary one is `active` (#790). */
+const resultHappened = (result: CdaNode) =>
+  result.attrs.moodCode === "EVN" && statesEachOnce(result) && child(result, "statusCode")?.attrs.code === "completed";
 
 /**
  * Whether an entry happened as its document states it: its template's own mood and status, and, for a
@@ -278,6 +302,9 @@ function concept(node: CdaNode | undefined): { coding: Array<{ system: string; c
   if (!node) return undefined;
   const coding: Array<{ system: string; code: string; display?: string }> = [];
   const push = (n: CdaNode) => {
+    // A nullFlavored code states that it has no code, whatever `code` sits beside it (#794); its
+    // translations are still codings (`nullFlavor="OTH"` with a translation is CDA's own idiom).
+    if (n.attrs.nullFlavor !== undefined) return;
     const code = n.attrs.code;
     const system = n.attrs.codeSystem ? SYSTEM_FOR_OID[n.attrs.codeSystem] : undefined;
     if (!code || !system) return;
@@ -294,6 +321,8 @@ function concept(node: CdaNode | undefined): { coding: Array<{ system: string; c
 /** `<effectiveTime>` → `{ point, start, end }` in ISO, whichever the element expresses. */
 function times(node: CdaNode | undefined): { point?: string; start?: string; end?: string; endUnknown?: boolean } {
   if (!node) return {};
+  // A bound stated twice is two statements: like a malformed value, it says nothing (#794).
+  if (childrenNamed(node, "low").length > 1 || childrenNamed(node, "high").length > 1) return {};
   const point = isoFromHl7(node.attrs.value);
   if (point) return { point };
   const high = child(node, "high");
@@ -323,6 +352,9 @@ function times(node: CdaNode | undefined): { point?: string; start?: string; end
   };
 }
 
+/** An `<id>` that states an extension: one with a nullFlavor states that it has none, whatever sits beside it (#794). */
+const statedId = (n: CdaNode): boolean => n.attrs.extension !== undefined && n.attrs.extension !== "" && n.attrs.nullFlavor === undefined;
+
 /** A stated time as nanoseconds: `Date.parse` keeps only milliseconds, and a time may state nine digits (Codex, #803). */
 function instantOf(time: string): bigint {
   const fraction = /\.(\d+)/.exec(time)?.[1] ?? "";
@@ -349,7 +381,7 @@ function endsBeforeItStarts(start: string, end: string): boolean {
  * a third party's document, whose root will never be ours.
  */
 function idOf(node: CdaNode, fallback: string): string {
-  const own = childrenNamed(node, "id").find((n) => n.attrs.extension);
+  const own = childrenNamed(node, "id").find(statedId);
   return own?.attrs.extension ?? fallback;
 }
 
@@ -373,7 +405,7 @@ function identifierOf(node: CdaNode): { identifier?: Array<{ system: string; val
           : undefined;
   const ids = childrenNamed(node, "id");
   // The same element `idOf` names the resource by: the first id with an extension.
-  const withExtension = ids.find((n) => n.attrs.extension);
+  const withExtension = ids.find(statedId);
   if (withExtension) {
     const root = withExtension.attrs.root;
     const system = root && !withExtension.attrs.nullFlavor ? asUri(root) : undefined;
@@ -650,6 +682,20 @@ function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | "bot
 }
 
 /**
+ * Which half of a blood pressure an entry's codes state: every `code` it writes and its translations, a
+ * second `code` included, but never a nullFlavored one, which states no code (as `concept` reads it, #794).
+ * The import reads a code only when it is stated once; §4A.8 counts every stated systolic and diastolic, so
+ * an entry stating 8480-6 in a second code is not imported and still keeps a pair at its time from forming.
+ */
+function writtenHalfOf(node: CdaNode): "systolic" | "diastolic" | "both" | undefined {
+  const written = childrenNamed(node, "code").flatMap((code) => [code, ...childrenNamed(code, "translation")]);
+  const coding = written
+    .filter((c) => c.attrs.nullFlavor === undefined && c.attrs.codeSystem !== undefined && SYSTEM_FOR_OID[c.attrs.codeSystem] === LOINC)
+    .map((c) => ({ system: LOINC, code: c.attrs.code }));
+  return bloodPressureHalfOf({ code: { coding } });
+}
+
+/**
  * Blood-pressure readings left as separate Observations, of any template: CMS165 reads a blood pressure only
  * as a panel, so it does not read one of these as a blood pressure (in a batch, the same reading may also sit
  * in a panel another of the person's documents formed). A "not done" (`status: cancelled`) is no reading.
@@ -789,8 +835,11 @@ interface TimeRange {
  * that cannot be placed (none, a nullFlavor, a center or a width, an unparseable value) could be any time.
  */
 function rangeOf(node: CdaNode): TimeRange {
-  const time = child(node, "effectiveTime");
-  if (!time || time.attrs.nullFlavor !== undefined) return {};
+  // Two times, or a bound stated twice, place the reading nowhere in particular: any time (review, #794).
+  const stated = childrenNamed(node, "effectiveTime");
+  const time = stated[0];
+  if (stated.length !== 1 || !time || time.attrs.nullFlavor !== undefined) return {};
+  if (childrenNamed(time, "low").length > 1 || childrenNamed(time, "high").length > 1) return {};
   if (time.attrs.value !== undefined) {
     const at = time.children.length === 0 ? statedTimestamp(time.attrs.value) : undefined;
     return at ? { start: at.start, end: at.end, zoned: at.offsetMinutes !== undefined } : {};
@@ -801,11 +850,11 @@ function rangeOf(node: CdaNode): TimeRange {
   // Bounds that disagree on stating a zone, or that run backwards, place the reading nowhere in particular:
   // it could be any time (review, #787).
   if (low && high && ((low.offsetMinutes === undefined) !== (high.offsetMinutes === undefined) || low.start > high.start)) return {};
-  const stated = low ?? high;
+  const bound = low ?? high;
   return {
     ...(low ? { start: low.start } : {}),
     ...(high ? { end: high.end } : {}),
-    ...(stated ? { zoned: stated.offsetMinutes !== undefined } : {}),
+    ...(bound ? { zoned: bound.offsetMinutes !== undefined } : {}),
   };
 }
 
@@ -1069,7 +1118,8 @@ function medicationRequestFrom(node: CdaNode, i: string, status: "active" | "com
   const material = descendants(node, "manufacturedMaterial")[0];
   const code = concept(child(material, "code"));
   if (!code) return undefined;
-  const t = times(child(node, "effectiveTime"));
+  // Its one period, never a frequency stated before it (#794).
+  const t = times(timesOf(node)[0]);
   return {
     resourceType: "MedicationRequest",
     id: idOf(node, `qrda1-medicationrequest-${i}`),
@@ -1146,7 +1196,7 @@ function calendarDate(value: string | undefined): string | undefined {
 function patientFrom(root: CdaNode): { resource: unknown; id: string } {
   const patientRole = child(child(root, "recordTarget"), "patientRole");
   const patient = child(patientRole, "patient");
-  const id = childrenNamed(patientRole, "id").find((n) => n.attrs.extension)?.attrs.extension ?? "qrda1-subject";
+  const id = childrenNamed(patientRole, "id").find(statedId)?.attrs.extension ?? "qrda1-subject";
   // Sex is the SNOMED `<translation>`, matching how the exporter writes it and how QI-Core reads it.
   const sexCode = child(child(patient, "administrativeGenderCode"), "translation")?.attrs.code;
   const name = child(patient, "name");
@@ -1208,7 +1258,11 @@ export interface Qrda1Import {
  * from a genuinely ineligible patient — the silent-failure shape ADR-043 exists to prevent.
  */
 export function importQrda1Document(xml: string): Qrda1Import {
-  const root = parseXml(xml);
+  const notWellFormed: string[] = [];
+  const root = parseXml(xml, notWellFormed);
+  // Not XML at all: every XML parser refuses it, and reading it would choose among statements the document
+  // makes twice (`negationInd="true" negationInd="false"` imported as done, #794).
+  if (notWellFormed.length > 0) throw new Qrda1ImportError(`not well-formed XML: ${notWellFormed[0]}`);
   if (!root || root.local !== "ClinicalDocument") {
     throw new Qrda1ImportError("not a CDA document: no <ClinicalDocument> root");
   }
@@ -1231,7 +1285,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
   const conditionIds = new Set<string>(
     descendants(patientData, "observation")
       .filter((n) => hasTemplate(n, T.diagnosis))
-      .map((n) => childrenNamed(n, "id").find((own) => own.attrs.extension)?.attrs.extension)
+      .map((n) => childrenNamed(n, "id").find(statedId)?.attrs.extension)
       .filter((own): own is string => typeof own === "string"),
   );
 
@@ -1310,14 +1364,19 @@ export function importQrda1Document(xml: string): Qrda1Import {
         : undefined;
       // An Encounter brings its diagnosis Conditions with it.
       const produced = (Array.isArray(resource) ? resource : [resource]).filter((r) => r !== undefined);
+      const isReading = (r: unknown) => (r as { resourceType?: unknown }).resourceType === "Observation" && bloodPressureHalfOf(r) !== undefined;
+      const written = writtenHalfOf(candidate);
+      // A datatype entry writing a systolic or diastolic its mapper did not import as one (a nullFlavored or
+      // second code) still keeps a pair at its time from forming (#794). A Result is part of its reading.
+      if (written !== undefined && !produced.some(isReading) && STATED_AS.some(([template]) => hasTemplate(candidate, template))) {
+        bloodPressureReadings.push({ index: -1, node: candidate });
+      }
       if (produced.length > 0 && !happenedAsStated(candidate)) {
         // Not translated: an entry that did not happen, or only was intended, is not what its mapper's status
         // says (#790). A blood-pressure reading among it still keeps a pair at its time from forming, as it
         // did when it was imported: §4A.8 counts every stated systolic and diastolic, of any template.
         for (const r of produced) {
-          if ((r as { resourceType?: unknown }).resourceType === "Observation" && bloodPressureHalfOf(r) !== undefined) {
-            bloodPressureReadings.push({ index: -1, node: candidate });
-          }
+          if (isReading(r)) bloodPressureReadings.push({ index: -1, node: candidate });
         }
         continue;
       }
@@ -1326,7 +1385,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
         // another act can take a performer, a device or a status from its wrapper (review, #787).
         const pairs = hasTemplate(candidate, T.physicalExamPerformed) && entry.children.includes(candidate);
         for (const r of produced) {
-          if ((r as { resourceType?: unknown }).resourceType === "Observation" && bloodPressureHalfOf(r) !== undefined) {
+          if (isReading(r)) {
             const reading = { index: entries.length, node: candidate };
             bloodPressureReadings.push(reading);
             if (pairs) pairable.push(reading);
