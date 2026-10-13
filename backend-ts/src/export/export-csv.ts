@@ -5,7 +5,7 @@
 import type { RunStore } from "../stores/run-store.ts";
 import type { OutcomeStore, OutcomeWithRun } from "../stores/outcome-store.ts";
 import type { CaseStore, CaseQuery } from "../stores/case-store.ts";
-import type { CaseEventStore } from "../stores/case-event-store.ts";
+import type { AuditPageCursor, CaseEventStore } from "../stores/case-event-store.ts";
 import { toRunSummaryFromCounts, runCandidates, type RunFilters } from "../run/read-models.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, employeeById, profileSubjectMatcher, subjectNoun } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
@@ -471,10 +471,13 @@ type AuditEvent = Awaited<ReturnType<CaseEventStore["listAuditEvents"]>>[number]
  * escalate/outreach) don't carry subjectId, so resolve it from the case.
  */
 async function resolveCaseEmployees(events: AuditEvent[], caseStore: CaseStore): Promise<Map<string, string>> {
+  // One bounded read for the page's cases, not one per case: a page of the streamed export names up to a
+  // thousand cases, and a round trip each kept the export from finishing on the pilot's ledger (#619).
+  // In chunks of 500: the floor binds one value per id, and older SQLite builds allow 999 per statement.
+  const ids = [...new Set(events.map((e) => e.refCaseId).filter((x): x is string => !!x))];
   const caseEmployee = new Map<string, string>();
-  for (const id of new Set(events.map((e) => e.refCaseId).filter((x): x is string => !!x))) {
-    const c = await caseStore.getCase(id);
-    if (c) caseEmployee.set(id, c.employeeId);
+  for (let start = 0; start < ids.length; start += 500) {
+    for (const c of await caseStore.getCases(ids.slice(start, start + 500))) caseEmployee.set(c.id, c.employeeId);
   }
   return caseEmployee;
 }
@@ -506,7 +509,10 @@ const AUDIT_STREAM_PAGE = 1000;
  */
 export function auditCsvStream(eventStore: CaseEventStore, caseStore: CaseStore): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  let offset = 0;
+  // Keyset paging: each page continues from where the last ended, so the 100th page costs what the first
+  // did. OFFSET paging made the database skip every row already sent, and on the pilot's ledger the
+  // stream slowed until a proxy cut it off with the export unfinished (#619).
+  let cursor: AuditPageCursor | undefined;
   let wroteHeader = false;
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -514,17 +520,17 @@ export function auditCsvStream(eventStore: CaseEventStore, caseStore: CaseStore)
         controller.enqueue(encoder.encode(AUDIT_HEADERS.join(",")));
         wroteHeader = true;
       }
-      const events = await eventStore.listAuditEvents(AUDIT_STREAM_PAGE, offset);
+      const { rows: events, next } = await eventStore.listAuditEventsAfter(AUDIT_STREAM_PAGE, cursor);
       if (events.length === 0) {
         controller.close();
         return;
       }
-      offset += events.length;
+      cursor = next;
       const caseEmployee = await resolveCaseEmployees(events, caseStore);
       // Each row is CRLF-prefixed so the concatenation equals toCsv's `[header, ...rows].join("\r\n")`.
       const chunk = events.map((e) => "\r\n" + auditRowCells(e, caseEmployee).map(csvCell).join(",")).join("");
       controller.enqueue(encoder.encode(chunk));
-      if (events.length < AUDIT_STREAM_PAGE) controller.close();
+      if (next === undefined) controller.close();
     },
   });
 }
