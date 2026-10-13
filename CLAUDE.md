@@ -33,9 +33,9 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
   Observation from its Procedure) are mappings, not exceptions. So is the QRDA I importer's blood-pressure
   panel (LOCKED_DECISIONS §4A.8): it supplies the panel code 85354-9 and the `vital-signs` category, and
   only under §4A.8's conditions. A blood pressure the document states as one Physical Exam coded 85354-9,
-  its readings as QDM Components, is imported as that panel: only the `vital-signs` category is supplied,
-  and only when it states exactly one 8480-6 and one 8462-4, each one numeric value in mm[Hg] (§4A.8's
-  value rule).
+  its readings as QDM Components, is imported as that panel: only the `vital-signs` category (and the UCUM
+  system on each unit) is supplied, and only when it states exactly one 8480-6 and one 8462-4, each one
+  numeric value in mm[Hg] (§4A.8's value rule).
 - Every state change writes an `audit_event` — the rule, **not yet everywhere true**. Write new code **audit-first** (the event before the mutation). Some paths are still mutate-first: run-boundary ones by design, outreach and the identity links pending owner decisions — `DATA_MODEL_CONTRACTS` §4 lists them. The cross-store `applyCaseAction` primitive (for case actions and run-created transitions) does not exist, and no open issue tracks it (#598 was closed by a PR keyword on 2026-09-21).
 - No silent scope changes; if a plan's stop condition triggers, record the fallback in JOURNAL.md
 - Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction

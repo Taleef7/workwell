@@ -609,10 +609,42 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
     category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: category }] }],
     code,
     ...when,
+    ...issuedOf(node),
     ...(quantity ? { valueQuantity: quantity } : {}),
     ...(coded ? { valueCodeableConcept: coded } : {}),
     ...(text ? { valueString: text } : {}),
+    ...oneOf(node, "targetSiteCode", "bodySite"),
+    ...oneOf(node, "methodCode", "method"),
   };
+}
+
+/**
+ * QDM's Author dateTime (`<author><time>`) → `Observation.issued`, the time the result was recorded (#794).
+ * `issued` is an instant, known to the second, so only a time stated to the second is one: a date or a minute
+ * is not, and padding it would invent the rest (Codex, #805). Only one stated time, under one author or
+ * several: two are two statements with no rule to choose between. Never the entry's own time, which is when
+ * it was measured.
+ */
+function issuedOf(node: CdaNode): { issued?: string } {
+  const stated = childrenNamed(node, "author")
+    .flatMap((author) => childrenNamed(author, "time"))
+    .filter((time) => time.attrs.nullFlavor === undefined);
+  if (stated.length !== 1) return {};
+  const value = stated[0]!.attrs.value;
+  if (value === undefined || !/^\d{14}/.test(value)) return {};
+  const time = isoFromHl7(value);
+  return time ? { issued: time } : {};
+}
+
+/**
+ * A QDM attribute an Observation holds once (Anatomical Location Site → `bodySite`, Method → `method`, both
+ * 0..1 in FHIR) → that field, only when the entry states exactly one it can code (#794). The blood-pressure
+ * panel reads the same attributes off its readings (§4A.8).
+ */
+function oneOf(node: CdaNode, element: "targetSiteCode" | "methodCode", field: "bodySite" | "method"): Record<string, unknown> {
+  const stated = childrenNamed(node, element);
+  const coded = stated.length === 1 ? concept(stated[0]) : undefined;
+  return coded ? { [field]: coded } : {};
 }
 
 /**
@@ -1498,6 +1530,15 @@ export function importQrda1Document(xml: string): Qrda1Import {
   });
 
   pairBloodPressures(entries, pairable, bloodPressureReadings);
+  // Every clinical resource names its patient (#794): QI-Core's profiles require `subject`, and so does the
+  // US Core blood-pressure profile preparation stamps on a paired panel, so the stamp was a claim the
+  // resource did not meet. A batch points a person's documents at the one Patient it keeps
+  // (`qrda1-identity.ts`).
+  const subject = { reference: `Patient/${patientId}` };
+  for (const e of entries) {
+    const r = e.resource as Record<string, unknown>;
+    if (r.resourceType !== "Patient" && r.subject === undefined) r.subject = { ...subject };
+  }
   const unpairedBloodPressureReadings = unpairedBloodPressureReadingsIn(entries.map((e) => e.resource));
 
   // A Patient-only bundle is the failure this whole module exists to avoid, and the section being

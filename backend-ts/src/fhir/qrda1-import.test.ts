@@ -540,6 +540,9 @@ test("#794: a blood pressure stated as one panel, its readings as QDM Components
   ]);
   assert.deepEqual([panel.id, panel.status, panel.effectiveDateTime, panel.valueQuantity], ["bp-panel", "final", "2025-02-19T17:10:00Z", undefined]);
   assert.deepEqual([imported.unpairedBloodPressureReadings, imported.untranslatedTemplates], [0, []]);
+  // The exam's own site, method, author time and patient are the panel's, as for any exam (#805, #806).
+  const sited = importQrda1Document(sitedDocument(statedPanel(bothHalves, { own: '<targetSiteCode code="368209003" codeSystem="2.16.840.1.113883.6.96"/><methodCode code="37931006" codeSystem="2.16.840.1.113883.6.96"/><author><time value="20250219171500"/></author>' }))).bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === "Observation")!;
+  assert.deepEqual([sited.bodySite?.coding?.[0]?.code, sited.method?.coding?.[0]?.code, sited.issued, sited.subject?.reference], ["368209003", "37931006", "2025-02-19T17:15:00Z", "Patient/emp-006"]);
   // Diastolic first in the document: the panel still states the systolic first, as the pairing writes it.
   const reversed = importQrda1Document(sitedDocument(statedPanel(bpComponent("8462-4", mmHg(78)) + bpComponent("8480-6", mmHg(128))))).bundle.entry;
   const order = (reversed.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === "Observation")!.component as Array<{ code: { coding: Array<{ code: string }> } }>).map((c) => c.code.coding[0]!.code);
@@ -624,6 +627,47 @@ test("#794 (review): readings stated as Components under another code or templat
   const result = importQrda1Document(sitedDocument(translated + dia({ id: "d2" })));
   assert.equal(result.bundle.entry.filter((e) => JSON.stringify((e.resource as { component?: unknown }).component ?? null) !== "null").length, 1);
   assert.equal(result.unpairedBloodPressureReadings, 1, "the separate diastolic, not the panel");
+});
+
+test("#794: every imported clinical resource names its patient, a paired panel included, and a batch names the one it keeps", () => {
+  const subjectsOf = (entries: Array<{ resource: unknown }>) => {
+    const resources = entries.map((e) => e.resource as Record<string, any>);
+    const patient = resources.find((r) => r.resourceType === "Patient")!;
+    return { id: patient.id as string, subjects: resources.filter((r) => r.resourceType !== "Patient").map((r) => `${r.resourceType}:${r.subject?.reference}`) };
+  };
+  const one = subjectsOf(importQrda1Document(sitedDocument(sys() + dia() + sitedDiagnosis("") + lab794())).bundle.entry);
+  assert.deepEqual(one.subjects.sort(), ["Condition:Patient/emp-006", "Observation:Patient/emp-006", "Observation:Patient/emp-006"]);
+  // Two documents of one person, identified by different first ids: every resource names the Patient kept.
+  const other = sitedDocument(lab794()).replace('<id root="urn:workwell:employee" extension="emp-006"/>', '<id root="urn:workwell:other" extension="x-1"/><id root="urn:workwell:employee" extension="emp-006"/>');
+  const [subject] = resolveQrda1Documents([sitedDocument(sys() + dia()), other]).subjects;
+  const merged = subjectsOf(subject!.bundle.entry);
+  assert.ok(merged.subjects.length >= 2);
+  assert.deepEqual([...new Set(merged.subjects.map((s) => s.split(":")[1]))], [`Patient/${merged.id}`]);
+});
+
+test("#794: an Observation carries its author time as issued, and one stated site and method", () => {
+  const author = (time: string) => `<author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/><time value="${time}"/><assignedAuthor><id nullFlavor="NA"/></assignedAuthor></author>`;
+  const site = (code: string) => `<targetSiteCode code="${code}" codeSystem="2.16.840.1.113883.6.96"/>`;
+  const method = `<methodCode code="37931006" codeSystem="2.16.840.1.113883.6.96"/>`;
+  const reading = (extra: string) => {
+    const imported = importQrda1Document(sitedDocument(exam({ id: "s-only", code: "8480-6", extra })));
+    return imported.bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === "Observation")!;
+  };
+  const all = reading(author("20250219171500") + site("368209003") + method);
+  assert.deepEqual([all.issued, all.bodySite?.coding?.[0]?.code, all.method?.coding?.[0]?.code], ["2025-02-19T17:15:00Z", "368209003", "37931006"]);
+  // Its own time stays its effective time: the author time is when it was recorded.
+  assert.equal(all.effectiveDateTime, "2025-02-19T17:10:00Z");
+  // What it cannot hold once, or as an instant, is left out.
+  const none = reading(author("20250219") + site("368209003") + site("368208006") + method + method);
+  assert.deepEqual([none.issued, none.bodySite, none.method], [undefined, undefined, undefined]);
+  assert.equal(reading(author("20250219171500") + author("20250220090000")).issued, undefined, "two authors' times are two statements");
+  // A minute is not an instant: padding it would invent its second (Codex, #805).
+  assert.equal(reading(author("202502191715")).issued, undefined);
+  // Two times under one author are two statements too.
+  assert.equal(reading(author("20250219171500").replace("</author>", '<time value="20250220090000"/></author>')).issued, undefined);
+  // A lab carries them the same way.
+  const lab = labsOf(sitedDocument(lab794({ value: '<value xsi:type="PQ" value="7.1" unit="%"/>' + method }).replace("</observation></entry>", `${author("20250602080000")}</observation></entry>`)))[0]!;
+  assert.deepEqual([lab.issued, lab.method?.coding?.[0]?.code], ["2025-06-02T08:00:00Z", undefined], "a lab's method is its Result's, not its own");
 });
 
 test("import NAMES an untranslated QDM datatype rather than counting it", () => {
