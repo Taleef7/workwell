@@ -307,13 +307,20 @@ function merge(
   }
 
   const entry: Array<{ resource: unknown }> = chosen ? [{ resource: patient }] : [];
+  // Each document names its own Patient; the merged bundle keeps the canonical one, so every member's
+  // resources point at it. Left as they were, a person's two documents would name two patients, and an
+  // entry they both state would be two facts, not one (#794).
   const clinical = mergeMemberResources(
-    members.map((m) => ({
-      index: m.index,
-      resources: m.imported.bundle.entry
-        .map((e) => e.resource)
-        .filter((r) => (r as { resourceType?: string })?.resourceType !== "Patient"),
-    })),
+    members.map((m) => {
+      const toCanonical = new Map([[`Patient/${m.imported.patientId}`, `Patient/${canonical.imported.patientId}`]]);
+      return {
+        index: m.index,
+        resources: m.imported.bundle.entry
+          .map((e) => e.resource)
+          .filter((r) => (r as { resourceType?: string })?.resourceType !== "Patient")
+          .map((r) => withReferencesRenamed(r, toCanonical)),
+      };
+    }),
   );
   for (const resource of clinical) entry.push({ resource });
 

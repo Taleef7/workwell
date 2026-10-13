@@ -1442,6 +1442,15 @@ export function importQrda1Document(xml: string): Qrda1Import {
   });
 
   pairBloodPressures(entries, pairable, bloodPressureReadings);
+  // Every clinical resource names its patient (#794): QI-Core's profiles require `subject`, and so does the
+  // US Core blood-pressure profile preparation stamps on a paired panel, so the stamp was a claim the
+  // resource did not meet. A batch points a person's documents at the one Patient it keeps
+  // (`qrda1-identity.ts`).
+  const subject = { reference: `Patient/${patientId}` };
+  for (const e of entries) {
+    const r = e.resource as Record<string, unknown>;
+    if (r.resourceType !== "Patient" && r.subject === undefined) r.subject = { ...subject };
+  }
   const unpairedBloodPressureReadings = unpairedBloodPressureReadingsIn(entries.map((e) => e.resource));
 
   // A Patient-only bundle is the failure this whole module exists to avoid, and the section being

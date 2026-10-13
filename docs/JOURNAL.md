@@ -12,6 +12,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   one stated Anatomical Location Site or Method becomes `bodySite` or `method`. Before, only a paired
   blood-pressure panel carried site and method; unpaired readings and every other Observation lost them.
   The performer is still not imported (no Practitioner is). Decks and C2 unchanged.
+- **Every imported QRDA I resource names its patient (#794, subject).** None carried `subject`, though
+  QI-Core requires it, and so does the US Core blood-pressure profile preparation stamps on a paired
+  panel, so the stamp claimed what the resource did not meet. A batch points a person's documents at the
+  one Patient it keeps, so an entry two documents repeat is still merged once. Decks and C2 unchanged.
 
 ## 2026-10-12
 
