@@ -599,6 +599,8 @@ test("#794 (review): the reference generator's exam, and what a Component or its
     ["an aborted reading", statedPanel(bpComponent("8480-6", mmHg(128)).replace("<code ", '<statusCode code="aborted"/><code ') + bpComponent("8462-4", mmHg(78)))],
     ["a reading at a time of its own", statedPanel(bpComponent("8480-6", mmHg(128)).replace("<code ", "<effectiveTime value='20240101090000'/><code ") + bpComponent("8462-4", mmHg(78)))],
     ["a reading with a Result's value beside its own", statedPanel(bpComponent("8480-6", mmHg(128) + `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/><code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/>${mmHg(999)}</observation></entryRelationship>`) + bpComponent("8462-4", mmHg(78)))],
+    // Its only value in a nested Result: whether that Result happened, or names this reading, is not judged (Codex, #807).
+    ["a reading whose value is a Result's", statedPanel(bpComponent("8480-6", `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/><code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/>${mmHg(128)}</observation></entryRelationship>`) + bpComponent("8462-4", mmHg(78)))],
     ["a month", statedPanel(bothHalves, { time: "<effectiveTime value='202502'/>" })],
     ["no time", statedPanel(bothHalves, { time: "" })],
   ] as const) {

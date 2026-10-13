@@ -699,8 +699,10 @@ function statesBloodPressurePanel(node: CdaNode): boolean {
  *   other than `completed` and no time of its own (a Component is part of its exam, at its exam's time);
  * - one states 8480-6 and the other 8462-4, each in exactly one `code` and neither stating both halves
  *   (`writtenHalfOf`, as §4A.8 reads a reading's code), each kept verbatim;
- * - each states exactly one value, its own or a Result's, and that one a numeric `PQ` in mm[Hg] with no
- *   nullFlavor (§4A.8's value rule; a stated value is not judged).
+ * - each states exactly one value of its own, a numeric `PQ` in mm[Hg] with no nullFlavor (§4A.8's value
+ *   rule; a stated value is not judged), and nests nothing: a Component is a code and a value, as the IG and
+ *   the reference generator write it, and a Result inside one would be a statement whose own status and
+ *   code this would have to judge (Codex, #807).
  * Anything else, a third Component included (a mean arterial pressure would be dropped), is not a panel.
  */
 function statedPanelComponents(node: CdaNode): Array<{ code: unknown; valueQuantity: unknown }> | undefined {
@@ -717,7 +719,8 @@ function statedPanelComponents(node: CdaNode): Array<{ code: unknown; valueQuant
     if (childrenNamed(c, "effectiveTime").length > 0) return undefined;
     if (childrenNamed(c, "code").length !== 1) return undefined;
     const half = writtenHalfOf(c);
-    const values = statedValuesOf(c);
+    if (childrenNamed(c, "entryRelationship").length > 0) return undefined;
+    const values = childrenNamed(c, "value");
     if (values.length !== 1) return undefined;
     const v = values[0]!;
     if (v.attrs["xsi:type"] !== "PQ" || v.attrs.nullFlavor !== undefined || v.attrs.unit !== "mm[Hg]") return undefined;
