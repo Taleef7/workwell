@@ -586,6 +586,8 @@ test("#794: a panel the document states keeps a pair at its time from forming, a
   assert.deepEqual(panels(sys() + dia() + statedPanel(bothHalves)).map((p) => p.id), ["bp-panel"]);
   // At another time each is its own panel.
   assert.equal(panels(sys() + dia() + statedPanel(bothHalves, { time: "<effectiveTime value='20250301090000'/>" })).length, 2);
+  // A negated Component states that its reading was not taken: no reading, and no block (Codex, #807).
+  assert.equal(panels(sys() + dia() + statedPanel(bpComponent("8480-6", mmHg(128), ' negationInd="true"') + bpComponent("8462-4", mmHg(78), ' negationInd="true"'), { code: '<code code="55284-4" codeSystem="2.16.840.1.113883.6.1"/>' })).length, 1);
   // A panel that is not translated still states its readings, and still blocks.
   assert.equal(panels(sys() + dia() + statedPanel(bpComponent("8480-6", mmHg(128)))).length, 0);
 });

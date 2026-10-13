@@ -666,13 +666,14 @@ function statedValuesOf(node: CdaNode): CdaNode[] {
 
 /**
  * The QDM Components (…24.3.149) an entry states directly, through a `REFR` relationship (the IG's, and the
- * one the reference generator writes) that is not negated.
+ * one the reference generator writes) that is not negated. A negated Component states that its reading was
+ * not taken: like a negated reading of its own, it is no reading at all, and blocks nothing (Codex, #807).
  */
 function componentsOf(node: CdaNode): CdaNode[] {
   return childrenNamed(node, "entryRelationship")
     .filter((relationship) => relationship.attrs.typeCode === "REFR" && !isNegatedNode(relationship))
     .flatMap((relationship) => childrenNamed(relationship, "observation"))
-    .filter((n) => hasTemplate(n, T.component));
+    .filter((n) => hasTemplate(n, T.component) && !isNegatedNode(n));
 }
 
 /** Whether an entry states a systolic or a diastolic as one of its Components, whatever its own code or template. */
@@ -695,7 +696,7 @@ function statesBloodPressurePanel(node: CdaNode): boolean {
  *   none, and is what the reference QRDA generator writes on every exam without a result (review, #794);
  * - it states its time to at least a day: US Core's vital signs need one (vs-1), and the profile
  *   preparation stamps on the panel would otherwise claim a conformance it does not have (review, #794);
- * - it states exactly two Components, neither negated, each an event (`EVN` or no mood) stating no status
+ * - it states exactly two Components that are not negated, each an event (`EVN` or no mood) stating no status
  *   other than `completed` and no time of its own (a Component is part of its exam, at its exam's time);
  * - one states 8480-6 and the other 8462-4, each in exactly one `code` and neither stating both halves
  *   (`writtenHalfOf`, as §4A.8 reads a reading's code), each kept verbatim;
@@ -713,7 +714,7 @@ function statedPanelComponents(node: CdaNode): Array<{ code: unknown; valueQuant
   const components = componentsOf(node);
   if (components.length !== 2) return undefined;
   const read = components.map((c) => {
-    if (isNegatedNode(c) || (c.attrs.moodCode !== undefined && c.attrs.moodCode !== "EVN")) return undefined;
+    if (c.attrs.moodCode !== undefined && c.attrs.moodCode !== "EVN") return undefined;
     const status = childrenNamed(c, "statusCode");
     if (status.length > 1 || (status.length === 1 && status[0]!.attrs.code !== "completed")) return undefined;
     if (childrenNamed(c, "effectiveTime").length > 0) return undefined;
