@@ -607,10 +607,39 @@ function observationFrom(node: CdaNode, i: string, category: string): unknown {
     category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: category }] }],
     code,
     ...when,
+    ...issuedOf(node),
     ...(quantity ? { valueQuantity: quantity } : {}),
     ...(coded ? { valueCodeableConcept: coded } : {}),
     ...(text ? { valueString: text } : {}),
+    ...oneOf(node, "targetSiteCode", "bodySite"),
+    ...oneOf(node, "methodCode", "method"),
   };
+}
+
+/**
+ * QDM's Author dateTime (`<author><time>`) → `Observation.issued`, the time the result was recorded (#794).
+ * `issued` is an instant, so only a time of day is one (a date alone is not), and only one author's: two
+ * authors stating times are two statements with no rule to choose between. Never the entry's own time, which
+ * is when it was measured.
+ */
+function issuedOf(node: CdaNode): { issued?: string } {
+  const stated = childrenNamed(node, "author")
+    .map((author) => child(author, "time"))
+    .filter((time): time is CdaNode => time !== undefined && time.attrs.nullFlavor === undefined);
+  if (stated.length !== 1) return {};
+  const time = isoFromHl7(stated[0]!.attrs.value);
+  return time?.includes("T") ? { issued: time } : {};
+}
+
+/**
+ * A QDM attribute an Observation holds once (Anatomical Location Site → `bodySite`, Method → `method`, both
+ * 0..1 in FHIR) → that field, only when the entry states exactly one it can code (#794). The blood-pressure
+ * panel reads the same attributes off its readings (§4A.8).
+ */
+function oneOf(node: CdaNode, element: "targetSiteCode" | "methodCode", field: "bodySite" | "method"): Record<string, unknown> {
+  const stated = childrenNamed(node, element);
+  const coded = stated.length === 1 ? concept(stated[0]) : undefined;
+  return coded ? { [field]: coded } : {};
 }
 
 /**
