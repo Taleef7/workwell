@@ -508,6 +508,124 @@ test("#794: a period that ends before it starts is no time, on every datatype th
   }
 });
 
+// #794, QDM Components: a blood pressure the document states as ONE panel is imported as that panel.
+const bpComponent = (code: string, value: string, extra = "") => `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN"${extra}>
+        <templateId root="2.16.840.1.113883.10.20.24.3.149" extension="2017-08-01"/>
+        <code code="${code}" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>
+        ${value}
+      </observation></entryRelationship>`;
+const mmHg = (n: number) => `<value xsi:type="PQ" value="${n}" unit="mm[Hg]"/>`;
+const statedPanel = (components: string, o: { time?: string; own?: string; code?: string } = {}) => `<entry><observation classCode="OBS" moodCode="EVN">
+      <templateId root="2.16.840.1.113883.10.20.22.4.13" extension="2014-06-09"/>
+      <templateId root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"/>
+      <id root="1.3.6.1.4.1.115" extension="bp-panel"/>
+      ${o.code ?? '<code code="85354-9" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC"/>'}
+      <statusCode code="completed"/>
+      ${o.time ?? "<effectiveTime value='20250219171000'/>"}
+      ${o.own ?? ""}
+      ${components}
+    </observation></entry>`;
+const bothHalves = bpComponent("8480-6", mmHg(128)) + bpComponent("8462-4", mmHg(78));
+
+test("#794: a blood pressure stated as one panel, its readings as QDM Components, is imported as that panel", () => {
+  const imported = importQrda1Document(sitedDocument(statedPanel(bothHalves)));
+  const panels = imported.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation");
+  assert.equal(panels.length, 1);
+  const panel = panels[0]!;
+  assert.deepEqual(panel.code, { coding: [{ system: "http://loinc.org", code: "85354-9" }] }, "its own code, as stated");
+  assert.deepEqual(panel.category, [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "vital-signs" }] }]);
+  assert.deepEqual(panel.component, [
+    { code: { coding: [{ system: "http://loinc.org", code: "8480-6" }] }, valueQuantity: { value: 128, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } },
+    { code: { coding: [{ system: "http://loinc.org", code: "8462-4" }] }, valueQuantity: { value: 78, unit: "mm[Hg]", system: "http://unitsofmeasure.org", code: "mm[Hg]" } },
+  ]);
+  assert.deepEqual([panel.id, panel.status, panel.effectiveDateTime, panel.valueQuantity], ["bp-panel", "final", "2025-02-19T17:10:00Z", undefined]);
+  assert.deepEqual([imported.unpairedBloodPressureReadings, imported.untranslatedTemplates], [0, []]);
+  // Diastolic first in the document: the panel still states the systolic first, as the pairing writes it.
+  const reversed = importQrda1Document(sitedDocument(statedPanel(bpComponent("8462-4", mmHg(78)) + bpComponent("8480-6", mmHg(128))))).bundle.entry;
+  const order = (reversed.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === "Observation")!.component as Array<{ code: { coding: Array<{ code: string }> } }>).map((c) => c.code.coding[0]!.code);
+  assert.deepEqual(order, ["8480-6", "8462-4"]);
+  // A date alone is a panel's day: no pairing is needed for a panel the document states.
+  const dated = importQrda1Document(sitedDocument(statedPanel(bothHalves, { time: "<effectiveTime value='20250219'/>" }))).bundle.entry.map((e) => e.resource as Record<string, any>);
+  assert.equal(dated.find((r) => r.resourceType === "Observation")!.effectiveDateTime, "2025-02-19");
+  // An exam coded 85354-9 stating no Components is what it always was: the code alone.
+  const codeOnly = importQrda1Document(sitedDocument(statedPanel(""))).bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.resourceType === "Observation")!;
+  assert.deepEqual([codeOnly.component, codeOnly.category[0].coding[0].code], [undefined, "exam"]);
+});
+
+test("#794: a panel the document does not state exactly is not imported as one, and is named", () => {
+  const both = bpComponent("8480-6", mmHg(128)).replace('codeSystemName="LOINC"/>', 'codeSystemName="LOINC"><translation code="8462-4" codeSystem="2.16.840.1.113883.6.1"/></code>');
+  for (const [why, entry] of [
+    ["one reading", statedPanel(bpComponent("8480-6", mmHg(128)))],
+    ["a third Component", statedPanel(bothHalves + bpComponent("8478-0", mmHg(95)))],
+    ["two systolics", statedPanel(bpComponent("8480-6", mmHg(128)) + bpComponent("8480-6", mmHg(130)))],
+    ["a reading stating both halves", statedPanel(both + bpComponent("8462-4", mmHg(78)))],
+    ["a reading stating a second code", statedPanel(bpComponent("8480-6", mmHg(128)).replace('codeSystemName="LOINC"/>', 'codeSystemName="LOINC"/><code code="8310-5" codeSystem="2.16.840.1.113883.6.1"/>') + bpComponent("8462-4", mmHg(78)))],
+    ["a unit that is not mm[Hg]", statedPanel(bpComponent("8480-6", '<value xsi:type="PQ" value="128" unit="mmHg"/>') + bpComponent("8462-4", mmHg(78)))],
+    ["a nullFlavored value", statedPanel(bpComponent("8480-6", '<value xsi:type="PQ" nullFlavor="UNK" value="128" unit="mm[Hg]"/>') + bpComponent("8462-4", mmHg(78)))],
+    ["two values", statedPanel(bpComponent("8480-6", mmHg(128) + mmHg(130)) + bpComponent("8462-4", mmHg(78)))],
+    ["no number", statedPanel(bpComponent("8480-6", '<value xsi:type="PQ" value="" unit="mm[Hg]"/>') + bpComponent("8462-4", mmHg(78)))],
+    ["a negated reading", statedPanel(bpComponent("8480-6", mmHg(128), ' negationInd="true"') + bpComponent("8462-4", mmHg(78)))],
+    ["an intended reading", statedPanel(bpComponent("8480-6", mmHg(128)).replace('moodCode="EVN"', 'moodCode="INT"') + bpComponent("8462-4", mmHg(78)))],
+    ["a value of the exam's own", statedPanel(bothHalves, { own: mmHg(120) })],
+    ["inside an organizer", `<entry><organizer classCode="CLUSTER" moodCode="EVN"><statusCode code="completed"/><component>${statedPanel(bothHalves).replace(/^<entry>|<\/entry>$/g, "")}</component></organizer></entry>`],
+  ] as const) {
+    const imported = importQrda1Document(sitedDocument(entry + sitedDiagnosis("")));
+    const observations = imported.bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation");
+    assert.deepEqual(observations, [], why);
+    assert.ok(imported.untranslatedTemplates.includes("2.16.840.1.113883.10.20.24.3.59"), why);
+  }
+});
+
+test("#794: a panel the document states keeps a pair at its time from forming, as any stated reading does (§4A.8)", () => {
+  assert.equal(paired(sys(), dia()).panels.length, 1, "the control");
+  const panels = (entries: string) => importQrda1Document(sitedDocument(entries)).bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation" && JSON.stringify(r.code).includes("85354-9"));
+  // At the pair's time: the stated panel is imported, the separate readings stay readings.
+  assert.deepEqual(panels(sys() + dia() + statedPanel(bothHalves)).map((p) => p.id), ["bp-panel"]);
+  // At another time each is its own panel.
+  assert.equal(panels(sys() + dia() + statedPanel(bothHalves, { time: "<effectiveTime value='20250301090000'/>" })).length, 2);
+  // A panel that is not translated still states its readings, and still blocks.
+  assert.equal(panels(sys() + dia() + statedPanel(bpComponent("8480-6", mmHg(128)))).length, 0);
+});
+
+test("#794 (review): the reference generator's exam, and what a Component or its exam must not state", () => {
+  const imported = (entry: string) => importQrda1Document(sitedDocument(entry + sitedDiagnosis("")));
+  const panelsIn = (entry: string) => imported(entry).bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation" && r.component !== undefined);
+  // The reference QRDA generator writes a nullFlavored value on every exam without a result: it states none.
+  assert.equal(panelsIn(statedPanel(bothHalves, { own: '<value xsi:type="CD" nullFlavor="UNK"/>' })).length, 1);
+  for (const [why, entry] of [
+    ["an aborted reading", statedPanel(bpComponent("8480-6", mmHg(128)).replace("<code ", '<statusCode code="aborted"/><code ') + bpComponent("8462-4", mmHg(78)))],
+    ["a reading at a time of its own", statedPanel(bpComponent("8480-6", mmHg(128)).replace("<code ", "<effectiveTime value='20240101090000'/><code ") + bpComponent("8462-4", mmHg(78)))],
+    ["a reading with a Result's value beside its own", statedPanel(bpComponent("8480-6", mmHg(128) + `<entryRelationship typeCode="REFR"><observation classCode="OBS" moodCode="EVN"><templateId root="2.16.840.1.113883.10.20.24.3.87" extension="2019-12-01"/><code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/><statusCode code="completed"/>${mmHg(999)}</observation></entryRelationship>`) + bpComponent("8462-4", mmHg(78)))],
+    ["a month", statedPanel(bothHalves, { time: "<effectiveTime value='202502'/>" })],
+    ["no time", statedPanel(bothHalves, { time: "" })],
+  ] as const) {
+    assert.deepEqual(panelsIn(entry), [], why);
+    assert.ok(imported(entry).untranslatedTemplates.includes("2.16.840.1.113883.10.20.24.3.59"), why);
+  }
+  // A completed status is the one a reading may state.
+  assert.equal(panelsIn(statedPanel(bpComponent("8480-6", mmHg(128)).replace("<code ", '<statusCode code="completed"/><code ') + bpComponent("8462-4", mmHg(78)))).length, 1);
+  // Components are the IG's REFR relationships: under another, the exam states none, and is what it was.
+  const comp = imported(statedPanel(bothHalves.replace(/typeCode="REFR"/g, 'typeCode="COMP"'))).bundle.entry.map((e) => e.resource as Record<string, any>).filter((r) => r.resourceType === "Observation");
+  assert.deepEqual(comp.map((r) => [r.component, r.category[0].coding[0].code]), [[undefined, "exam"]]);
+});
+
+test("#794 (review): readings stated as Components under another code or template are not lost silently, and block", () => {
+  const under = (code: string) => statedPanel(bothHalves, { code: `<code code="${code}" codeSystem="2.16.840.1.113883.6.1"/>` });
+  const lab = statedPanel(bothHalves).replace('root="2.16.840.1.113883.10.20.24.3.59" extension="2021-08-01"', 'root="2.16.840.1.113883.10.20.24.3.38" extension="2019-12-01"');
+  for (const [why, entry] of [["a panel coded 55284-4", under("55284-4")], ["a Laboratory Test coded 85354-9", lab]] as const) {
+    const imported = importQrda1Document(sitedDocument(entry + sitedDiagnosis("")));
+    assert.deepEqual(imported.bundle.entry.filter((e) => (e.resource as { resourceType: string }).resourceType === "Observation"), [], why);
+    assert.equal(imported.untranslatedTemplates.length, 1, why);
+    // Its readings, at the pair's time, keep the pair from forming.
+    assert.equal(paired(sys(), dia(), entry).panels.length, 0, why);
+  }
+  // A panel whose own code also carries a reading's code is the panel, never a half of one.
+  const translated = statedPanel(bothHalves, { code: '<code code="85354-9" codeSystem="2.16.840.1.113883.6.1"><translation code="8480-6" codeSystem="2.16.840.1.113883.6.1"/></code>' });
+  const result = importQrda1Document(sitedDocument(translated + dia({ id: "d2" })));
+  assert.equal(result.bundle.entry.filter((e) => JSON.stringify((e.resource as { component?: unknown }).component ?? null) !== "null").length, 1);
+  assert.equal(result.unpairedBloodPressureReadings, 1, "the separate diastolic, not the panel");
+});
+
 test("import NAMES an untranslated QDM datatype rather than counting it", () => {
   // An operator needs to know WHICH datatype was dropped to judge whether the recalculation can be
   // trusted; a bare count reads as "a few things we don't support".
