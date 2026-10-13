@@ -50,6 +50,15 @@ export interface AuditEventRow {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Where one page of the audit ledger ends: the last row's `occurred_at` exactly as the store holds it (the
+ * ceiling's to the microsecond, which a JavaScript Date cannot carry) and its id. Opaque to callers.
+ */
+export interface AuditPageCursor {
+  at: string;
+  id: string;
+}
+
 /** One audit_packet_exports row to record (#108 auditor packets) — see the table in `postgres/schema-pg.ts`. */
 export interface PacketExportInput {
   packetType: string;
@@ -106,6 +115,13 @@ export interface CaseEventStore {
    * `offset` lets the export page the ledger so it never materializes the whole table (#150 M9).
    */
   listAuditEvents(limit?: number, offset?: number): Promise<AuditEventRow[]>;
+  /**
+   * One page of the ledger in `listAuditEvents`' order (oldest-first, `occurred_at` then id), after
+   * `after`, and the cursor for the next page, absent once a page comes back short. Keyset, not OFFSET:
+   * every page costs the same, where the Nth OFFSET page made the database skip every row before it, so
+   * the streamed export slowed until a proxy cut it off (#619).
+   */
+  listAuditEventsAfter(limit: number, after?: AuditPageCursor): Promise<{ rows: AuditEventRow[]; next?: AuditPageCursor }>;
   /** Audit events for one run (ref_run_id), oldest-first — the run auditor packet ledger. */
   auditEventsByRun(runId: string): Promise<AuditEventRow[]>;
   /** The most recent audit_events of a given event_type, NEWEST-first, bounded by limit.

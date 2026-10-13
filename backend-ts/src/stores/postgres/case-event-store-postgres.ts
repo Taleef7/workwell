@@ -9,6 +9,7 @@ import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import type {
   AppendAuditInput,
   AuditEventRow,
+  AuditPageCursor,
   CaseEventStore,
   InsertActionInput,
   PacketExportInput,
@@ -299,6 +300,27 @@ export class PgCaseEventStore implements CaseEventStore {
       [limit, offset],
     );
     return rows.map(toAuditEventRow);
+  }
+
+  async listAuditEventsAfter(limit: number, after?: AuditPageCursor): Promise<{ rows: AuditEventRow[]; next?: AuditPageCursor }> {
+    // The cursor's time is `occurred_at::text`, cast back by the same session: a timestamptz holds
+    // microseconds, a Date does not, and a cursor rounded to the millisecond would repeat rows at a page
+    // edge. The range on `occurred_at` alone is what the ledger's index can serve.
+    const columns = `id::text AS page_id, occurred_at::text AS page_at,
+            occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json`;
+    const { rows } = after
+      ? await this.pool.query<AuditRow & { page_id: string; page_at: string }>(
+          `SELECT ${columns} FROM ${SPIKE_SCHEMA}.audit_events
+            WHERE occurred_at >= $1::timestamptz AND (occurred_at > $1::timestamptz OR id > $2::bigint)
+            ORDER BY occurred_at ASC, id ASC LIMIT $3`,
+          [after.at, after.id, limit],
+        )
+      : await this.pool.query<AuditRow & { page_id: string; page_at: string }>(
+          `SELECT ${columns} FROM ${SPIKE_SCHEMA}.audit_events ORDER BY occurred_at ASC, id ASC LIMIT $1`,
+          [limit],
+        );
+    const last = rows[rows.length - 1];
+    return { rows: rows.map(toAuditEventRow), ...(rows.length === limit && last ? { next: { at: last.page_at, id: last.page_id } } : {}) };
   }
 
   async recentAuditEventsByType(eventType: string, limit: number): Promise<AuditEventRow[]> {

@@ -41,6 +41,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   "still counted by CQL" note and the roster's staff-closure marker read it as a gap. A failure is not a
   finding: such a cell is now marked as failed, and its live state is UNKNOWN ("current CQL status
   unavailable").
+- **The audit-events CSV export finishes (#619, #655).** It paged the ledger by OFFSET, so each page made
+  the database skip every row already sent, and it looked up each page's cases one at a time; on the pilot's
+  ledger it stalled until a proxy cut it off. It now pages by keyset on the export's own order
+  (`occurred_at`, then id; the cursor keeps Postgres's microseconds) and reads each page's cases in one
+  batch. Local Postgres 16, 1,000,000 rows: a page at row 900,000 takes 0.5 ms (448 ms by OFFSET), paging
+  the whole ledger 2.8 s (117 s by OFFSET), and the whole CSV streams in 6.3 s with every row once.
 
 ## 2026-10-12
 
