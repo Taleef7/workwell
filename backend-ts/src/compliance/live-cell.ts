@@ -94,7 +94,11 @@ export function liveFieldsFor(answer: LiveCell): {
   displayStatus: string | null;
   runId: string | null;
 } {
-  if (answer.cell == null) return { state: "UNKNOWN", outcomeStatus: null, displayStatus: null, runId: answer.runId };
+  // A failed evaluation is no answer either: its persisted MISSING_DATA is not a status, and a reader that
+  // took it would file a case under Missing Data while its row shows the frozen status (Codex, #812).
+  if (answer.cell == null || answer.cell.evaluationFailed) {
+    return { state: "UNKNOWN", outcomeStatus: null, displayStatus: null, runId: answer.runId };
+  }
   return {
     state: answer.state,
     // `canonical` is OPTIONAL on a cell (absent on the synthetic NOT_APPLICABLE ones), and `null`

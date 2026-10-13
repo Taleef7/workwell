@@ -332,6 +332,16 @@ test("liveFieldsFor keeps the display status and the canonical bucket apart", ()
   assert.equal(none.outcomeStatus, null);
   assert.equal(none.state, "UNKNOWN", "and the state says so");
   assert.equal(none.runId, "run-9", "the run is still named, so the absence can be traced");
+
+  // A failed evaluation is no answer: its MISSING_DATA is not a status, so a staff-closed OVERDUE case
+  // stays under Overdue in the filters rather than moving to Missing Data (Codex, #812).
+  const failed = liveFieldsFor({
+    state: "UNKNOWN",
+    runId: "run-9",
+    cell: { status: "MISSING_DATA", method: "m", canonical: "MISSING_DATA", evaluationPeriod: PERIOD, evaluationFailed: true },
+  });
+  assert.deepEqual([failed.state, failed.outcomeStatus, failed.displayStatus, failed.runId], ["UNKNOWN", null, null, "run-9"]);
+  assert.equal(shownStatusFor("OVERDUE", failed), "OVERDUE");
 });
 
 /**
