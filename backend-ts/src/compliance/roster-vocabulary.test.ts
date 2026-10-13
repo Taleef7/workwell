@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveCell } from "./roster-vocabulary.ts";
+import { deriveCell, liveStateOfCell } from "./roster-vocabulary.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 // Evidence is the engine's `{ expressionResults: [{define, result}] }` shape.
@@ -148,7 +148,7 @@ test("official: out of the initial population → OUT_OF_POPULATION; an evaluati
     assert.equal(out.status, "OUT_OF_POPULATION");
     assert.match(out.method, /initial population/);
     const err = deriveCell("MISSING_DATA", { evaluationError: "engine failure", message: "boom" }, "cms122", PERIOD);
-    assert.deepEqual(err, { status: "MISSING_DATA", method: "Evaluation failed; no engine result for this subject" });
+    assert.deepEqual(err, { status: "MISSING_DATA", method: "Evaluation failed; no engine result for this subject", evaluationFailed: true });
     const inPop = deriveCell("MISSING_DATA", { expressionResults: [], official: { populationResults: { ipp: true, denom: true, denex: false, numer: false, denexcep: false } } }, "cms122", PERIOD);
     assert.equal(inPop.status, "MISSING_DATA", "in the population and missing data stays MISSING_DATA");
   } finally {
@@ -195,4 +195,15 @@ test("an authored outcome is never out of population — membership is absent, n
   // the worklist. The gate is what makes the fallback safe to reuse here.
   const cell = deriveCell("MISSING_DATA", { expressionResults: [] }, "audiogram", PERIOD);
   assert.notEqual(cell.status, "OUT_OF_POPULATION");
+});
+
+test("a failed evaluation's live state is UNKNOWN, never a gap: a failure is not a finding (#655)", () => {
+  // The run persists a failed evaluation as MISSING_DATA (DATA_MODEL §4), the bucket that opens a case; read
+  // as such, a staff-closed case whose winning run failed reported `liveState: GAP` in the cases CSV.
+  const failed = { ...deriveCell("MISSING_DATA", { evaluationError: "CQL engine failure", message: "boom" }, "cms125", "2026"), canonical: "MISSING_DATA" };
+  assert.deepEqual([failed.status, failed.evaluationFailed, liveStateOfCell(failed)], ["MISSING_DATA", true, "UNKNOWN"]);
+  // A MISSING_DATA the engine returned is still a gap, and an evaluated result is still what it says.
+  const missing = { ...deriveCell("MISSING_DATA", { expressionResults: [] }, "cms125", "2026"), canonical: "MISSING_DATA" };
+  assert.deepEqual([missing.evaluationFailed, liveStateOfCell(missing)], [undefined, "GAP"]);
+  assert.equal(liveStateOfCell({ ...deriveCell("COMPLIANT", { expressionResults: [] }, "cms125", "2026"), canonical: "COMPLIANT" }), "CLEAR");
 });

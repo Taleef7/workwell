@@ -28,6 +28,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   pair at its time from forming. No Cypress deck document states a panel this way, so the decks and C2 are
   unchanged and the evidence is the tests.
 
+- **A staff-closed case whose winning run failed reads `liveState: UNKNOWN`, not GAP (#655).** A failed
+  evaluation persists MISSING_DATA, the bucket that opens a case, so the cases CSV, the case list's
+  "still counted by CQL" note and the roster's staff-closure marker read it as a gap. A failure is not a
+  finding: such a cell is now marked as failed, and its live state is UNKNOWN ("current CQL status
+  unavailable").
+
 ## 2026-10-12
 
 - **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The
