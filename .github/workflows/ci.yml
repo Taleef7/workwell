@@ -173,7 +173,7 @@ jobs:
     timeout-minutes: 20
     # Sharded because this was a single 12m20s step and the whole CI wall-clock was it: every other job
     # finishes inside two minutes. Exercises BOTH the SQLite floor (default) and the Postgres ceiling —
-    # the postgres service + WORKWELL_TEST_PG_URL light up the store-contract suite, which otherwise
+    # the Postgres step + WORKWELL_TEST_PG_URL light up the store-contract suite, which otherwise
     # SELF-SKIPS rather than failing.
     #
     # Three shards, not more: `node --test` parallelises across files and never within one, so the job
@@ -184,29 +184,10 @@ jobs:
       fail-fast: false # one shard's failure must not hide another's — they test disjoint code
       matrix:
         shard: [1, 2, 3]
-    # Every shard gets the service, though only shard 1 holds Pg-dependent files today: a stray file
+    # Every shard gets Postgres, though only shard 1 holds Pg-dependent files today: a stray file
     # that drifts off shard 1 then still RUNS its Postgres tests (the verify step above fails the
-    # build to get it moved back). The alternative — service on shard 1 only — would make that same
+    # build to get it moved back). The alternative — Postgres on shard 1 only — would make that same
     # drift silently skip, which is the failure this whole arrangement exists to prevent.
-    services:
-      postgres:
-        # The official postgres:16 image through Google's public mirror of Docker Hub's library images. The
-        # runners pull anonymously: Docker Hub's shared anonymous pull limit failed every job that needs
-        # this service before a test ran (2026-10-09, #780), and so did AWS's public mirror's anonymous
-        # data limit ("toomanyrequests: Data limit exceeded", three times on 2026-10-13). No credentials:
-        # the AWS account is suspended and the repo holds no registry login.
-        image: mirror.gcr.io/library/postgres:16
-        env:
-          POSTGRES_USER: workwell
-          POSTGRES_PASSWORD: workwell
-          POSTGRES_DB: workwell
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U workwell"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 25
     defaults:
       run:
         working-directory: backend-ts
@@ -214,6 +195,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      # postgres:16 from the first registry that serves it (see the script): a `services:` container names
+      # one image and fails the job before any step when that registry refuses the pull.
+      - name: Start Postgres 16
+        working-directory: .
+        run: bash .github/scripts/start-ci-postgres.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 10.17.1
@@ -302,25 +288,6 @@ jobs:
     #
     # Postgres is here for the MADiE end-to-end twin (#727): the steward's patients through the run and
     # the read APIs on the Pg ceiling, which only this job can run because only it has the sidecars.
-    services:
-      postgres:
-        # The official postgres:16 image through Google's public mirror of Docker Hub's library images. The
-        # runners pull anonymously: Docker Hub's shared anonymous pull limit failed every job that needs
-        # this service before a test ran (2026-10-09, #780), and so did AWS's public mirror's anonymous
-        # data limit ("toomanyrequests: Data limit exceeded", three times on 2026-10-13). No credentials:
-        # the AWS account is suspended and the repo holds no registry login.
-        image: mirror.gcr.io/library/postgres:16
-        env:
-          POSTGRES_USER: workwell
-          POSTGRES_PASSWORD: workwell
-          POSTGRES_DB: workwell
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U workwell"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 25
     defaults:
       run:
         working-directory: backend-ts
@@ -328,6 +295,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      # postgres:16 from the first registry that serves it (see the script): a `services:` container names
+      # one image and fails the job before any step when that registry refuses the pull.
+      - name: Start Postgres 16
+        working-directory: .
+        run: bash .github/scripts/start-ci-postgres.sh
       - uses: pnpm/action-setup@v6
         with:
           version: 10.17.1
