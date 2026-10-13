@@ -68,6 +68,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   forbids (the Maui corpus already wrote `Z`). They now write `Z`. Every TWH subject on every measure TWH
   runs, scale-tenant subjects on every authored measure and the official-only bundles score identically
   before and after, on three evaluation dates and in three host time zones; the stored evidence is unchanged.
+- **A QRDA I period that ends before it starts imports as no time (#794, dates).** It imported as a FHIR
+  period whose start was after its end, which FHIR forbids and cql-execution compares with rather than
+  refusing: a diagnosis so stated was marked resolved, abated before its onset. It is now silence, as a
+  malformed date is, and as the blood-pressure pairing already read it. Two times compare as instants in
+  their own offsets; beside a date, as dates at the coarser precision. #794's out-of-range years were fixed
+  by #788. Decks and C2 unchanged.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11
