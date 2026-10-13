@@ -36,6 +36,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   It wrote `0`, which CMS's validation refuses there (CYPRESS-2051): a rate over nobody is undefined, not
   zero, and the summary MeasureReport already omits its score in the same case. A denominator with no one
   in the numerator still writes `0.0000`.
+- **A staff-closed case whose winning run failed reads `liveState: UNKNOWN`, not GAP (#655).** A failed
+  evaluation persists MISSING_DATA, the bucket that opens a case, so the cases CSV, the case list's
+  "still counted by CQL" note and the roster's staff-closure marker read it as a gap. A failure is not a
+  finding: such a cell is now marked as failed, and its live state is UNKNOWN ("current CQL status
+  unavailable").
 
 ## 2026-10-12
 

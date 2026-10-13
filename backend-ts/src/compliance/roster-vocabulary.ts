@@ -34,18 +34,24 @@ export interface Cell {
    */
   canonical?: string;
   evaluationPeriod?: string;
+  /**
+   * The engine failed for this subject: its canonical bucket is the MISSING_DATA a failed evaluation
+   * persists (DATA_MODEL §4), which says nothing about the patient. Present only when true.
+   */
+  evaluationFailed?: true;
 }
 
 /**
  * Whether the run still counts this patient as a gap — "GAP" (a case would be opened for it),
  * "CLEAR" (compliant, excluded, or outside the population), or "UNKNOWN" (no canonical bucket: a
- * cell that was never evaluated or that a segment marked not applicable). Evaluated on the canonical
+ * cell that was never evaluated or that a segment marked not applicable; or an evaluation that failed,
+ * which is not a finding, though its persisted MISSING_DATA would otherwise read as a gap, #655). Evaluated on the canonical
  * bucket, never on the display state, and "not currently evaluable" is its own answer rather than
  * either of the other two (#569).
  */
 export type LiveState = "GAP" | "CLEAR" | "UNKNOWN";
-export function liveStateOfCell(cell: Pick<Cell, "status" | "canonical">): LiveState {
-  if (cell.canonical == null) return "UNKNOWN";
+export function liveStateOfCell(cell: Pick<Cell, "status" | "canonical" | "evaluationFailed">): LiveState {
+  if (cell.canonical == null || cell.evaluationFailed) return "UNKNOWN";
   if (cell.status === "OUT_OF_POPULATION") return "CLEAR";
   return dispositionFor(cell.canonical) === "OPEN" ? "GAP" : "CLEAR";
 }
@@ -54,7 +60,7 @@ export function liveStateOfCell(cell: Pick<Cell, "status" | "canonical">): LiveS
 export function deriveCell(canonicalStatus: string, evidence: unknown, measureId: string, evaluationPeriod: string): Cell {
   // No engine spoke for this subject. Say so, rather than the measure's "missing data" wording, which
   // would read as a clinical fact about the record (ADR-077 d7).
-  if (isEvaluationErrorEvidence(evidence)) return { status: "MISSING_DATA", method: "Evaluation failed; no engine result for this subject" };
+  if (isEvaluationErrorEvidence(evidence)) return { status: "MISSING_DATA", method: "Evaluation failed; no engine result for this subject", evaluationFailed: true };
   const ers = expressionResults(evidence);
   const get = (re: RegExp): unknown => ers.find((r) => re.test(r.define))?.result;
   const binding = MEASURE_BINDINGS[measureId];
