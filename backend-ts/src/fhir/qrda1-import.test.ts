@@ -508,6 +508,22 @@ test("#794: a period that ends before it starts is no time, on every datatype th
   }
 });
 
+test("#794: every imported clinical resource names its patient, a paired panel included, and a batch names the one it keeps", () => {
+  const subjectsOf = (entries: Array<{ resource: unknown }>) => {
+    const resources = entries.map((e) => e.resource as Record<string, any>);
+    const patient = resources.find((r) => r.resourceType === "Patient")!;
+    return { id: patient.id as string, subjects: resources.filter((r) => r.resourceType !== "Patient").map((r) => `${r.resourceType}:${r.subject?.reference}`) };
+  };
+  const one = subjectsOf(importQrda1Document(sitedDocument(sys() + dia() + sitedDiagnosis("") + lab794())).bundle.entry);
+  assert.deepEqual(one.subjects.sort(), ["Condition:Patient/emp-006", "Observation:Patient/emp-006", "Observation:Patient/emp-006"]);
+  // Two documents of one person, identified by different first ids: every resource names the Patient kept.
+  const other = sitedDocument(lab794()).replace('<id root="urn:workwell:employee" extension="emp-006"/>', '<id root="urn:workwell:other" extension="x-1"/><id root="urn:workwell:employee" extension="emp-006"/>');
+  const [subject] = resolveQrda1Documents([sitedDocument(sys() + dia()), other]).subjects;
+  const merged = subjectsOf(subject!.bundle.entry);
+  assert.ok(merged.subjects.length >= 2);
+  assert.deepEqual([...new Set(merged.subjects.map((s) => s.split(":")[1]))], [`Patient/${merged.id}`]);
+});
+
 test("import NAMES an untranslated QDM datatype rather than counting it", () => {
   // An operator needs to know WHICH datatype was dropped to judge whether the recalculation can be
   // trusted; a bare count reads as "a few things we don't support".

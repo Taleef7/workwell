@@ -5,6 +5,13 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-13
+
+- **Every imported QRDA I resource names its patient (#794, subject).** None carried `subject`, though
+  QI-Core requires it, and so does the US Core blood-pressure profile preparation stamps on a paired
+  panel, so the stamp claimed what the resource did not meet. A batch points a person's documents at the
+  one Patient it keeps, so an entry two documents repeat is still merged once. Decks and C2 unchanged.
+
 ## 2026-10-12
 
 - **A QRDA I entry is imported only when it states its template's own mood and status (#790).** The
