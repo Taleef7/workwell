@@ -660,15 +660,16 @@ function bloodPressureHalfOf(resource: unknown): "systolic" | "diastolic" | "bot
 }
 
 /**
- * Which half of a blood pressure an entry's every written LOINC code states: each `code` it writes, a
- * nullFlavored one or a second one included, and their translations. The import reads a code only when it
- * is stated once and not nullFlavored (#794), but §4A.8 counts every stated systolic and diastolic: an entry
- * writing 8480-6 in any of these ways keeps a pair at its time from forming, and one whose written codes
- * say more than its imported code does not pair.
+ * Which half of a blood pressure an entry's codes state: every `code` it writes and its translations, a
+ * second `code` included, but never a nullFlavored one, which states no code (as `concept` reads it, #794).
+ * The import reads a code only when it is stated once; §4A.8 counts every stated systolic and diastolic, so
+ * an entry stating 8480-6 in a second code is not imported and still keeps a pair at its time from forming.
  */
 function writtenHalfOf(node: CdaNode): "systolic" | "diastolic" | "both" | undefined {
   const written = childrenNamed(node, "code").flatMap((code) => [code, ...childrenNamed(code, "translation")]);
-  const coding = written.filter((c) => c.attrs.codeSystem !== undefined && SYSTEM_FOR_OID[c.attrs.codeSystem] === LOINC).map((c) => ({ system: LOINC, code: c.attrs.code }));
+  const coding = written
+    .filter((c) => c.attrs.nullFlavor === undefined && c.attrs.codeSystem !== undefined && SYSTEM_FOR_OID[c.attrs.codeSystem] === LOINC)
+    .map((c) => ({ system: LOINC, code: c.attrs.code }));
   return bloodPressureHalfOf({ code: { coding } });
 }
 
@@ -1365,8 +1366,7 @@ export function importQrda1Document(xml: string): Qrda1Import {
           if (isReading(r)) {
             const reading = { index: entries.length, node: candidate };
             bloodPressureReadings.push(reading);
-            // Pairs only when its written codes say what its imported one does (#794).
-            if (pairs && written === bloodPressureHalfOf(r)) pairable.push(reading);
+            if (pairs) pairable.push(reading);
           }
           entries.push({ resource: r });
         }

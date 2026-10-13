@@ -74,8 +74,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   reports it and keeps the others). An entry stating its code, status or time twice (a medication: two
   periods beside its frequencies), or a diagnosis its value twice, is not translated and is named; a bound
   stated twice is no time; a nullFlavored code or id is no code or id; and `xsi:type` is read by its
-  namespace whatever prefix the document binds to it. §4A.8 still counts every time and code a reading
-  writes, so none of these lets a pair form that did not before. Decks and C2 unchanged.
+  namespace whatever prefix the document binds to it. §4A.8 still counts every time and every code a
+  reading states, a second one included; a nullFlavored code states none, so it no longer blocks a pair or
+  makes its translation a second half. Decks and C2 unchanged.
 - The first weekday nightly with #783-#787 live on Maui: 120,000 evaluated, 0 errors; CMS165 49.0%.
 
 ## 2026-10-11

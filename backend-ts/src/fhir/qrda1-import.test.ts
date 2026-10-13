@@ -429,13 +429,16 @@ test("#794 (review): §4A.8 counts every time and code a reading writes", () => 
   assert.deepEqual([twice.effectiveDateTime, twice.effectivePeriod], [undefined, undefined]);
   // A bound stated twice.
   assert.equal(paired(sys(), dia(), third({ time: "<effectiveTime><low value='20250219171500'/><low value='20250219170000'/><high value='20250219180000'/></effectiveTime>" })).panels.length, 0);
-  // A second code, or a nullFlavored one, still writes a systolic.
+  // A second code still states a systolic.
   assert.equal(paired(sys(), dia(), third({ code: "8310-5" }).replace('<code code="8310-5" codeSystem="2.16.840.1.113883.6.1"/>', '<code code="8310-5" codeSystem="2.16.840.1.113883.6.1"/><code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>')).panels.length, 0);
-  assert.equal(paired(sys(), dia(), third({}).replace('<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>', '<code nullFlavor="UNK" code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>')).panels.length, 0);
-  // A diastolic whose code is nullFlavored beside a systolic translation writes both halves: it is neither.
-  const both = dia().replace('<code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>', '<code nullFlavor="OTH" code="8462-4" codeSystem="2.16.840.1.113883.6.1"><translation code="8480-6" codeSystem="2.16.840.1.113883.6.1"/></code>');
-  // Imported as the systolic its translation names, beside the only diastolic: before, it paired.
-  assert.equal(paired(both, dia({ id: "d2" })).panels.length, 0);
+  // A nullFlavored code states none, whatever sits beside it (Codex, #804): it neither blocks...
+  assert.equal(paired(sys(), dia(), third({}).replace('<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>', '<code nullFlavor="UNK" code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>')).panels.length, 1);
+  // ...nor makes its translation a second half: a systolic stated only in the translation pairs as one.
+  const translated = sys().replace('<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>', '<code nullFlavor="OTH" code="8462-4" codeSystem="2.16.840.1.113883.6.1"><translation code="8480-6" codeSystem="2.16.840.1.113883.6.1"/></code>');
+  assert.equal(paired(translated, dia()).panels.length, 1);
+  // Its codes stating both halves (two codes), it is neither: imported as its first, it does not pair.
+  const twoCodes = sys().replace('<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/>', '<code code="8480-6" codeSystem="2.16.840.1.113883.6.1"/><code code="8462-4" codeSystem="2.16.840.1.113883.6.1"/>');
+  assert.equal(paired(twoCodes, dia({ id: "d2" })).panels.length, 0);
 });
 
 test("#794 (review): a medication states one period beside its frequencies; a diagnosis one value", () => {
