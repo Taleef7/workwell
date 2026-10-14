@@ -170,6 +170,10 @@ export default function WorklistPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Whether the LIST failed to load. `error` also carries a failed bulk assign, which leaves the rows on
+  // screen, so the count line and Try again read this instead.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [assigning, setAssigning] = useState(false);
@@ -359,6 +363,7 @@ export default function WorklistPage() {
     const ticket = (requestSeq.current += 1);
     setLoading(true);
     setError(null);
+    setLoadFailed(false);
     try {
       const params = new URLSearchParams({ status: statusView, limit: String(pageSize), offset: String(page * pageSize) });
       if (providerFilter) params.set("providerId", providerFilter);
@@ -385,6 +390,7 @@ export default function WorklistPage() {
     } catch (err) {
       if (ticket !== requestSeq.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
+      setLoadFailed(true);
       setRows([]);
       setTotal(0);
     } finally {
@@ -501,23 +507,27 @@ export default function WorklistPage() {
     <div className="flex flex-col gap-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Work list</h1>
+          <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-neutral-900 outline-none dark:text-neutral-100">
+            Work list
+          </h1>
           {/* The line describes the rows under it, so it follows the tab and the Work view (#661): it
               said "with open gaps" over the closed-by-staff list and over the Panels table. The Panels
               tab describes itself, so there is no page line over it. */}
           {tab === "panels" ? null : (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            {statusView === "staff_closed" ? (
-              <>
-                One row per {SUBJECT.singular}, with every gap staff closed and what CQL says about it today.{" "}
-                {total.toLocaleString()} {total === 1 ? SUBJECT.singular : SUBJECT.plural} with gaps closed by staff.
-              </>
-            ) : (
-              <>
-                One row per {SUBJECT.singular}, with every open gap. {total.toLocaleString()}{" "}
-                {total === 1 ? SUBJECT.singular : SUBJECT.plural} with open gaps.
-              </>
-            )}
+            {statusView === "staff_closed"
+              ? `One row per ${SUBJECT.singular}, with every gap staff closed and what CQL says about it today.`
+              : `One row per ${SUBJECT.singular}, with every open gap.`}{" "}
+            {/* The count only once there is one: "0 patients with open gaps" while the list is still
+                coming, or after it failed, reads as an empty practice (the /cases fix in #696). A list
+                that has loaded keeps its count while it reloads. */}
+            {loadFailed
+              ? `The ${SUBJECT.plural} could not be loaded.`
+              : loading && rows.length === 0
+                ? `Loading ${SUBJECT.plural}…`
+                : `${total.toLocaleString()} ${total === 1 ? SUBJECT.singular : SUBJECT.plural} ${
+                    statusView === "staff_closed" ? "with gaps closed by staff" : "with open gaps"
+                  }.`}
           </p>
           )}
         </div>
@@ -741,8 +751,22 @@ export default function WorklistPage() {
       ) : null}
 
       {error ? (
-        <div role="alert" className="rounded-lg border border-danger-300 bg-danger-50 p-3 text-sm text-danger-800 dark:border-danger-800 dark:bg-danger-900/20 dark:text-danger-200">
-          {error}
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger-300 bg-danger-50 p-3 text-sm text-danger-800 dark:border-danger-800 dark:bg-danger-900/20 dark:text-danger-200">
+          <span>{error}</span>
+          {/* Only for a failed list: a failed assign is not retried by reloading the list. The alert
+              unmounts as the reload starts, so focus goes to the heading rather than to the page body. */}
+          {loadFailed ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                headingRef.current?.focus();
+                void load();
+              }}
+            >
+              Try again
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -843,7 +867,11 @@ export default function WorklistPage() {
             ) : rows.length === 0 ? (
               <tr className="@max-4xl:block">
                 <td colSpan={7} className="p-6 text-center text-neutral-500 @max-4xl:block dark:text-neutral-400">
-                  {statusView === "staff_closed"
+                  {/* A list that failed to load has no rows to match: "no patients match" would be a
+                      claim about a list nobody saw. */}
+                  {loadFailed
+                    ? `Nothing to show: the ${SUBJECT.plural} could not be loaded.`
+                    : statusView === "staff_closed"
                     ? `No ${SUBJECT.plural} with gaps closed by staff match these filters.`
                     : `No ${SUBJECT.plural} with open gaps match these filters.`}
                 </td>

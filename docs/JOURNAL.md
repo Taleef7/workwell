@@ -5,6 +5,16 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-14
+
+- **The work list and the measure labels no longer state a wrong answer while loading or after a
+  failure (#655).** Both seen live on Maui right after a deploy:
+  - The work list said "0 patients with open gaps" while its list was still coming, and again after a
+    failed load. It now says it is loading, or that the list could not be loaded, with Try again.
+  - Every result label (programs cards, work list, cases, patient pages) lost its "MIPS 112 ·" prefix
+    for the life of the page when the first `/api/measures` fetch failed on a worker still warming up.
+    No page reads the hook's error. A failed first fetch is now retried twice (after 1 s and 4 s).
+
 ## 2026-10-13
 
 - **An imported QRDA I Observation carries its author time, site and method (#794, Physical Exam
