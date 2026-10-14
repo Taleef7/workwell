@@ -466,11 +466,18 @@ function derivedRoutingProblems(
     for (const name of REQUIRED_DERIVED_ORACLES) {
       const record = oracles.find((o) => o.name === name);
       // Listed deck misses are the deck check's alone, and a malformed list is a refusal, never ignored.
-      const listed = record?.listedMisses;
+      const listed: unknown = record?.listedMisses;
+      const shape = listed && typeof listed === "object" ? (listed as { patients?: unknown; sha256?: unknown }) : undefined;
       const listedOk =
         listed === undefined ||
-        (name === "cypress-deck" && Number.isInteger(listed.patients) && listed.patients > 0 && typeof listed.sha256 === "string" && /^sha256:[0-9a-f]{64}$/.test(listed.sha256));
-      const accounted = listed !== undefined && listedOk ? listed.patients : 0;
+        (name === "cypress-deck" &&
+          shape !== undefined &&
+          typeof shape.patients === "number" &&
+          Number.isInteger(shape.patients) &&
+          shape.patients > 0 &&
+          typeof shape.sha256 === "string" &&
+          /^sha256:[0-9a-f]{64}$/.test(shape.sha256));
+      const accounted = listed !== undefined && listedOk ? (shape!.patients as number) : 0;
       if (!record || !listedOk || record.result !== "pass" || record.total <= 0 || record.agree + accounted !== record.total) {
         problems.push(`${id}: the translation has no passing '${name}' check`);
       } else if (record.ranAgainst.artifactSha256 !== manifest.sha256 || record.ranAgainst.terminologySha256 !== manifest.terminology?.sha256) {

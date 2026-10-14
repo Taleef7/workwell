@@ -46,6 +46,8 @@ import {
   matchPopulationDifferences,
   excusePresence,
   parseExpectedDeckMisses,
+  populationsTheEditsReach,
+  deckMissProblems,
   DECK_EXPECTED_FILE,
   parseArgs,
   parseExpectedDifferences,
@@ -57,6 +59,11 @@ import {
 } from "./derived-check.ts";
 
 const BACKEND_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+const loadDerivedArtifactOrThrow = (id: string): OfficialArtifact => {
+  const artifact = readArtifactDir("derived", id, pathToFileURL(join(BACKEND_ROOT, "measures", "derived") + "/")).artifact;
+  if (!artifact) throw new Error(`no committed translation ${id}`);
+  return artifact;
+};
 const sha = (bytes: string | Buffer) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const base = derivedCms137();
 const official = loadOfficialArtifact("cms137")!;
@@ -785,8 +792,40 @@ test("a deck-miss file is a set of exact, explained rows", () => {
     [[{ ...ok, diffs: [""] }], "diffs must be the row's non-empty list of differences"],
     [[{ ...ok, reason: "" }], "entry 1 has no reason"],
     [[ok, { ...ok, diffs: ["DENEX 0→1"] }], "entry 2 lists a row an earlier entry lists"],
+    [[], "it lists no row"],
   ];
   for (const [bad, message] of refusals) throwsWith(() => parseExpectedDeckMisses(bad), message);
+});
+
+test("a listed deck miss may not differ on a population the edits reach, or on a stratum's membership (#816 review)", async () => {
+  // CMS165v15's edits reach the initial population (the hypertension window), so the denominator, and the
+  // exclusions; its numerator is the blood-pressure logic, which no edit touches.
+  const translation = loadDerivedArtifactOrThrow("cms165");
+  const cms = loadOfficialArtifact("cms165")!;
+  const touched = populationsTheEditsReach(translation.bundle as never, cms.bundle as never, translation.manifest.derived!.changedLibraries ?? []);
+  assert.deepEqual([...touched].sort(), ["DENEX", "DENOM", "IPP"]);
+  // An untranslated main library and no changed library reach nothing.
+  assert.deepEqual([...populationsTheEditsReach(cms.bundle as never, cms.bundle as never, [])], []);
+
+  // Through main: a listed DENEX row is refused even when CMS's logic misses it the same way.
+  const run = async (listed: unknown, touchedRows: Record<string, AgreementSubjectResult>) => {
+    const f = fixture();
+    writeFileSync(join(f.dir, DECK_EXPECTED_FILE), JSON.stringify(listed));
+    const s = setup(f, { calculate: deckStubBySide([], touchedRows, touchedRows) });
+    return { code: await main(recordArgs(f), s.deps), errors: s.errors.join("\n") };
+  };
+  // Directly: the same row, missed the same way by both logics, passes only while no edit reaches DENEX.
+  const row = { patientId: "p9", set: 0, diffs: ["DENEX 0→1"] };
+  const report = (patientsAgreeing: number) =>
+    ({ patients: 2, patientsAgreeing, disagreements: [row], disagreementCount: 1, engineErrors: [], importFailures: [], unrecognisedRows: 0, noResult: 0, strataRows: 0, strataMode: "compare" }) as never;
+  const listedRow = [{ ...row, reason: "why" }];
+  assert.deepEqual(deckMissProblems(report(1), report(1), listedRow, new Set(["NUMER"])), []);
+  assert.deepEqual(deckMissProblems(report(1), report(1), listedRow, new Set(["DENEX"])), [
+    "a listed row of patient p9 differs on DENEX, whose criteria reach a define the edits changed: a miss CMS's own logic shares there could be an edit that was not ported",
+  ]);
+  const stratumOnly = await run([{ ...P2_ROWS[0], diffs: ["stratum 2 1→0"] }, P2_ROWS[1]], P2_MISSED);
+  assert.equal(stratumOnly.code, 1);
+  assert.ok(stratumOnly.errors.includes("differs on something that is not a population (stratum), which no listed miss may cover"), stratumOnly.errors);
 });
 
 test("every committed translation's listed deck misses are the committed file, by hash and by patients", () => {

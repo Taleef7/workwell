@@ -55,6 +55,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   agreementPasses,
+  CYPRESS_POPULATIONS,
   importDeckPatients,
   readCypressDeck,
   renderAgreementMarkdown,
@@ -524,11 +525,12 @@ const deckMissIdentity = (d: { patientId: string; set: number; stratum?: number;
 
 /**
  * Read `cypress-expected-differences.json`: a JSON array of `{ patientId, set, stratum?, diffs, reason }`.
- * Refused: an unknown key, a blank id or reason, a rate or stratum that is not a whole number from 0, no
+ * Refused: an empty list, an unknown key, a blank id or reason, a rate or stratum that is not a whole number from 0, no
  * diffs, and a second entry for one row (patient, rate, stratum).
  */
 export function parseExpectedDeckMisses(json: unknown): ExpectedDeckMiss[] {
   if (!Array.isArray(json)) throw new Error("it is not a JSON array");
+  if (json.length === 0) throw new Error("it lists no row: with nothing to excuse, the file should not exist");
   const rows = new Set<string>();
   return json.map((raw, index) => {
     const where = `entry ${index + 1}`;
@@ -552,15 +554,94 @@ export function parseExpectedDeckMisses(json: unknown): ExpectedDeckMiss[] {
   });
 }
 
+type ReachElm = {
+  library: { includes?: { def?: Array<{ localIdentifier?: string; path?: string }> }; statements?: { def?: ElmDef[] } };
+};
+
+/**
+ * The Cypress population keys ("IPP", "DENEX", …) whose criteria reach a def the edits changed: a def of the
+ * translation's main library or of a changed library that differs from CMS's copy (or that only the
+ * translation has), followed through every ExpressionRef and FunctionRef, across includes. A listed deck
+ * miss on such a population is refused (`deckMissProblems`): if the translation failed to port an edit, it
+ * would miss that row exactly as CMS's own logic does, and a listed miss would hide the gap (#816 review).
+ */
+export function populationsTheEditsReach(
+  translation: { entry?: Array<{ resource?: Record<string, unknown> }> },
+  upstream: { entry?: Array<{ resource?: Record<string, unknown> }> },
+  changed: readonly DerivedChangedLibrary[],
+): Set<string> {
+  const librariesOf = (bundle: { entry?: Array<{ resource?: Record<string, unknown> }> }) =>
+    new Map(resourcesOf(bundle).filter((r) => r["resourceType"] === "Library").map((r) => [String(r["name"]), elmOfLibrary(r) as ReachElm] as const));
+  const ours = librariesOf(translation);
+  const cms = librariesOf(upstream);
+  const ourMain = mainLibraryName(translation);
+  const edited = new Set<string>();
+  const mark = (name: string, mine: ReachElm | undefined, theirs: ReachElm | undefined) => {
+    if (!mine || !theirs) throw new Error(`cannot compare library ${name} with CMS's: one side has no such library`);
+    for (const d of differingDefines(mine as ElmJson, theirs as ElmJson)) if (d.in !== "cms") edited.add(`${name}|${d.name}`);
+  };
+  mark(ourMain, ours.get(ourMain), cms.get(mainLibraryName(upstream)));
+  for (const library of changed) mark(library.name, ours.get(library.name), cms.get(library.from.name));
+
+  const memo = new Map<string, boolean>();
+  const reaches = (library: string, name: string): boolean => {
+    const key = `${library}|${name}`;
+    if (edited.has(key)) return true;
+    if (memo.has(key)) return memo.get(key)!;
+    memo.set(key, false); // a cycle reaches nothing new
+    const elm = ours.get(library);
+    const aliases = new Map((elm?.library.includes?.def ?? []).map((d) => [String(d.localIdentifier), String(d.path)]));
+    let found = false;
+    const walk = (node: unknown): void => {
+      if (found || !node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      const n = node as Record<string, unknown>;
+      if ((n["type"] === "ExpressionRef" || n["type"] === "FunctionRef") && typeof n["name"] === "string") {
+        const target = typeof n["libraryName"] === "string" ? aliases.get(n["libraryName"]) : library;
+        if (target !== undefined && reaches(target, n["name"])) found = true;
+      }
+      for (const [k, v] of Object.entries(n)) if (k !== "annotation") walk(v);
+    };
+    for (const def of elm?.library.statements?.def ?? []) if (def.name === name) walk(def);
+    memo.set(key, found);
+    return found;
+  };
+
+  const measure = resourcesOf(translation).find((r) => r["resourceType"] === "Measure");
+  const touched = new Set<string>();
+  for (const group of (measure?.["group"] as Array<{ population?: Array<Record<string, unknown>> }> | undefined) ?? []) {
+    for (const population of group.population ?? []) {
+      const type = ((population["code"] as { coding?: Array<{ code?: string }> } | undefined)?.coding ?? [])[0]?.code;
+      const expression = (population["criteria"] as { expression?: string } | undefined)?.expression;
+      const cypress = CYPRESS_POPULATIONS.find(([, fqm]) => fqm === type)?.[0];
+      if (cypress && typeof expression === "string" && reaches(ourMain, expression)) touched.add(cypress);
+    }
+  }
+  return touched;
+}
+
 /**
  * Whether a deck run passes with `listed` misses, and why not. Every condition of `agreementPasses` holds
  * except row agreement; instead the run's disagreements are EXACTLY the listed rows (none unlisted, none
  * listed but unseen), every listed row is one CMS's own logic misses identically on the same deck (`cms`,
  * so the translation introduced none of them), no patient lacks a result, and every patient that does not
  * agree is a listed one. Both reports must carry every disagreement (`disagreementCount` equal to the list).
+ * And no listed row may differ on a population the edits reach (`touched`, `populationsTheEditsReach`), or
+ * on anything that is not a population (a stratum's membership): there a miss CMS's logic shares could be
+ * an edit that was not ported.
  */
-export function deckMissProblems(report: AgreementReport, cms: AgreementReport, listed: readonly ExpectedDeckMiss[]): string[] {
+export function deckMissProblems(report: AgreementReport, cms: AgreementReport, listed: readonly ExpectedDeckMiss[], touched: ReadonlySet<string>): string[] {
   const problems: string[] = [];
+  const populations = new Set(CYPRESS_POPULATIONS.map(([cypress]) => cypress));
+  for (const miss of listed) {
+    const named = miss.diffs.map((d) => d.split(" ")[0]!);
+    const notPopulation = named.filter((p) => !populations.has(p));
+    const edited = named.filter((p) => touched.has(p));
+    if (notPopulation.length > 0) problems.push(`a listed row of patient ${miss.patientId} differs on something that is not a population (${notPopulation.join(", ")}), which no listed miss may cover`);
+    if (edited.length > 0) {
+      problems.push(`a listed row of patient ${miss.patientId} differs on ${edited.join(", ")}, whose criteria reach a define the edits changed: a miss CMS's own logic shares there could be an edit that was not ported`);
+    }
+  }
   for (const [whose, r] of [["the translation's", report], ["CMS's", cms]] as const) {
     if (r.disagreements.length !== r.disagreementCount) problems.push(`${whose} run reported ${r.disagreements.length} of its ${r.disagreementCount} disagreements, so the list cannot be compared`);
   }
@@ -981,7 +1062,8 @@ async function check(args: DerivedCheckArgs, deps: DerivedCheckDeps, calculate: 
     const common = { deck, patients, valueSetCache, trustMetaProfile: false, trustedProfiles: semantics.trustedProfiles ?? [], calculate, strata: "compare" as const, limit: args.limit };
     // Every disagreement is kept (not the printed `--limit`): a listed miss is matched against all of them.
     const report = await runAgreement({ ...common, artifact: derived, limit: Number.MAX_SAFE_INTEGER });
-    log(renderAgreementMarkdown(report, { artifact: `WorkWell translation (${bundleSha}); terminology: its own sidecar`, engine: common.trustedProfiles.length > 0 ? `retrieves by type, except ${common.trustedProfiles.join(", ")}` : "retrieves by type", namePatients: false, limit: args.limit }));
+    // The report keeps every disagreement for the listed-miss match; the printout keeps to --limit.
+    log(renderAgreementMarkdown({ ...report, disagreements: report.disagreements.slice(0, args.limit) }, { artifact: `WorkWell translation (${bundleSha}); terminology: its own sidecar`, engine: common.trustedProfiles.length > 0 ? `retrieves by type, except ${common.trustedProfiles.join(", ")}` : "retrieves by type", namePatients: false, limit: args.limit }));
     const broken = await runAgreement({ ...common, artifact: { ...derived, bundle: withInitialPopulationBroken(derived.bundle) } });
     const before = rowsAgreeing(report);
     const after = rowsAgreeing(broken);
@@ -1002,7 +1084,7 @@ async function check(args: DerivedCheckArgs, deps: DerivedCheckDeps, calculate: 
       if (!official) throw new Refusal(`${DECK_EXPECTED_FILE} needs CMS's own artifact for ${id} to run on the deck, and there is none`);
       const cmsCache = await expandArtifactTerminology(official, expand);
       const cms = await runAgreement({ ...common, valueSetCache: cmsCache, artifact: official, limit: Number.MAX_SAFE_INTEGER });
-      const problems = deckMissProblems(report, cms, listed);
+      const problems = deckMissProblems(report, cms, listed, populationsTheEditsReach(derived.bundle as never, official.bundle as never, block.changedLibraries ?? []));
       for (const problem of problems) failures.push(`cypress-deck: ${problem}`);
       rowsPass = problems.length === 0;
       listedMisses = { patients: new Set(listed.map((m) => m.patientId)).size, sha256: sha256OfFile(join(dir, DECK_EXPECTED_FILE), DECK_EXPECTED_FILE) };

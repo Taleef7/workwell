@@ -181,6 +181,9 @@ test("D1–D8: each unfit translation is refused with its own sentence", () => {
   expect(problemsWith(withOracle("cypress-deck", { agree: deckTotal - 2, listedMisses: { patients: 2, sha256: "sha256:short" } })), /no passing 'cypress-deck' check/);
   expect(problemsWith(withOracle("cypress-deck", { agree: deckTotal - 2, listedMisses: { patients: 1.5, sha256: sha } })), /no passing 'cypress-deck' check/);
   expect(problemsWith(withOracle("cypress-deck", { agree: deckTotal, listedMisses: { patients: 0, sha256: sha } })), /no passing 'cypress-deck' check/);
+  let nullRefusal: string[] = [];
+  assert.doesNotThrow(() => (nullRefusal = problemsWith(withOracle("cypress-deck", { agree: deckTotal - 2, listedMisses: null }))), "a null list is a sentence, not an exception");
+  expect(nullRefusal, /no passing 'cypress-deck' check/);
   const termTotal = oracles.find((o) => o.name === "terminology-equivalence")!.total;
   expect(problemsWith(withOracle("terminology-equivalence", { agree: termTotal - 1, listedMisses: { patients: 1, sha256: sha } })), /no passing 'terminology-equivalence' check/);
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => ({ ...o, ranAgainst: { ...o.ranAgainst, artifactSha256: "sha256:other" } })) } })), /ran against a different artifact/);

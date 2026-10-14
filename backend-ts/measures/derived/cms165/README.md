@@ -50,7 +50,7 @@ reads what CMS's does, so its lists are CMS's.
 | `bundle.json` | yes | the Measure and ten Libraries, ELM only: the main library and the changed library are WorkWell's compile, the other eight are CMS's committed ones |
 | `manifest.json` | yes | identity, pins, `changedLibraries`, `recomputedDataRequirements`, the terminology pin and the check records |
 | `edits.json` | yes | the ten edits |
-| `edit-cases.json` | yes | 12 synthetic test patients; read only by `derived:check`, never by the corpus, ingest or any evaluation path |
+| `edit-cases.json` | yes | 14 synthetic test patients; read only by `derived:check`, never by the corpus, ingest or any evaluation path |
 | `madie-expected-differences.json` | yes | the two population moves, the four defines only one side has, and the twenty define values that follow from the moves |
 | `cypress-expected-differences.json` | yes | the two Cypress deck patients CMS's own logic misses too, and why |
 | `terminology.json` | no (gitignored) | every declared value set at the release |
@@ -61,9 +61,11 @@ reads what CMS's does, so its lists are CMS's.
   pressures taken during an emergency admission or ED visit (`Z4_DQ_1`, `Z4_DQ_2`): the deck leaves the
   reading out, but CMS's FHIR logic keeps any reading whose `Observation.encounter` is not an ED or inpatient
   class, and a QRDA I document states no encounter link on a reading. **CMS's own 2026 logic misses the same
-  two rows on the same deck**, which the check verifies by running it, and it fails on any miss not listed
-  or listed but not seen. The record carries the list's hash, and a test holds it to this file. Otherwise
-  **non-regression only**: no deck patient exercises the v15 changes.
+  two rows on the same deck**, which the check verifies by running it. It fails on any miss not listed or
+  listed but not seen, and on a listed row that differs on a population the edits reach (these two differ
+  only on the numerator, which no edit touches). The record carries the list's hash, and a test holds it
+  to this file. CMS's own logic also scores 42/44 here (logged by the check), so the deck is
+  **non-regression evidence only**.
 - `terminology-equivalence` (recorded): all 31 declared value sets equal the deck's 2026-05-14 export. Ten
   differ from CMS's 2026 sidecar: eight moved by the release, and `…1014` and `…1029` dropped by the edits.
   Pinned in `src/wiring/derived-terminology.test.ts`.
@@ -73,11 +75,11 @@ reads what CMS's does, so its lists are CMS's.
   `78fc0433` loses it (its only exclusion was an ESRD monthly services encounter, CPT 90999). Four defines
   exist on one side only (the split and the removed encounter define), stated as presence entries the ELM
   must bear out; the twenty other define values that differ follow from the two moves.
-- Edit cases (CI, every push, not recorded): 12 patients, 9 of them telling the logics apart, give the stated
+- Edit cases (CI, every push, not recorded): 14 patients, 11 of them telling the logics apart, give the stated
   answer under both: a renal diagnosis and a kidney transplant status that ended before the period, an
-  active one of each, an ESRD monthly encounter alone, pregnancy active and ending at the period's first edge,
-  the hypertension window's edge in both offset directions, dialysis at the period's end in both directions,
-  and the frailty edit. The pregnancy patients use `77386006` rather than `Z33.1`: CMS's upstream Pregnancy
+  active one of each, an ESRD monthly encounter alone, a pregnancy active in the period, and every
+  day-precision edit in both offset directions (pregnancy and renal at the period's edges, the hypertension
+  window, dialysis), and the frailty edit. The pregnancy patients use `77386006` rather than `Z33.1`: CMS's upstream Pregnancy
   expansion (version 20210218) stops at 1,000 codes and lacks `Z33.1`, and the cases run on it. **These are
   the evidence that discriminates the edits, and they are WorkWell's own.**
 

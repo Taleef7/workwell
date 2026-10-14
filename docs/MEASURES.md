@@ -95,7 +95,7 @@ now counts when it **started on or before the year's end**, even if it ended ear
 is the code Z94.0; the ESRD monthly-visit exclusion is gone; and the hypertension window and the dialysis
 date comparisons become day-precise. On the 2027 Cypress deck it matches 42 of 44 patients: the other two are
 blood pressures taken during an emergency stay, which CMS's own logic misses the same way, because a QRDA
-file does not tie a reading to its visit. On CMS's own test deck two patients move, each explained; 12
+file does not tie a reading to its visit. On CMS's own test deck two patients move, each explained; 14
 hand-built patients test every edit (`backend-ts/measures/derived/cms165/README.md`).
 
 > **CMS165 reads a blood pressure by its profile, and nothing else by profile (#591, 2026-10-10).**
