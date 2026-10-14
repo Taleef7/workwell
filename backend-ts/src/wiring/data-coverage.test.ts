@@ -185,6 +185,8 @@ test("#776: the coverage of every logic the Maui sandbox scores with is pinned",
     // (#816), but Encounter and Condition are still read (the visits, the ED/inpatient check, the
     // diagnoses), so by type it reads what CMS's artifact reads.
     "cms165 workwell-translation": cmsWithDevices,
+    // Its edits change which assessment the numerator reads, not what is retrieved (#818).
+    "cms122 workwell-translation": cmsWithDevices,
   });
 });
 

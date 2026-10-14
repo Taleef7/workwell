@@ -1,0 +1,48 @@
+[
+  {
+    "key": "g0|CMS122FHIRDiabetesAssessGT9Pct.Lowest Glycemic Status Assessment Reading on Most Recent Day",
+    "presentIn": "cms",
+    "reason": "CMS122v15 replaces this define with the lowest NUMERICAL result on the most recent day, falling back to the most recent numerical, then result-less, assessment in the period."
+  },
+  {
+    "key": "g0|CMS122FHIRDiabetesAssessGT9Pct.Lowest Glycemic Status Assessment With Numerical Result On Most Recent Day",
+    "presentIn": "ours",
+    "reason": "CMS122v15: the lowest numerical result on the most recent day."
+  },
+  {
+    "key": "g0|CMS122FHIRDiabetesAssessGT9Pct.Most Recent Glycemic Status Assessment With Numerical Result In Measurement Period",
+    "presentIn": "ours",
+    "reason": "CMS122v15: the first fallback, the most recent assessment in the period with a result."
+  },
+  {
+    "key": "g0|CMS122FHIRDiabetesAssessGT9Pct.Most Recent Glycemic Status Assessment With Null Result In Measurement Period",
+    "presentIn": "ours",
+    "reason": "CMS122v15: the second fallback, the most recent assessment in the period with no result."
+  },
+  {
+    "key": "g0|CMS122FHIRDiabetesAssessGT9Pct.Most Recent Glycemic Status Assessment",
+    "presentIn": "ours",
+    "reason": "CMS122v15: the assessment the numerator reads, the first of the three above that exists."
+  },
+  {
+    "case": "21695544-0997-4b9a-989c-a535da22d033",
+    "key": "g0|CMS122FHIRDiabetesAssessGT9Pct.Most Recent Glycemic Status Date",
+    "cms": "\"2026-01-03\"|\"TRUE\"|TRUE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Its only HbA1c (LOINC 17855-8) has no result, so no result above 0 % sets v15's most recent day. v15 falls through to the most recent result-less assessment, the one CMS's logic read, so no population moves."
+  },
+  {
+    "case": "5ed37c9e-85a3-4819-8051-3d960159cae0",
+    "key": "g0|CMS122FHIRDiabetesAssessGT9Pct.Most Recent Glycemic Status Date",
+    "cms": "\"2026-01-01\"|\"TRUE\"|TRUE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Its only HbA1c (LOINC 17855-8) result is a coded value (SNOMED 373066001 'Yes'), not a quantity, so it sets no v15 most recent day. v15 falls through to the most recent assessment with a result, the same one CMS's logic read, so no population moves."
+  },
+  {
+    "case": "ab29ab81-b4fc-4817-bd9c-98d8d4b4a3a3",
+    "key": "g0|CMS122FHIRDiabetesAssessGT9Pct.Most Recent Glycemic Status Date",
+    "cms": "\"2026-01-01\"|\"TRUE\"|TRUE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Its only HbA1c (LOINC 17855-8) has no result, so no result above 0 % sets v15's most recent day. v15 falls through to the most recent result-less assessment, the one CMS's logic read, so no population moves."
+  }
+]
