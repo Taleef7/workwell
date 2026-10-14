@@ -28,6 +28,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   pair at its time from forming. No Cypress deck document states a panel this way, so the decks and C2 are
   unchanged and the evidence is the tests.
 
+- **CI starts Postgres from the first registry that serves `postgres:16` (owner choice today).** AWS's
+  public mirror's anonymous data limit ("toomanyrequests: Data limit exceeded") failed a backend shard or
+  the MADiE gate three times today before any test ran, and a `services:` container names one image with no
+  fallback. A step now tries Google's mirror of Docker Hub's official images, then AWS's, then Docker Hub
+  (Google's is a cache that may evict an image). No registry login was possible: the AWS account is
+  suspended, and the repo holds no registry credentials. The deploy Dockerfiles still pull their Node base
+  images from AWS's mirror.
 - **A QRDA I batch import persists each person under the subject id the resolver gave them (#655).** A
   successful evaluation was stored under the engine's `Patient.id`, which two people share when their
   identifiers share a shape (one MRN extension under two roots), so the second person's outcome read as
