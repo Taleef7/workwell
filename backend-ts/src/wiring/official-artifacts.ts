@@ -138,6 +138,12 @@ export interface DerivedManifestBlock {
     period: { start: string; end: string };
     agree: number;
     total: number;
+    /**
+     * `cypress-deck` only: deck patients the translation may miss because CMS's own logic misses the same
+     * rows on the same deck (#816), as `derived:check` matched them against `cypress-expected-differences.json`,
+     * whose bytes on disk hashed to `sha256`. Absent when every patient agreed.
+     */
+    listedMisses?: { patients: number; sha256: string };
     result: "pass" | "fail";
     ranAgainst: { artifactSha256: string; terminologySha256: string };
   }>;

@@ -1,0 +1,2024 @@
+{
+  "measurementPeriod": {
+    "start": "2026-01-01",
+    "end": "2026-12-31"
+  },
+  "cases": [
+    {
+      "id": "ww-cms165-edit-01",
+      "description": "End stage renal disease (N18.6) that started 2020 and resolved 2021, before the period (renal now starts on or before its end)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-01",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-01-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-01"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-01-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-01"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-01-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "N18.6",
+                "display": "End stage renal disease"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-01"
+          },
+          "onsetDateTime": "2020-01-01T00:00:00.000+00:00",
+          "abatementDateTime": "2021-01-01T00:00:00.000+00:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-02",
+      "description": "End stage renal disease (N18.6) active since 2024 (excluded under both)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-02",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-02-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-02"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-02-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-02"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-02-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "N18.6",
+                "display": "End stage renal disease"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-02"
+          },
+          "onsetDateTime": "2024-01-01T00:00:00.000+00:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-03",
+      "description": "Kidney transplant status (Z94.0) active since 2019 (excluded under both: value set 1029 is exactly Z94.0)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-03",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-03-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-03"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-03-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-03"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-03-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "Z94.0",
+                "display": "Kidney transplant status"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-03"
+          },
+          "onsetDateTime": "2019-01-01T00:00:00.000+00:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-04",
+      "description": "Kidney transplant status (Z94.0) recorded 2019 and resolved 2020 (renal now starts on or before the period's end)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-04",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-04-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-04"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-04-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-04"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-04-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "Z94.0",
+                "display": "Kidney transplant status"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-04"
+          },
+          "onsetDateTime": "2019-01-01T00:00:00.000+00:00",
+          "abatementDateTime": "2020-01-01T00:00:00.000+00:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-05",
+      "description": "ESRD monthly outpatient service (CPT 90951) in May 2026 and nothing else renal (that exclusion is removed)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-05",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-05-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-05"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-05-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-05"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-05-enc-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "90951",
+                  "display": "ESRD related services monthly, younger than 2 years"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-05"
+          },
+          "period": {
+            "start": "2026-05-01T09:00:00.000+00:00",
+            "end": "2026-05-01T10:00:00.000+00:00"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-06",
+      "description": "Pregnancy (77386006) active from March 2026 (excluded under both)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-06",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-06-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-06"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-06-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-06"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-06-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "77386006",
+                "display": "Pregnancy (finding)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-06"
+          },
+          "onsetDateTime": "2026-03-01T00:00:00.000+00:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-07",
+      "description": "Pregnancy (77386006) that ended 2026-01-01T03:00+05:00, i.e. 2025-12-31T22:00Z (day precision: its own date is in the period)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-07",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-07-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-07"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-07-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-07"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-07-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "77386006",
+                "display": "Pregnancy (finding)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-07"
+          },
+          "onsetDateTime": "2025-06-01T00:00:00.000+00:00",
+          "abatementDateTime": "2026-01-01T03:00:00.000+05:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-08",
+      "description": "Hypertension diagnosed 2026-07-01T03:00+05:00, i.e. 2026-06-30T22:00Z (day precision: its own date is past the window)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 0,
+          "denominator": 0,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-08",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-08-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-08"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-08-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-08"
+          },
+          "onsetDateTime": "2026-07-01T03:00:00.000+05:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-09",
+      "description": "Hypertension diagnosed 2026-06-30T20:00-05:00, i.e. 2026-07-01T01:00Z (day precision: its own date is in the window)",
+      "expected": {
+        "cms": {
+          "initial-population": 0,
+          "denominator": 0,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-09",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-09-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-09"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-09-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-09"
+          },
+          "onsetDateTime": "2026-06-30T20:00:00.000-05:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-10",
+      "description": "Dialysis (CPT 90935) at 2026-12-31T20:00-05:00, i.e. 2027-01-01T01:00Z (day precision: its own date is the last day)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-10",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-10-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-10"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-10-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-10"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms165-edit-10-proc-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://www.ama-assn.org/go/cpt",
+                "code": "90935",
+                "display": "Hemodialysis procedure with single evaluation"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-10"
+          },
+          "performedDateTime": "2026-12-31T20:00:00.000-05:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-11",
+      "description": "Dialysis (CPT 90935) at 2027-01-01T03:00+05:00, i.e. 2026-12-31T22:00Z (day precision: its own date is after the period)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-11",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-11-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-11"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-11-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-11"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms165-edit-11-proc-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://www.ama-assn.org/go/cpt",
+                "code": "90935",
+                "display": "Hemodialysis procedure with single evaluation"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-11"
+          },
+          "performedDateTime": "2027-01-01T03:00:00.000+05:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-12",
+      "description": "Aged 70, frail, advanced illness since 2023-06-01 and still active (the frailty look-back edit)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-12",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1956-05-15"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-12-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-12"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-12-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-12"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-12-enc-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99509",
+                  "display": "Home visit for assistance with activities of daily living and personal care"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-12"
+          },
+          "period": {
+            "start": "2026-04-10T09:00:00.000+00:00",
+            "end": "2026-04-10T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-12-cond-4",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "101421000119107",
+                "display": "Dementia due to Parkinson's disease (disorder)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-12"
+          },
+          "onsetDateTime": "2023-06-01T00:00:00.000+00:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-13",
+      "description": "Pregnancy (77386006) that ended 2025-12-31T22:00-05:00, i.e. 2026-01-01T03:00Z (day precision: its own date is before the period)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-13",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248152002"
+            }
+          ],
+          "gender": "female",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-13-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-13"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-13-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-13"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-13-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "resolved"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "77386006",
+                "display": "Pregnancy (finding)"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-13"
+          },
+          "onsetDateTime": "2025-06-01T00:00:00.000+00:00",
+          "abatementDateTime": "2025-12-31T22:00:00.000-05:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms165-edit-14",
+      "description": "End stage renal disease (N18.6) diagnosed 2026-12-31T20:00-05:00, i.e. 2027-01-01T01:00Z (day precision: its own date is the period's last day)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 1,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms165-edit-14",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-sex",
+              "valueCode": "248153007"
+            }
+          ],
+          "gender": "male",
+          "birthDate": "1966-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms165-edit-14-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://snomed.info/sct",
+                  "code": "185349003",
+                  "display": "Encounter for check up (procedure)"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-14"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T10:00:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-14-cond-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "I10",
+                "display": "Essential (primary) hypertension"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-14"
+          },
+          "onsetDateTime": "2025-01-01T00:00:00.000+00:00"
+        },
+        {
+          "resourceType": "Condition",
+          "id": "ww-cms165-edit-14-cond-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-condition-problems-health-concerns"
+            ]
+          },
+          "clinicalStatus": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                "code": "active"
+              }
+            ]
+          },
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/condition-category",
+                  "code": "problem-list-item"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://hl7.org/fhir/sid/icd-10-cm",
+                "code": "N18.6",
+                "display": "End stage renal disease"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms165-edit-14"
+          },
+          "onsetDateTime": "2026-12-31T20:00:00.000-05:00"
+        }
+      ]
+    }
+  ]
+}

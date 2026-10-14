@@ -194,16 +194,31 @@ test("the removed entry is matched by type, profile and code filter; with none t
   assert.throws(() => recomputeDataRequirements(twoFilters, cmsElm125, v15Elm()), /no dataRequirement entry describes that retrieve/);
 });
 
-test("refused until a translation needs it: a code retrieve, a value set of another library, another comparator, a versioned declaration", () => {
+test("refused until a translation needs it: a code of another library, several codes, another comparator, a value set of another library, a versioned declaration", () => {
   const withRetrieve = (codes: unknown, codeComparator = "in") => {
     const elm = v15Elm();
     const retrieve = { type: "Retrieve", dataType: "{http://hl7.org/fhir}Procedure", templateId: `${QICORE}qicore-procedure`, codeProperty: "code", codeComparator, codes };
     elm.library.statements.def.push({ name: "Extra", context: "Patient", expression: { type: "Exists", operand: retrieve } });
     return elm;
   };
+  // Codes: one local code is supported (below); a code of another library, several codes, a code
+  // compared by `in`, and a code whose declared display is not its name are not.
   assert.throws(
-    () => recomputeDataRequirements(main125, cmsElm125, withRetrieve({ type: "ToList", operand: { type: "CodeRef", name: "Entire left breast (body structure)" } }, "~")),
-    /a retrieve only WorkWell's ELM has \(.*361716006.*\) filters by a code, not a value set, which is not supported until a translation needs it/,
+    () => recomputeDataRequirements(main125, cmsElm125, withRetrieve({ type: "ToList", operand: { type: "CodeRef", libraryName: "QICoreCommon", name: "Birthdate" } }, "~")),
+    /a retrieve only WorkWell's ELM has \(.*QICoreCommon:Birthdate.*\) filters by a code that is not one local code with its system/,
+  );
+  const leftBreast = { type: "CodeRef", name: "Entire left breast (body structure)" };
+  const rightBreast = { type: "CodeRef", name: "Entire right breast (body structure)" };
+  assert.throws(
+    () => recomputeDataRequirements(main125, cmsElm125, withRetrieve({ type: "List", element: [leftBreast, rightBreast] }, "~")),
+    /filters by codes in a shape that is neither one value set nor one code/,
+  );
+  assert.throws(() => recomputeDataRequirements(main125, cmsElm125, withRetrieve({ type: "ToList", operand: leftBreast }, "in")), /compares its code by 'in', not '~'/);
+  const renamed = withRetrieve({ type: "ToList", operand: leftBreast }, "~");
+  renamed.library.codes.def[0].display = "Entire left breast";
+  assert.throws(
+    () => recomputeDataRequirements(main125, cmsElm125, renamed),
+    /code 361716006 is declared as 'Entire left breast \(body structure\)' with display 'Entire left breast', and which of the two MADiE writes in a code filter is not calibrated/,
   );
   assert.throws(
     () => recomputeDataRequirements(main125, cmsElm125, withRetrieve({ type: "ValueSetRef", libraryName: "Hospice", name: "Hospice care ambulatory" })),
@@ -216,6 +231,55 @@ test("refused until a translation needs it: a code retrieve, a value set of anot
   const versionedSystem = v15Elm();
   versionedSystem.library.codeSystems.def[0].version = "2026-03";
   assert.throws(() => recomputeDataRequirements(main125, cmsElm125, versionedSystem), /declares code system 'SNOMEDCT' with a version/);
+});
+
+// ---- a retrieve of one local code (CMS165v15's Z94.0, #816), calibrated on CMS138's Z71.6 ---------------
+
+const cms138 = loadOfficialArtifact("cms138")!.bundle as unknown as B;
+const main138 = mainOf(cms138);
+const cmsElm138 = elmOf(main138);
+const Z716 = (value: unknown) => (JSON.stringify(value) ?? "").includes('"Tobacco abuse counseling"');
+const isZ716Entry = (e: Res) => JSON.stringify(e).includes('"Z71.6"');
+
+/** CMS138's committed main ELM with every retrieve of the Z71.6 code replaced by an empty list. */
+function withoutZ716(): Elm {
+  const elm = clone(cmsElm138);
+  let removed = 0;
+  const walk = (node: Elm): Elm => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (!node || typeof node !== "object") return node;
+    if (node.type === "Retrieve" && Z716(node.codes)) {
+      removed++;
+      return { type: "List", element: [] };
+    }
+    for (const key of Object.keys(node)) node[key] = walk(node[key]);
+    return node;
+  };
+  elm.library.statements = walk(elm.library.statements);
+  assert.equal(removed, 2, "CMS138 retrieves Z71.6 twice, one per Condition profile");
+  return elm;
+}
+
+test("a retrieve of one local code: the entry appended is MADiE's own, byte for byte (CMS138's Z71.6)", () => {
+  const madie = (main138["dataRequirement"] as Res[]).filter(isZ716Entry);
+  assert.equal(madie.length, 2);
+  assert.deepEqual(madie[0]!["codeFilter"], [{ path: "code", code: [{ system: "http://hl7.org/fhir/sid/icd-10-cm", code: "Z71.6", display: "Tobacco abuse counseling" }] }]);
+  // CMS's side lacks the two retrieves and their entries; ours has them: the recompute appends two
+  // entries, and they are exactly the ones MADiE wrote.
+  const library = { ...clone(main138), dataRequirement: (main138["dataRequirement"] as Res[]).filter((e) => !isZ716Entry(e)) };
+  const out = recomputeDataRequirements(library, withoutZ716(), cmsElm138);
+  const entries = out["dataRequirement"] as Res[];
+  assert.equal(JSON.stringify(entries.slice(-2)), JSON.stringify(madie));
+  assert.equal(JSON.stringify(entries.slice(0, -2)), JSON.stringify(library["dataRequirement"]), "every other entry is CMS's");
+});
+
+test("a retrieve of one local code that the translation drops: its entry is found and removed", () => {
+  const out = recomputeDataRequirements(main138, cmsElm138, withoutZ716());
+  assert.equal(JSON.stringify(out["dataRequirement"]), JSON.stringify((main138["dataRequirement"] as Res[]).filter((e) => !isZ716Entry(e))));
+  // An entry for another code does not describe it.
+  const otherCode = clone(main138);
+  for (const e of otherCode["dataRequirement"] as Res[]) if (isZ716Entry(e)) (e["codeFilter"] as Array<{ code: Res[] }>)[0]!.code[0]!["code"] = "Z71.7";
+  assert.throws(() => recomputeDataRequirements(otherCode, cmsElm138, withoutZ716()), /CMS's ELM retrieves Condition \(.*, code Z71\.6\), which WorkWell's does not, but no dataRequirement entry describes that retrieve/);
 });
 
 // ---- the appended entry's mustSupport, and lists the library did not have --------------------------------

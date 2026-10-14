@@ -14,6 +14,17 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - Every result label (programs cards, work list, cases, patient pages) lost its "MIPS 112 ·" prefix
     for the life of the page when the first `/api/measures` fetch failed on a worker still warming up.
     No page reads the hook's error. A failed first fetch is now retried twice (after 1 s and 4 s).
+- **The remaining 2027 translations move up (scope change, owner decision today).** The plan was to wait
+  until 2026-11-20 for CMS's own 2027 FHIR logic before building CMS122 and CMS165. Instead all three
+  remaining measures are translated now (CMS165v15, then CMS122v15, then CMS2v16), and the CMS125 and CMS122
+  translations are to be routed on TWH too. If CMS publishes its own 2027 logic later, it replaces ours by
+  year.
+- **CMS165 for 2027: WorkWell's translation of CMS165v15, routed on Maui (#816).** Ten edits; the
+  blood-pressure logic is CMS's. The builder now supports a one-code retrieve (Z94.0, in CMS138's MADiE
+  shape). The checker gained presence entries (a define only one side has) and listed Cypress deck misses
+  (owner decision today): a miss passes only if CMS's own logic misses it the same way and no edit reaches
+  its population. Cypress 42/44 plus 2 listed (blood pressures taken during an emergency stay), MADiE two
+  explained moves, 14 hand-built patients (11 discriminating).
 
 ## 2026-10-13
 

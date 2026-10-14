@@ -1,0 +1,178 @@
+[
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "populations": {
+      "cms": "11000",
+      "ours": "11100"
+    },
+    "reason": "Now excluded. The frailty look-back edit: aged 67 with a frailty device order, and an advanced illness (dementia) active since 2024-12-31T23:59:59Z, one second before the look-back window opens on 2025-01-01. It does not START during the window (CMS's 2026 logic) but OVERLAPS it (v15)."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "populations": {
+      "cms": "11100",
+      "ours": "11000"
+    },
+    "reason": "No longer excluded. Its only exclusion is an ESRD monthly outpatient services encounter (CPT 90999 on 2026-01-01), the exclusion CMS165v15 removes; it has no ESRD diagnosis, dialysis or kidney transplant."
+  },
+  {
+    "key": "g0|CMS165FHIRControllingHighBP.Pregnancy or Renal Diagnosis",
+    "presentIn": "cms",
+    "reason": "CMS165v15 splits this define into \"Pregnancy Diagnosis\" and \"Renal Diagnosis\"; the translation has no define of this name."
+  },
+  {
+    "key": "g0|CMS165FHIRControllingHighBP.End Stage Renal Disease Encounter",
+    "presentIn": "cms",
+    "reason": "CMS165v15 removes the ESRD monthly outpatient encounter exclusion and its define."
+  },
+  {
+    "key": "g0|CMS165FHIRControllingHighBP.Pregnancy Diagnosis",
+    "presentIn": "ours",
+    "reason": "CMS165v15's pregnancy half of the split: a pregnancy that overlaps day of the measurement period."
+  },
+  {
+    "key": "g0|CMS165FHIRControllingHighBP.Renal Diagnosis",
+    "presentIn": "ours",
+    "reason": "CMS165v15's renal half of the split: ESRD, CKD stage 5 or kidney transplant status (Z94.0) starting on or before day of the end of the measurement period."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Denominator Exclusions",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "true|\"TRUE\"|TRUE",
+    "reason": "Now excluded, through the frailty exclusion (the look-back edit)."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Qualifying Blood Pressure Reading",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[]|\"UNHIT\"|FALSE",
+    "reason": "Same empty value; marked unhit on the translation because the patient is now excluded, so fqm does not evaluate the numerator."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Blood Pressure Days",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[]|\"UNHIT\"|FALSE",
+    "reason": "Same empty value; marked unhit on the translation because the patient is now excluded, so fqm does not evaluate the numerator."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Most Recent Blood Pressure Day",
+    "cms": "null|\"FALSE\"|TRUE",
+    "ours": "null|\"UNHIT\"|FALSE",
+    "reason": "Same empty value; marked unhit on the translation because the patient is now excluded, so fqm does not evaluate the numerator."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Lowest Systolic Reading on Most Recent Blood Pressure Day",
+    "cms": "null|\"FALSE\"|TRUE",
+    "ours": "null|\"UNHIT\"|FALSE",
+    "reason": "Same empty value; marked unhit on the translation because the patient is now excluded, so fqm does not evaluate the numerator."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Has Systolic Blood Pressure Less Than 140",
+    "cms": "null|\"FALSE\"|TRUE",
+    "ours": "null|\"UNHIT\"|FALSE",
+    "reason": "Same empty value; marked unhit on the translation because the patient is now excluded, so fqm does not evaluate the numerator."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Lowest Diastolic Reading on Most Recent Blood Pressure Day",
+    "cms": "null|\"FALSE\"|TRUE",
+    "ours": "null|\"UNHIT\"|FALSE",
+    "reason": "Same empty value; marked unhit on the translation because the patient is now excluded, so fqm does not evaluate the numerator."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Has Diastolic Blood Pressure Less Than 90",
+    "cms": "null|\"FALSE\"|TRUE",
+    "ours": "null|\"UNHIT\"|FALSE",
+    "reason": "Same empty value; marked unhit on the translation because the patient is now excluded, so fqm does not evaluate the numerator."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|CMS165FHIRControllingHighBP.Numerator",
+    "cms": "null|\"FALSE\"|TRUE",
+    "ours": "null|\"UNHIT\"|FALSE",
+    "reason": "Same empty value; marked unhit on the translation because the patient is now excluded, so fqm does not evaluate the numerator."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|AdvancedIllnessandFrailty.Has Advanced Illness in Year Before or During Measurement Period",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "true|\"TRUE\"|TRUE",
+    "reason": "The frailty look-back edit: the dementia diagnosis active since 2024-12-31T23:59:59Z overlaps the window (v15) without starting in it (CMS's 2026 logic)."
+  },
+  {
+    "case": "598f05e7-83b4-4609-9795-e9ac75f57f36",
+    "key": "g0|AdvancedIllnessandFrailty.Is Age 66 to 80 with Advanced Illness and Frailty or Is Age 81 or Older with Frailty",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "true|\"TRUE\"|TRUE",
+    "reason": "Follows from the look-back edit: aged 67, frail, and now with advanced illness in the window."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Denominator Exclusions",
+    "cms": "true|\"TRUE\"|TRUE",
+    "ours": "false|\"FALSE\"|TRUE",
+    "reason": "No longer excluded: the ESRD monthly encounter exclusion is removed in CMS165v15."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Qualifying Blood Pressure Reading",
+    "cms": "[]|\"UNHIT\"|FALSE",
+    "ours": "[]|\"FALSE\"|TRUE",
+    "reason": "Same empty value; now evaluated on the translation because the patient is no longer excluded (CMS's side marks it unhit)."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Blood Pressure Days",
+    "cms": "[]|\"UNHIT\"|FALSE",
+    "ours": "[]|\"FALSE\"|TRUE",
+    "reason": "Same empty value; now evaluated on the translation because the patient is no longer excluded (CMS's side marks it unhit)."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Most Recent Blood Pressure Day",
+    "cms": "null|\"UNHIT\"|FALSE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Same empty value; now evaluated on the translation because the patient is no longer excluded (CMS's side marks it unhit)."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Lowest Systolic Reading on Most Recent Blood Pressure Day",
+    "cms": "null|\"UNHIT\"|FALSE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Same empty value; now evaluated on the translation because the patient is no longer excluded (CMS's side marks it unhit)."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Has Systolic Blood Pressure Less Than 140",
+    "cms": "null|\"UNHIT\"|FALSE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Same empty value; now evaluated on the translation because the patient is no longer excluded (CMS's side marks it unhit)."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Lowest Diastolic Reading on Most Recent Blood Pressure Day",
+    "cms": "null|\"UNHIT\"|FALSE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Same empty value; now evaluated on the translation because the patient is no longer excluded (CMS's side marks it unhit)."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Has Diastolic Blood Pressure Less Than 90",
+    "cms": "null|\"UNHIT\"|FALSE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Same empty value; now evaluated on the translation because the patient is no longer excluded (CMS's side marks it unhit)."
+  },
+  {
+    "case": "78fc0433-a72a-45a3-b2c4-995e614674cb",
+    "key": "g0|CMS165FHIRControllingHighBP.Numerator",
+    "cms": "null|\"UNHIT\"|FALSE",
+    "ours": "null|\"FALSE\"|TRUE",
+    "reason": "Same empty value; now evaluated on the translation because the patient is no longer excluded (CMS's side marks it unhit)."
+  }
+]

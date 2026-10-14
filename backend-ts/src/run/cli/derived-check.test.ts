@@ -11,10 +11,10 @@
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import type { AgreementCalculate, AgreementSubjectResult } from "../../standards/cypress-agreement.ts";
 import { readCypressDeck } from "../../standards/cypress-agreement.ts";
@@ -44,14 +44,26 @@ import {
   mainLibraryName,
   matchExpectedDifferences,
   matchPopulationDifferences,
+  excusePresence,
+  parseExpectedDeckMisses,
+  populationsTheEditsReach,
+  deckMissProblems,
+  DECK_EXPECTED_FILE,
   parseArgs,
   parseExpectedDifferences,
+  presenceProblems,
   translatedUpstreamBundle,
   translationOnlyValueSets,
   withChangedLibraryBroken,
   type DerivedCheckDeps,
 } from "./derived-check.ts";
 
+const BACKEND_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+const loadDerivedArtifactOrThrow = (id: string): OfficialArtifact => {
+  const artifact = readArtifactDir("derived", id, pathToFileURL(join(BACKEND_ROOT, "measures", "derived") + "/")).artifact;
+  if (!artifact) throw new Error(`no committed translation ${id}`);
+  return artifact;
+};
 const sha = (bytes: string | Buffer) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const base = derivedCms137();
 const official = loadOfficialArtifact("cms137")!;
@@ -703,6 +715,135 @@ test("a failing deck oracle exits 1 and leaves manifest.json untouched", async (
   assert.equal(readFileSync(f.manifestPath, "utf8"), before);
 });
 
+// ---- listed deck misses (#816) ---------------------------------------------------------------------------
+
+/** p2 in rate 1's numerator, which the deck says it is not: one rate row and its stratum row disagree. */
+const P2_MISSED = { ...ANSWERS, p2: { ...ANSWERS["p2"]!, rates: [pops(true, true), pops(true, false)] } };
+const P2_ROWS = [
+  { patientId: "p2", set: 0, diffs: ["NUMER 0→1"], reason: "the reading the deck leaves out" },
+  { patientId: "p2", set: 0, stratum: 1, diffs: ["NUMER 0→1"], reason: "the same patient's stratum row" },
+];
+/** A deck stub answering CMS's logic and the translation separately, by the Measure each run carries. */
+function deckStubBySide(calls: DeckCall[], cms: Record<string, AgreementSubjectResult>, ours: Record<string, AgreementSubjectResult>): AgreementCalculate {
+  const cmsUrl = official.bundle.entry.map((e) => e.resource as Record<string, unknown>).find((r) => r["resourceType"] === "Measure")!["url"];
+  return async (input) => {
+    const measure = input.bundle.entry.find((e) => e.resource["resourceType"] === "Measure")!.resource;
+    return deckStub(calls, measure["url"] === cmsUrl ? cms : ours)(input);
+  };
+}
+
+test("listed deck misses: CMS's own misses pass and are recorded with the file's hash; anything else fails", async () => {
+  const run = async (listed: unknown, cms: Record<string, AgreementSubjectResult>, ours: Record<string, AgreementSubjectResult>) => {
+    const f = fixture();
+    if (listed !== null) writeFileSync(join(f.dir, DECK_EXPECTED_FILE), JSON.stringify(listed));
+    const calls: DeckCall[] = [];
+    const s = setup(f, { calculate: deckStubBySide(calls, cms, ours) });
+    const before = readFileSync(f.manifestPath, "utf8");
+    const code = await main(recordArgs(f), s.deps);
+    return { code, f, errors: s.errors.join("\n"), logs: s.logs.join("\n"), before, after: readFileSync(f.manifestPath, "utf8") };
+  };
+
+  // Both logics miss p2's two rows the same way, and both are listed: a pass, recorded with the list's hash.
+  const ok = await run(P2_ROWS, P2_MISSED, P2_MISSED);
+  assert.equal(ok.code, 0, ok.errors);
+  const record = (JSON.parse(ok.after) as OfficialManifest).derived!.oracles.find((o) => o.name === "cypress-deck")!;
+  assert.deepEqual([record.agree, record.total, record.result], [1, 2, "pass"]);
+  assert.deepEqual(record.listedMisses, { patients: 1, sha256: sha(readFileSync(join(ok.f.dir, DECK_EXPECTED_FILE))) });
+  assert.match(ok.logs, /cypress-deck 1\/2 \(\+1 listed\)/);
+
+  // Only the translation misses them: it introduced the misses, so nothing is recorded.
+  const introduced = await run(P2_ROWS, ANSWERS, P2_MISSED);
+  assert.equal(introduced.code, 1);
+  assert.ok(introduced.errors.includes("cypress-deck: 2 listed row(s) CMS's own logic does not miss in the same way on this deck, so the translation introduced them"), introduced.errors);
+  assert.equal(introduced.after, introduced.before);
+
+  // Listed but not missed by the translation.
+  const unseen = await run(P2_ROWS, P2_MISSED, ANSWERS);
+  assert.equal(unseen.code, 1);
+  assert.ok(unseen.errors.includes("cypress-deck: 2 row(s) cypress-expected-differences.json lists were not missed"), unseen.errors);
+
+  // One of the two rows unlisted: the patient is not accounted for either.
+  const short = await run([P2_ROWS[0]], P2_MISSED, P2_MISSED);
+  assert.equal(short.code, 1);
+  assert.ok(short.errors.includes("cypress-deck: 1 disagreeing row(s) cypress-expected-differences.json does not list"), short.errors);
+
+  // The same row with another diff is another row.
+  const other = await run([P2_ROWS[0], { ...P2_ROWS[1], diffs: ["DENEX 0→1"] }], P2_MISSED, P2_MISSED);
+  assert.equal(other.code, 1);
+  assert.ok(other.errors.includes("1 disagreeing row(s) cypress-expected-differences.json does not list") && other.errors.includes("1 row(s) cypress-expected-differences.json lists were not missed"), other.errors);
+
+  // No file: the deck must agree on every patient, as before.
+  const none = await run(null, P2_MISSED, P2_MISSED);
+  assert.equal(none.code, 1);
+  assert.ok(none.errors.includes("cypress-deck: 1/2 patients agree on every row"), none.errors);
+});
+
+test("a deck-miss file is a set of exact, explained rows", () => {
+  const ok = { patientId: "p", set: 0, diffs: ["NUMER 0→1"], reason: "why" };
+  assert.deepEqual(parseExpectedDeckMisses([ok, { ...ok, stratum: 1 }]), [ok, { ...ok, stratum: 1 }]);
+  const refusals: Array<[unknown, string]> = [
+    [{}, "not a JSON array"],
+    [[{ ...ok, extra: 1 }], "entry 1 has unknown key(s) extra"],
+    [[{ ...ok, patientId: " " }], "entry 1 has no patientId"],
+    [[{ ...ok, set: -1 }], "set must be the rate's 0-based index"],
+    [[{ ...ok, set: 1.5 }], "set must be the rate's 0-based index"],
+    [[{ ...ok, stratum: "1" }], "stratum must be the 0-based stratum index"],
+    [[{ ...ok, diffs: [] }], "diffs must be the row's non-empty list of differences"],
+    [[{ ...ok, diffs: [""] }], "diffs must be the row's non-empty list of differences"],
+    [[{ ...ok, reason: "" }], "entry 1 has no reason"],
+    [[ok, { ...ok, diffs: ["DENEX 0→1"] }], "entry 2 lists a row an earlier entry lists"],
+    [[], "it lists no row"],
+  ];
+  for (const [bad, message] of refusals) throwsWith(() => parseExpectedDeckMisses(bad), message);
+});
+
+test("a listed deck miss may not differ on a population the edits reach, or on a stratum's membership (#816 review)", async () => {
+  // CMS165v15's edits reach the initial population (the hypertension window), so the denominator, and the
+  // exclusions; its numerator is the blood-pressure logic, which no edit touches.
+  const translation = loadDerivedArtifactOrThrow("cms165");
+  const cms = loadOfficialArtifact("cms165")!;
+  const touched = populationsTheEditsReach(translation.bundle as never, cms.bundle as never, translation.manifest.derived!.changedLibraries ?? []);
+  assert.deepEqual([...touched].sort(), ["DENEX", "DENOM", "IPP"]);
+  // An untranslated main library and no changed library reach nothing.
+  assert.deepEqual([...populationsTheEditsReach(cms.bundle as never, cms.bundle as never, [])], []);
+
+  // Through main: a listed DENEX row is refused even when CMS's logic misses it the same way.
+  const run = async (listed: unknown, touchedRows: Record<string, AgreementSubjectResult>) => {
+    const f = fixture();
+    writeFileSync(join(f.dir, DECK_EXPECTED_FILE), JSON.stringify(listed));
+    const s = setup(f, { calculate: deckStubBySide([], touchedRows, touchedRows) });
+    return { code: await main(recordArgs(f), s.deps), errors: s.errors.join("\n") };
+  };
+  // Directly: the same row, missed the same way by both logics, passes only while no edit reaches DENEX.
+  const row = { patientId: "p9", set: 0, diffs: ["DENEX 0→1"] };
+  const report = (patientsAgreeing: number) =>
+    ({ patients: 2, patientsAgreeing, disagreements: [row], disagreementCount: 1, engineErrors: [], importFailures: [], unrecognisedRows: 0, noResult: 0, strataRows: 0, strataMode: "compare" }) as never;
+  const listedRow = [{ ...row, reason: "why" }];
+  assert.deepEqual(deckMissProblems(report(1), report(1), listedRow, new Set(["NUMER"])), []);
+  assert.deepEqual(deckMissProblems(report(1), report(1), listedRow, new Set(["DENEX"])), [
+    "a listed row of patient p9 differs on DENEX, whose criteria reach a define the edits changed: a miss CMS's own logic shares there could be an edit that was not ported",
+  ]);
+  const stratumOnly = await run([{ ...P2_ROWS[0], diffs: ["stratum 2 1→0"] }, P2_ROWS[1]], P2_MISSED);
+  assert.equal(stratumOnly.code, 1);
+  assert.ok(stratumOnly.errors.includes("differs on something that is not a population (stratum), which no listed miss may cover"), stratumOnly.errors);
+});
+
+test("every committed translation's listed deck misses are the committed file, by hash and by patients", () => {
+  const root = join(BACKEND_ROOT, "measures", "derived");
+  for (const id of readdirSync(root)) {
+    const manifestPath = join(root, id, "manifest.json");
+    if (!existsSync(manifestPath)) continue;
+    const record = (JSON.parse(readFileSync(manifestPath, "utf8")) as OfficialManifest).derived?.oracles.find((o) => o.name === "cypress-deck");
+    const file = join(root, id, DECK_EXPECTED_FILE);
+    if (!record?.listedMisses) {
+      assert.ok(!existsSync(file), `${id}: ${DECK_EXPECTED_FILE} is committed, but its deck record lists no misses`);
+      continue;
+    }
+    assert.equal(sha(readFileSync(file)), record.listedMisses.sha256, `${id}: ${DECK_EXPECTED_FILE} is not the file the deck record was checked against`);
+    assert.equal(new Set(parseExpectedDeckMisses(JSON.parse(readFileSync(file, "utf8"))).map((m) => m.patientId)).size, record.listedMisses.patients, id);
+  }
+});
+
 test("an oracle that cannot see the break fails, however well it agrees", async () => {
   const f = fixture();
   const { deps, errors } = setup(f, { calculate: deckStub([], ANSWERS, false) });
@@ -1145,7 +1286,7 @@ test("--madie: the define-value differences must equal the listed ones exactly",
 
 test("an expected-differences file is a set of exact, explained differences", () => {
   const ok = { case: "c1", key: "g0|Lib.Define", cms: "false", ours: "true", reason: "why" };
-  assert.deepEqual(parseExpectedDifferences([ok, { ...ok, key: "g1|Lib.Define", ours: null }]), { defines: [ok, { ...ok, key: "g1|Lib.Define", ours: null }], populations: [] });
+  assert.deepEqual(parseExpectedDifferences([ok, { ...ok, key: "g1|Lib.Define", ours: null }]), { defines: [ok, { ...ok, key: "g1|Lib.Define", ours: null }], populations: [], presence: [] });
   const refusals: Array<[unknown, string]> = [
     [{}, "not a JSON array"],
     [[{ ...ok, extra: 1 }], "unknown key(s) extra"],
@@ -1160,6 +1301,60 @@ test("an expected-differences file is a set of exact, explained differences", ()
   const d = (k: string) => ({ case: "c", key: k, cms: "a", ours: "b" });
   assert.deepEqual(matchExpectedDifferences([d("g0|L.x"), d("g0|L.y")], [d("g0|L.y"), d("g0|L.z")]), { missing: [d("g0|L.z")], unexpected: [d("g0|L.x")] });
   assert.deepEqual(matchExpectedDifferences([d("g0|L.x"), d("g0|L.x")], [d("g0|L.x")]), { missing: [], unexpected: [d("g0|L.x")] }, "a multiset: seen twice, listed once");
+});
+
+test("a presence entry excuses a define only one side has, on every case, and nothing else (#816)", () => {
+  const removed = { key: "g0|Main.Old", presentIn: "cms" as const, reason: "split by the edit" };
+  const added = { key: "g0|Main.New", presentIn: "ours" as const, reason: "added by the edit" };
+  const define = { case: "c1", key: "g0|Main.Kept", cms: "false", ours: "true", reason: "why" };
+  assert.deepEqual(parseExpectedDifferences([removed, define, added]), { defines: [define], populations: [], presence: [removed, added] });
+  const refusals: Array<[unknown, string]> = [
+    [[{ ...removed, case: "c1" }], "entry 1 has key(s) a presence entry does not take: case"],
+    [[{ ...removed, cms: null }], "entry 1 has key(s) a presence entry does not take: cms"],
+    [[{ ...removed, presentIn: "both" }], 'entry 1: presentIn must be "cms" or "ours"'],
+    [[{ ...removed, key: "Main.Old" }], "g<group>|<library>.<define>"],
+    [[{ ...removed, reason: " " }], "entry 1 has no reason"],
+    [[removed, { ...removed, presentIn: "ours" }], "entry 2 lists g0|Main.Old's presence a second time"],
+  ];
+  for (const [bad, message] of refusals) throwsWith(() => parseExpectedDifferences(bad), message);
+
+  const d = (c: string, key: string, cms: string | null, ours: string | null) => ({ case: c, key, cms, ours });
+  const observed = [
+    d("c1", "g0|Main.Old", "[]", null),
+    d("c2", "g0|Main.Old", "[{}]", null),
+    d("c1", "g0|Main.New", null, "[]"),
+    // Both sides report it, or the absent side is the wrong one: not a presence difference.
+    d("c3", "g0|Main.Old", "[]", "[{}]"),
+    d("c4", "g0|Main.New", "[]", null),
+    d("c1", "g0|Main.Kept", "false", "true"),
+  ];
+  const out = excusePresence(observed, [removed, added]);
+  assert.deepEqual(out.excused, observed.slice(0, 3));
+  assert.deepEqual(out.remaining, observed.slice(3));
+  assert.deepEqual(out.unseen, []);
+  assert.deepEqual(excusePresence(observed.slice(3), [removed]).unseen, [removed], "an entry no case shows is unseen");
+
+  // The ELM decides: the named side declares the define and the other does not.
+  const cms = new Map([["Main", new Set(["Old", "Kept"])]]);
+  const ours = new Map([["Main", new Set(["New", "Kept"])]]);
+  assert.deepEqual(presenceProblems([removed, added], cms, ours), []);
+  assert.deepEqual(presenceProblems([{ ...removed, key: "g0|Main.Kept" }], cms, ours), [
+    "g0|Main.Kept is listed as present in CMS's logic only, but CMS's ELM declares it and the translation's declares it",
+  ]);
+  assert.deepEqual(presenceProblems([{ ...added, presentIn: "cms" }], cms, ours), [
+    "g0|Main.New is listed as present in CMS's logic only, but CMS's ELM does not declare it and the translation's declares it",
+  ]);
+  assert.deepEqual(presenceProblems([{ ...added, key: "g0|Other.New" }], cms, ours), [
+    "g0|Other.New is listed as present in the translation's logic only, but CMS's ELM does not declare it and the translation's does not declare it",
+  ]);
+});
+
+test("--madie: a presence entry the ELM does not bear out, or no case shows, fails the check", async () => {
+  const s = changedSetup(fixture({ sidecar: false, changed: "edited", expectedDifferences: [...LISTED, { key: "g0|Hospice.Not A Define", presentIn: "ours", reason: "r" }] }));
+  assert.equal(await main(MADIE, s.deps), 1);
+  const errors = s.errors.join("\n");
+  assert.ok(errors.includes("madie-expected-differences.json: g0|Hospice.Not A Define is listed as present in the translation's logic only, but CMS's ELM does not declare it and the translation's does not declare it"), errors);
+  assert.ok(errors.includes("madie-expected-differences.json: g0|Hospice.Not A Define's presence in the translation's logic only was not observed on any case"), errors);
 });
 
 test("--madie: a changed-library break that moves nothing fails, and so does an edit that changed no define", async () => {
@@ -1241,7 +1436,7 @@ const C2_MOVED = { case: "c2", populations: { cms: "11000|11000", ours: "11100|1
 
 test("an expected-differences file lists population entries beside define entries, told apart by their keys", () => {
   const define = { case: "c1", key: "g0|Lib.Define", cms: "false", ours: "true", reason: "why" };
-  assert.deepEqual(parseExpectedDifferences([define, C2_MOVED]), { defines: [define], populations: [C2_MOVED] });
+  assert.deepEqual(parseExpectedDifferences([define, C2_MOVED]), { defines: [define], populations: [C2_MOVED], presence: [] });
   const refusals: Array<[unknown, string]> = [
     [[{ ...C2_MOVED, key: "g0|L.D" }], "entry 1 mixes a population entry's key (populations) with a define entry's (key, cms, ours)"],
     [[{ ...C2_MOVED, cms: "x" }], "entry 1 mixes"],

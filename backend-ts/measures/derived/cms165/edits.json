@@ -1,0 +1,82 @@
+[
+  {
+    "library": "AdvancedIllnessandFrailty",
+    "anchorSha256": "sha256:dd8e6cd21cddad7894d1a885f24e2afcea77dbc3cb372151777b522597d3e0b5",
+    "startLine": 69,
+    "endLine": 69,
+    "replacement": "where AdvancedIllnessDiagnosis.prevalenceInterval() overlaps day of Interval[start of \"Measurement Period\" - 1 year, end of \"Measurement Period\"])",
+    "reason": "CMS165v15 (as CMS130v15 and CMS125v15): the advanced-illness diagnosis overlaps the look-back window (v14: starts during it)"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:c58b9057504e35dcadcacab42cb622487f6163ee2ed8e4c0af8a41010adc52cb",
+    "startLine": 14,
+    "endLine": 14,
+    "replacement": "codesystem \"ICD10CM\": 'http://hl7.org/fhir/sid/icd-10-cm'\ncodesystem \"LOINC\": 'http://loinc.org'",
+    "reason": "CMS165v15: kidney transplant status is read by an ICD-10-CM code"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:7541f9a7111b59028f923a12d664b3f34b22b09063e1892acf42ae695cb51b75",
+    "startLine": 21,
+    "endLine": 21,
+    "replacement": "",
+    "reason": "CMS165v15: the ESRD monthly-encounter exclusion is removed"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:dc3bdb38bea985b3fd4d8f5be92b147c3b7ef1f4c96d2118875b9c3d420c80b7",
+    "startLine": 24,
+    "endLine": 24,
+    "replacement": "",
+    "reason": "CMS165v15: the kidney transplant recipient value set is replaced by the code Z94.0"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:bf34ba58d7a9d5f81ccd7ca63d16940b931ad09d010249dd8bd9690fa490abdb",
+    "startLine": 27,
+    "endLine": 28,
+    "replacement": "code \"Diastolic blood pressure\": '8462-4' from \"LOINC\" display 'Diastolic blood pressure'\ncode \"Systolic blood pressure\": '8480-6' from \"LOINC\" display 'Systolic blood pressure'\ncode \"Kidney transplant status\": 'Z94.0' from \"ICD10CM\" display 'Kidney transplant status'",
+    "reason": "CMS165v15: kidney transplant status is the direct-reference code Z94.0"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:a49a84f27d4d6517d183780d2a79dc8258fb95a3520835aff57ac78d2f11367a",
+    "startLine": 46,
+    "endLine": 46,
+    "replacement": "    where Hypertension.prevalenceInterval ( ) overlaps day of Interval[start of \"Measurement Period\", start of \"Measurement Period\" + 6 months )",
+    "reason": "CMS165v15: day precision on the essential hypertension window"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:a4e9281847b1e756c299da8ff9c87188ea49abd5f71d4a8ec127b9937365010a",
+    "startLine": 53,
+    "endLine": 55,
+    "replacement": "    or exists ( \"Pregnancy Diagnosis\" )\n    or exists ( \"Renal Diagnosis\" )\n    or exists ( \"End Stage Renal Disease Procedures\" )",
+    "reason": "CMS165v15: pregnancy and renal diagnoses are separate exclusions; the ESRD monthly encounter no longer excludes"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:fc9b976d8f28d33e5baad15c7ce178520daa3eeb6041d4be5bb63f65200b6497",
+    "startLine": 60,
+    "endLine": 70,
+    "replacement": "define \"Pregnancy Diagnosis\":\n  ( ( [ConditionProblemsHealthConcerns: \"Pregnancy\"]\n      union [ConditionEncounterDiagnosis: \"Pregnancy\"]\n  ).verified ( ) ) PregnancyDiagnosis\n    where PregnancyDiagnosis.prevalenceInterval ( ) overlaps day of \"Measurement Period\"\n\ndefine \"Renal Diagnosis\":\n  ( ( [ConditionProblemsHealthConcerns: \"End Stage Renal Disease\"]\n      union [ConditionEncounterDiagnosis: \"End Stage Renal Disease\"]\n      union [ConditionProblemsHealthConcerns: \"Kidney transplant status\"]\n      union [ConditionEncounterDiagnosis: \"Kidney transplant status\"]\n      union [ConditionProblemsHealthConcerns: \"Chronic Kidney Disease, Stage 5\"]\n      union [ConditionEncounterDiagnosis: \"Chronic Kidney Disease, Stage 5\"]\n  ).verified ( ) ) ESRDDiagnosis\n    where ESRDDiagnosis.prevalenceInterval ( ) starts on or before day of end of \"Measurement Period\"",
+    "reason": "CMS165v15: a pregnancy overlaps the period (day precision); a renal diagnosis (ESRD, CKD 5, kidney transplant status Z94.0) starts on or before its last day"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:8ca890f35957772e0fbfbceeff8d6f879c71f2d9f75966fbed53d1ca5082409e",
+    "startLine": 76,
+    "endLine": 76,
+    "replacement": "    where ESRDProcedure.performed.toInterval ( ) ends on or before day of end of \"Measurement Period\"",
+    "reason": "CMS165v15: day precision on the ESRD procedures"
+  },
+  {
+    "library": "CMS165FHIRControllingHighBP",
+    "anchorSha256": "sha256:4f99236838c04d6a2f1931d4567936af51b4c8d8809e1cfa79c0ad03344dc668",
+    "startLine": 77,
+    "endLine": 80,
+    "replacement": "",
+    "reason": "CMS165v15: the ESRD monthly-encounter exclusion is removed"
+  }
+]

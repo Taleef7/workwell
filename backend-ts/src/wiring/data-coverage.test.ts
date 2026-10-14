@@ -181,6 +181,10 @@ test("#776: the coverage of every logic the Maui sandbox scores with is pinned",
     // Its edit swaps a value set and moves a laterality read from a Condition to a Procedure (#782), but
     // both types were already read, so by type it reads what CMS's artifact reads.
     "cms125 workwell-translation": cmsWithDevices,
+    // Its edits drop the ESRD monthly-encounter retrieve and read kidney transplant status by a code
+    // (#816), but Encounter and Condition are still read (the visits, the ED/inpatient check, the
+    // diagnoses), so by type it reads what CMS's artifact reads.
+    "cms165 workwell-translation": cmsWithDevices,
   });
 });
 

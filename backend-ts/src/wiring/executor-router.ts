@@ -384,7 +384,10 @@ export function officialRoutingProblems(env: OfficialMeasuresEnv, deps: RoutingC
  *      CMS's — the semantics table, case logic and MeasureReport strata are all keyed by the measure;
  *   D7 every required check passed, against THIS artifact's hash and THIS terminology's hash, over exactly
  *      one calendar year — and the terminology check over the translation's own year: value sets are
- *      bound to the year they score. The deck check's year is the deck's own (`oraclePeriodProblems`);
+ *      bound to the year they score. The deck check's year is the deck's own (`oraclePeriodProblems`).
+ *      Every patient agreed, or (the deck check only, #816) the rest are `listedMisses`: rows CMS's own
+ *      logic misses the same way on the same deck, matched by `derived:check` against a file whose hash
+ *      the record carries (and a test holds to the committed file);
  *   D8 its terminology sidecar is present, matches its pin, and is neither capped nor missing a set;
  *   D9 its bundle holds only a Measure and Libraries: an embedded ValueSet would outrank its sidecar.
  *   D10 each library's computed data requirements describe its own ELM (`libraryDataRequirementProblems`, on
@@ -462,7 +465,20 @@ function derivedRoutingProblems(
     const oracles = manifest.derived?.oracles ?? [];
     for (const name of REQUIRED_DERIVED_ORACLES) {
       const record = oracles.find((o) => o.name === name);
-      if (!record || record.result !== "pass" || record.total <= 0 || record.agree !== record.total) {
+      // Listed deck misses are the deck check's alone, and a malformed list is a refusal, never ignored.
+      const listed: unknown = record?.listedMisses;
+      const shape = listed && typeof listed === "object" ? (listed as { patients?: unknown; sha256?: unknown }) : undefined;
+      const listedOk =
+        listed === undefined ||
+        (name === "cypress-deck" &&
+          shape !== undefined &&
+          typeof shape.patients === "number" &&
+          Number.isInteger(shape.patients) &&
+          shape.patients > 0 &&
+          typeof shape.sha256 === "string" &&
+          /^sha256:[0-9a-f]{64}$/.test(shape.sha256));
+      const accounted = listed !== undefined && listedOk ? (shape!.patients as number) : 0;
+      if (!record || !listedOk || record.result !== "pass" || record.total <= 0 || record.agree + accounted !== record.total) {
         problems.push(`${id}: the translation has no passing '${name}' check`);
       } else if (record.ranAgainst.artifactSha256 !== manifest.sha256 || record.ranAgainst.terminologySha256 !== manifest.terminology?.sha256) {
         problems.push(`${id}: the translation's '${name}' check ran against a different artifact or terminology than the one committed`);
