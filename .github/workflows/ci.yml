@@ -1008,7 +1008,10 @@ jobs:
           for id in "${TRANSLATIONS[@]}"; do
             YEAR="$(jq -er '.effectivePeriod.start[0:4]' "backend-ts/measures/derived/${id}/manifest.json")"
             LABEL="$(jq -er '.derived.label' "backend-ts/measures/derived/${id}/manifest.json")"
-            CANDIDATES="$(curl -fsS --max-time 120 "$API/api/cases?measureId=${id}&limit=8" "${auth[@]}" | jq -r '.[].employeeId')"
+            # Any patient with a case of this measure, open or closed, up to 50 distinct: which of them the
+            # translation keeps in the gap for its year depends on the corpus and on what the specs above
+            # closed, and an inverse measure (cms122) can have few open cases left by now.
+            CANDIDATES="$(curl -fsS --max-time 120 "$API/api/cases?measureId=${id}&status=all&limit=200" "${auth[@]}" | jq -r '[.[].employeeId] | unique | .[:50] | .[]')"
             FOUND=""
             for pid in $CANDIDATES; do
               RUN_ID="$(curl -fsS --max-time 300 -X POST "$API/api/runs/manual" "${auth[@]}" -H 'content-type: application/json' \
