@@ -80,6 +80,21 @@ const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
     added: 70,
     removed: 19,
   },
+  // cms122 (ww-2027.1, #818): seven sets the release moved. The edits change how the numerator picks a
+  // reading, not what is read, so no set is the edit's.
+  cms122: {
+    oids: [
+      "2.16.840.1.113883.3.464.1003.1006", // Nutrition Services (+1)
+      "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)
+      "2.16.840.1.113883.3.464.1003.101.12.1080", // Telephone Visits (+9)
+      "2.16.840.1.113883.3.464.1003.103.12.1001", // Diabetes (+6/−4)
+      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+25)
+      "2.16.840.1.113883.3.464.1003.118.12.1300", // Frailty Device (−12)
+      "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient (+4)
+    ],
+    added: 55,
+    removed: 16,
+  },
   // cms165 (ww-2027.1, #816): eight sets the release moved, and two that are the LOGIC edit's: CMS165v15
   // removes the ESRD monthly outpatient encounter exclusion (…109.12.1014, its 25 codes all "removed") and
   // reads kidney transplant status by the code Z94.0, not the Kidney Transplant Recipient set (…109.12.1029,

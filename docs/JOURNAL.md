@@ -7,6 +7,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-14
 
+- **CMS122 for 2027: WorkWell's translation of CMS122v15, routed on Maui (#818).** The frailty edit, and
+  v15's choice of HbA1c/GMI reading: the most recent day counts only a result above 0 %, and the reading is
+  the lowest number that day, else the most recent number, else the most recent result-less one. CMS's v14
+  draft read a result-less test first, so a patient counted as poor control beside a numerical result.
+  Cypress 64/64, MADiE no population moves, 12 hand-built patients (6 discriminating). A `>14 %` result reads
+  as no result in FHIR, so v15 can fall back to an earlier normal one: pinned, and asked of MIE (§4.14).
 - **The work list and the measure labels no longer state a wrong answer while loading or after a
   failure (#655).** Both seen live on Maui right after a deploy:
   - The work list said "0 patients with open gaps" while its list was still coming, and again after a

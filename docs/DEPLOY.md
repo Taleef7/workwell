@@ -169,7 +169,7 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
 **Reversible:** remove the id where step 4 says and redeploy; `logic_version` carries the artifact's
 identity (ADR-040), so no cache cleanup is needed.
 
-**Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms137,cms130,cms125,cms165`) lets a committed WorkWell
+**Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms137,cms130,cms125,cms165,cms122`) lets a committed WorkWell
 translation score the one year it covers (2027); CMS's artifact still scores every other year. Each id
 must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit it where step 4 says (the build arg and the gate's
 `EXPECTED_DERIVED`, same value), and keep the build job's `vendor-derived-terminology.mjs` lines

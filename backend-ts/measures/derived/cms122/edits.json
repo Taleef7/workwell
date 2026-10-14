@@ -1,0 +1,26 @@
+[
+  {
+    "library": "AdvancedIllnessandFrailty",
+    "anchorSha256": "sha256:dd8e6cd21cddad7894d1a885f24e2afcea77dbc3cb372151777b522597d3e0b5",
+    "startLine": 69,
+    "endLine": 69,
+    "replacement": "where AdvancedIllnessDiagnosis.prevalenceInterval() overlaps day of Interval[start of \"Measurement Period\" - 1 year, end of \"Measurement Period\"])",
+    "reason": "CMS122v15 (as CMS130v15, CMS125v15 and CMS165v15): the advanced-illness diagnosis overlaps the look-back window (v14: starts during it)"
+  },
+  {
+    "library": "CMS122FHIRDiabetesAssessGT9Pct",
+    "anchorSha256": "sha256:9b13fe65d7bbef2597bff4533fa7ab1d675c52ef7827fb5f4b37313d0d3c280d",
+    "startLine": 116,
+    "endLine": 130,
+    "replacement": "define \"Lowest Glycemic Status Assessment With Numerical Result On Most Recent Day\":\n  First(\"Glycemic Status Assessment\" QualifyingGlycemicStatus\n      where date from QualifyingGlycemicStatus.effective.latest() same day as \"Most Recent Glycemic Status Date\"\n        and QualifyingGlycemicStatus.value is not null\n      return {\n        QualifyingGlycemicStatusValue: QualifyingGlycemicStatus.value as Quantity,\n        QualifyingGlycemicStatus: QualifyingGlycemicStatus\n      }\n      sort by QualifyingGlycemicStatusValue\n  ).QualifyingGlycemicStatus\n\ndefine \"Most Recent Glycemic Status Assessment With Numerical Result In Measurement Period\":\n  Last(\"Glycemic Status Assessment\" QualifyingGlycemicStatus\n      where QualifyingGlycemicStatus.effective.latest() during day of \"Measurement Period\"\n        and QualifyingGlycemicStatus.value is not null\n      return {\n        QualifyingGlycemicStatusTime: QualifyingGlycemicStatus.effective.latest(),\n        QualifyingGlycemicStatus: QualifyingGlycemicStatus\n      }\n      sort by QualifyingGlycemicStatusTime\n  ).QualifyingGlycemicStatus\n\ndefine \"Most Recent Glycemic Status Assessment With Null Result In Measurement Period\":\n  Last(\"Glycemic Status Assessment\" QualifyingGlycemicStatus\n      where QualifyingGlycemicStatus.effective.latest() during day of \"Measurement Period\"\n        and QualifyingGlycemicStatus.value is null\n      return {\n        QualifyingGlycemicStatusTime: QualifyingGlycemicStatus.effective.latest(),\n        QualifyingGlycemicStatus: QualifyingGlycemicStatus\n      }\n      sort by QualifyingGlycemicStatusTime\n  ).QualifyingGlycemicStatus\n\ndefine \"Most Recent Glycemic Status Assessment\":\n  Coalesce(\n    \"Lowest Glycemic Status Assessment With Numerical Result On Most Recent Day\",\n    \"Most Recent Glycemic Status Assessment With Numerical Result In Measurement Period\",\n    \"Most Recent Glycemic Status Assessment With Null Result In Measurement Period\"\n  )\n\ndefine \"Most Recent Glycemic Status Date\":\n  Last((\"Glycemic Status Assessment\" QualifyingGlycemicStatus\n      where ( QualifyingGlycemicStatus.value as Quantity ) > 0 '%'\n      return date from QualifyingGlycemicStatus.effective.latest()) QualifyingGlycemicStatus\n      sort asc\n  )",
+    "reason": "CMS122v15: the most recent day counts only a result above 0 %; the reading is the lowest numerical result that day, else the most recent numerical result in the period, else the most recent one with no result"
+  },
+  {
+    "library": "CMS122FHIRDiabetesAssessGT9Pct",
+    "anchorSha256": "sha256:fd19cad1a8db5e254e4760ee78686ab55fe5643562a7daddaa003b9b1ef0aaef",
+    "startLine": 132,
+    "endLine": 137,
+    "replacement": "define \"Has Most Recent Glycemic Status Assessment Without Result\":\n  \"Most Recent Glycemic Status Assessment\" is not null\n    and \"Most Recent Glycemic Status Assessment\".value is null\n\ndefine \"Has Most Recent Elevated Glycemic Status Assessment\":\n  \"Most Recent Glycemic Status Assessment\".value > 9 '%'",
+    "reason": "CMS122v15: both results are read off the most recent glycemic status assessment as v15 chooses it"
+  }
+]
