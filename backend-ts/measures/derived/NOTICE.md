@@ -37,6 +37,17 @@ included.
   same carried notice as `cms130/`. Its `edit-cases.json` names one code it asserts is in value set
   `…1003.1285`, checked against the translation's own expansion when its checks are recorded; it is not a
   copy of the value set.
+- `cms165/` — WorkWell translation of CMS165v15 (`ww-2027.1`), built from CMS's CMS165FHIR v1.0.000 CQL
+  with ten edits: the same AdvancedIllnessandFrailty edit (the same changed library), and CMS165v15's
+  pregnancy/renal split, kidney transplant status read by the code Z94.0, the ESRD monthly-encounter
+  exclusion removed and two day-precision comparisons in the main library, whose computed data
+  requirements were edited to match. Its logic is MODIFIED from the measure steward's (NCQA's), under the
+  same carried notice as `cms130/`. `cypress-expected-differences.json` beside it lists the two Cypress
+  deck rows CMS's own logic misses too.
+- `cms122/` — WorkWell translation of CMS122v15 (`ww-2027.1`), built from CMS's CMS122FHIR v1.0.000 CQL
+  with three edits: the same AdvancedIllnessandFrailty edit (the same changed library), and CMS122v15's
+  choice of glycemic status assessment in the main library. Its logic is MODIFIED from the measure
+  steward's (NCQA's), under the same carried notice as `cms130/`.
 
 ## What does not live here
 

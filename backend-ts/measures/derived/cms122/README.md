@@ -39,7 +39,7 @@ over unchanged.
 | `bundle.json` | yes | the Measure and nine Libraries, ELM only: the main library and the changed library are WorkWell's compile, the other seven are CMS's committed ones |
 | `manifest.json` | yes | identity, pins, `changedLibraries`, the terminology pin and the check records |
 | `edits.json` | yes | the three edits |
-| `edit-cases.json` | yes | 8 synthetic test patients; read only by `derived:check`, never by the corpus, ingest or any evaluation path |
+| `edit-cases.json` | yes | 12 synthetic test patients; read only by `derived:check`, never by the corpus, ingest or any evaluation path |
 | `madie-expected-differences.json` | yes | the five defines only one side has, and three define values that differ without moving a population |
 | `terminology.json` | no (gitignored) | every declared value set at the release |
 
@@ -54,11 +54,26 @@ over unchanged.
   Recent Glycemic Status Date" differs (`ab29ab81` and `21695544` have only a result-less assessment,
   `5ed37c9e` only a coded "Yes"): v15 finds no result above 0 %, falls through to the same assessment CMS's
   logic read, and the population stays.
-- Edit cases (CI, every push, not recorded): 8 patients, 4 of them telling the logics apart, give the stated
+- Edit cases (CI, every push, not recorded): 12 patients, 6 of them telling the logics apart, give the stated
   answer under both: a result-less and a 7 % assessment on one day, a result-less latest day after an earlier
-  6 %, a 0 % latest result after an earlier 10 %, the frailty edit, and controls (only result-less, one 10 %, none
-  at all, and the day boundary across offsets, where both logics take each reading's own date). **These are the
-  evidence that discriminates the edits, and they are WorkWell's own.**
+  6 %, a 0 % latest result after an earlier 10 %, a 0 % in June and a result-less one in September (the first
+  fallback), a `>14 %` result after an earlier 7 % (below), the frailty edit, and controls (only result-less,
+  one 10 %, none at all, two numbers on one day, a coded result beside a number, and the day boundary across
+  offsets, where both logics take each reading's own date). Deleting the first fallback from the translation
+  fails one of them. **These are the evidence that discriminates the edits, and they are WorkWell's own.**
+
+## What to know before real data
+
+- **A result with a comparator** (`>14 %`) is read as no result by the FHIR helper library. CMS's 2026 draft
+  then calls the patient poor control; v15 skips a result-less latest day and reads an earlier number, so
+  an earlier normal result makes the patient controlled. An edit case pins this. The sandbox corpus states
+  one plain UCUM `%` result per patient, so it never arises there (`OPEN_QUESTIONS.md` §4.14).
+- **More results are read.** v15 reads every HbA1c/GMI result in the year (for the most recent day and both
+  fallbacks), where the 2026 draft read only the most recent day's. One result whose unit is not valid UCUM
+  anywhere in the year now fails the patient's evaluation (no case changes; §4.14).
+- **"Last result date" on a 2027 row** is the last day with a result above 0 % (the define the read model
+  reads). A patient whose only results are result-less, coded or 0 % shows none, though the measure still
+  scores them.
 
 ## Commands (from `backend-ts/`)
 

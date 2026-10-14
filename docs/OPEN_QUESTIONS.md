@@ -14,7 +14,7 @@
 > already answered. This file exists because an unanswered question with no home decays silently —
 > every entry below had been raised at least once, some three times, with no record of an answer.
 
-**As of 2026-10-08.** Twenty-one open; one answered (§5).
+**As of 2026-10-14.** Twenty-four open; one answered (§5).
 
 ---
 
@@ -302,10 +302,27 @@ restarts an exited process. Without that, exiting would leave Maui down until th
 
 CMS130's 2027 translation changes one line of the measure steward's logic (the frailty look-back,
 `measures/derived/cms130/`). CMS125's changes more: the same line, its mastectomy-laterality logic, a value
-set and its end-of-period comparisons (#782, `measures/derived/cms125/`). The steward's notice, carried on
-each, allows internal, noncommercial use without its approval and requires approval for any other use. The
+set and its end-of-period comparisons (#782, `measures/derived/cms125/`). CMS165's (#816) and CMS122's (#818)
+carry the same line and their own v15 changes (`measures/derived/cms165/`, `measures/derived/cms122/`). The
+steward's notice, carried on each, allows internal, noncommercial use without its approval and requires
+approval for any other use. The
 sandbox is within the first; scoring a customer's patients with a modified measure may not be. Before the
 PHI phase, MIE's legal view is needed on whether its arrangement with NCQA covers modified logic.
+
+### 4.14 What shape do WebChart's HbA1c and GMI results take?
+
+**Status:** new 2026-10-14 (#818); not yet asked.
+
+CMS122's 2027 translation reads every HbA1c/GMI result in the year, where CMS's 2026 draft read only the
+most recent day's. Two value shapes matter:
+- **A result with a comparator** (`>14 %`): the FHIR helper library reads it as no result. CMS's 2026 draft
+  then counts the patient as poor control. v15 skips a result-less latest day and reads an earlier number,
+  so an earlier normal result makes the patient controlled. The sandbox corpus never states one; real data
+  might (an edit case pins the behaviour).
+- **A unit that is not valid UCUM** (`% of total Hgb`): one such result anywhere in the year now fails the
+  patient's evaluation (MISSING_DATA with an error; no case changes). #591 tracks the same normalisation
+  for blood-pressure units.
+- Does WebChart send comparators on lab results, and does it send UCUM `%` for HbA1c and GMI?
 
 ### 4.13 Does WebChart's FHIR `Procedure` carry a body site, and coded how?
 

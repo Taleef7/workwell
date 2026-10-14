@@ -103,7 +103,7 @@ same frailty edit, and v15's change to which HbA1c or GMI the numerator reads: t
 only a result above 0 %, and the reading is the lowest number that day, else the most recent number in the
 year, else the most recent result-less one. So a result-less test beside a numerical one on the same day,
 or on a later day, no longer makes the patient "poor control". The 2027 Cypress deck agrees on 64 of 64; on
-CMS's own test deck no patient moves; 8 hand-built patients test every edit
+CMS's own test deck no patient moves; 12 hand-built patients test every edit
 (`backend-ts/measures/derived/cms122/README.md`).
 
 > **CMS165 reads a blood pressure by its profile, and nothing else by profile (#591, 2026-10-10).**
