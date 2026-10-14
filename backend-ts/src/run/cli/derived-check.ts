@@ -62,6 +62,7 @@ import {
   runAgreement,
   type AgreementCalculate,
   type ImportDeckDeps,
+  type AgreementReport,
 } from "../../standards/cypress-agreement.ts";
 import {
   loadOfficialMeasureCases,
@@ -499,6 +500,87 @@ export function translationOnlyValueSets(upstream: Pick<FhirBundle, "entry">, tr
   return lacking;
 }
 
+// ---- the deck rows a translation is allowed to miss (#816) ----------------------------------------------
+
+export const DECK_EXPECTED_FILE = "cypress-expected-differences.json";
+
+/**
+ * One deck row the translation is allowed to miss: a disagreement exactly as `runAgreement` reports it
+ * (patient, rate, stratum, and its population diffs such as "DENEX 0→1"), plus why. CMS165's two are blood
+ * pressures taken in an ED or inpatient stay: the deck excludes them, and nothing in a QRDA I file ties a
+ * reading to its visit, so CMS's own 2026 logic misses the same rows on the same deck.
+ */
+export interface ExpectedDeckMiss {
+  patientId: string;
+  set: number;
+  stratum?: number;
+  diffs: string[];
+  reason: string;
+}
+
+const DECK_MISS_KEYS = ["patientId", "set", "stratum", "diffs", "reason"];
+const deckMissIdentity = (d: { patientId: string; set: number; stratum?: number; diffs: readonly string[] }): string =>
+  JSON.stringify([d.patientId, d.set, d.stratum ?? null, d.diffs]);
+
+/**
+ * Read `cypress-expected-differences.json`: a JSON array of `{ patientId, set, stratum?, diffs, reason }`.
+ * Refused: an unknown key, a blank id or reason, a rate or stratum that is not a whole number from 0, no
+ * diffs, and a second entry for one row (patient, rate, stratum).
+ */
+export function parseExpectedDeckMisses(json: unknown): ExpectedDeckMiss[] {
+  if (!Array.isArray(json)) throw new Error("it is not a JSON array");
+  const rows = new Set<string>();
+  return json.map((raw, index) => {
+    const where = `entry ${index + 1}`;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} is not an object`);
+    const entry = raw as Record<string, unknown>;
+    const unknown = Object.keys(entry).filter((k) => !DECK_MISS_KEYS.includes(k));
+    if (unknown.length > 0) throw new Error(`${where} has unknown key(s) ${unknown.join(", ")}`);
+    if (typeof entry["patientId"] !== "string" || entry["patientId"].trim() === "") throw new Error(`${where} has no patientId`);
+    const whole = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 0;
+    if (!whole(entry["set"])) throw new Error(`${where}: set must be the rate's 0-based index`);
+    if ("stratum" in entry && !whole(entry["stratum"])) throw new Error(`${where}: stratum must be the 0-based stratum index`);
+    const diffs = entry["diffs"];
+    if (!Array.isArray(diffs) || diffs.length === 0 || !diffs.every((d) => typeof d === "string" && d !== "")) throw new Error(`${where}: diffs must be the row's non-empty list of differences`);
+    if (typeof entry["reason"] !== "string" || entry["reason"].trim() === "") throw new Error(`${where} has no reason`);
+    const row = JSON.stringify([entry["patientId"], entry["set"], entry["stratum"] ?? null]);
+    if (rows.has(row)) throw new Error(`${where} lists a row an earlier entry lists`);
+    rows.add(row);
+    const miss: ExpectedDeckMiss = { patientId: entry["patientId"], set: entry["set"] as number, diffs: diffs as string[], reason: entry["reason"] };
+    if ("stratum" in entry) miss.stratum = entry["stratum"] as number;
+    return miss;
+  });
+}
+
+/**
+ * Whether a deck run passes with `listed` misses, and why not. Every condition of `agreementPasses` holds
+ * except row agreement; instead the run's disagreements are EXACTLY the listed rows (none unlisted, none
+ * listed but unseen), every listed row is one CMS's own logic misses identically on the same deck (`cms`,
+ * so the translation introduced none of them), no patient lacks a result, and every patient that does not
+ * agree is a listed one. Both reports must carry every disagreement (`disagreementCount` equal to the list).
+ */
+export function deckMissProblems(report: AgreementReport, cms: AgreementReport, listed: readonly ExpectedDeckMiss[]): string[] {
+  const problems: string[] = [];
+  for (const [whose, r] of [["the translation's", report], ["CMS's", cms]] as const) {
+    if (r.disagreements.length !== r.disagreementCount) problems.push(`${whose} run reported ${r.disagreements.length} of its ${r.disagreementCount} disagreements, so the list cannot be compared`);
+  }
+  if (report.engineErrors.length > 0 || report.importFailures.length > 0 || report.unrecognisedRows > 0 || report.noResult > 0) {
+    problems.push("the run had an engine error, an import failure, an unrecognised row or a patient with no result, which no listed miss excuses");
+  }
+  if (report.strataRows > 0 && report.strataMode !== "compare") problems.push("the deck's strata were counted, not compared");
+  const { missing, unexpected } = matchMultiset(report.disagreements, listed, deckMissIdentity);
+  if (unexpected.length > 0) problems.push(`${unexpected.length} disagreeing row(s) ${DECK_EXPECTED_FILE} does not list`);
+  if (missing.length > 0) problems.push(`${missing.length} row(s) ${DECK_EXPECTED_FILE} lists were not missed`);
+  const cmsMisses = new Set(cms.disagreements.map(deckMissIdentity));
+  const introduced = listed.filter((m) => !cmsMisses.has(deckMissIdentity(m)));
+  if (introduced.length > 0) problems.push(`${introduced.length} listed row(s) CMS's own logic does not miss in the same way on this deck, so the translation introduced them`);
+  const listedPatients = new Set(listed.map((m) => m.patientId)).size;
+  if (report.patientsAgreeing + listedPatients !== report.patients) {
+    problems.push(`${report.patientsAgreeing} patient(s) agree and ${listedPatients} are listed, of ${report.patients}`);
+  }
+  return problems;
+}
+
 // ---- the define-value differences a translation is allowed --------------------------------------------
 
 export const EXPECTED_DIFFERENCES_FILE = "madie-expected-differences.json";
@@ -520,9 +602,24 @@ export interface ExpectedPopulationDifference {
   reason: string;
 }
 
+/**
+ * A presence entry: a define the edit removed (`presentIn: "cms"`) or added (`presentIn: "ours"`), so it has
+ * no counterpart to compare on any case. It excuses, on every case, that key's differences where the named
+ * side reports a value and the other reports none, and nothing else. CMS165v15 (#816) splits one define in
+ * two and removes another, which is 272 such differences on CMS's 68-case deck; listing them per case would
+ * pin values nothing compares. The ELM must agree: the define exists in the named side's library and not
+ * in the other (`presenceProblems`), and an entry no case shows is listed-but-unseen.
+ */
+export interface ExpectedPresenceDifference {
+  key: string;
+  presentIn: "cms" | "ours";
+  reason: string;
+}
+
 export interface ExpectedDifferences {
   defines: ExpectedDifference[];
   populations: ExpectedPopulationDifference[];
+  presence: ExpectedPresenceDifference[];
 }
 
 const identityOf = (d: StatementDifference): string => JSON.stringify([d.case, d.key, d.cms, d.ours]);
@@ -530,15 +627,19 @@ const populationIdentityOf = (d: CaseDifference): string => JSON.stringify([d.ca
 
 const DEFINE_KEYS = ["case", "key", "cms", "ours", "reason"];
 const POPULATION_KEYS = ["case", "populations", "reason"];
+const PRESENCE_KEYS = ["key", "presentIn", "reason"];
+const DEFINE_KEY = /^g\d+\|.+\..+/;
 /** One or more rates of five 0/1 counts, `|`-joined: the only strings `rateVector` gives a scored case. */
 const RATE_VECTOR = /^[01]{5}(\|[01]{5})*$/;
 
 /**
- * Read `madie-expected-differences.json`: a JSON array of two kinds of entry, told apart by their keys.
+ * Read `madie-expected-differences.json`: a JSON array of three kinds of entry, told apart by their keys.
  *
  * - `{ case, key, cms, ours, reason }`: a define value, exactly the strings `compareRuns` reports (`null`
  *   for a side that reports no such define).
  * - `{ case, populations: { cms, ours }, reason }`: a case's populations, in `rateVector` form.
+ * - `{ key, presentIn: "cms" | "ours", reason }`: a define only one side has, on every case
+ *   (`ExpectedPresenceDifference`); a second entry for one key is refused.
  *
  * Refused: an entry that mixes the two kinds' keys, an unknown key, a blank reason (a difference nobody can
  * explain is not "expected"), an entry whose two sides are equal (it is no difference), a population
@@ -550,11 +651,23 @@ export function parseExpectedDifferences(json: unknown): ExpectedDifferences {
   if (!Array.isArray(json)) throw new Error("it is not a JSON array");
   const seen = new Set<string>();
   const populationCases = new Set<string>();
-  const out: ExpectedDifferences = { defines: [], populations: [] };
+  const presenceKeys = new Set<string>();
+  const out: ExpectedDifferences = { defines: [], populations: [], presence: [] };
   json.forEach((raw, index) => {
     const where = `entry ${index + 1}`;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} is not an object`);
     const entry = raw as Record<string, unknown>;
+    if ("presentIn" in entry) {
+      const unknown = Object.keys(entry).filter((k) => !PRESENCE_KEYS.includes(k));
+      if (unknown.length > 0) throw new Error(`${where} has key(s) a presence entry does not take: ${unknown.join(", ")}`);
+      if (typeof entry["key"] !== "string" || !DEFINE_KEY.test(entry["key"])) throw new Error(`${where} has no key of the form g<group>|<library>.<define>`);
+      if (entry["presentIn"] !== "cms" && entry["presentIn"] !== "ours") throw new Error(`${where}: presentIn must be "cms" or "ours"`);
+      if (typeof entry["reason"] !== "string" || entry["reason"].trim() === "") throw new Error(`${where} has no reason`);
+      if (presenceKeys.has(entry["key"])) throw new Error(`${where} lists ${entry["key"]}'s presence a second time`);
+      presenceKeys.add(entry["key"]);
+      out.presence.push({ key: entry["key"], presentIn: entry["presentIn"], reason: entry["reason"] });
+      return;
+    }
     const isPopulation = "populations" in entry;
     if (isPopulation && ["key", "cms", "ours"].some((k) => k in entry)) {
       throw new Error(`${where} mixes a population entry's key (populations) with a define entry's (key, cms, ours)`);
@@ -586,7 +699,7 @@ export function parseExpectedDifferences(json: unknown): ExpectedDifferences {
       out.populations.push({ case: entry["case"], populations: { cms, ours }, reason: reason as string });
       return;
     }
-    if (typeof entry["key"] !== "string" || !/^g\d+\|.+\..+/.test(entry["key"])) throw new Error(`${where} has no key of the form g<group>|<library>.<define>`);
+    if (typeof entry["key"] !== "string" || !DEFINE_KEY.test(entry["key"])) throw new Error(`${where} has no key of the form g<group>|<library>.<define>`);
     for (const side of ["cms", "ours"]) {
       if (entry[side] !== null && typeof entry[side] !== "string") throw new Error(`${where}: ${side} must be the compared string, or null where that side reports no such define`);
     }
@@ -626,6 +739,57 @@ function matchMultiset<T>(observed: readonly T[], expected: readonly T[], identi
  */
 export function matchExpectedDifferences(observed: readonly StatementDifference[], expected: readonly StatementDifference[]): { missing: StatementDifference[]; unexpected: StatementDifference[] } {
   return matchMultiset(observed, expected, identityOf);
+}
+
+/**
+ * The observed differences a presence entry excuses, split off: `excused` are the differences whose key a
+ * presence entry names and whose named side alone reports a value; `remaining` are the rest, for the
+ * per-case list. `unseen` are presence entries no difference matched.
+ */
+export function excusePresence(
+  observed: readonly StatementDifference[],
+  presence: readonly ExpectedPresenceDifference[],
+): { remaining: StatementDifference[]; excused: StatementDifference[]; unseen: ExpectedPresenceDifference[] } {
+  const byKey = new Map(presence.map((p) => [p.key, p]));
+  const seen = new Set<string>();
+  const remaining: StatementDifference[] = [];
+  const excused: StatementDifference[] = [];
+  for (const d of observed) {
+    const entry = byKey.get(d.key);
+    const matches = entry !== undefined && (entry.presentIn === "cms" ? d.cms !== null && d.ours === null : d.ours !== null && d.cms === null);
+    if (matches) {
+      excused.push(d);
+      seen.add(d.key);
+    } else remaining.push(d);
+  }
+  return { remaining, excused, unseen: presence.filter((p) => !seen.has(p.key)) };
+}
+
+/**
+ * Why a presence entry is not what the ELM says: the named side's library must declare the define and the
+ * other side's must not. `cms` and `ours` map a library name, as `compareRuns` keys it (ours renamed to
+ * CMS's names), to the expression defines its ELM declares.
+ */
+export function presenceProblems(
+  presence: readonly ExpectedPresenceDifference[],
+  cms: ReadonlyMap<string, ReadonlySet<string>>,
+  ours: ReadonlyMap<string, ReadonlySet<string>>,
+): string[] {
+  const problems: string[] = [];
+  for (const entry of presence) {
+    const qualified = entry.key.slice(entry.key.indexOf("|") + 1);
+    const dot = qualified.indexOf(".");
+    const library = qualified.slice(0, dot);
+    const define = qualified.slice(dot + 1);
+    const inCms = cms.get(library)?.has(define) ?? false;
+    const inOurs = ours.get(library)?.has(define) ?? false;
+    const want = entry.presentIn === "cms" ? inCms && !inOurs : inOurs && !inCms;
+    if (!want) {
+      const side = entry.presentIn === "cms" ? "CMS's" : "the translation's";
+      problems.push(`${entry.key} is listed as present in ${side} logic only, but CMS's ELM ${inCms ? "declares" : "does not declare"} it and the translation's ${inOurs ? "declares" : "does not declare"} it`);
+    }
+  }
+  return problems;
 }
 
 /**
@@ -815,15 +979,41 @@ async function check(args: DerivedCheckArgs, deps: DerivedCheckDeps, calculate: 
     const valueSetCache = await expandArtifactTerminology(derived, expand);
     // As production runs the measure: by type, except its trusted profiles (#591).
     const common = { deck, patients, valueSetCache, trustMetaProfile: false, trustedProfiles: semantics.trustedProfiles ?? [], calculate, strata: "compare" as const, limit: args.limit };
-    const report = await runAgreement({ ...common, artifact: derived });
+    // Every disagreement is kept (not the printed `--limit`): a listed miss is matched against all of them.
+    const report = await runAgreement({ ...common, artifact: derived, limit: Number.MAX_SAFE_INTEGER });
     log(renderAgreementMarkdown(report, { artifact: `WorkWell translation (${bundleSha}); terminology: its own sidecar`, engine: common.trustedProfiles.length > 0 ? `retrieves by type, except ${common.trustedProfiles.join(", ")}` : "retrieves by type", namePatients: false, limit: args.limit }));
     const broken = await runAgreement({ ...common, artifact: { ...derived, bundle: withInitialPopulationBroken(derived.bundle) } });
     const before = rowsAgreeing(report);
     const after = rowsAgreeing(broken);
     const lowered = after < before;
     log(`${id}: cypress-deck non-vacuity, "Initial Population" forced false → rows agreeing ${before} → ${after} ${lowered ? "(the oracle runs the translation)" : "— FAIL: the oracle is not running the translation"}`);
-    const deckPass = agreementPasses(report) && lowered;
-    if (!agreementPasses(report)) failures.push(`cypress-deck: ${report.patientsAgreeing}/${report.patients} patients agree on every row`);
+    // Rows the translation may miss, each one CMS's own logic misses identically on this deck (#816).
+    const listedFile = readJsonBeside(dir, DECK_EXPECTED_FILE);
+    let listedMisses: { patients: number; sha256: string } | undefined;
+    let rowsPass = agreementPasses(report);
+    if (!listedFile.absent) {
+      if ("problem" in listedFile) throw new Refusal(listedFile.problem);
+      let listed: ExpectedDeckMiss[];
+      try {
+        listed = parseExpectedDeckMisses(listedFile.json);
+      } catch (error) {
+        throw new Refusal(`${DECK_EXPECTED_FILE}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (!official) throw new Refusal(`${DECK_EXPECTED_FILE} needs CMS's own artifact for ${id} to run on the deck, and there is none`);
+      const cmsCache = await expandArtifactTerminology(official, expand);
+      const cms = await runAgreement({ ...common, valueSetCache: cmsCache, artifact: official, limit: Number.MAX_SAFE_INTEGER });
+      const problems = deckMissProblems(report, cms, listed);
+      for (const problem of problems) failures.push(`cypress-deck: ${problem}`);
+      rowsPass = problems.length === 0;
+      listedMisses = { patients: new Set(listed.map((m) => m.patientId)).size, sha256: sha256OfFile(join(dir, DECK_EXPECTED_FILE), DECK_EXPECTED_FILE) };
+      log(
+        `${id}: cypress-deck listed misses: ${listed.length} row(s) of ${listedMisses.patients} patient(s) in ${DECK_EXPECTED_FILE} (${listedMisses.sha256}); ` +
+          `CMS's own logic on this deck: ${cms.patientsAgreeing}/${cms.patients} — ${rowsPass ? "every listed row is CMS's own miss, and nothing else is missed" : "FAIL"}`,
+      );
+    } else if (!rowsPass) {
+      failures.push(`cypress-deck: ${report.patientsAgreeing}/${report.patients} patients agree on every row`);
+    }
+    const deckPass = rowsPass && lowered;
     if (!lowered) failures.push("cypress-deck: breaking the translation did not lower agreement");
     records.push({
       name: "cypress-deck",
@@ -831,10 +1021,11 @@ async function check(args: DerivedCheckArgs, deps: DerivedCheckDeps, calculate: 
       period: { start: deck.period.start, end: deck.period.end },
       agree: report.patientsAgreeing,
       total: report.patients,
+      ...(listedMisses ? { listedMisses } : {}),
       result: deckPass ? "pass" : "fail",
       ranAgainst,
     });
-    log(`${id}: cypress-deck ${report.patientsAgreeing}/${report.patients} · input ${deck.inputSha256} · period ${deck.period.start}..${deck.period.end} — ${deckPass ? "PASS" : "FAIL"}`);
+    log(`${id}: cypress-deck ${report.patientsAgreeing}/${report.patients}${listedMisses ? ` (+${listedMisses.patients} listed)` : ""} · input ${deck.inputSha256} · period ${deck.period.start}..${deck.period.end} — ${deckPass ? "PASS" : "FAIL"}`);
 
     const csvPath = at(args.csv ?? join(args.cypressBundle!, "value-sets", "value-set-codes.csv"));
     const release = args.release ?? deck.meta.release;
@@ -1051,7 +1242,28 @@ async function madie(
   if (c.stratifiersEqual !== c.cases) problems.push(`stratifiers differ on ${c.cases - c.stratifiersEqual} case(s)`);
   if (populationMatch.unexpected.length > 0) problems.push(`${populationMatch.unexpected.length} case(s)' populations differ that ${EXPECTED_DIFFERENCES_FILE} does not list`);
   if (populationMatch.missing.length > 0) problems.push(`${populationMatch.missing.length} population difference(s) ${EXPECTED_DIFFERENCES_FILE} lists were not observed`);
-  const { missing, unexpected } = matchExpectedDifferences(c.statementDifferences, expected?.defines ?? []);
+  const presence = excusePresence(c.statementDifferences, expected?.presence ?? []);
+  if (expected && expected.presence.length > 0) {
+    type BundleLike = { entry?: Array<{ resource?: Record<string, unknown> }> };
+    const definesOf = (bundle: BundleLike, rename: (name: string) => string) =>
+      new Map(
+        resourcesOf(bundle)
+          .filter((r) => r["resourceType"] === "Library")
+          .map((r) => [rename(String(r["name"])), new Set((elmOfLibrary(r).library.statements?.def ?? []).filter((d) => d.type !== "FunctionDef").map((d) => String(d.name)))] as const),
+      );
+    const renamed = new Map<string, string>([[ourMain, cmsMain], ...changed.map((library) => [library.name, library.from.name] as [string, string])]);
+    problems.push(
+      ...presenceProblems(
+        expected.presence,
+        definesOf(loaded.measureBundle as unknown as BundleLike, (n) => n),
+        definesOf(derived.bundle as unknown as BundleLike, (n) => renamed.get(n) ?? n),
+      ).map((p) => `${EXPECTED_DIFFERENCES_FILE}: ${p}`),
+    );
+    for (const entry of presence.unseen) {
+      problems.push(`${EXPECTED_DIFFERENCES_FILE}: ${entry.key}'s presence in ${entry.presentIn === "cms" ? "CMS's" : "the translation's"} logic only was not observed on any case`);
+    }
+  }
+  const { missing, unexpected } = matchExpectedDifferences(presence.remaining, expected?.defines ?? []);
   if (expected === undefined) {
     if (unexpected.length > 0) problems.push(`${unexpected.length} define value(s) differ, and no ${EXPECTED_DIFFERENCES_FILE} lists any`);
   } else {
@@ -1065,7 +1277,11 @@ async function madie(
     listedPopulations > 0 || populationMatch.unexpected.length > 0
       ? ` · listed population differences ${listedPopulations - populationMatch.missing.length}/${listedPopulations} observed, ${populationMatch.unexpected.length} unlisted`
       : "";
-  const listed = expected === undefined ? "" : ` · listed differences ${expected.defines.length - missing.length}/${expected.defines.length} observed, ${unexpected.length} unlisted`;
+  const listed =
+    expected === undefined
+      ? ""
+      : ` · listed differences ${expected.defines.length - missing.length}/${expected.defines.length} observed, ${unexpected.length} unlisted` +
+        (expected.presence.length > 0 ? ` · ${presence.excused.length} excused by ${expected.presence.length} presence entr${expected.presence.length === 1 ? "y" : "ies"}` : "");
   deps.log(
     `${id}: madie ${c.cases} cases · status ${c.statusEqual} · rates ${c.ratesEqual} · stratifiers ${c.stratifiersEqual}${populationsNote} · ` +
       `define values ${c.statementsCompared - c.statementsDiffering}/${c.statementsCompared} equal${listed} — ${problems.length ? "FAIL" : "PASS"} (reported, never recorded)`,

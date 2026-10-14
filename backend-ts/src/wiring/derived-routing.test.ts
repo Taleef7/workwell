@@ -169,6 +169,20 @@ test("D1–D8: each unfit translation is refused with its own sentence", () => {
   const oracles = derived.manifest.derived!.oracles;
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.filter((o) => o.name !== "terminology-equivalence") } })), /no passing 'terminology-equivalence' check/);
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => (o.name === "cypress-deck" ? { ...o, agree: 35 } : o)) } })), /no passing 'cypress-deck' check/);
+  // Listed deck misses (#816): the rest of the deck's patients, each a row CMS's own logic misses too, as
+  // derived:check matched them against a file whose hash the record carries. Only on the deck check, and
+  // only when the counts add up.
+  const deckTotal = oracles.find((o) => o.name === "cypress-deck")!.total;
+  const sha = `sha256:${"a".repeat(64)}`;
+  const withOracle = (name: string, change: Record<string, unknown>) =>
+    withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => (o.name === name ? { ...o, ...change } : o)) } });
+  assert.deepEqual(problemsWith(withOracle("cypress-deck", { agree: deckTotal - 2, listedMisses: { patients: 2, sha256: sha } })), [], "two listed misses account for the two patients that do not agree");
+  expect(problemsWith(withOracle("cypress-deck", { agree: deckTotal - 3, listedMisses: { patients: 2, sha256: sha } })), /no passing 'cypress-deck' check/);
+  expect(problemsWith(withOracle("cypress-deck", { agree: deckTotal - 2, listedMisses: { patients: 2, sha256: "sha256:short" } })), /no passing 'cypress-deck' check/);
+  expect(problemsWith(withOracle("cypress-deck", { agree: deckTotal - 2, listedMisses: { patients: 1.5, sha256: sha } })), /no passing 'cypress-deck' check/);
+  expect(problemsWith(withOracle("cypress-deck", { agree: deckTotal, listedMisses: { patients: 0, sha256: sha } })), /no passing 'cypress-deck' check/);
+  const termTotal = oracles.find((o) => o.name === "terminology-equivalence")!.total;
+  expect(problemsWith(withOracle("terminology-equivalence", { agree: termTotal - 1, listedMisses: { patients: 1, sha256: sha } })), /no passing 'terminology-equivalence' check/);
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => ({ ...o, ranAgainst: { ...o.ranAgainst, artifactSha256: "sha256:other" } })) } })), /ran against a different artifact/);
   expect(problemsWith(withManifest({ derived: { ...derived.manifest.derived!, oracles: oracles.map((o) => ({ ...o, ranAgainst: { ...o.ranAgainst, terminologySha256: "sha256:other" } })) } })), /different artifact or terminology/);
   // D7's periods: each record covers one calendar year, and the codes are proven for the translation's own.
