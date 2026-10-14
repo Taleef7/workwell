@@ -430,7 +430,7 @@ test("PR-9c: the shipped configuration constructs cleanly — no routing problem
 //
 // The same "the workflow IS the source of truth" rule as the official list, for the same reason: the
 // router refuses an unfit translation at ENGINE construction, per request, while /actuator/health stays
-// 200. The Maui deployment ships cms137's translation (pinned below) and TWH and staging ship none; each
+// 200. Maui and TWH ship translations (each list pinned below) and staging ships none; each
 // check fails the moment a workflow names a translation it cannot route, and the fixture tests prove that.
 // ---------------------------------------------------------------------------
 
@@ -506,12 +506,16 @@ test(`${DERIVED_KEY}: the shipping rule and its parser refuse a fixture workflow
   assert.match(problemsFor(fixture("cms137", "")).join("\n"), /present but empty/);
 });
 
-test(`${DERIVED_KEY}: TWH and staging ship no translation`, () => {
-  // Translations exist for the pilot's performance year (decision 3). Turning one on for the occupational
-  // stack or for staging is its own decision, so it must fail here rather than ride along with a Maui change.
-  for (const workflow of ["deploy-twh-mieweb.yml", "deploy-staging-mieweb.yml"]) {
-    assert.equal(shippedDerived(workflow), null, `${workflow} ships ${DERIVED_KEY}`);
-  }
+test(`${DERIVED_KEY}: staging ships no translation`, () => {
+  // Turning one on for staging is its own decision, so it must fail here rather than ride along with
+  // another stack's change.
+  assert.equal(shippedDerived("deploy-staging-mieweb.yml"), null, `deploy-staging-mieweb.yml ships ${DERIVED_KEY}`);
+});
+
+test(`${DERIVED_KEY}: the TWH deployment ships the cms125 and cms122 translations`, () => {
+  // TWH routes CMS's artifacts for these two only (its other measures are authored, with no CMS version),
+  // and scores them with the same 2027 logic as Maui (#820). Pinned for the same reason as Maui's list.
+  assert.deepEqual(shippedDerived("deploy-twh-mieweb.yml"), ["cms125", "cms122"], `deploy-twh-mieweb.yml must ship ${DERIVED_KEY}=cms125,cms122`);
 });
 
 test(`${DERIVED_KEY}: the Maui deployment ships the cms137, cms130, cms125, cms165 and cms122 translations`, () => {
@@ -613,23 +617,26 @@ function translationVendoring(yaml: string, job: string) {
   return { vendored, unread, failSoft, build };
 }
 
-test(`${DERIVED_KEY}: deploy-maui vendors every shipped translation with --verify-pin, before it builds the image`, () => {
+test(`${DERIVED_KEY}: every deploy vendors each shipped translation with --verify-pin, before it builds the image`, () => {
   // The worker boots even when the router refuses a translation (it only logs), and then every evaluating
   // route 500s behind a green health check. So the sidecar is produced, and its pin verified, in the job
   // that builds the image and BEFORE it does: a failed vendoring then fails the deploy instead of shipping.
-  const workflow = "deploy-maui-mieweb.yml";
-  const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
-  const { vendored, unread, failSoft, build } = translationVendoring(readFileSync(path, "utf8"), "build-backend-ts");
-  assert.ok(build >= 0, `${workflow}: build-backend-ts builds no image that this guard can find, so it is not looking at what it guards`);
-  assert.deepEqual(unread, [], `${workflow}: a translation is vendored only as "node scripts/vendor-derived-terminology.mjs --catalog-id <id> --verify-pin"`);
-  assert.deepEqual(failSoft, [], `${workflow}: the step that vendors a translation must fail the job when the vendoring fails`);
-  assert.deepEqual(
-    vendored.map((v) => v.id).sort(),
-    [...(shippedDerived(workflow) ?? [])].sort(),
-    `${workflow}: the translations its build job vendors must be exactly the ${DERIVED_KEY} it ships`,
-  );
-  for (const { id, line } of vendored) {
-    assert.ok(line < build, `${workflow}: ${id} is vendored after the image is built, so the image ships without its sidecar`);
+  const shipping = WORKFLOWS.filter((workflow) => shippedDerived(workflow) !== null);
+  assert.deepEqual(shipping.sort(), ["deploy-maui-mieweb.yml", "deploy-twh-mieweb.yml"], "the stacks that ship a translation");
+  for (const workflow of shipping) {
+    const path = fileURLToPath(new URL(`../../../.github/workflows/${workflow}`, import.meta.url));
+    const { vendored, unread, failSoft, build } = translationVendoring(readFileSync(path, "utf8"), "build-backend-ts");
+    assert.ok(build >= 0, `${workflow}: build-backend-ts builds no image that this guard can find, so it is not looking at what it guards`);
+    assert.deepEqual(unread, [], `${workflow}: a translation is vendored only as "node scripts/vendor-derived-terminology.mjs --catalog-id <id> --verify-pin"`);
+    assert.deepEqual(failSoft, [], `${workflow}: the step that vendors a translation must fail the job when the vendoring fails`);
+    assert.deepEqual(
+      vendored.map((v) => v.id).sort(),
+      [...(shippedDerived(workflow) ?? [])].sort(),
+      `${workflow}: the translations its build job vendors must be exactly the ${DERIVED_KEY} it ships`,
+    );
+    for (const { id, line } of vendored) {
+      assert.ok(line < build, `${workflow}: ${id} is vendored after the image is built, so the image ships without its sidecar`);
+    }
   }
 });
 

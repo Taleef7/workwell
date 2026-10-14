@@ -121,10 +121,19 @@ jobs:
           node scripts/vendor-official-measure.mjs --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --complete-terminology
           node scripts/vendor-official-measure.mjs --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --complete-terminology
           node scripts/vendor-official-measure.mjs --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --complete-terminology
-      # The vendored artifact must not have changed — only the gitignored sidecar is new. A non-empty
-      # diff means the committed bundle does not match its pin, which must never reach a deploy image.
+          # Each WorkWell translation this stack routes, one explicit line per id. The list must equal the
+          # WORKWELL_DERIVED_MEASURES build arg below, and every line must come before the image is
+          # built; official-flip-config.test.ts enforces both. Every value set is re-expanded at
+          # the VSAC release the committed manifest names, and --verify-pin exits 1 unless the bytes hash
+          # to its pin. That gate has to run HERE: the worker boots even when the router refuses a
+          # translation, then every evaluating route 500s while /actuator/health stays 200.
+          node scripts/vendor-derived-terminology.mjs --catalog-id cms125 --verify-pin
+          node scripts/vendor-derived-terminology.mjs --catalog-id cms122 --verify-pin
+      # The vendored artifacts must not have changed — only the gitignored sidecars are new. A non-empty
+      # diff means a committed bundle does not match its pin, or a translation vendor step rewrote a
+      # committed file instead of verifying it; neither may reach a deploy image.
       - name: The committed artifact is reproducible from its pin
-        run: git diff --exit-code backend-ts/measures/official
+        run: git diff --exit-code backend-ts/measures/official backend-ts/measures/derived
 
       - uses: docker/login-action@v4
         with:
@@ -145,9 +154,14 @@ jobs:
           # evaluates the synthetic roster (docs/evidence/PR9C_FLIP_SNAPSHOT_2026-07-30.md). Rollback is
           # removing an id here and redeploying; logic_version carries the artifact's identity (ADR-040),
           # so a flip in either direction invalidates eval_state by construction.
+          #
+          # The WorkWell translations of CMS125v15 and CMS122v15 (WORKWELL_DERIVED_MEASURES, #820) score
+          # 2027 only, as on Maui; CMS's artifacts still score every other year. Each id must be vendored
+          # above with --verify-pin. TWH's other measures are authored occupational ones with no CMS version.
           build-args: |
             WORKWELL_BUILD_SHA=${{ github.sha }}
             WORKWELL_OFFICIAL_MEASURES=cms122,cms125
+            WORKWELL_DERIVED_MEASURES=cms125,cms122
           tags: |
             ${{ env.BACKEND_TS_IMAGE }}:latest
             ${{ env.BACKEND_TS_IMAGE }}:sha-${{ github.sha }}
@@ -325,7 +339,7 @@ jobs:
           HEALTH_URL: ${{ env.BACKEND_TS_URL }}/health
           EXPECTED_SHA: ${{ github.sha }}
           EXPECTED_OFFICIAL: cms122,cms125
-          EXPECTED_DERIVED: ""
+          EXPECTED_DERIVED: cms125,cms122
         run: bash .github/scripts/verify-routing-health.sh
 
   deploy-frontend:
