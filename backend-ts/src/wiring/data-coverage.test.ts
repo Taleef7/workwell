@@ -187,6 +187,9 @@ test("#776: the coverage of every logic the Maui sandbox scores with is pinned",
     "cms165 workwell-translation": cmsWithDevices,
     // Its edits change which assessment the numerator reads, not what is retrieved (#818).
     "cms122 workwell-translation": cmsWithDevices,
+    // Its edits add a Procedure read (Active Depression Management) and move a MedicationRequest read into its
+    // own define, so by type it reads what CMS's artifact reads (#822).
+    "cms2 workwell-translation": withoutDevices,
   });
 });
 

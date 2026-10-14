@@ -115,6 +115,23 @@ const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
     added: 60,
     removed: 48,
   },
+  // cms2 (ww-2027.1, #822): eight sets the release moved, and one the LOGIC edit adds: CMS2v16's Active
+  // Depression Management (…1248.413), which CMS's 2026 sidecar does not have (both its codes "added").
+  cms2: {
+    oids: [
+      "2.16.840.1.113762.1.4.1248.413", // Active Depression Management (+2: new in v16)
+      "2.16.840.1.113883.3.464.1003.101.12.1080", // Telephone Visits (+9)
+      "2.16.840.1.113883.3.526.3.1007", // Medical Reason (+1)
+      "2.16.840.1.113883.3.526.3.1022", // Physical Therapy Evaluation (+1)
+      "2.16.840.1.113883.3.526.3.1566", // Adult Depression Medications (−5)
+      "2.16.840.1.113883.3.526.3.1568", // Follow Up for Adult Depression (+4)
+      "2.16.840.1.113883.3.526.3.1569", // Follow Up for Adolescent Depression (+4)
+      "2.16.840.1.113883.3.526.3.1570", // Referral for Adolescent Depression (+1)
+      "2.16.840.1.113883.3.526.3.1571", // Referral for Adult Depression (+1)
+    ],
+    added: 23,
+    removed: 5,
+  },
   cms130: {
     oids: [
       "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)

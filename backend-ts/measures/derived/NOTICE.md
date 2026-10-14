@@ -44,6 +44,11 @@ included.
   requirements were edited to match. Its logic is MODIFIED from the measure steward's (NCQA's), under the
   same carried notice as `cms130/`. `cypress-expected-differences.json` beside it lists the two Cypress
   deck rows CMS's own logic misses too.
+- `cms2/` — WorkWell translation of CMS2v16 (`ww-2027.1`), built from CMS's CMS2FHIR v1.0.000 CQL with six
+  edits in the main library: v16's follow-up window, its active-depression-management path (a value set new in
+  v16) and the active-medication path as its own define. Its logic is MODIFIED from the measure steward's
+  (CMS's, developed under contract by AIR). The notice on its Measure is the steward's, carried verbatim; it
+  sets no approval condition on use, and the code sets it contains keep their owners' licenses.
 - `cms122/` — WorkWell translation of CMS122v15 (`ww-2027.1`), built from CMS's CMS122FHIR v1.0.000 CQL
   with three edits: the same AdvancedIllnessandFrailty edit (the same changed library), and CMS122v15's
   choice of glycemic status assessment in the main library. Its logic is MODIFIED from the measure
