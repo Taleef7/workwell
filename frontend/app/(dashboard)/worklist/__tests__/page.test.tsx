@@ -667,3 +667,51 @@ describe("WorklistPage — search as you type (#658)", () => {
     await waitFor(() => expect(searchBox()).toHaveValue(""));
   });
 });
+
+describe("WorklistPage — the count line never says zero for a list it does not have", () => {
+  it("while the list is loading it says so, not \"0 patients with open gaps\"", async () => {
+    getWithHeaders.mockReturnValue(new Promise(() => {}));
+    render(<WorklistPage />);
+    expect(await screen.findByText(/Loading (patients|employees)…/)).toBeInTheDocument();
+    expect(screen.queryByText(/\b0 (patients|employees) with open gaps/)).toBeNull();
+  });
+
+  it("a failed load says it failed, offers Try again, and the retry shows the real count", async () => {
+    getWithHeaders.mockRejectedValue(new Error("Gateway Timeout"));
+    render(<WorklistPage />);
+    expect(await screen.findByText(/The (patients|employees) could not be loaded\./)).toBeInTheDocument();
+    expect(screen.queryByText(/\b0 (patients|employees) with open gaps/)).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent("Gateway Timeout");
+    // Nor does the table claim that no patient matches a list it never received.
+    expect(screen.queryByText(/match these filters/)).toBeNull();
+
+    getWithHeaders.mockResolvedValue({ data: [TWO_GAP_PATIENT], headers: new Headers({ "X-Total-Count": "1" }) });
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText(/1 (patient|employee) with open gaps\./)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a failed bulk assign keeps the count and offers no list reload", async () => {
+    render(<WorklistPage />);
+    expect(await screen.findByText(/1 (patient|employee) with open gaps\./)).toBeInTheDocument();
+    post.mockRejectedValueOnce(new Error("Bad Gateway"));
+    await userEvent.click(await screen.findByRole("checkbox", { name: /select lisa carter/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /assignee for selected/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /quality-staff@maui\.workwell\.dev/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^Assign \d+ open gap/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Bad Gateway");
+    expect(screen.getByText(/1 (patient|employee) with open gaps\./)).toBeInTheDocument();
+    expect(screen.queryByText(/could not be loaded/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  it("a reload keeps the last count instead of flipping to Loading", async () => {
+    render(<WorklistPage />);
+    expect(await screen.findByText(/1 (patient|employee) with open gaps\./)).toBeInTheDocument();
+    getWithHeaders.mockReturnValue(new Promise(() => {}));
+    navHolder.current.setUrl("/worklist?measureId=cms125");
+    await waitFor(() => expect(listCalls().some((u) => u.includes("measureId=cms125"))).toBe(true));
+    expect(screen.getByText(/1 (patient|employee) with open gaps\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Loading (patients|employees)…/)).toBeNull();
+  });
+});

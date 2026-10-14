@@ -193,6 +193,9 @@ export function singleScoringLogic(logics: readonly ScoringLogic[] | null | unde
   return logics && logics.length === 1 ? logics[0] : null;
 }
 
+/** How long to wait before retrying a failed first `/api/measures` fetch, one entry per retry. */
+export const IDENTITY_RETRY_DELAYS_MS = [1000, 4000] as const;
+
 export function useMeasureIdentities() {
   const api = useApi();
   const [identities, setIdentities] = useState<Record<string, MeasureIdentity | null>>({});
@@ -203,37 +206,61 @@ export function useMeasureIdentities() {
   const [error, setError] = useState<string | null>(null);
   const reqIdRef = useRef(0);
   const mountedRef = useRef(true);
+  // Whether any fetch has succeeded. Until one has, a failure is retried: no page reads `error`, so a
+  // first fetch that failed (a worker still warming after a deploy) left every label without its MIPS
+  // id for the life of the page.
+  const loadedRef = useRef(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchIdentities = useCallback(async () => {
-    const reqId = ++reqIdRef.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const measures = await api.get<MeasureListItem[]>("/api/measures");
-      if (!mountedRef.current || reqId !== reqIdRef.current) return;
-      const map: Record<string, MeasureIdentity | null> = {};
-      const rows = Array.isArray(measures) ? measures : [];
-      for (const m of rows) {
-        map[m.id] = m.identity ?? null;
+  const fetchIdentities = useCallback(() => {
+    const run = async (attempt: number): Promise<void> => {
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
       }
-      setIdentities(map);
-      setMeasures(rows);
-    } catch (err) {
-      if (!mountedRef.current || reqId !== reqIdRef.current) return;
-      setError(err instanceof Error ? err.message : "Failed to load measure identities");
-    } finally {
-      if (mountedRef.current && reqId === reqIdRef.current) {
-        setLoading(false);
+      const reqId = ++reqIdRef.current;
+      setLoading(true);
+      setError(null);
+      try {
+        const measures = await api.get<MeasureListItem[]>("/api/measures");
+        if (!mountedRef.current || reqId !== reqIdRef.current) return;
+        const map: Record<string, MeasureIdentity | null> = {};
+        const rows = Array.isArray(measures) ? measures : [];
+        for (const m of rows) {
+          map[m.id] = m.identity ?? null;
+        }
+        setIdentities(map);
+        setMeasures(rows);
+        loadedRef.current = true;
+      } catch (err) {
+        if (!mountedRef.current || reqId !== reqIdRef.current) return;
+        setError(err instanceof Error ? err.message : "Failed to load measure identities");
+        // Bounded: a few seconds, then the page keeps the names it can show without the crosswalk.
+        if (!loadedRef.current && attempt < IDENTITY_RETRY_DELAYS_MS.length) {
+          retryTimerRef.current = setTimeout(() => {
+            retryTimerRef.current = null;
+            if (mountedRef.current) void run(attempt + 1);
+          }, IDENTITY_RETRY_DELAYS_MS[attempt]);
+        }
+      } finally {
+        // Still loading while a retry is pending: the chain settles on its last attempt.
+        if (mountedRef.current && reqId === reqIdRef.current && retryTimerRef.current === null) {
+          setLoading(false);
+        }
       }
-    }
+    };
+    return run(0);
   }, [api]);
 
   useEffect(() => {
     mountedRef.current = true;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void fetchIdentities();
     return () => {
       mountedRef.current = false;
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     };
   }, [fetchIdentities]);
 
