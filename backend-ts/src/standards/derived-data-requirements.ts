@@ -52,11 +52,14 @@
  * is MADiE's shape, not a guarantee of MADiE's output; nothing executes on `mustSupport` (fqm reads only
  * the code filters).
  *
- * Refused, with a sentence, until a translation needs them: a changed retrieve whose codes are a value set
- * in another library or a code (a direct-reference-code retrieve's entry carries `code`, not `valueSet`,
- * and its exact shape is not calibrated here); a changed retrieve with an ELM `codeFilter`, a comparator
- * other than `in`, or no `templateId`; a versioned code system or value set declaration, which no
- * committed artifact has. Pure and deterministic; the input resource is not modified.
+ * A changed retrieve of ONE local code (CMS165v15's Z94.0, #816) has the entry CMS138's committed Z71.6
+ * retrieves have: `codeFilter: [{ path, code: [{ system, code, display }] }]`, compared by `~`, with the
+ * code's name as the display (refused when its declared display differs, as that choice is not
+ * calibrated). Refused, with a sentence, until a translation needs them: a changed retrieve whose codes are
+ * a value set or a code in another library, or several codes; a changed retrieve with an ELM
+ * `codeFilter`, a value set compared other than by `in`, or no `templateId`; a versioned code system or
+ * value set declaration, which no committed artifact has. Pure and deterministic; the input resource is
+ * not modified.
  */
 import { dataSurfaceDifferences, elmDataSurface } from "./elm-data-surface.ts";
 
@@ -272,8 +275,14 @@ interface Projection {
   codeFilter: unknown;
 }
 
+/** A direct-reference code a retrieve filters by: the code and its code system's canonical. */
+interface DirectCode {
+  system: string;
+  code: string;
+}
+
 /** What a changed retrieve's `dataRequirement` entry is keyed by, or a refusal. */
-function entryKey(projection: string, side: string): { type: string; profile: string; codePath?: string; valueSet?: string } {
+function entryKey(projection: string, side: string): { type: string; profile: string; codePath?: string; valueSet?: string; directCode?: DirectCode } {
   const p = JSON.parse(projection) as Projection;
   const what = `a retrieve only ${side} has (${projection.length > 300 ? `${projection.slice(0, 300)}…` : projection})`;
   const type = typeof p.dataType === "string" ? FHIR_TYPE.exec(p.dataType)?.[1] : undefined;
@@ -292,7 +301,45 @@ function entryKey(projection: string, side: string): { type: string; profile: st
   if (JSON.stringify(p.codes).includes('"valueSetRef"')) {
     throw new Error(`${what} filters by a value set declared in another library, which is not supported until a translation needs it (MADiE's entry would name it, but this library's relatedArtifact cannot)`);
   }
-  throw new Error(`${what} filters by a code, not a value set, which is not supported until a translation needs it`);
+  // One local code, as the translator writes `[Condition: "Kidney transplant status"]`: `ToList(CodeRef)`,
+  // compared by `~` (CMS165v15, #816; the shape CMS138's committed Z71.6 retrieves have).
+  const operand = isNode(p.codes) && p.codes["type"] === "ToList" ? p.codes["operand"] : undefined;
+  const signature = isNode(p.codes) ? p.codes["signature"] : undefined;
+  const codeKeys = isNode(p.codes) ? Object.keys(p.codes).sort().join(",") : "";
+  if (isNode(operand) && (codeKeys === "operand,type" || (codeKeys === "operand,signature,type" && Array.isArray(signature) && signature.length === 0))) {
+    if (Object.keys(operand).sort().join(",") !== "code,system" || typeof operand["code"] !== "string" || typeof operand["system"] !== "string") {
+      throw new Error(`${what} filters by a code that is not one local code with its system, which is not supported until a translation needs it`);
+    }
+    // A local code's system resolves to its canonical; one in another library stays `<alias>:<name>`.
+    if (!/^(https?:\/\/|urn:)/.test(operand["system"])) {
+      throw new Error(`${what} filters by a code whose code system is not declared in this library (${operand["system"]}), which is not supported until a translation needs it`);
+    }
+    if (p.codeComparator !== "~") throw new Error(`${what} compares its code by '${String(p.codeComparator)}', not '~'`);
+    if (typeof p.codeProperty !== "string") throw new Error(`${what} names no code path`);
+    return { type, profile: p.templateId, codePath: p.codeProperty, directCode: { system: operand["system"], code: operand["code"] } };
+  }
+  throw new Error(`${what} filters by codes in a shape that is neither one value set nor one code, which is not supported until a translation needs it`);
+}
+
+/**
+ * The `display` MADiE writes in a direct-code entry's filter. CMS138's committed Z71.6 entries carry
+ * "Tobacco abuse counseling", which is both the code's CQL name and its declared display, so which of the
+ * two MADiE takes is not calibrated (its `cqf-directReferenceCode` takes the name). A code whose name and
+ * display differ is refused rather than guessed.
+ */
+function directCodeDisplay(library: Node, code: DirectCode, what: string): string {
+  const systems = new Map(defsOf(library, "codeSystems").map((d) => [String(d["name"]), String(d["id"])]));
+  const matches = defsOf(library, "codes").filter((d) => {
+    const ref = isNode(d["codeSystem"]) ? d["codeSystem"] : undefined;
+    return String(d["id"]) === code.code && ref !== undefined && ref["libraryName"] === undefined && systems.get(String(ref["name"])) === code.system;
+  });
+  if (matches.length !== 1) throw new Error(`${what}: ${matches.length} declarations of code ${code.code} (${code.system}), not one`);
+  const name = String(matches[0]!["name"]);
+  const display = matches[0]!["display"];
+  if (display !== undefined && display !== name) {
+    throw new Error(`${what}: code ${code.code} is declared as '${name}' with display '${String(display)}', and which of the two MADiE writes in a code filter is not calibrated`);
+  }
+  return name;
 }
 
 /** Does MADiE's `entry` describe the retrieve keyed `key`? `mustSupport` is not compared: it is MADiE's. */
@@ -301,14 +348,19 @@ function describes(entry: Node, key: ReturnType<typeof entryKey>): boolean {
   const profile = entry["profile"];
   if (!Array.isArray(profile) || profile.length !== 1 || profile[0] !== key.profile) return false;
   const filters = entry["codeFilter"];
-  if (key.valueSet === undefined) return filters === undefined || (Array.isArray(filters) && filters.length === 0);
+  if (key.valueSet === undefined && key.directCode === undefined) return filters === undefined || (Array.isArray(filters) && filters.length === 0);
   if (!Array.isArray(filters) || filters.length !== 1 || !isNode(filters[0])) return false;
   const filter = filters[0];
+  if (key.directCode !== undefined) {
+    const codes = filter["code"];
+    if (Object.keys(filter).length !== 2 || filter["path"] !== key.codePath || !Array.isArray(codes) || codes.length !== 1 || !isNode(codes[0])) return false;
+    return codes[0]["system"] === key.directCode.system && codes[0]["code"] === key.directCode.code;
+  }
   return Object.keys(filter).length === 2 && filter["path"] === key.codePath && filter["valueSet"] === key.valueSet;
 }
 
 /** The `dataRequirement` entry, in MADiE's shape, for one retrieve WorkWell's ELM has and CMS's does not. */
-function entryFor(site: RetrieveSite, key: ReturnType<typeof entryKey>): Node {
+function entryFor(site: RetrieveSite, key: ReturnType<typeof entryKey>, display?: string): Node {
   const mustSupport: string[] = [];
   const add = (path: string) => {
     if (!mustSupport.includes(path)) mustSupport.push(path);
@@ -320,6 +372,9 @@ function entryFor(site: RetrieveSite, key: ReturnType<typeof entryKey>): Node {
     profile: [key.profile],
     ...(mustSupport.length > 0 ? { mustSupport } : {}),
     ...(key.valueSet !== undefined ? { codeFilter: [{ path: key.codePath, valueSet: key.valueSet }] } : {}),
+    ...(key.directCode !== undefined
+      ? { codeFilter: [{ path: key.codePath, code: [{ system: key.directCode.system, code: key.directCode.code, display }] }] }
+      : {}),
   };
 }
 
@@ -371,7 +426,7 @@ export function recomputeDataRequirements<T extends LibraryResource>(library: T,
     const at = entries.findIndex((entry) => describes(entry, key));
     if (at < 0) {
       throw new Error(
-        `${name}: CMS's ELM retrieves ${key.type} (${key.profile}${key.valueSet ? `, value set ${key.valueSet}` : ""}), which WorkWell's does not, ` +
+        `${name}: CMS's ELM retrieves ${key.type} (${key.profile}${key.valueSet ? `, value set ${key.valueSet}` : ""}${key.directCode ? `, code ${key.directCode.code}` : ""}), which WorkWell's does not, ` +
           "but no dataRequirement entry describes that retrieve, so there is no entry to remove; the list is not MADiE's one entry per retrieve",
       );
     }
@@ -383,7 +438,8 @@ export function recomputeDataRequirements<T extends LibraryResource>(library: T,
     const at = pending.indexOf(projection);
     if (at < 0) continue;
     pending.splice(at, 1);
-    entries.push(entryFor(site, entryKey(projection, "WorkWell's ELM")));
+    const key = entryKey(projection, "WorkWell's ELM");
+    entries.push(entryFor(site, key, key.directCode ? directCodeDisplay(ours, key.directCode, name) : undefined));
   }
   setList(out, "dataRequirement", entries);
   return out as T;
