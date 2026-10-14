@@ -88,6 +88,16 @@ match its logic. On CMS's own test deck three patients move (two lose the exclus
 the frailty edit), each listed and explained; 22 hand-built patients test every edit
 (`backend-ts/measures/derived/cms125/README.md`).
 
+**For 2027, Maui scores CMS165 with WorkWell's translation of CMS165v15** (ww-2027.1, #816). Its
+blood-pressure logic is CMS's, unchanged. Its exclusions follow v15: the same frailty edit; pregnancy and
+renal diagnoses become two exclusions, and a renal diagnosis (ESRD, CKD stage 5, kidney transplant status)
+now counts when it **started on or before the year's end**, even if it ended earlier; kidney transplant status
+is the code Z94.0; the ESRD monthly-visit exclusion is gone; and the hypertension window and the dialysis
+date comparisons become day-precise. On the 2027 Cypress deck it matches 42 of 44 patients: the other two are
+blood pressures taken during an emergency stay, which CMS's own logic misses the same way, because a QRDA
+file does not tie a reading to its visit. On CMS's own test deck two patients move, each explained; 12
+hand-built patients test every edit (`backend-ts/measures/derived/cms165/README.md`).
+
 > **CMS165 reads a blood pressure by its profile, and nothing else by profile (#591, 2026-10-10).**
 > CMS165 is the only pilot measure whose decisive retrieve identifies a blood pressure by PROFILE alone
 > with no code filter. Read by resource type, it matched any final Observation, so a patient with any
@@ -120,7 +130,7 @@ the frailty edit), each listed and explained; 22 hand-built patients test every 
 
 **An officially routed measure is scored over the calendar year** containing the evaluation date, not a
 rolling 365-day window (ADR-072). The vendored artifacts are a **2026 vintage** and the pilot year is 2027.
-Where a WorkWell translation covers the year (CMS137, CMS130 and CMS125 on Maui, #767, #779, #782), it scores the run with no warning.
+Where a WorkWell translation covers the year (CMS137, CMS130, CMS125 and CMS165 on Maui, #767, #779, #782, #816), it scores the run with no warning.
 Otherwise the run logs an `effectivePeriod` warning naming both periods, and the measure page says
 "Scored with the 2026 FHIR logic; 2027 logic not yet available" beside the rate, or "…; <translation>
 applies from the next run" for a run scored before the translation was routed (the programs summary's

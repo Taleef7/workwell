@@ -1,0 +1,14 @@
+[
+  {
+    "patientId": "6a8df6bcc47acab944e4695c",
+    "set": 0,
+    "diffs": ["NUMER 0→1"],
+    "reason": "Z4_DQ_1: the most recent reading (130/60, 2025-12-10T17:05) was taken during an emergency hospital admission (SNOMED 183452005, 2025-12-10T17:00 to 2025-12-11T12:00), so the deck leaves it out and scores the earlier 150/60 as not controlled. CMS's FHIR logic keeps any reading whose Observation.encounter is not an ED or inpatient class, and a QRDA I document states no encounter link on a reading, so the reading is counted (by CMS's 2026 logic on this deck as well)."
+  },
+  {
+    "patientId": "6a8df73cc47acab944e47ebf",
+    "set": 0,
+    "diffs": ["NUMER 0→1"],
+    "reason": "Z4_DQ_2: as Z4_DQ_1, with an emergency department visit (CPT 99281, 2025-12-06T17:00 to 21:45): the deck leaves out the reading taken during it; CMS's FHIR logic keeps it, since the QRDA I document states no encounter link on the reading (CMS's 2026 logic on this deck as well)."
+  }
+]

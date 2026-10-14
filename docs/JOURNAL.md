@@ -14,6 +14,28 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - Every result label (programs cards, work list, cases, patient pages) lost its "MIPS 112 ·" prefix
     for the life of the page when the first `/api/measures` fetch failed on a worker still warming up.
     No page reads the hook's error. A failed first fetch is now retried twice (after 1 s and 4 s).
+- **The remaining 2027 translations move up (scope change, owner decision today).** The plan was to wait
+  until 2026-11-20 for CMS's own 2027 FHIR logic before building CMS122 and CMS165. Instead all three
+  remaining measures are translated now (CMS165v15, then CMS122v15, then CMS2v16), and the CMS125 and CMS122
+  translations are to be routed on TWH too. If CMS publishes its own 2027 logic later, it replaces ours by
+  year.
+- **CMS165 for 2027: WorkWell's translation of CMS165v15, routed on Maui (#816).**
+  - **The logic:** ten edits. The frailty look-back (as CMS130 and CMS125). Pregnancy and renal diagnoses
+    become two exclusions, and a renal diagnosis now counts when it started on or before the period's end,
+    even if it ended earlier. Kidney transplant status is the code Z94.0. The ESRD monthly-encounter
+    exclusion is removed. The hypertension window and the dialysis comparison are day-precise. The
+    blood-pressure logic is CMS's, unchanged.
+  - **The builder:** the data-requirements recompute now supports a direct-reference-code retrieve, in the
+    exact shape MADiE wrote for CMS138's Z71.6 (pinned against it both ways).
+  - **The checker:**
+    - `madie-expected-differences.json` takes a third kind of entry: a define only one side has, on every
+      case, which the ELM must bear out. CMS165's split and removed defines are 272 such differences.
+    - `cypress-expected-differences.json` lists deck rows a translation may miss (owner decision today). A
+      row passes only if it is listed and CMS's own 2026 logic misses it the same way on the same deck. The
+      record carries the file's hash, and the router's D7 accepts agree + listed = total.
+  - **The evidence:** Cypress 42/44 plus the 2 listed misses: blood pressures taken during an emergency
+    stay, which a QRDA I document cannot tie to its visit, so CMS's own logic misses them too. MADiE: two
+    population moves, each explained. 12 hand-built patients, 9 of which tell the logics apart.
 
 ## 2026-10-13
 

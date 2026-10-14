@@ -80,6 +80,26 @@ const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
     added: 70,
     removed: 19,
   },
+  // cms165 (ww-2027.1, #816): eight sets the release moved, and two that are the LOGIC edit's: CMS165v15
+  // removes the ESRD monthly outpatient encounter exclusion (…109.12.1014, its 25 codes all "removed") and
+  // reads kidney transplant status by the code Z94.0, not the Kidney Transplant Recipient set (…109.12.1029,
+  // whose one code is that Z94.0). The translation declares neither, so its sidecar has neither.
+  cms165: {
+    oids: [
+      "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)
+      "2.16.840.1.113883.3.464.1003.101.12.1080", // Telephone Visits (+9)
+      "2.16.840.1.113883.3.464.1003.101.12.1089", // Virtual Encounter (+2/−4)
+      "2.16.840.1.113883.3.464.1003.109.12.1012", // Kidney Transplant (+1)
+      "2.16.840.1.113883.3.464.1003.109.12.1013", // Dialysis Services (+9/−6)
+      "2.16.840.1.113883.3.464.1003.109.12.1014", // ESRD Monthly Outpatient Services (−25: the exclusion the edit removes)
+      "2.16.840.1.113883.3.464.1003.109.12.1029", // Kidney Transplant Recipient (−1: replaced by the code Z94.0)
+      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+25)
+      "2.16.840.1.113883.3.464.1003.118.12.1300", // Frailty Device (−12)
+      "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient (+4)
+    ],
+    added: 60,
+    removed: 48,
+  },
   cms130: {
     oids: [
       "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)
