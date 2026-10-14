@@ -153,7 +153,7 @@ pilot group's reported rates, so on the patient profile every rate screen calls 
 > PY2027 FHIR content is a **profile migration plus a full MADiE re-gate per measure**, not a refresh —
 > re-sized in `ROADMAP_2026-08-30.md` MM-1d and §7.9. Until then, a measure without a WorkWell
 > translation fires the `effectivePeriod` warning through 2027, which is the warning doing its job rather
-> than a defect to silence; CMS137, CMS130 and CMS125 have one (#767, #779, #782). Check the repository for a release tag before assuming
+> than a defect to silence; CMS137, CMS130, CMS125 and CMS165 have one (#767, #779, #782, #816). Check the repository for a release tag before assuming
 > this is still true.
 
 Outcome buckets (all measures): `COMPLIANT`, `DUE_SOON`, `OVERDUE`, `MISSING_DATA`, `EXCLUDED`.
