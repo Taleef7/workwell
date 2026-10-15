@@ -244,11 +244,11 @@ test("the Maui deployment actually ships the corpus size, and it is the 20,000-p
   // Agreement alone is satisfied by BOTH workflows omitting the key, which is the vacuous reading of
   // the test above — and would leave the pilot on the 48-row fixture while every doc said 20,000.
   assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_MAUI_CORPUS_SIZE"), "20000");
-  // Retention is ON since 2026-09-07 (issue #535). It was pinned ABSENT here until then, precisely so
-  // that turning it on had to be a deliberate edit of this line rather than a value that slipped in —
-  // which is what this now is. 400 days until 2026-09-30, then 90 to stop the sandbox's storage growing
-  // on metered Neon (ADR-073: calibrated for a sandbox, revisited before a real performance year).
-  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), "90");
+  // Retention is PAUSED since 2026-10-15 (owner decision). It was on from 2026-09-07 (#535; 400 days,
+  // then 90 from 2026-09-30), but no compaction has deleted yet, and the first would be an unattended,
+  // unmeasured bulk DELETE in a nightly around 2026-11-30. It returns only after a measured hand pass on a
+  // restored copy, as a deliberate edit of this line.
+  assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_OUTCOME_RETENTION_DAYS"), null);
   // Weekdays only since 2026-09-30: each nightly is 20,000 synthetic patients on metered compute.
   assert.equal(shippedValue("deploy-maui-mieweb.yml", "WORKWELL_SCHEDULER_DAYS"), "1-5");
   // ADR-073 d1's condition, enforced instead of remembered: Maui turns retention on ONLY alongside the

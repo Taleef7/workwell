@@ -265,7 +265,9 @@ jobs:
                 # 409. The oldest outcome rows date from 2026-09-01, so nothing is deleted before the end
                 # of November. Both workflows carry it; official-flip-config.test.ts asserts they agree.
                 # No apostrophes in this comment: it lives inside a single-quoted shell string.
-                {key: "WORKWELL_OUTCOME_RETENTION_DAYS", value: "90"},
+                # WORKWELL_OUTCOME_RETENTION_DAYS is deliberately UNSET (retention paused 2026-10-15): the first
+                # real compaction would be an unattended, unmeasured bulk DELETE in a nightly. It returns only
+                # after a measured hand pass on a restored copy; official-flip-config.test.ts pins it absent.
                 {key: "WORKWELL_VSAC_API_KEY", value: $vsac_api_key},
                 {key: "WORKWELL_BUCKET_S3_BUCKET", value: $bucket_name},
                 {key: "WORKWELL_BUCKET_S3_ACCESS_KEY_ID", value: $bucket_key_id},

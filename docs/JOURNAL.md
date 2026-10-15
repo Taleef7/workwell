@@ -7,6 +7,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-15
 
+- **Maui's outcome retention is paused** (owner decision from the production-readiness review). No compaction
+  had deleted yet; the first would have been an unattended, unmeasured bulk DELETE in the ~11-30 nightly. It
+  returns after a measured hand pass on a restored copy. Storage grows meanwhile on the metered Neon plan.
 - **VSAC moved a value set at a pinned release, and the deploy now survives it.** Overnight, VSAC's
   expansion of Advanced Illness (1082) at the eCQM Update 2026-05-14 went from 2,025 codes (the published
   release) to 2,027: 1082 groups two member sets, one gained a version on 2026-10-15, and VSAC resolves a
