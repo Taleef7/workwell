@@ -60,12 +60,11 @@
  * `expandComplete` has already proved equals the codes held.
  */
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  copyFileFromImage,
   DEFAULT_VSAC_BASE,
   declaredValueSets,
   expandAtRelease,
@@ -278,9 +277,20 @@ async function run(args, { env, fs, fetchImpl, out, err }) {
       // the router refuses, and writing it would only move the failure from here to boot.
       throw new Refusal(`could not expand ${oid} at ${release}: ${cause.message}. Nothing was written.`);
     }
+    if (expanded.drift && args.emitBlock) {
+      // Producing a PIN over a disagreement would pin one of two answers on faith: the members at a release
+      // are the release for ecqm-update-2026-05-14 (verified against its published file), but not at every
+      // release (at ecqm-fhir-update-2025 they disagree with both). Verify against the release's file first.
+      const { vsacTotal, releaseTotal } = expanded.drift;
+      throw new Refusal(
+        `VSAC's grouping expansion of ${oid} at ${release} (${vsacTotal} codes) and its members at that release` +
+          ` (${releaseTotal}) disagree, so no pin is produced. Check the set against the release's published` +
+          " value-set file before pinning. Nothing was written.",
+      );
+    }
     if (expanded.drift) {
       // Said loudly, never hidden: the sidecar holds what the release holds, and the operator learns VSAC
-      // disagreed (its grouping answer used a member version newer than the release).
+      // disagreed (its grouping answer used a member version newer than the release). The pin judges it.
       const { vsacTotal, releaseTotal, vsacOnly, releaseOnly } = expanded.drift;
       err(
         `  WARNING ${args.catalogId}: VSAC's grouping expansion of ${oid} at ${release} (${vsacTotal} codes) differs from` +
@@ -363,29 +373,6 @@ async function run(args, { env, fs, fetchImpl, out, err }) {
 const imageSidecarPath = (catalogId) => `/app/backend-ts/measures/derived/${catalogId}/${SIDECAR}`;
 
 /**
- * The sidecar's text as `ref` holds it, through the docker CLI: create a stopped container (pulling the
- * image if absent), copy the one file out, remove the container. Throws if any step fails.
- */
-function extractFromImage(ref, path) {
-  const dir = mkdtempSync(join(tmpdir(), "ww-sidecar-"));
-  try {
-    const container = execFileSync("docker", ["create", ref], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-    try {
-      execFileSync("docker", ["cp", `${container}:${path}`, join(dir, SIDECAR)], { stdio: ["ignore", "pipe", "pipe"] });
-      return readFileSync(join(dir, SIDECAR), "utf8");
-    } finally {
-      try {
-        execFileSync("docker", ["rm", container], { stdio: ["ignore", "pipe", "pipe"] });
-      } catch {
-        // A leftover stopped container costs nothing and must not turn a good restore into a failure.
-      }
-    }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-/**
  * The second line (see the header): the pinned sidecar copied out of `args.fallbackImage`, written only if
  * it passes `pinProblems` exactly as a fresh expansion must.
  */
@@ -448,7 +435,7 @@ export async function main(argv, deps = {}) {
   }
   if (code === 1 && args.fallbackImage) {
     try {
-      return restoreFromImage(args, { fs, out, err, extract: deps.extractFromImage ?? extractFromImage });
+      return restoreFromImage(args, { fs, out, err, extract: deps.extractFromImage ?? copyFileFromImage });
     } catch (cause) {
       err(`  ERROR ${args.catalogId}: ${cause.message}\n`);
       return 1;

@@ -121,15 +121,15 @@ jobs:
         env:
           WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
         run: |
-          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology
-          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology
-          node scripts/vendor-official-measure.mjs --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --complete-terminology
-          node scripts/vendor-official-measure.mjs --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --complete-terminology
-          node scripts/vendor-official-measure.mjs --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --complete-terminology
-          node scripts/vendor-official-measure.mjs --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --complete-terminology
-          node scripts/vendor-official-measure.mjs --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --complete-terminology
-          node scripts/vendor-official-measure.mjs --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --complete-terminology
-          node scripts/vendor-official-measure.mjs --measure CMS137FHIRSUDTxInitEngagement --catalog-id cms137 --strip-elm-annotations --complete-terminology
+          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS137FHIRSUDTxInitEngagement --catalog-id cms137 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
           # Each WorkWell translation this stack routes, one explicit line per id. The list must equal the
           # WORKWELL_DERIVED_MEASURES build arg below, and every line must come before the image is
           # built; official-flip-config.test.ts enforces both. Every value set is re-expanded at

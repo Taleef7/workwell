@@ -638,3 +638,33 @@ describe("--fallback-image (VSAC drift, 2026-10-15)", () => {
     assert.equal((await run([...emitArgs(dir), "--fallback-image", IMAGE])).code, 2);
   });
 });
+
+describe("emit mode refuses to pin over a grouping disagreement", () => {
+  it("writes nothing and names the set when VSAC's grouping and its members disagree at the release", async () => {
+    const dir = await translationDir({ base: baseSidecar() });
+    const stub = vsacStub(vsacTable());
+    // 9.9.2 is a grouping of 9.9.1 and 9.9.10 whose VSAC answer (5 codes) is not their union (7).
+    const fetch = async (url, init) => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname.endsWith("/ValueSet") && (parsed.searchParams.get("url") ?? "").endsWith("/9.9.2")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              resourceType: "Bundle",
+              entry: [{ resource: { resourceType: "ValueSet", version: "1", compose: { include: [{ valueSet: [`${CANON}9.9.1`] }, { valueSet: [`${CANON}9.9.10`] }] } } }],
+            }),
+        };
+      }
+      return stub.fetch(url, init);
+    };
+
+    const result = await run(emitArgs(dir), { fetch });
+
+    assert.equal(result.code, 1, result.stderr);
+    assert.match(result.stderr, /grouping expansion of 9\.9\.2 .* disagree, so no pin is produced/);
+    assert.equal(existsSync(join(dir, "terminology.json")), false, "no sidecar, and so no pin");
+    assert.equal(result.stdout, "");
+  });
+});

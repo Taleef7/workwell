@@ -9,6 +9,7 @@
  * and injecting a transport would test a seam instead of the loop.
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
@@ -19,6 +20,7 @@ import {
   expandComplete,
   expandFromVsac,
   limitConcurrency,
+  officialRestoreDecision,
   IncompleteExpansionError,
   oidFromValueSetUrl,
   sortValueSets,
@@ -1030,5 +1032,43 @@ describe("expandAtRelease (VSAC grouping drift, 2026-10-15)", () => {
     const results = await Promise.all(Array.from({ length: 10 }, () => limited()));
     assert.equal(results.length, 10);
     assert.equal(peak, 3);
+  });
+});
+
+describe("officialRestoreDecision (an official re-vendor VSAC moved, 2026-10-15)", () => {
+  const sha = (text) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
+  const SIDECAR = '{"catalogId":"cms999","valueSets":[]}\n';
+  const manifest = (overrides = {}) => ({
+    catalogId: "cms999",
+    sha256: "sha256:bundle",
+    terminology: { file: "terminology.json", codes: 2000, sha256: sha(SIDECAR) },
+    tests: { count: 3 },
+    ...overrides,
+  });
+  const text = (m) => `${JSON.stringify(m, null, 2)}\n`;
+  const moved = text(manifest({ terminology: { file: "terminology.json", codes: 2002, sha256: "sha256:moved" } }));
+
+  it("restores when ONLY the terminology block moved and the image holds the committed pin", () => {
+    const decision = officialRestoreDecision({ committedManifestText: text(manifest()), regeneratedManifestText: moved, imageSidecarText: SIDECAR });
+    assert.equal(decision.restore, true, decision.reason);
+  });
+
+  it("never restores over a change OUTSIDE the terminology block (the bundle moved)", () => {
+    const bundleMoved = text(manifest({ sha256: "sha256:other-bundle", terminology: { file: "terminology.json", codes: 2002, sha256: "sha256:moved" } }));
+    const decision = officialRestoreDecision({ committedManifestText: text(manifest()), regeneratedManifestText: bundleMoved, imageSidecarText: SIDECAR });
+    assert.equal(decision.restore, false);
+    assert.match(decision.reason, /outside its terminology block/);
+  });
+
+  it("never restores a copy that does not hash to the committed pin", () => {
+    const decision = officialRestoreDecision({ committedManifestText: text(manifest()), regeneratedManifestText: moved, imageSidecarText: SIDECAR + " " });
+    assert.equal(decision.restore, false);
+    assert.match(decision.reason, /not the committed pin/);
+  });
+
+  it("does nothing when the re-vendor reproduced the committed manifest, or there is no copy or no committed manifest", () => {
+    assert.equal(officialRestoreDecision({ committedManifestText: text(manifest()), regeneratedManifestText: text(manifest()), imageSidecarText: SIDECAR }).restore, false);
+    assert.equal(officialRestoreDecision({ committedManifestText: text(manifest()), regeneratedManifestText: moved, imageSidecarText: undefined }).restore, false);
+    assert.equal(officialRestoreDecision({ committedManifestText: null, regeneratedManifestText: moved, imageSidecarText: SIDECAR }).restore, false);
   });
 });

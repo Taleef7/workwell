@@ -73,7 +73,7 @@ exits 1 unless the bytes hash to the manifest's pin and every declared set is pr
 uncapped, so the deploy fails here instead of shipping an image whose evaluations all 500 while health
 stays 200.
 
-**When VSAC moves (2026-10-15).** VSAC's expansion of a GROUPING value set at a pinned release resolves
+**When VSAC moves (2026-10-15).** (The official artifacts' version is under Step 1a.) VSAC's expansion of a GROUPING value set at a pinned release resolves
 its members at their latest version, so a member republished after the release changes the grouping's
 answer (Advanced Illness 1082 went from the release's 2,025 codes to 2,027 overnight, and every
 translation declaring it failed its pin). Two defences:
@@ -84,6 +84,9 @@ translation declaring it failed its pin). Two defences:
   the pin or cannot be reached, and the same pin check judges the copy. The log says `WARNING … restored
   it from`. A deploy that needed it is fine to ship; a translation whose pin changed has no older copy,
   so it still needs VSAC.
+- `--emit-block` (producing a NEW pin) REFUSES when a grouping and its members disagree: the members are
+  the release at `ecqm-update-2026-05-14` (checked against its published file) but not at every release,
+  so a pin is never produced over a disagreement without checking the published value-set file.
 
 The registry login runs before vendoring so the image stays pullable if the package is made private.
 
@@ -96,6 +99,12 @@ content names (old name `--complete-capped-expansions` still accepted).
 - **`WORKWELL_VSAC_API_KEY_VENDOR` missing, or VSAC unreachable** ⇒ capped codes ship, the manifest no
   longer matches the committed one, and **the deploy fails at the reproducibility gate**. So every
   deploy needs NLM VSAC reachable: any post-ADR-041 SHA, forward *or* rollback, fails during an outage.
+- **VSAC moved a completed set (2026-10-15)** ⇒ every deploy and CI line passes `--fallback-image
+  ghcr.io/taleef7/workwell-api-ts:maui-latest`. When the re-vendored manifest differs from the committed
+  one in its `terminology` block ALONE, and the image's sidecar hashes to the committed pin, the committed
+  manifest and that sidecar are put back (`WARNING … restored the committed manifest`). Anything else
+  stands and the gate fails as before. Member-by-member expansion is NOT used here: at
+  `ecqm-fhir-update-2025` a grouping's members disagree with both VSAC's answer and the release.
 - `_VENDOR` (build time) and `WORKWELL_VSAC_API_KEY_TWH` (runtime resolver, ADR-023) are separate
   secrets on purpose (ADR-036), even though they hold the same UMLS key.
 - **Landing order — secrets before manifests.** Add or change the secret in the **same change** that

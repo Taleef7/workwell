@@ -344,13 +344,15 @@ jobs:
         run: |
           if [ -n "$WORKWELL_VSAC_API_KEY" ]; then
             echo "credentialed=true" >> "$GITHUB_OUTPUT"
-            COMPLETE=--complete-terminology
+            # A completed value set VSAC has since moved is restored from the last deployed image, judged by the
+            # committed pin (vendor-official-measure.mjs --fallback-image).
+            COMPLETE="--complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest"
           else
             echo "credentialed=false" >> "$GITHUB_OUTPUT"
             COMPLETE=
             echo "::notice::No VSAC credential in this context (expected on Dependabot's pushes). Vendoring without expansion completion; the reproducibility check will verify bundle bytes only."
           fi
-          # $COMPLETE is deliberately UNQUOTED: it is either one flag or nothing, and quoting it passes
+          # $COMPLETE is deliberately UNQUOTED: it is either the flags or nothing, and quoting it passes
           # an empty string that the script's parseArgs rejects as `unknown argument:`. Leave it bare.
           pnpm vendor:official --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --with-tests $COMPLETE
           pnpm vendor:official --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --with-tests $COMPLETE
@@ -796,7 +798,7 @@ jobs:
           for id in "${MEASURES[@]}"; do
             NAME="$(pnpm exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${id}') ?? '')")"
             if [ -z "$NAME" ]; then echo "::error::${id} is not an official measure id"; exit 1; fi
-            pnpm vendor:official --measure "$NAME" --catalog-id "$id" --strip-elm-annotations --complete-terminology
+            pnpm vendor:official --measure "$NAME" --catalog-id "$id" --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
             TRUNCATED=$(jq -r '.terminology.truncated | length' "measures/official/${id}/manifest.json")
             if [ "$TRUNCATED" != "0" ]; then
               echo "::error::${id}'s vendored terminology still reports ${TRUNCATED} TRUNCATED expansion(s) — refusing to run the suite against capped expansions."

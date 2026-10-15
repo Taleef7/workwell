@@ -50,6 +50,12 @@
  *   strength as a completed cap.
  */
 
+import { execFileSync } from "node:child_process";
+import { createHash as createHashImpl } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 /** NLM's FHIR terminology service — the same host `@work-well/measure-engine`'s `vsac-client.ts` expands against. */
 export const DEFAULT_VSAC_BASE = "https://cts.nlm.nih.gov/fhir";
 
@@ -454,6 +460,60 @@ export async function expandAtRelease(oid, { vsacBase, vsacManifest, apiKey, fet
     }
   }
   return result;
+}
+
+/**
+ * One file's text as the image `ref` holds it, through the docker CLI: create a stopped container (pulling
+ * the image if absent; nothing in it runs), copy the one file out, remove the container. Throws if any
+ * step fails. The vendor scripts use it to restore a pinned sidecar from the last deployed image when
+ * VSAC no longer reproduces it (2026-10-15); a pin check judges what it returns, never this function.
+ */
+export function copyFileFromImage(ref, path) {
+  const dir = mkdtempSync(join(tmpdir(), "ww-image-file-"));
+  try {
+    const container = execFileSync("docker", ["create", ref], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    try {
+      execFileSync("docker", ["cp", `${container}:${path}`, join(dir, "file")], { stdio: ["ignore", "pipe", "pipe"] });
+      return readFileSync(join(dir, "file"), "utf8");
+    } finally {
+      try {
+        execFileSync("docker", ["rm", container], { stdio: ["ignore", "pipe", "pipe"] });
+      } catch {
+        // A leftover stopped container costs nothing and must not turn a good restore into a failure.
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Whether an OFFICIAL artifact's re-vendor may be replaced by its committed state plus the sidecar the
+ * last deployed image holds: only when the regenerated manifest differs from the committed one IN THE
+ * `terminology` BLOCK ALONE (VSAC moved a completed value set; the bundle and everything else
+ * reproduced), and the image's sidecar hashes to the committed pin. Anything else returns
+ * `{ restore: false, reason }` and the re-vendor stands, so the reproducibility gate still fails on it.
+ * Pure, so it is tested directly; `vendor-official-measure.mjs` does the I/O.
+ */
+export function officialRestoreDecision({ committedManifestText, regeneratedManifestText, imageSidecarText }) {
+  const sha256 = (text) => `sha256:${createHashHex(text)}`;
+  if (committedManifestText === null || committedManifestText === undefined) return { restore: false, reason: "no committed manifest to restore" };
+  if (committedManifestText === regeneratedManifestText) return { restore: false, reason: "the re-vendor reproduced the committed manifest" };
+  const committed = JSON.parse(committedManifestText);
+  const regenerated = JSON.parse(regeneratedManifestText);
+  const outsideTerminology = (manifest) => JSON.stringify({ ...manifest, terminology: undefined });
+  if (outsideTerminology(committed) !== outsideTerminology(regenerated)) {
+    return { restore: false, reason: "the manifest changed outside its terminology block, which no sidecar copy can explain" };
+  }
+  if (typeof imageSidecarText !== "string") return { restore: false, reason: "no sidecar could be copied from the image" };
+  const pinned = committed.terminology?.sha256;
+  const actual = sha256(imageSidecarText);
+  if (actual !== pinned) return { restore: false, reason: `the image's sidecar hashes to ${actual}, not the committed pin ${pinned}` };
+  return { restore: true, reason: "the image holds the committed pin's sidecar" };
+}
+
+function createHashHex(text) {
+  return createHashImpl("sha256").update(text).digest("hex");
 }
 
 /**

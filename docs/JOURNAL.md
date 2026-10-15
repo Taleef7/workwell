@@ -13,7 +13,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   grouping's members at their latest version. The pin check failed closed, so CI and every deploy of
   cms122/125/130/165 stopped. Vendoring now expands each pure grouping member by member at the release
   (the members win, with a WARNING), and `--fallback-image` restores a sidecar from the last deployed
-  image when VSAC still disagrees or is down, judged by the same pin. No pin changed.
+  image when VSAC still disagrees or is down, judged by the same pin. No pin changed. By afternoon the
+  same two codes reached the official artifacts' Advanced Illness completion at `ecqm-fhir-update-2025`
+  (2,000 -> 2,002), failing every deploy's reproducibility gate on both stacks; the official vendor now
+  restores the committed manifest and the pinned sidecar from the image when only the terminology moved.
+  Member expansion is not used there: at that release the members disagree with both answers.
 
 ## 2026-10-14
 
