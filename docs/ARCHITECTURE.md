@@ -57,7 +57,7 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
   - Maui: `WORKWELL_INSTANCE=maui`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137`
     and `WORKWELL_DERIVED_MEASURES=cms137,cms130,cms125,cms165,cms122`;
     `WORKWELL_MAUI_CORPUS_SIZE`, `WORKWELL_RUN_CHUNK_SIZE`, `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC`,
-    `WORKWELL_SCHEDULER_DAYS=1-5`, `WORKWELL_OUTCOME_RETENTION_DAYS=90`.
+    `WORKWELL_SCHEDULER_DAYS=1-5`; `WORKWELL_OUTCOME_RETENTION_DAYS` unset (retention paused 2026-10-15).
 - Other workflows: `ci.yml`, `flip-gate.yml`, `cross-engine-sweep.yml`, `vendor-official-measure.yml`,
   `publish-packages.yml`, `backup-neon-nightly.yml`.
 - Secrets, env vars, rollback and the flip runbook: `docs/DEPLOY.md`.
