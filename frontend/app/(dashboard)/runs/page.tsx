@@ -1351,7 +1351,7 @@ export default function RunsPage() {
         {runOutcomesTotal !== null && runOutcomesTotal > runOutcomes.length ? (
           <p className="text-xs text-neutral-500 dark:text-neutral-400" data-testid="outcomes-capped">
             Showing {runOutcomes.length.toLocaleString()} of {runOutcomesTotal.toLocaleString()}.{" "}
-            {siteId ? `The outcomes CSV has every ${siteId} row.` : "The outcomes CSV has every row."}
+            {mayExport ? (siteId ? `The outcomes CSV has every ${siteId} row.` : "The outcomes CSV has every row.") : null}
           </p>
         ) : null}
         {runOutcomes.length === 0 ? (
@@ -1359,6 +1359,7 @@ export default function RunsPage() {
         ) : (
           <div className="mt-2">
             <NitroGrid
+              allowExport={mayExport}
               rows={outcomeRows}
               columns={outcomeColumns}
               sourceName="Outcomes"

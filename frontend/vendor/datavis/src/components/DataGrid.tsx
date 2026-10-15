@@ -119,6 +119,12 @@ export interface DataGridProps {
   helpText?: string;
   /** Whether to show the toolbar */
   showToolbar?: boolean;
+  /**
+   * Whether the title bar offers "Download CSV" and "Copy to Clipboard" (WorkWell local patch; default
+   * true). False withholds both handlers, so neither control renders, for a role that may browse the rows
+   * but not carry them away in bulk.
+   */
+  allowExport?: boolean;
   /** Whether to show controls (filter/group/pivot/aggregate) initially */
   showControls?: boolean;
   /** Grid height (CSS value) */
@@ -176,6 +182,7 @@ export function DataGrid({
   title = '',
   helpText,
   showToolbar = true,
+  allowExport = true,
   showControls: initialShowControls = false,
   height,
   operations = [],
@@ -936,8 +943,8 @@ export function DataGrid({
         onCancel={sourceState.cancel}
         onClearFilter={clearFilter}
         onOpenPerspective={openPerspective}
-        onExportCsv={handleExportCsv}
-        onCopyClipboard={handleCopyClipboard}
+        onExportCsv={allowExport ? handleExportCsv : undefined}
+        onCopyClipboard={allowExport ? handleCopyClipboard : undefined}
       />
 
       {/* Collapsible Content */}

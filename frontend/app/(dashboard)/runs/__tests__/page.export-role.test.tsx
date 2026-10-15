@@ -12,7 +12,13 @@ vi.mock("next/navigation", () => ({ useRouter: () => routerMock, useSearchParams
 vi.mock("@/components/global-filter-context", () => ({ useGlobalFilters: () => ({ siteId: "", from: "", to: "" }) }));
 vi.mock("@/components/auth-provider", () => ({ useAuth: () => ({ user: { role: auth.role } }) }));
 vi.mock("@/components/run-status-provider", () => ({ useRunStatus: () => ({ isActive: false, startTracking: vi.fn() }) }));
-vi.mock("@/features/datavis/NitroGridClient", () => ({ default: () => <div data-testid="outcomes-grid" /> }));
+const gridProps = vi.hoisted(() => ({ last: undefined as undefined | { allowExport?: boolean } }));
+vi.mock("@/features/datavis/NitroGridClient", () => ({
+  default: (props: { allowExport?: boolean }) => {
+    gridProps.last = props;
+    return <div data-testid="outcomes-grid" />;
+  },
+}));
 
 import RunsPage from "../page";
 
@@ -36,6 +42,11 @@ beforeEach(() => {
   get.mockReset().mockImplementation((url: string) => {
     if (url === "/api/runs?limit=20") return Promise.resolve([run]);
     if (url === "/api/runs/run-1") return Promise.resolve(summary);
+    if (url === "/api/runs/run-1/outcomes") {
+      return Promise.resolve([
+        { employeeName: "Pat Doe", employeeExternalId: "pat-1", role: "", site: "Clinic", outcomeStatus: "OVERDUE", daysSinceExam: null, waiverStatus: null, caseId: null },
+      ]);
+    }
     return Promise.resolve([]);
   });
 });
@@ -46,6 +57,10 @@ describe("RunsPage bulk downloads by role", () => {
     render(<RunsPage />);
     await screen.findByText(/Evaluated:/);
     for (const name of EXPORTS) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    // The Outcomes grid holds every row of the run; its own "Download CSV" and "Copy to Clipboard" are
+    // withheld too (review of #827), not only the page's buttons.
+    await screen.findByTestId("outcomes-grid");
+    expect(gridProps.last?.allowExport).toBe(false);
   });
 
   it.each(["ROLE_CASE_MANAGER", "ROLE_ADMIN"])("offers every one to %s", async (role) => {
@@ -53,5 +68,7 @@ describe("RunsPage bulk downloads by role", () => {
     render(<RunsPage />);
     expect(await screen.findByRole("button", { name: "MeasureReport (FHIR)" })).toBeInTheDocument();
     for (const name of EXPORTS) expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    await screen.findByTestId("outcomes-grid");
+    expect(gridProps.last?.allowExport).toBe(true);
   });
 });

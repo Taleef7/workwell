@@ -102,6 +102,9 @@ test("a VIEWER cannot narrow ANY surface to a list — the gate the membership a
   ]) {
     const res = await call(path, viewer);
     assert.equal(res.status, 403, `${path} must refuse a viewer`);
+    // The CSV exports are refused to a VIEWER outright since D5 (bulk downloads are CASE_MANAGER/ADMIN),
+    // before the route can name `listId`; the browsing surfaces still say why.
+    if (path.startsWith("/api/exports/")) continue;
     const body = (await res.json()) as { error: string; parameter?: string };
     assert.equal(body.parameter, "listId", `${path} says WHY`);
   }
