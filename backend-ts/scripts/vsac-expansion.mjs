@@ -175,6 +175,8 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
    * by its own test, which is the only reason it is not in this PR.
    */
   let echoedUrl;
+  /** The value-set version VSAC says it expanded, when it says one (`expandAtRelease` reads it). */
+  let echoedVersion;
 
   for (let page = 0; ; page += 1) {
     if (page >= VSAC_MAX_PAGES) {
@@ -189,6 +191,7 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
     const contains = body.expansion.contains ?? [];
     if (typeof body.expansion.total === "number") total = body.expansion.total;
     if (echoedUrl === undefined && typeof body.url === "string") echoedUrl = body.url;
+    if (echoedVersion === undefined && typeof body.version === "string") echoedVersion = body.version;
     codes.push(...flattenExpansion(contains));
     offset += contains.length;
     if (contains.length === 0 || (total > 0 && codes.length >= total)) break;
@@ -199,7 +202,7 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
   }
   // `total` stays 0 when the server volunteered none. That is NOT "zero codes" and callers must not read
   // it as a count — the absent-set path refuses on it precisely because it is an absence of evidence.
-  return { codes, total, ...(echoedUrl ? { url: echoedUrl } : {}) };
+  return { codes, total, ...(echoedUrl ? { url: echoedUrl } : {}), ...(echoedVersion ? { version: echoedVersion } : {}) };
 }
 
 /**
@@ -290,7 +293,157 @@ export async function expandComplete(oid, { vsacBase, vsacManifest, apiKey, fetc
       detail,
     );
   }
-  return { codes, total: expanded.total };
+  return { codes, total: expanded.total, ...(expanded.version ? { version: expanded.version } : {}) };
+}
+
+/**
+ * A `fetch` that runs at most `limit` requests at once, the rest queued in order. Resolving a release's
+ * groupings member by member multiplies requests; this keeps VSAC from seeing them all at once.
+ */
+export function limitConcurrency(fetchFn, limit) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= limit || queue.length === 0) return;
+    active += 1;
+    const { args, resolve, reject } = queue.shift();
+    Promise.resolve()
+      .then(() => fetchFn(...args))
+      .then(resolve, reject)
+      .finally(() => {
+        active -= 1;
+        next();
+      });
+  };
+  return (...args) =>
+    new Promise((resolve, reject) => {
+      queue.push({ args, resolve, reject });
+      next();
+    });
+}
+
+/** VSAC's ValueSet canonical prefix: `<this><oid>` names a value set, `|<version>` a version of it. */
+const VSAC_VALUESET_PREFIX = "http://cts.nlm.nih.gov/fhir/ValueSet/";
+
+/** Nesting deeper than this is not a grouping VSAC publishes; refusing it bounds a cycle. */
+const MAX_GROUPING_DEPTH = 5;
+
+const vsacHeaders = (apiKey) => ({
+  Authorization: `Basic ${Buffer.from(`apikey:${apiKey}`).toString("base64")}`,
+  Accept: "application/fhir+json",
+});
+
+/**
+ * The value-set versions a release pins: `ValueSet/<oid>|<version>` entries of its manifest Library's
+ * `relatedArtifact`. Read once per release per run (`cache`).
+ */
+function releasePins(vsacManifest, opts) {
+  const key = `pins|${vsacManifest}`;
+  // The PROMISE is cached, so concurrent callers share one request.
+  if (!opts.cache.has(key)) opts.cache.set(key, readReleasePins(vsacManifest, opts));
+  return opts.cache.get(key);
+}
+
+async function readReleasePins(vsacManifest, { vsacBase, apiKey, fetch: fetchImpl }) {
+  const id = String(vsacManifest).split("/Library/")[1];
+  if (!id) throw new Error(`the release ${vsacManifest} is not a VSAC Library canonical, so its pinned versions cannot be read`);
+  const base = String(vsacBase).replace(/\/+$/, "");
+  const library = await fetchVsacJson(`${base}/Library/${encodeURIComponent(id)}`, vsacHeaders(apiKey), fetchImpl);
+  const pins = new Map();
+  for (const artifact of library.relatedArtifact ?? []) {
+    const resource = typeof artifact?.resource === "string" ? artifact.resource : "";
+    if (!resource.startsWith(VSAC_VALUESET_PREFIX)) continue;
+    const [canonical, version] = resource.split("|");
+    if (version) pins.set(oidFromValueSetUrl(canonical), version);
+  }
+  if (pins.size === 0) throw new Error(`the release ${vsacManifest} pins no value-set versions, so a grouping cannot be resolved against it`);
+  return pins;
+}
+
+/**
+ * The member OIDs of a GROUPING value set at one version, or null when the set is not a pure grouping
+ * (any concept list, filter, system include or exclude makes it something only VSAC can expand).
+ */
+function groupingMembers(oid, version, opts) {
+  const key = `def|${oid}|${version}`;
+  if (!opts.cache.has(key)) opts.cache.set(key, readGroupingMembers(oid, version, opts));
+  return opts.cache.get(key);
+}
+
+async function readGroupingMembers(oid, version, { vsacBase, apiKey, fetch: fetchImpl }) {
+  const base = String(vsacBase).replace(/\/+$/, "");
+  const query = `url=${encodeURIComponent(`${VSAC_VALUESET_PREFIX}${oid}`)}&version=${encodeURIComponent(version)}`;
+  const found = await fetchVsacJson(`${base}/ValueSet?${query}`, vsacHeaders(apiKey), fetchImpl);
+  const definitions = (found.entry ?? []).map((e) => e?.resource).filter((r) => r?.resourceType === "ValueSet");
+  const definition = definitions.find((d) => d.version === version);
+  if (!definition) throw new Error(`VSAC holds no definition of ${oid}|${version} to resolve its members against`);
+  const compose = definition.compose ?? {};
+  const includes = compose.include ?? [];
+  const pure =
+    includes.length > 0 &&
+    (compose.exclude ?? []).length === 0 &&
+    includes.every((inc) => Array.isArray(inc.valueSet) && inc.valueSet.length > 0 && !inc.system && !inc.concept && !inc.filter);
+  return pure ? [...new Set(includes.flatMap((inc) => inc.valueSet.map((url) => oidFromValueSetUrl(url))))] : null;
+}
+
+/**
+ * One value set at a pinned release, faithful to the RELEASE even where VSAC's own answer for a grouping
+ * drifts from it.
+ *
+ * Measured 2026-10-15: VSAC's `$expand?manifest=` of a grouping value set resolves each member at the
+ * member's LATEST version, not the version the release used. Advanced Illness (1082, pinned 20190315)
+ * groups 110.11.1151 and 110.11.1150 with no member versions; 1151 gained a version on 2026-10-15, after
+ * the eCQM Update 2026-05-14, and the grouping's expansion at that release went from 2,025 codes (the
+ * published release file) to 2,027. Expanding 1151 itself at the same release correctly returns its
+ * release-time version. So a pure grouping is ALSO expanded member by member at the release, and the
+ * union of the members is what the release holds.
+ *
+ * When the two agree (the normal case) the answer is VSAC's grouping expansion, unchanged. When they
+ * disagree the member union is returned and `drift` says how VSAC's grouping answer differs, so a caller
+ * reports it instead of hiding it. Every member goes through `expandAtRelease` itself (a member can be a
+ * grouping), so each is held to `expandComplete`'s guards. Any failure throws: there is no path that
+ * returns a set this cannot account for.
+ */
+export function expandAtRelease(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache = new Map() }, depth = 0) {
+  if (depth > MAX_GROUPING_DEPTH) {
+    return Promise.reject(new Error(`grouping value sets nest deeper than ${MAX_GROUPING_DEPTH} levels at ${oid}; refusing to resolve a possible cycle`));
+  }
+  const memo = `exp|${oid}`;
+  const opts = { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache };
+  // The promise is cached, so a member shared by several groupings expanding at once is fetched once.
+  if (!cache.has(memo)) cache.set(memo, resolveAtRelease(oid, opts, depth));
+  return cache.get(memo);
+}
+
+async function resolveAtRelease(oid, opts, depth) {
+  const { vsacManifest } = opts;
+  const grouping = await expandComplete(oid, opts);
+  const pins = await releasePins(vsacManifest, opts);
+  // The version the release pins, where it pins one (a top-level declared set); else the version VSAC
+  // says it expanded (a member, which the release does not pin and its parent names without a version).
+  const version = pins.get(oid) ?? grouping.version;
+  if (!version) {
+    throw new Error(`neither the release ${vsacManifest} nor VSAC's expansion names a version of ${oid}, so its definition at that release cannot be read`);
+  }
+  const members = await groupingMembers(oid, version, opts);
+  let result = grouping;
+  if (members) {
+    const expandedMembers = await Promise.all(members.map((member) => expandAtRelease(member, opts, depth + 1)));
+    const union = canonicalize(expandedMembers.flatMap((m) => m.codes));
+    const key = (c) => `${c.system}|${c.code}`;
+    const inGrouping = new Set(grouping.codes.map(key));
+    const inUnion = new Set(union.map(key));
+    const added = grouping.codes.filter((c) => !inUnion.has(key(c)));
+    const missing = union.filter((c) => !inGrouping.has(key(c)));
+    if (added.length > 0 || missing.length > 0) {
+      result = {
+        codes: union,
+        total: union.length,
+        drift: { oid, vsacTotal: grouping.total, releaseTotal: union.length, vsacOnly: added, releaseOnly: missing },
+      };
+    }
+  }
+  return result;
 }
 
 /**

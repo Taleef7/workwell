@@ -15,8 +15,10 @@ import {
   canonicalize,
   completeTerminology,
   declaredValueSets,
+  expandAtRelease,
   expandComplete,
   expandFromVsac,
+  limitConcurrency,
   IncompleteExpansionError,
   oidFromValueSetUrl,
   sortValueSets,
@@ -845,5 +847,149 @@ describe("completeTerminology — absent sets refused by expandComplete", () => 
     assert.deepEqual(completed, []);
     assert.deepEqual(terminology.absent.map((v) => v.oid), [ABSENT_OID]);
     assert.match(warnings.join("\n"), /claimed 2 codes for absent value set .* returned 3 distinct — its count and its content disagree/);
+  });
+});
+
+describe("expandAtRelease (VSAC grouping drift, 2026-10-15)", () => {
+  const CANON = "http://cts.nlm.nih.gov/fhir/ValueSet/";
+  const RELEASE = "http://cts.nlm.nih.gov/fhir/Library/ecqm-update-2026-05-14";
+  const OPTS = { vsacBase: "https://cts.nlm.nih.gov/fhir", vsacManifest: RELEASE, apiKey: "test-key" };
+  const sct = (...codes) => codes.map((code) => ({ system: "http://snomed.info/sct", code }));
+
+  /**
+   * A VSAC stand-in. `sets[oid]` = { codes (what $expand at the release answers), version (echoed),
+   * members (a pure grouping's member OIDs) }; a set without members is a concept list. `pins` = the
+   * release Library's pinned versions. Every request is recorded.
+   */
+  const serve = (sets, pins) => {
+    const json = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+    globalThis.fetch = async (url) => {
+      const parsed = new URL(String(url));
+      calls.push(parsed);
+      if (parsed.pathname.includes("/Library/")) {
+        return json({ resourceType: "Library", relatedArtifact: Object.entries(pins).map(([oid, v]) => ({ type: "depends-on", resource: `${CANON}${oid}|${v}` })) });
+      }
+      if (parsed.pathname.endsWith("/ValueSet")) {
+        const oid = parsed.searchParams.get("url").split("/ValueSet/")[1];
+        const set = sets[oid];
+        if (!set || set.version !== parsed.searchParams.get("version")) return json({ resourceType: "Bundle", entry: [] });
+        const compose = set.members
+          ? { include: set.members.map((m) => ({ valueSet: [`${CANON}${m}`] })) }
+          : { include: [{ system: "http://snomed.info/sct", concept: set.codes.map((c) => ({ code: c.code })) }] };
+        return json({ resourceType: "Bundle", entry: [{ resource: { resourceType: "ValueSet", version: set.version, compose } }] });
+      }
+      const oid = decodeURIComponent(parsed.pathname.split("/ValueSet/")[1].split("/")[0]);
+      const set = sets[oid];
+      if (!set) return { ok: false, status: 404, text: async () => "" };
+      const offset = Number(parsed.searchParams.get("offset"));
+      return json({
+        resourceType: "ValueSet",
+        url: `${CANON}${oid}`,
+        ...(set.version ? { version: set.version } : {}),
+        expansion: { total: set.codes.length, contains: set.codes.slice(offset, offset + 1000) },
+      });
+    };
+  };
+  const expansionsOf = (oid) => calls.filter((u) => u.pathname.endsWith(`/ValueSet/${oid}/$expand`)).length;
+
+  it("returns VSAC's grouping expansion unchanged when it equals its members at the release", async () => {
+    serve(
+      { G: { codes: sct("a", "b", "c"), version: "g1", members: ["M1", "M2"] }, M1: { codes: sct("a", "b"), version: "m1" }, M2: { codes: sct("c"), version: "m2" } },
+      { G: "g1" },
+    );
+    const result = await expandAtRelease("G", OPTS);
+    assert.deepEqual(result.codes, canonicalize(sct("a", "b", "c")));
+    assert.equal(result.total, 3);
+    assert.equal(result.drift, undefined);
+  });
+
+  it("returns the MEMBERS at the release, and says so, when VSAC's grouping answer drifts (1082 on 2026-10-15)", async () => {
+    // VSAC's grouping expansion carries two codes from a member version newer than the release.
+    serve(
+      { G: { codes: sct("a", "b", "c", "x", "y"), version: "20190315", members: ["M1", "M2"] }, M1: { codes: sct("a", "b"), version: "20260116" }, M2: { codes: sct("c"), version: "20260116" } },
+      { G: "20190315" },
+    );
+    const result = await expandAtRelease("G", OPTS);
+    assert.deepEqual(result.codes, canonicalize(sct("a", "b", "c")), "the release's codes, not VSAC's drifted grouping");
+    assert.equal(result.total, 3);
+    assert.equal(result.drift.vsacTotal, 5);
+    assert.equal(result.drift.releaseTotal, 3);
+    assert.deepEqual(result.drift.vsacOnly.map((c) => c.code), ["x", "y"]);
+    assert.deepEqual(result.drift.releaseOnly, []);
+  });
+
+  it("leaves a set that is not a pure grouping as VSAC expanded it, and expands nothing else", async () => {
+    serve({ E: { codes: sct("a", "b"), version: "e1" } }, { E: "e1" });
+    const result = await expandAtRelease("E", OPTS);
+    assert.deepEqual(result.codes, canonicalize(sct("a", "b")));
+    assert.equal(result.drift, undefined);
+    assert.equal(calls.filter((u) => u.pathname.endsWith("/$expand")).length, 1);
+  });
+
+  it("resolves a member that is itself a grouping at ITS echoed version", async () => {
+    serve(
+      {
+        G: { codes: sct("a", "b", "z"), version: "g1", members: ["N"] },
+        N: { codes: sct("a", "b", "z"), version: "n1", members: ["M"] }, // the nested grouping drifted too
+        M: { codes: sct("a", "b"), version: "m1" },
+      },
+      { G: "g1" },
+    );
+    const result = await expandAtRelease("G", OPTS);
+    assert.deepEqual(result.codes, canonicalize(sct("a", "b")));
+    assert.deepEqual(result.drift.vsacOnly.map((c) => c.code), ["z"]);
+  });
+
+  it("expands a member shared by two groupings once per run (one cache)", async () => {
+    serve(
+      {
+        G1: { codes: sct("a", "b"), version: "1", members: ["S", "A"] },
+        G2: { codes: sct("a", "c"), version: "1", members: ["S", "C"] },
+        S: { codes: sct("a"), version: "s" },
+        A: { codes: sct("b"), version: "a" },
+        C: { codes: sct("c"), version: "c" },
+      },
+      { G1: "1", G2: "1" },
+    );
+    const cache = new Map();
+    await Promise.all([expandAtRelease("G1", { ...OPTS, cache }), expandAtRelease("G2", { ...OPTS, cache })]);
+    assert.equal(expansionsOf("S"), 1);
+    assert.equal(calls.filter((u) => u.pathname.includes("/Library/")).length, 1, "the release is read once");
+  });
+
+  it("REFUSES when VSAC holds no definition at the pinned version, never falling back to the drifted answer", async () => {
+    serve({ G: { codes: sct("a"), version: "other" } }, { G: "g1" });
+    await assert.rejects(expandAtRelease("G", OPTS), /holds no definition of G\|g1/);
+  });
+
+  it("REFUSES when neither the release nor VSAC names a version", async () => {
+    serve({ G: { codes: sct("a") } }, { OTHER: "1" });
+    await assert.rejects(expandAtRelease("G", OPTS), /neither the release .* nor VSAC's expansion names a version of G/);
+  });
+
+  it("REFUSES groupings that nest deeper than any VSAC publishes (a cycle)", async () => {
+    const chain = {};
+    const names = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    names.forEach((name, i) => {
+      chain[name] = { codes: sct("a"), version: `v${i}`, ...(i < names.length - 1 ? { members: [names[i + 1]] } : {}) };
+    });
+    serve(chain, { A: "v0" });
+    await assert.rejects(expandAtRelease("A", OPTS), /nest deeper than 5 levels/);
+  });
+
+  it("limitConcurrency never runs more than `limit` requests at once", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const slow = async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return "ok";
+    };
+    const limited = limitConcurrency(slow, 3);
+    const results = await Promise.all(Array.from({ length: 10 }, () => limited()));
+    assert.equal(results.length, 10);
+    assert.equal(peak, 3);
   });
 });

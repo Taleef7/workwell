@@ -407,7 +407,9 @@ jobs:
         run: |
           n=0
           for id in $TRANSLATIONS; do
-            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin
+            # As the deploy does: a sidecar VSAC no longer reproduces is restored from the last deployed
+            # image, and judged by the same pin.
+            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
             n=$((n + 1))
           done
           if [ "$n" -eq 0 ]; then
@@ -806,7 +808,7 @@ jobs:
           # hash to that pin, so the suite never boots a translation the router would refuse.
           IFS=',' read -ra TRANSLATIONS <<< "$ROUTED_TRANSLATIONS"
           for id in "${TRANSLATIONS[@]}"; do
-            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin
+            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
           done
       # Only the gitignored sidecars may be new; the committed artifacts must still match their pins.
       - name: The committed artifacts are reproducible from their pins

@@ -89,12 +89,34 @@ const baseSidecar = (catalogId = "cms999") => ({
  * A VSAC stand-in that pages by `offset` the way the real one does. `order` reorders a set's codes and
  * `pageSize` splits them, so two runs can see the same set served differently. Per-OID overrides:
  * `total` (undefined = omitted), `echo` (null = no url; default = the right canonical).
+ *
+ * It also answers the two reads `expandAtRelease` makes (#822 VSAC drift): the release Library, pinning
+ * every OID in the table at version "1", and each set's definition at that version, an extensional
+ * concept list (no grouping), so the expansion stays VSAC's answer. `calls` records every request;
+ * `expansions` only the `$expand` ones.
  */
 function vsacStub(table, { pageSize = 1000, order = (list) => list } = {}) {
   const calls = [];
+  const json = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
   const fetch = async (url, init) => {
     const parsed = new URL(String(url));
     calls.push({ url: parsed, init });
+    if (parsed.pathname.includes("/Library/")) {
+      return json({
+        resourceType: "Library",
+        relatedArtifact: Object.keys(table).map((oid) => ({ type: "depends-on", resource: `${CANON}${oid}|1` })),
+      });
+    }
+    if (parsed.pathname.endsWith("/ValueSet")) {
+      const oid = decodeURIComponent(parsed.searchParams.get("url") ?? "").split("/ValueSet/")[1];
+      const entry = table[oid];
+      return json({
+        resourceType: "Bundle",
+        entry: entry
+          ? [{ resource: { resourceType: "ValueSet", version: parsed.searchParams.get("version"), compose: { include: [{ system: "http://example.test/cs-a", concept: [{ code: "x" }] }] } } }]
+          : [],
+      });
+    }
     const oid = decodeURIComponent(parsed.pathname.split("/ValueSet/")[1].split("/")[0]);
     const entry = table[oid];
     if (!entry) return { ok: false, status: 404, text: async () => "" };
@@ -109,7 +131,13 @@ function vsacStub(table, { pageSize = 1000, order = (list) => list } = {}) {
     };
     return { ok: true, status: 200, text: async () => JSON.stringify(body) };
   };
-  return { fetch, calls };
+  return {
+    fetch,
+    calls,
+    get expansions() {
+      return calls.filter((c) => c.url.pathname.endsWith("/$expand"));
+    },
+  };
 }
 
 const tempDirs = [];
@@ -149,12 +177,18 @@ async function translationDir({ manifest, base, bundleOptions, bundleOverride } 
  * 404 (which `vsac-expansion.mjs` does not retry) rather than thrown, because a throw inside the
  * transport is retried with backoff and would surface only as a slow, ambiguous exit 1.
  */
-async function run(argv, { env = KEYED, fetch } = {}) {
+async function run(argv, { env = KEYED, fetch, extractFromImage } = {}) {
   let stdout = "";
   let stderr = "";
   const forbidden = [];
   const code = await main(argv, {
     env,
+    // No real docker in a unit test: a run that reaches for the image without an injected one fails loudly.
+    extractFromImage:
+      extractFromImage ??
+      (() => {
+        throw new Error("this run must not copy from an image");
+      }),
     fetch:
       fetch ??
       (async (url) => {
@@ -410,9 +444,9 @@ describe("the sidecar and the emitted block", () => {
 
     await run(emitArgs(dir), { fetch: stub.fetch });
 
-    const requested = stub.calls.map((c) => decodeURIComponent(c.url.pathname.split("/ValueSet/")[1].split("/")[0]));
+    const requested = stub.expansions.map((c) => decodeURIComponent(c.url.pathname.split("/ValueSet/")[1].split("/")[0]));
     assert.deepEqual(requested, ["9.9.1", "9.9.10", "9.9.2"], "the versioned canonical collapsed onto 9.9.1");
-    for (const call of stub.calls) {
+    for (const call of stub.expansions) {
       assert.equal(call.url.searchParams.get("manifest"), RELEASE_EMIT);
       assert.notEqual(call.url.searchParams.get("manifest"), DEFAULT_VSAC_MANIFEST);
     }
@@ -430,8 +464,8 @@ describe("verify mode and --verify-pin (the deploy step)", () => {
 
     assert.equal(result.code, 0, "without --verify-pin a mismatch is reported, not fatal");
     assert.match(result.stdout, /does NOT match the manifest pin/);
-    assert.equal(stub.calls.length, 3);
-    for (const call of stub.calls) {
+    assert.equal(stub.expansions.length, 3);
+    for (const call of stub.expansions) {
       assert.equal(call.url.searchParams.get("manifest"), RELEASE_COMMITTED);
       assert.notEqual(call.url.searchParams.get("manifest"), DEFAULT_VSAC_MANIFEST);
     }
@@ -519,5 +553,88 @@ describe("the deploy path's constraints", () => {
   it(".gitattributes keeps a translation's JSON byte-exact on a Windows checkout", () => {
     const lines = readFileSync(new URL("../.gitattributes", import.meta.url), "utf8").split(/\r?\n/).map((l) => l.trim());
     assert.ok(lines.includes("measures/derived/**/*.json -text"), "CRLF conversion would change every pinned hash");
+  });
+});
+
+describe("--fallback-image (VSAC drift, 2026-10-15)", () => {
+  const IMAGE = "ghcr.io/example/workwell-api-ts:maui-latest";
+
+  it("restores the pinned sidecar from the image when VSAC's expansion does not reproduce the pin", async () => {
+    const { dir, sidecar } = await committedTranslation();
+    const drifted = vsacTable();
+    drifted["9.9.2"].codes = codes("two", 6); // VSAC now answers one more code than the release held
+    const copied = [];
+
+    const result = await run(verifyArgs(dir, "--verify-pin", "--fallback-image", IMAGE), {
+      fetch: vsacStub(drifted).fetch,
+      extractFromImage: (ref, path) => {
+        copied.push({ ref, path });
+        return sidecar;
+      },
+    });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(copied, [{ ref: IMAGE, path: "/app/backend-ts/measures/derived/cms999/terminology.json" }]);
+    assert.match(result.stderr, /WARNING cms999: VSAC did not reproduce the pinned sidecar; restored it from/);
+    assert.match(result.stdout, /restored from .*; matches the manifest pin/);
+    assert.equal(await readFile(join(dir, "terminology.json"), "utf8"), sidecar, "the pinned bytes, not VSAC's");
+  });
+
+  it("restores when VSAC cannot be reached at all (no key), still judged by the pin", async () => {
+    const { dir, sidecar } = await committedTranslation();
+
+    const result = await run(verifyArgs(dir, "--verify-pin", "--fallback-image", IMAGE), { env: {}, extractFromImage: () => sidecar });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stderr, /WORKWELL_VSAC_API_KEY is unset/);
+    assert.match(result.stderr, /restored it from/);
+  });
+
+  it("REFUSES a copy that does not match the pin: the image is a source, never a judge", async () => {
+    const { dir, sidecar } = await committedTranslation();
+    const drifted = vsacTable();
+    drifted["9.9.2"].codes = codes("two", 6);
+    const tampered = sidecar.replace("two-0", "two-X");
+
+    const result = await run(verifyArgs(dir, "--verify-pin", "--fallback-image", IMAGE), {
+      fetch: vsacStub(drifted).fetch,
+      extractFromImage: () => tampered,
+    });
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /the copy from .*hashes to .* but the manifest pins/);
+    assert.notEqual(await readFile(join(dir, "terminology.json"), "utf8"), tampered, "a refused copy is never written");
+  });
+
+  it("fails as before when nothing can be copied from the image", async () => {
+    const { dir } = await committedTranslation();
+    const drifted = vsacTable();
+    drifted["9.9.2"].codes = codes("two", 6);
+
+    const result = await run(verifyArgs(dir, "--verify-pin", "--fallback-image", IMAGE), {
+      fetch: vsacStub(drifted).fetch,
+      extractFromImage: () => {
+        throw new Error("Error response from daemon: manifest unknown");
+      },
+    });
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /no sidecar could be copied from .*manifest unknown/);
+  });
+
+  it("never touches the image when VSAC reproduces the pin", async () => {
+    const { dir } = await committedTranslation();
+
+    // The harness's default extractor throws, so reaching for the image would fail this run.
+    const result = await run(verifyArgs(dir, "--verify-pin", "--fallback-image", IMAGE), { fetch: vsacStub(vsacTable()).fetch });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.doesNotMatch(result.stderr, /restored/);
+  });
+
+  it("refuses --fallback-image without --verify-pin, and with --emit-block (usage, exit 2)", async () => {
+    const dir = await translationDir({ manifest: { terminology: { completion: { manifest: RELEASE_COMMITTED } } } });
+    assert.equal((await run(verifyArgs(dir, "--fallback-image", IMAGE))).code, 2);
+    assert.equal((await run([...emitArgs(dir), "--fallback-image", IMAGE])).code, 2);
   });
 });

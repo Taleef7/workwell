@@ -12,10 +12,23 @@
  * An official artifact's terminology is CMS's own, shipped in its bundle, and VSAC only patches what
  * upstream capped or omitted. A translation has no such source: it exists because CMS publishes no FHIR
  * content for the year it covers, so EVERY value set its ELM declares is re-expanded at the VSAC release
- * its manifest pins. There is nothing to fall back to, so there is no fallback: each set goes through
- * `expandComplete`, which throws on anything not provably the whole set, and one refusal fails the run
- * with nothing written. A partial sidecar would hash differently from the pin anyway, but "refused at the
- * deploy step, naming the OID" is a far better failure than "refused at boot, naming a hash".
+ * its manifest pins. Each set goes through `expandAtRelease` (and so `expandComplete`), which throws on
+ * anything not provably the whole set, and one refusal fails the run with nothing written. A partial
+ * sidecar would hash differently from the pin anyway, but "refused at the deploy step, naming the OID" is
+ * a far better failure than "refused at boot, naming a hash".
+ *
+ * ## When VSAC's answer is not the release's (2026-10-15)
+ *
+ * VSAC's `$expand?manifest=` of a GROUPING value set resolves its members at their latest version, so a
+ * member republished after the release moved Advanced Illness (1082) from the release's 2,025 codes to
+ * 2,027 overnight and every translation that declares it failed its pin. `expandAtRelease` expands each
+ * pure grouping member by member at the release as well, and uses that union (with a WARNING) when the
+ * two disagree, so the sidecar is the release's again.
+ *
+ * `--fallback-image <ref>` is the second line: when the expansion still does not reproduce the pin, or
+ * VSAC cannot be reached, the sidecar is copied out of that image (the last deployed one) and accepted
+ * ONLY if it passes the same pin check, byte for byte. The pin decides either way; the image is just
+ * another place the pinned bytes can come from.
  *
  * ## Two modes
  *
@@ -47,13 +60,16 @@
  * `expandComplete` has already proved equals the codes held.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEFAULT_VSAC_BASE,
   declaredValueSets,
-  expandComplete,
+  expandAtRelease,
+  limitConcurrency,
   oidFromValueSetUrl,
   sortValueSets,
 } from "./vsac-expansion.mjs";
@@ -69,7 +85,7 @@ const VSAC_VALUESET_CANONICAL = "http://cts.nlm.nih.gov/fhir/ValueSet/";
 const SIDECAR = "terminology.json";
 
 const USAGE =
-  "usage: --catalog-id <id> [--verify-pin] [--vsac-base <url>] [--output-dir <dir>]\n" +
+  "usage: --catalog-id <id> [--verify-pin [--fallback-image <ref>]] [--vsac-base <url>] [--output-dir <dir>]\n" +
   "       --catalog-id <id> --emit-block --base-terminology <path> --vsac-manifest <canonical>" +
   " [--vsac-base <url>] [--output-dir <dir>]";
 
@@ -97,11 +113,16 @@ function parseArgs(argv) {
     else if (flag === "--vsac-manifest") args.vsacManifest = valueOf(flag, argv[++i]);
     else if (flag === "--vsac-base") args.vsacBase = valueOf(flag, argv[++i]);
     else if (flag === "--output-dir") args.outputDir = resolve(valueOf(flag, argv[++i]));
+    else if (flag === "--fallback-image") args.fallbackImage = valueOf(flag, argv[++i]);
     else throw new UsageError(`unknown argument: ${flag}\n${USAGE}`);
   }
   if (!args.catalogId) throw new UsageError(USAGE);
   if (!/^[a-z0-9]+$/.test(args.catalogId)) {
     throw new UsageError(`--catalog-id must be lowercase alphanumeric (got "${args.catalogId}")`);
+  }
+  if (args.fallbackImage !== undefined && (args.emitBlock || !args.verifyPin)) {
+    // Only where the pin decides: emit mode produces a pin, and verify without --verify-pin decides nothing.
+    throw new UsageError("--fallback-image is accepted only with --verify-pin, where the pin judges the copied bytes");
   }
   if (args.emitBlock) {
     if (args.verifyPin) {
@@ -238,14 +259,35 @@ async function run(args, { env, fs, fetchImpl, out, err }) {
   }
 
   const valueSets = [];
-  for (const oid of required) {
-    let expanded;
-    try {
-      expanded = await expandComplete(oid, { vsacBase: args.vsacBase, vsacManifest: release, apiKey, fetch: fetchImpl });
-    } catch (cause) {
+  // One cache per run: a member shared by several groupings, and the release's pins, are read once. The
+  // sets resolve concurrently, at most six requests at a time; the sidecar's order comes from
+  // `sortValueSets`, never from which answer arrived first.
+  const cache = new Map();
+  const transport = limitConcurrency(fetchImpl ?? ((...request) => globalThis.fetch(...request)), 6);
+  const outcomes = await Promise.all(
+    required.map((oid) =>
+      expandAtRelease(oid, { vsacBase: args.vsacBase, vsacManifest: release, apiKey, fetch: transport, cache }).then(
+        (expanded) => ({ oid, expanded }),
+        (cause) => ({ oid, cause }),
+      ),
+    ),
+  );
+  for (const { oid, expanded, cause } of outcomes) {
+    if (cause) {
       // The whole run fails on one set, and nothing is written: a sidecar missing one set is a sidecar
       // the router refuses, and writing it would only move the failure from here to boot.
       throw new Refusal(`could not expand ${oid} at ${release}: ${cause.message}. Nothing was written.`);
+    }
+    if (expanded.drift) {
+      // Said loudly, never hidden: the sidecar holds what the release holds, and the operator learns VSAC
+      // disagreed (its grouping answer used a member version newer than the release).
+      const { vsacTotal, releaseTotal, vsacOnly, releaseOnly } = expanded.drift;
+      err(
+        `  WARNING ${args.catalogId}: VSAC's grouping expansion of ${oid} at ${release} (${vsacTotal} codes) differs from` +
+          ` its members expanded at that release (${releaseTotal}); using the members. VSAC only: ` +
+          `${vsacOnly.map((c) => c.code).join(", ") || "none"}; members only: ${releaseOnly.map((c) => c.code).join(", ") || "none"}
+`,
+      );
     }
     valueSets.push({ url: `${VSAC_VALUESET_CANONICAL}${oid}`, oid, declaredTotal: expanded.total, codes: expanded.codes });
   }
@@ -317,10 +359,70 @@ async function run(args, { env, fs, fetchImpl, out, err }) {
   return 0;
 }
 
+/** Where the image holds a translation's sidecar: the backend image's WORKDIR is /app/backend-ts. */
+const imageSidecarPath = (catalogId) => `/app/backend-ts/measures/derived/${catalogId}/${SIDECAR}`;
+
+/**
+ * The sidecar's text as `ref` holds it, through the docker CLI: create a stopped container (pulling the
+ * image if absent), copy the one file out, remove the container. Throws if any step fails.
+ */
+function extractFromImage(ref, path) {
+  const dir = mkdtempSync(join(tmpdir(), "ww-sidecar-"));
+  try {
+    const container = execFileSync("docker", ["create", ref], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    try {
+      execFileSync("docker", ["cp", `${container}:${path}`, join(dir, SIDECAR)], { stdio: ["ignore", "pipe", "pipe"] });
+      return readFileSync(join(dir, SIDECAR), "utf8");
+    } finally {
+      try {
+        execFileSync("docker", ["rm", container], { stdio: ["ignore", "pipe", "pipe"] });
+      } catch {
+        // A leftover stopped container costs nothing and must not turn a good restore into a failure.
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The second line (see the header): the pinned sidecar copied out of `args.fallbackImage`, written only if
+ * it passes `pinProblems` exactly as a fresh expansion must.
+ */
+function restoreFromImage(args, { fs, out, err, extract }) {
+  const bundle = readJson(fs, join(args.outputDir, "bundle.json"), "the translation's bundle.json");
+  const manifest = readJson(fs, join(args.outputDir, "manifest.json"), "the translation's manifest.json");
+  const pinned = manifest.terminology?.sha256;
+  let text;
+  try {
+    text = extract(args.fallbackImage, imageSidecarPath(args.catalogId));
+  } catch (cause) {
+    err(`  ERROR ${args.catalogId}: no sidecar could be copied from ${args.fallbackImage}: ${String(cause.message).split("\n")[0]}\n`);
+    return 1;
+  }
+  let problems;
+  try {
+    problems = pinProblems(text, pinned, requiredOids(bundle));
+  } catch (cause) {
+    problems = [`it is not a sidecar: ${cause.message}`];
+  }
+  if (problems.length > 0) {
+    for (const problem of problems) err(`  ERROR ${args.catalogId}: the copy from ${args.fallbackImage}: ${problem}\n`);
+    return 1;
+  }
+  fs.writeFileSync(join(args.outputDir, SIDECAR), text);
+  err(
+    `  WARNING ${args.catalogId}: VSAC did not reproduce the pinned sidecar; restored it from ${args.fallbackImage}` +
+      " (it matches the manifest pin byte for byte)\n",
+  );
+  out(`  ${args.catalogId} translation terminology restored from ${args.fallbackImage}; matches the manifest pin\n`);
+  return 0;
+}
+
 /**
  * Returns the exit code (0 ok, 1 refused, 2 usage) rather than exiting, so tests drive it in-process.
- * `deps` is `{ env, fetch, fs: { existsSync, readFileSync, writeFileSync }, stdout, stderr }`; each
- * defaults to the real one.
+ * `deps` is `{ env, fetch, fs: { existsSync, readFileSync, writeFileSync }, stdout, stderr, extractFromImage }`;
+ * each defaults to the real one.
  */
 export async function main(argv, deps = {}) {
   const env = deps.env ?? process.env;
@@ -335,14 +437,24 @@ export async function main(argv, deps = {}) {
     err(`${cause.message}\n`);
     return 2;
   }
+  let code;
   try {
-    return await run(args, { env, fs, fetchImpl: deps.fetch, out, err });
+    code = await run(args, { env, fs, fetchImpl: deps.fetch, out, err });
   } catch (cause) {
     // Anything unexpected (unparseable ELM, a write error) is still a refusal with exit 1, never a
     // stack trace that a deploy log truncates.
     err(`  ERROR ${args.catalogId}: ${cause.message}\n`);
-    return 1;
+    code = 1;
   }
+  if (code === 1 && args.fallbackImage) {
+    try {
+      return restoreFromImage(args, { fs, out, err, extract: deps.extractFromImage ?? extractFromImage });
+    } catch (cause) {
+      err(`  ERROR ${args.catalogId}: ${cause.message}\n`);
+      return 1;
+    }
+  }
+  return code;
 }
 
 /**

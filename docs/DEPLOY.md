@@ -64,15 +64,28 @@ Maui also vendors the sidecar of each WorkWell translation it routes (`measures/
 per id, before `docker build`:
 
 ```bash
-node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin
-node scripts/vendor-derived-terminology.mjs --catalog-id cms130 --verify-pin
-node scripts/vendor-derived-terminology.mjs --catalog-id cms125 --verify-pin
+node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+node scripts/vendor-derived-terminology.mjs --catalog-id cms130 --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
 ```
 
-Every value set is re-expanded from VSAC at the release the committed manifest names (there is no CMS
-copy to fall back to). `--verify-pin` exits 1 unless the bytes hash to the manifest's pin and every
-declared set is present, non-empty and uncapped, so the deploy fails here instead of shipping an image
-whose evaluations all 500 while health stays 200.
+Every value set is re-expanded from VSAC at the release the committed manifest names. `--verify-pin`
+exits 1 unless the bytes hash to the manifest's pin and every declared set is present, non-empty and
+uncapped, so the deploy fails here instead of shipping an image whose evaluations all 500 while health
+stays 200.
+
+**When VSAC moves (2026-10-15).** VSAC's expansion of a GROUPING value set at a pinned release resolves
+its members at their latest version, so a member republished after the release changes the grouping's
+answer (Advanced Illness 1082 went from the release's 2,025 codes to 2,027 overnight, and every
+translation declaring it failed its pin). Two defences:
+- each pure grouping is also expanded member by member at the release; when that differs from VSAC's
+  grouping answer the members win, which is the release, and the log says `WARNING … differs from its
+  members` with the codes;
+- `--fallback-image` copies the sidecar out of the last deployed image when VSAC still does not reproduce
+  the pin or cannot be reached, and the same pin check judges the copy. The log says `WARNING … restored
+  it from`. A deploy that needed it is fine to ship; a translation whose pin changed has no older copy,
+  so it still needs VSAC.
+
+The registry login runs before vendoring so the image stays pullable if the package is made private.
 
 #### Step 1a — `--complete-terminology`: value sets the bundle does not fully carry (ADR-041, ADR-053)
 
