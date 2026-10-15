@@ -50,6 +50,12 @@
  *   strength as a completed cap.
  */
 
+import { execFileSync } from "node:child_process";
+import { createHash as createHashImpl } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 /** NLM's FHIR terminology service — the same host `@work-well/measure-engine`'s `vsac-client.ts` expands against. */
 export const DEFAULT_VSAC_BASE = "https://cts.nlm.nih.gov/fhir";
 
@@ -175,6 +181,8 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
    * by its own test, which is the only reason it is not in this PR.
    */
   let echoedUrl;
+  /** The value-set version VSAC says it expanded, when it says one (`expandAtRelease` reads it). */
+  let echoedVersion;
 
   for (let page = 0; ; page += 1) {
     if (page >= VSAC_MAX_PAGES) {
@@ -189,6 +197,7 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
     const contains = body.expansion.contains ?? [];
     if (typeof body.expansion.total === "number") total = body.expansion.total;
     if (echoedUrl === undefined && typeof body.url === "string") echoedUrl = body.url;
+    if (echoedVersion === undefined && typeof body.version === "string") echoedVersion = body.version;
     codes.push(...flattenExpansion(contains));
     offset += contains.length;
     if (contains.length === 0 || (total > 0 && codes.length >= total)) break;
@@ -199,7 +208,7 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
   }
   // `total` stays 0 when the server volunteered none. That is NOT "zero codes" and callers must not read
   // it as a count — the absent-set path refuses on it precisely because it is an absence of evidence.
-  return { codes, total, ...(echoedUrl ? { url: echoedUrl } : {}) };
+  return { codes, total, ...(echoedUrl ? { url: echoedUrl } : {}), ...(echoedVersion ? { version: echoedVersion } : {}) };
 }
 
 /**
@@ -290,7 +299,221 @@ export async function expandComplete(oid, { vsacBase, vsacManifest, apiKey, fetc
       detail,
     );
   }
-  return { codes, total: expanded.total };
+  return { codes, total: expanded.total, ...(expanded.version ? { version: expanded.version } : {}) };
+}
+
+/**
+ * A `fetch` that runs at most `limit` requests at once, the rest queued in order. Resolving a release's
+ * groupings member by member multiplies requests; this keeps VSAC from seeing them all at once.
+ */
+export function limitConcurrency(fetchFn, limit) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= limit || queue.length === 0) return;
+    active += 1;
+    const { args, resolve, reject } = queue.shift();
+    Promise.resolve()
+      .then(() => fetchFn(...args))
+      .then(resolve, reject)
+      .finally(() => {
+        active -= 1;
+        next();
+      });
+  };
+  return (...args) =>
+    new Promise((resolve, reject) => {
+      queue.push({ args, resolve, reject });
+      next();
+    });
+}
+
+/** VSAC's ValueSet canonical prefix: `<this><oid>` names a value set, `|<version>` a version of it. */
+const VSAC_VALUESET_PREFIX = "http://cts.nlm.nih.gov/fhir/ValueSet/";
+
+/** Nesting deeper than this is not a grouping VSAC publishes; refusing it bounds a cycle. */
+const MAX_GROUPING_DEPTH = 5;
+
+const vsacHeaders = (apiKey) => ({
+  Authorization: `Basic ${Buffer.from(`apikey:${apiKey}`).toString("base64")}`,
+  Accept: "application/fhir+json",
+});
+
+/**
+ * The value-set versions a release pins: `ValueSet/<oid>|<version>` entries of its manifest Library's
+ * `relatedArtifact`. Read once per release per run (`cache`).
+ */
+function releasePins(vsacManifest, opts) {
+  const key = `pins|${vsacManifest}`;
+  // The PROMISE is cached, so concurrent callers share one request.
+  if (!opts.cache.has(key)) opts.cache.set(key, readReleasePins(vsacManifest, opts));
+  return opts.cache.get(key);
+}
+
+async function readReleasePins(vsacManifest, { vsacBase, apiKey, fetch: fetchImpl }) {
+  const id = String(vsacManifest).split("/Library/")[1];
+  if (!id) throw new Error(`the release ${vsacManifest} is not a VSAC Library canonical, so its pinned versions cannot be read`);
+  const base = String(vsacBase).replace(/\/+$/, "");
+  const library = await fetchVsacJson(`${base}/Library/${encodeURIComponent(id)}`, vsacHeaders(apiKey), fetchImpl);
+  const pins = new Map();
+  for (const artifact of library.relatedArtifact ?? []) {
+    const resource = typeof artifact?.resource === "string" ? artifact.resource : "";
+    if (!resource.startsWith(VSAC_VALUESET_PREFIX)) continue;
+    const [canonical, version] = resource.split("|");
+    if (version) pins.set(oidFromValueSetUrl(canonical), version);
+  }
+  if (pins.size === 0) throw new Error(`the release ${vsacManifest} pins no value-set versions, so a grouping cannot be resolved against it`);
+  return pins;
+}
+
+/**
+ * The member OIDs of a GROUPING value set at one version, or null when the set is not a pure grouping
+ * (any concept list, filter, system include or exclude makes it something only VSAC can expand) or names
+ * a member at an explicit version.
+ */
+function groupingMembers(oid, version, opts) {
+  const key = `def|${oid}|${version}`;
+  if (!opts.cache.has(key)) opts.cache.set(key, readGroupingMembers(oid, version, opts));
+  return opts.cache.get(key);
+}
+
+async function readGroupingMembers(oid, version, { vsacBase, apiKey, fetch: fetchImpl }) {
+  const base = String(vsacBase).replace(/\/+$/, "");
+  const query = `url=${encodeURIComponent(`${VSAC_VALUESET_PREFIX}${oid}`)}&version=${encodeURIComponent(version)}`;
+  const found = await fetchVsacJson(`${base}/ValueSet?${query}`, vsacHeaders(apiKey), fetchImpl);
+  const definitions = (found.entry ?? []).map((e) => e?.resource).filter((r) => r?.resourceType === "ValueSet");
+  const definition = definitions.find((d) => d.version === version);
+  if (!definition) throw new Error(`VSAC holds no definition of ${oid}|${version} to resolve its members against`);
+  const compose = definition.compose ?? {};
+  const includes = compose.include ?? [];
+  const pure =
+    includes.length > 0 &&
+    (compose.exclude ?? []).length === 0 &&
+    includes.every((inc) => Array.isArray(inc.valueSet) && inc.valueSet.length > 0 && !inc.system && !inc.concept && !inc.filter);
+  // A member named WITH a version (`ValueSet/<oid>|<version>`) is the grouping choosing that version, which
+  // a member expansion at the release cannot reproduce; such a grouping is left to VSAC (review of #825).
+  const versioned = pure && includes.some((inc) => inc.valueSet.some((url) => String(url).includes("|")));
+  return pure && !versioned ? [...new Set(includes.flatMap((inc) => inc.valueSet.map((url) => oidFromValueSetUrl(url))))] : null;
+}
+
+/** `expandComplete`, its promise shared per run: a member several groupings name is fetched once. */
+function sharedExpansion(oid, opts) {
+  const key = `exp|${oid}`;
+  if (!opts.cache.has(key)) opts.cache.set(key, expandComplete(oid, opts));
+  return opts.cache.get(key);
+}
+
+/**
+ * One value set at a pinned release, faithful to the RELEASE even where VSAC's own answer for a grouping
+ * drifts from it.
+ *
+ * Measured 2026-10-15: VSAC's `$expand?manifest=` of a grouping value set resolves each member at the
+ * member's LATEST version, not the version the release used. Advanced Illness (1082, pinned 20190315)
+ * groups 110.11.1151 and 110.11.1150 with no member versions; 1151 gained a version on 2026-10-15, after
+ * the eCQM Update 2026-05-14, and the grouping's expansion at that release went from 2,025 codes (the
+ * published release file) to 2,027. Expanding 1151 itself at the same release correctly returns its
+ * release-time version. So a pure grouping is ALSO expanded member by member at the release, and the
+ * union of the members is what the release holds.
+ *
+ * When the two agree (the normal case) the answer is VSAC's grouping expansion, unchanged. When they
+ * disagree the member union is returned and `drift` says how VSAC's grouping answer differs, so a caller
+ * reports it instead of hiding it. Every member goes through `expandAtRelease` itself (a member can be a
+ * grouping), so each is held to `expandComplete`'s guards. Any failure throws: there is no path that
+ * returns a set this cannot account for.
+ */
+export async function expandAtRelease(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache = new Map() }, path = []) {
+  // Only the network calls are shared (an expansion, a definition, the release), each a fetch that waits
+  // on nothing else. The recursion itself is not: a cached promise for a grouping still resolving would
+  // let a cycle (A includes B, B includes A, or X->Y and Y->X entered from two groupings at once) wait on
+  // itself forever, and the vendor step would hang instead of refusing (review of #825).
+  if (path.includes(oid)) {
+    throw new Error(`grouping value sets form a cycle (${[...path, oid].join(" -> ")}); refusing to resolve it`);
+  }
+  if (path.length > MAX_GROUPING_DEPTH) {
+    throw new Error(`grouping value sets nest deeper than ${MAX_GROUPING_DEPTH} levels at ${oid}; refusing to resolve them`);
+  }
+  const opts = { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache };
+  const grouping = await sharedExpansion(oid, opts);
+  const pins = await releasePins(vsacManifest, opts);
+  // The version the release pins, where it pins one (a top-level declared set); else the version VSAC
+  // says it expanded (a member, which the release does not pin and its parent names without a version).
+  const version = pins.get(oid) ?? grouping.version;
+  if (!version) {
+    throw new Error(`neither the release ${vsacManifest} nor VSAC's expansion names a version of ${oid}, so its definition at that release cannot be read`);
+  }
+  const members = await groupingMembers(oid, version, opts);
+  let result = grouping;
+  if (members) {
+    const expandedMembers = await Promise.all(members.map((member) => expandAtRelease(member, opts, [...path, oid])));
+    const union = canonicalize(expandedMembers.flatMap((m) => m.codes));
+    const key = (c) => `${c.system}|${c.code}`;
+    const inGrouping = new Set(grouping.codes.map(key));
+    const inUnion = new Set(union.map(key));
+    const added = grouping.codes.filter((c) => !inUnion.has(key(c)));
+    const missing = union.filter((c) => !inGrouping.has(key(c)));
+    if (added.length > 0 || missing.length > 0) {
+      result = {
+        codes: union,
+        total: union.length,
+        drift: { oid, vsacTotal: grouping.total, releaseTotal: union.length, vsacOnly: added, releaseOnly: missing },
+      };
+    }
+  }
+  return result;
+}
+
+/**
+ * One file's text as the image `ref` holds it, through the docker CLI: create a stopped container (pulling
+ * the image if absent; nothing in it runs), copy the one file out, remove the container. Throws if any
+ * step fails. The vendor scripts use it to restore a pinned sidecar from the last deployed image when
+ * VSAC no longer reproduces it (2026-10-15); a pin check judges what it returns, never this function.
+ */
+export function copyFileFromImage(ref, path) {
+  const dir = mkdtempSync(join(tmpdir(), "ww-image-file-"));
+  try {
+    const container = execFileSync("docker", ["create", ref], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    try {
+      execFileSync("docker", ["cp", `${container}:${path}`, join(dir, "file")], { stdio: ["ignore", "pipe", "pipe"] });
+      return readFileSync(join(dir, "file"), "utf8");
+    } finally {
+      try {
+        execFileSync("docker", ["rm", container], { stdio: ["ignore", "pipe", "pipe"] });
+      } catch {
+        // A leftover stopped container costs nothing and must not turn a good restore into a failure.
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Whether an OFFICIAL artifact's re-vendor may be replaced by its committed state plus the sidecar the
+ * last deployed image holds: only when the regenerated manifest differs from the committed one IN THE
+ * `terminology` BLOCK ALONE (VSAC moved a completed value set; the bundle and everything else
+ * reproduced), and the image's sidecar hashes to the committed pin. Anything else returns
+ * `{ restore: false, reason }` and the re-vendor stands, so the reproducibility gate still fails on it.
+ * Pure, so it is tested directly; `vendor-official-measure.mjs` does the I/O.
+ */
+export function officialRestoreDecision({ committedManifestText, regeneratedManifestText, imageSidecarText }) {
+  const sha256 = (text) => `sha256:${createHashHex(text)}`;
+  if (committedManifestText === null || committedManifestText === undefined) return { restore: false, reason: "no committed manifest to restore" };
+  if (committedManifestText === regeneratedManifestText) return { restore: false, reason: "the re-vendor reproduced the committed manifest" };
+  const committed = JSON.parse(committedManifestText);
+  const regenerated = JSON.parse(regeneratedManifestText);
+  const outsideTerminology = (manifest) => JSON.stringify({ ...manifest, terminology: undefined });
+  if (outsideTerminology(committed) !== outsideTerminology(regenerated)) {
+    return { restore: false, reason: "the manifest changed outside its terminology block, which no sidecar copy can explain" };
+  }
+  if (typeof imageSidecarText !== "string") return { restore: false, reason: "no sidecar could be copied from the image" };
+  const pinned = committed.terminology?.sha256;
+  const actual = sha256(imageSidecarText);
+  if (actual !== pinned) return { restore: false, reason: `the image's sidecar hashes to ${actual}, not the committed pin ${pinned}` };
+  return { restore: true, reason: "the image holds the committed pin's sidecar" };
+}
+
+function createHashHex(text) {
+  return createHashImpl("sha256").update(text).digest("hex");
 }
 
 /**

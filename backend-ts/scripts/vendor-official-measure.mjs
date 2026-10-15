@@ -111,8 +111,10 @@ import {
   DEFAULT_VSAC_BASE,
   DEFAULT_VSAC_MANIFEST,
   completeTerminology,
+  copyFileFromImage,
   declaredValueSets,
   flattenExpansion,
+  officialRestoreDecision,
   oidFromValueSetUrl,
   sortValueSets,
 } from "./vsac-expansion.mjs";
@@ -161,6 +163,7 @@ function parseArgs(argv) {
     else if (flag === "--with-tests") args.withTests = true;
     else if (flag === "--content-dir") args.contentDir = resolve(argv[++i]);
     else if (flag === "--output-dir") args.outputDir = resolve(argv[++i]);
+    else if (flag === "--fallback-image") args.fallbackImage = argv[++i];
     else throw new Error(`unknown argument: ${flag}`);
   }
   if (args.testsOnly && args.withTests) throw new Error("--tests-only and --with-tests are mutually exclusive");
@@ -554,6 +557,8 @@ const manifest = buildManifest(reduced, args, raw, bundleJson, terminology, term
 // separate call sites across four workflows to remember `--with-tests` is the wrong shape of fix: the
 // script knows whether it regenerated the deck, and the callers do not.
 const existingManifestPath = join(outDir, "manifest.json");
+// Read before anything is written: `--fallback-image` (below) may need to put these exact bytes back.
+const committedManifestText = existsSync(existingManifestPath) ? readFileSync(existingManifestPath, "utf8") : null;
 if (!args.withTests && existsSync(existingManifestPath)) {
   const previous = JSON.parse(readFileSync(existingManifestPath, "utf8"));
   if (previous.tests) manifest.tests = previous.tests;
@@ -569,6 +574,39 @@ if (args.withTests) {
   const tests = vendorTests({ ...args, outputDir: outDir });
   manifest.tests = tests;
   writeFileSync(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+// `--fallback-image <ref>` (2026-10-15): VSAC can move a value set this re-vendor completes, at the pinned
+// release, with nothing in the artifact changing. Then the manifest differs only in its terminology block
+// and the deploy's reproducibility gate fails although nothing we pinned moved. When that is ALL that
+// differs and the image holds a sidecar hashing to the committed pin, the committed manifest and that
+// sidecar are put back (`officialRestoreDecision` decides; it is tested directly). Anything else stands,
+// and the gate fails on it as before.
+if (args.fallbackImage) {
+  let imageSidecarText;
+  try {
+    imageSidecarText = copyFileFromImage(args.fallbackImage, `/app/backend-ts/measures/official/${args.catalogId}/terminology.json`);
+  } catch (cause) {
+    imageSidecarText = undefined;
+    if (committedManifestText !== null && committedManifestText !== readFileSync(join(outDir, "manifest.json"), "utf8")) {
+      console.warn(`  WARNING could not copy ${args.catalogId}'s sidecar from ${args.fallbackImage}: ${String(cause.message).split("\n")[0]}`);
+    }
+  }
+  const decision = officialRestoreDecision({
+    committedManifestText,
+    regeneratedManifestText: readFileSync(join(outDir, "manifest.json"), "utf8"),
+    imageSidecarText,
+  });
+  if (decision.restore) {
+    writeFileSync(join(outDir, "terminology.json"), imageSidecarText);
+    writeFileSync(join(outDir, "manifest.json"), committedManifestText);
+    console.warn(
+      `  WARNING ${args.catalogId}: VSAC no longer reproduces the committed terminology pin; restored the committed` +
+        ` manifest and the pinned sidecar from ${args.fallbackImage} (the summary below describes the re-vendor that was discarded)`,
+    );
+  } else if (committedManifestText !== null && committedManifestText !== readFileSync(join(outDir, "manifest.json"), "utf8")) {
+    console.warn(`  NOTE ${args.catalogId}: not restored from ${args.fallbackImage}: ${decision.reason}`);
+  }
 }
 
 // Decimal MB, matching the evidence report's own formatting — the two printed the same file at
