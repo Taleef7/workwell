@@ -7,6 +7,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-15
 
+- **Bulk downloads are CASE_MANAGER/ADMIN, the audit ledger ADMIN** (owner decision D5). The read-only VIEWER
+  (the public sandbox, the Maui clinician seat) could download every patient's rows, QRDA I documents and the
+  audit ledger. Browsing in the app is unchanged; the run and cases pages no longer offer a download a role
+  would only meet a 403 on.
 - **VSAC moved a value set at a pinned release, and the deploy now survives it.** Overnight, VSAC's
   expansion of Advanced Illness (1082) at the eCQM Update 2026-05-14 went from 2,025 codes (the published
   release) to 2,027: 1082 groups two member sets, one gained a version on 2026-10-15, and VSAC resolves a

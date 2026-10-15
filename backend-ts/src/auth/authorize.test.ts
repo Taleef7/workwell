@@ -142,6 +142,32 @@ test("read-only viewer (public sandbox) may GET anything authenticated but never
   assert.equal(authorize("POST", "/api/auth/logout", viewer).ok, true);
 });
 
+test("bulk downloads are CM/ADMIN and the audit-ledger export ADMIN; browsing the same rows stays open (D5)", () => {
+  const cmOrAdmin = [
+    "/api/exports/cases",
+    "/api/exports/outcomes",
+    "/api/exports/runs",
+    "/api/runs/r1/qrda1",
+    "/api/runs/r1/qrda",
+    "/api/runs/r1/measure-report",
+  ];
+  for (const path of cmOrAdmin) {
+    assert.equal(authorize("GET", path, cm).ok, true, `${path}: CASE_MANAGER`);
+    assert.equal(authorize("GET", path, admin).ok, true, `${path}: ADMIN`);
+    for (const who of [viewer, author, approver]) {
+      assert.deepEqual(authorize("GET", path, who), { ok: false, status: 403 }, `${path}: ${who.role}`);
+    }
+  }
+  assert.equal(authorize("GET", "/api/audit-events/export", admin).ok, true);
+  for (const who of [cm, viewer, author, approver]) {
+    assert.deepEqual(authorize("GET", "/api/audit-events/export", who), { ok: false, status: 403 }, who.role);
+  }
+  // In-app browsing is unchanged: the run's outcomes and logs, the run list, the work list and the cases.
+  for (const path of ["/api/runs/r1/outcomes", "/api/runs/r1/logs", "/api/runs", "/api/worklist", "/api/cases"]) {
+    assert.equal(authorize("GET", path, viewer).ok, true, `${path}: VIEWER may still browse`);
+  }
+});
+
 test("non-/api routes default to permit", () => {
   assert.equal(authorize("GET", "/", null).ok, true);
 });

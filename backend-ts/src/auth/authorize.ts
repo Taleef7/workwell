@@ -180,6 +180,16 @@ const RULES: Rule[] = [
   // seat is a VIEWER too, so leaving the reads to the /api/** catch-all would expose all of it. The
   // identity routes are restricted for exactly this reason. Must precede the catch-alls below.
   { pattern: rx("/api/subject-lists/**"), access: [CM, A] },
+  // Bulk downloads (production-readiness review 2026-10-15, owner decision D5). Every patient's rows in one
+  // file is a minimum-necessary question, so the CSV exports, the per-patient QRDA I documents, the QRDA III
+  // and MeasureReport files are CM/ADMIN, and the audit-ledger export is ADMIN. BROWSING the same rows in the
+  // app stays AUTHENTICATED (the work-list decision above); what changes is who can carry them away in bulk.
+  // The read-only VIEWER is the public /sandbox and the Maui clinician seat. Must precede the catch-alls.
+  { pattern: rx("/api/exports/**"), access: [CM, A] },
+  { pattern: rx("/api/audit-events/**"), access: [A] },
+  { method: "GET", pattern: rx("/api/runs/*/qrda1"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/runs/*/qrda"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/runs/*/measure-report"), access: [CM, A] },
   { method: "GET", pattern: rx("/api/worklist/**"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/**"), access: "AUTHENTICATED" },
   { pattern: rx("/api/**"), access: "AUTHENTICATED" },

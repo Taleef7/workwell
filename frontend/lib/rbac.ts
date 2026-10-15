@@ -49,6 +49,17 @@ export const canRunMeasures = (role: string | null | undefined): boolean =>
 export const canManageCases = (role: string | null | undefined): boolean =>
   hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
 
+/**
+ * Download patient data in bulk: the CSV exports, QRDA and MeasureReport files (/api/exports/**,
+ * /api/runs/:id/{qrda1,qrda,measure-report}) — CASE_MANAGER/ADMIN, mirroring the backend gate (D5).
+ * Browsing the same rows in the app stays open to every signed-in role.
+ */
+export const canExportData = (role: string | null | undefined): boolean =>
+  hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
+
+/** Download the audit ledger (/api/audit-events/export) — ADMIN only, mirroring the backend gate. */
+export const canExportAudit = (role: string | null | undefined): boolean => isAdmin(role);
+
 /** Launch bulk outreach campaigns + view campaign history (/api/campaigns/**). */
 export const canRunCampaigns = (role: string | null | undefined): boolean =>
   hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
