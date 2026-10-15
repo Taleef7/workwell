@@ -539,8 +539,11 @@ function jobLines(yaml: string, job: string): string[] {
   return lines.slice(start + 1, end);
 }
 
-/** The one form of a translation vendor line that fails a deploy: an explicit id, `--verify-pin`, nothing after. */
-const VENDOR_TRANSLATION = /^\s*node scripts\/vendor-derived-terminology\.mjs --catalog-id ([a-z0-9]+) --verify-pin\s*$/;
+/**
+ * The one form of a translation vendor line that fails a deploy: an explicit id, `--verify-pin`, and at
+ * most a `--fallback-image <ref>` (whose copy the same pin check judges), nothing after.
+ */
+const VENDOR_TRANSLATION = /^\s*node scripts\/vendor-derived-terminology\.mjs --catalog-id ([a-z0-9]+) --verify-pin(?: --fallback-image \S+)?\s*$/;
 /** The image build, as a build-push-action step or a `docker build` / `docker buildx build` command. */
 const IMAGE_BUILD = /^\s*-?\s*uses:\s*docker\/build-push-action@|\bdocker\s+(?:buildx\s+)?build\b/;
 
@@ -664,6 +667,8 @@ test("the vendor reader keeps to one job, refuses a fail-soft line, and finds th
   assert.ok(late.vendored[0]!.line > late.build, "a line after the build reads as after it");
   assert.deepEqual(read(workflow(run, vendor(" || true"), image)).unread, [vendor(" || true").trim()]);
   assert.equal(read(workflow(run, "          node scripts/vendor-derived-terminology.mjs --catalog-id cms137", image)).unread.length, 1, "no --verify-pin");
+  assert.deepEqual(read(workflow(run, vendor(" --fallback-image ghcr.io/x/y:maui-latest"), image)).vendored.map((v) => v.id), ["cms137"], "a fallback image is read");
+  assert.deepEqual(read(workflow(run, vendor(" --fallback-image ghcr.io/x/y:maui-latest || true"), image)).unread.length, 1, "a fallback line made fail-soft is not");
   const cli = read(workflow(run, vendor(), "          docker buildx build ."));
   assert.ok(cli.build > cli.vendored[0]!.line, "a docker build command counts as the build");
   assert.equal(read(workflow(run, vendor())).build, -1, "no build in the job");
