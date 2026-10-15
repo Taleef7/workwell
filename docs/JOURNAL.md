@@ -12,8 +12,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   with active depression management (new in v16), or with an antidepressant active over the visit (CMS's
   draft had folded that path into the follow-up). The QRDA importer now maps a performed procedure's one
   stated author time to QI-Core's `recorded`, which v16 falls back to. Cypress 379/379, MADiE one move (an
-  old, still-active antidepressant), 12 hand-built patients (6 discriminating). All six ACO measures now have
-  2027 logic.
+  old, still-active antidepressant), 19 hand-built patients (10 discriminating). All six ACO measures now have
+  2027 logic. Review found that a QRDA-imported medication's stated end is invisible to CMS's period logic
+  (#823, every measure that reads one).
 - **CMS122 for 2027: WorkWell's translation of CMS122v15, routed on Maui (#818).** The frailty edit, and
   v15's choice of HbA1c/GMI reading: the most recent day counts only a result above 0 %, and the reading is
   the lowest number that day, else the most recent number, else the most recent result-less one. CMS's v14

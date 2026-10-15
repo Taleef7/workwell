@@ -1565,6 +1565,979 @@
           ]
         }
       ]
+    },
+    {
+      "id": "ww-cms2-edit-13",
+      "description": "Aged 13: a positive adolescent screen on 20 February and a follow-up procedure on 25 February, before the visit (v16's window)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 1
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms2-edit-13",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "2012-05-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms2-edit-13-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99213"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-13"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Observation",
+          "id": "ww-cms2-edit-13-obs-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-screening-assessment"
+            ]
+          },
+          "status": "final",
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                  "code": "survey"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "73831-0",
+                "display": "Adolescent depression screening assessment"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-13"
+          },
+          "effectiveDateTime": "2026-02-20T10:00:00.000+00:00",
+          "valueCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428181000124104",
+                "display": "Depression screening positive (finding)"
+              }
+            ]
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms2-edit-13-proc-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "108313002"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-13"
+          },
+          "performedDateTime": "2026-02-25T10:00:00.000+00:00"
+        }
+      ]
+    },
+    {
+      "id": "ww-cms2-edit-14",
+      "description": "Aged 13: a positive adolescent screen and a follow-up procedure with no performed time, recorded the day after the visit",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 1
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms2-edit-14",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "2012-05-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms2-edit-14-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99213"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-14"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Observation",
+          "id": "ww-cms2-edit-14-obs-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-screening-assessment"
+            ]
+          },
+          "status": "final",
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                  "code": "survey"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "73831-0",
+                "display": "Adolescent depression screening assessment"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-14"
+          },
+          "effectiveDateTime": "2026-03-02T09:05:00.000+00:00",
+          "valueCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428181000124104",
+                "display": "Depression screening positive (finding)"
+              }
+            ]
+          }
+        },
+        {
+          "resourceType": "Procedure",
+          "id": "ww-cms2-edit-14-proc-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-procedure"
+            ]
+          },
+          "status": "completed",
+          "code": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "108313002"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-14"
+          },
+          "extension": [
+            {
+              "url": "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-recorded",
+              "valueDateTime": "2026-03-03T10:00:00.000+00:00"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ww-cms2-edit-15",
+      "description": "Aged 17: a positive adult screen and an adult antidepressant active from December through June",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 1
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms2-edit-15",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "2008-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms2-edit-15-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99213"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-15"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Observation",
+          "id": "ww-cms2-edit-15-obs-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-screening-assessment"
+            ]
+          },
+          "status": "final",
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                  "code": "survey"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "73832-8",
+                "display": "Adult depression screening assessment"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-15"
+          },
+          "effectiveDateTime": "2026-03-02T09:05:00.000+00:00",
+          "valueCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428181000124104",
+                "display": "Depression screening positive (finding)"
+              }
+            ]
+          }
+        },
+        {
+          "resourceType": "MedicationRequest",
+          "id": "ww-cms2-edit-15-med-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest"
+            ]
+          },
+          "status": "active",
+          "intent": "order",
+          "medicationCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                "code": "1000048"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-15"
+          },
+          "authoredOn": "2025-12-01T10:00:00.000+00:00",
+          "dosageInstruction": [
+            {
+              "timing": {
+                "repeat": {
+                  "boundsPeriod": {
+                    "start": "2025-12-01",
+                    "end": "2026-06-30"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ww-cms2-edit-16",
+      "description": "Aged 17: a positive adolescent screen and an adolescent antidepressant active from December through June",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 1
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms2-edit-16",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "2008-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms2-edit-16-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99213"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-16"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Observation",
+          "id": "ww-cms2-edit-16-obs-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-screening-assessment"
+            ]
+          },
+          "status": "final",
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                  "code": "survey"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "73831-0",
+                "display": "Adolescent depression screening assessment"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-16"
+          },
+          "effectiveDateTime": "2026-03-02T09:05:00.000+00:00",
+          "valueCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428181000124104",
+                "display": "Depression screening positive (finding)"
+              }
+            ]
+          }
+        },
+        {
+          "resourceType": "MedicationRequest",
+          "id": "ww-cms2-edit-16-med-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest"
+            ]
+          },
+          "status": "active",
+          "intent": "order",
+          "medicationCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                "code": "1190110"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-16"
+          },
+          "authoredOn": "2025-12-01T10:00:00.000+00:00",
+          "dosageInstruction": [
+            {
+              "timing": {
+                "repeat": {
+                  "boundsPeriod": {
+                    "start": "2025-12-01",
+                    "end": "2026-06-30"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ww-cms2-edit-17",
+      "description": "A positive screen and a COMPLETED antidepressant order spanning the visit: an order, not an active medication (QI-Core's Medication, Active is status active)",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms2-edit-17",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1980-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms2-edit-17-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99213"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-17"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Observation",
+          "id": "ww-cms2-edit-17-obs-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-screening-assessment"
+            ]
+          },
+          "status": "final",
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                  "code": "survey"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "73832-8",
+                "display": "Adult depression screening assessment"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-17"
+          },
+          "effectiveDateTime": "2026-03-02T09:05:00.000+00:00",
+          "valueCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428181000124104",
+                "display": "Depression screening positive (finding)"
+              }
+            ]
+          }
+        },
+        {
+          "resourceType": "MedicationRequest",
+          "id": "ww-cms2-edit-17-med-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest"
+            ]
+          },
+          "status": "completed",
+          "intent": "order",
+          "medicationCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                "code": "1000048"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-17"
+          },
+          "authoredOn": "2025-12-01T10:00:00.000+00:00",
+          "dosageInstruction": [
+            {
+              "timing": {
+                "repeat": {
+                  "boundsPeriod": {
+                    "start": "2025-12-01",
+                    "end": "2026-06-30"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ww-cms2-edit-18",
+      "description": "A positive screen and an antidepressant PLANNED (intent plan) over the visit: not an order",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms2-edit-18",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1980-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms2-edit-18-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99213"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-18"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Observation",
+          "id": "ww-cms2-edit-18-obs-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-screening-assessment"
+            ]
+          },
+          "status": "final",
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                  "code": "survey"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "73832-8",
+                "display": "Adult depression screening assessment"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-18"
+          },
+          "effectiveDateTime": "2026-03-02T09:05:00.000+00:00",
+          "valueCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428181000124104",
+                "display": "Depression screening positive (finding)"
+              }
+            ]
+          }
+        },
+        {
+          "resourceType": "MedicationRequest",
+          "id": "ww-cms2-edit-18-med-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest"
+            ]
+          },
+          "status": "active",
+          "intent": "plan",
+          "medicationCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                "code": "1000048"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-18"
+          },
+          "authoredOn": "2025-12-01T10:00:00.000+00:00",
+          "dosageInstruction": [
+            {
+              "timing": {
+                "repeat": {
+                  "boundsPeriod": {
+                    "start": "2025-12-01",
+                    "end": "2026-06-30"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ww-cms2-edit-19",
+      "description": "A positive screen and an active antidepressant whose stated period ended in December, before the visit",
+      "expected": {
+        "cms": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        },
+        "translation": {
+          "initial-population": 1,
+          "denominator": 1,
+          "denominator-exclusion": 0,
+          "denominator-exception": 0,
+          "numerator": 0
+        }
+      },
+      "resources": [
+        {
+          "resourceType": "Patient",
+          "id": "ww-cms2-edit-19",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-patient"
+            ]
+          },
+          "gender": "female",
+          "birthDate": "1980-06-01"
+        },
+        {
+          "resourceType": "Encounter",
+          "id": "ww-cms2-edit-19-enc-1",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-encounter"
+            ]
+          },
+          "status": "finished",
+          "class": {
+            "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+            "code": "AMB",
+            "display": "ambulatory"
+          },
+          "type": [
+            {
+              "coding": [
+                {
+                  "system": "http://www.ama-assn.org/go/cpt",
+                  "code": "99213"
+                }
+              ]
+            }
+          ],
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-19"
+          },
+          "period": {
+            "start": "2026-03-02T09:00:00.000+00:00",
+            "end": "2026-03-02T09:30:00.000+00:00"
+          }
+        },
+        {
+          "resourceType": "Observation",
+          "id": "ww-cms2-edit-19-obs-2",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-observation-screening-assessment"
+            ]
+          },
+          "status": "final",
+          "category": [
+            {
+              "coding": [
+                {
+                  "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+                  "code": "survey"
+                }
+              ]
+            }
+          ],
+          "code": {
+            "coding": [
+              {
+                "system": "http://loinc.org",
+                "code": "73832-8",
+                "display": "Adult depression screening assessment"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-19"
+          },
+          "effectiveDateTime": "2026-03-02T09:05:00.000+00:00",
+          "valueCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://snomed.info/sct",
+                "code": "428181000124104",
+                "display": "Depression screening positive (finding)"
+              }
+            ]
+          }
+        },
+        {
+          "resourceType": "MedicationRequest",
+          "id": "ww-cms2-edit-19-med-3",
+          "meta": {
+            "profile": [
+              "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest"
+            ]
+          },
+          "status": "active",
+          "intent": "order",
+          "medicationCodeableConcept": {
+            "coding": [
+              {
+                "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+                "code": "1000048"
+              }
+            ]
+          },
+          "subject": {
+            "reference": "Patient/ww-cms2-edit-19"
+          },
+          "authoredOn": "2025-10-01T10:00:00.000+00:00",
+          "dosageInstruction": [
+            {
+              "timing": {
+                "repeat": {
+                  "boundsPeriod": {
+                    "start": "2025-10-01",
+                    "end": "2025-12-31"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

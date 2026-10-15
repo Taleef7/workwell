@@ -111,8 +111,8 @@ depression screen counts in three ways: a follow-up from the screening to two da
 during the visit, or ordered up to two days after it), active depression management (new in v16), or an
 antidepressant active over and after the visit, whenever it was ordered. CMS's FHIR draft had no separate
 active-medication path. The 2027 Cypress deck agrees on 379 of 379; on CMS's own test deck one patient
-moves into the numerator (an active antidepressant ordered a year before the visit); 12 hand-built patients
-test every edit (`backend-ts/measures/derived/cms2/README.md`).
+moves into the numerator (an active antidepressant ordered a year before the visit, with no stated end); 19
+hand-built patients, 10 of which tell the logics apart (`backend-ts/measures/derived/cms2/README.md`).
 
 > **CMS165 reads a blood pressure by its profile, and nothing else by profile (#591, 2026-10-10).**
 > CMS165 is the only pilot measure whose decisive retrieve identifies a blood pressure by PROFILE alone

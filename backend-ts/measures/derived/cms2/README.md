@@ -21,9 +21,10 @@ FHIR idiom:
    active over the visit.
 2. **Active depression management** (new in v16): a completed Procedure from Active Depression Management
    (`…1248.413`, a value set new in v16), from the end of the screening to two days after the visit.
-3. **An active depression medication**: a MedicationRequest active over and after the visit, with no timing
-   on the order. v15 had this path too; CMS's FHIR draft folded it into the follow-up union, under the
-   follow-up's timing. Its condition is CMS's own draft expression, moved into its own define.
+3. **An active depression medication**: a MedicationRequest with status `active` (QI-Core's Medication,
+   Active; a `completed` request is an order) whose period overlaps the visit and runs after it, with no
+   timing on the order. v15 had this path too; CMS's FHIR draft folded it into the follow-up union, under the
+   follow-up's timing. Its period condition is CMS's own draft expression, moved into its own define.
 
 The edits add the value set, change both follow-up unions, both "Positive and Follow Up Provided" defines (and
 add the two new paths beside each), and the numerator. Not ported, because they change no result: v16's
@@ -37,7 +38,7 @@ the new value set).
 | `bundle.json` | yes | the Measure and five Libraries, ELM only: the main library is WorkWell's compile, the other four are CMS's committed ones |
 | `manifest.json` | yes | identity, pins, the terminology pin and the check records |
 | `edits.json` | yes | the six edits |
-| `edit-cases.json` | yes | 12 synthetic test patients, and the one Active Depression Management code they need; read only by `derived:check`, never by the corpus, ingest or any evaluation path |
+| `edit-cases.json` | yes | 19 synthetic test patients, and the one Active Depression Management code they need; read only by `derived:check`, never by the corpus, ingest or any evaluation path |
 | `madie-expected-differences.json` | yes | the four defines only the translation has, one population that moves, and twelve define values that differ |
 | `terminology.json` | no (gitignored) | every declared value set at the release |
 
@@ -51,16 +52,20 @@ the new value set).
   Pinned in `src/wiring/derived-terminology.test.ts`.
 - MADiE (CI, every push, not recorded): CMS's 36-case deck. **One population moves**: an adult with a positive
   screen and an antidepressant order that is active, has no stated end, and was written a year before the
-  visit enters the numerator through v16's active-medication path. CMS's draft counts that order only as a
-  follow-up timed by its order date. Four defines exist on the translation's side only; twelve define values
+  visit enters the numerator through v16's active-medication path: the order has no stated end, and an active
+  medication with no end is ongoing, as the steward's own v16 results score two Cypress deck patients. CMS's
+  draft counts that order only as a follow-up timed by its order date. Four defines exist on the translation's side only; twelve define values
   differ without moving a population (the follow-up union now holds an order on its own, and the moving
   case's exceptions are not evaluated once it is in the numerator).
-- Edit cases (CI, every push, not recorded): 12 patients, 6 of them telling the logics apart, give the stated
-  answer under both: a follow-up between the screening and the visit, a medication ordered after the visit, a
-  medication active from before it (adult and adolescent), a follow-up procedure stated only by when it was
-  recorded, and active management stated the same way; and controls (a follow-up during the visit, a referral
-  during it, a negative screen, no follow-up, one three days late, one before the screening). **These are
-  the evidence that discriminates the edits, and they are WorkWell's own.**
+- Edit cases (CI, every push, not recorded): 19 patients, 10 of them telling the logics apart, give the
+  stated answer under both: a follow-up between the screening and the visit (adult and adolescent), a
+  medication ordered after the visit, a medication active from before it (adult, adolescent, and both tools at
+  age 17), a follow-up stated only by when it was recorded (adult and adolescent), and active management stated
+  the same way; and controls (a follow-up during the visit, a referral during it, a negative screen, no
+  follow-up, one three days late, one before the screening, and a completed order, a planned medication and a
+  medication that ended before the visit, none of which is an active medication). Allowing `completed` back
+  into the active-medication status fails one of them. **These are the evidence that discriminates the
+  edits, and they are WorkWell's own.**
 
 ## What to know before real data
 
@@ -68,10 +73,17 @@ the new value set).
   are also follow-up codes, and its window lies inside the follow-up's, so a management procedure already
   counts as a follow-up. It is ported as v16 states it, and an edit case shows it, but no case can tell it
   apart.
-- **An active medication needs no timing on its order.** An antidepressant order left `active` with no stated
-  end counts at every visit after it (the moving MADiE case). Whether WebChart closes old orders matters here,
-  and its medication codes are FDDC, not RxNorm, so neither medication path can fire on its data today
-  (`OPEN_QUESTIONS.md` §4.9).
+- **An active medication needs no timing on its order.** An antidepressant left `active` with no stated end
+  counts at every visit after it (the moving MADiE case), as v16 scores it. Whether WebChart closes old orders
+  matters here, and its medication codes are FDDC, not RxNorm, so neither medication path can fire on its data
+  today (`OPEN_QUESTIONS.md` §4.9).
+- **A QRDA-imported medication's stated end is not seen** (#823): the importer writes the period to
+  `dispenseRequest.validityPeriod`, which CMS's `medicationRequestPeriod()` does not read for an end, so an
+  active medication that ended reads as ongoing. It affects every CMS library that reads medication periods,
+  not only this one.
+- **A medication order is timed by when it was written** (`authoredOn`), CMS's FHIR idiom for orders. v16
+  times a Medication, Order by the start of the period it orders, falling back to when it was written, so an
+  order written at the visit for a course starting later counts here and not in v16.
 - **The `recorded` fallback** reads QI-Core's `qicore-recorded` extension on a Procedure. The QRDA importer now
   maps a performed procedure's one stated author time to it; WebChart ingest does not set it.
 

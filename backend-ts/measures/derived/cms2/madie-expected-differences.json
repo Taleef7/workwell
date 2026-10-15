@@ -25,7 +25,7 @@
       "cms": "11000",
       "ours": "11010"
     },
-    "reason": "Now in the numerator, through v16's active-medication path. Aged 18, a positive adult screen on 2026-06-15 and a visit on 2026-06-21; an antidepressant order (doxepin, status active) authored 2025-06-24 with no dosage or supply stated. CMS's draft counts the order only as a follow-up, timed by its order date a year before the visit, so not in the numerator. v16 counts a depression medication active over and after the visit with no timing on the order: CMS's own medicationRequestPeriod() overlap condition holds for this order (the draft evaluates the same condition inside its follow-up union, which holds this order too)."
+    "reason": "Now in the numerator, through v16's active-medication path. Aged 18, a positive adult screen on 2026-06-15 and a visit on 2026-06-21; an antidepressant (doxepin) with status active and intent order, authored 2025-06-24, with no dosage or supply, so no stated end. v16 counts a depression medication active over and after the visit, with no timing on the order, and scores an active medication with no end as ongoing: the steward's own v16 results put two Cypress deck patients in the numerator on exactly that shape (a Medication, Active with no end). CMS's draft counts the order only as a follow-up, timed by its order date a year before the visit, so not in the numerator."
   },
   {
     "case": "328248a7-33d6-4923-a99a-a56ec88c515e",
