@@ -977,6 +977,45 @@ describe("expandAtRelease (VSAC grouping drift, 2026-10-15)", () => {
     await assert.rejects(expandAtRelease("A", OPTS), /nest deeper than 5 levels/);
   });
 
+  /** Settles or fails within `ms`: a cycle must REFUSE, and a hang would otherwise pass as a slow test. */
+  const settles = (promise, ms = 3000) =>
+    Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("hung: the promise never settled")), ms))]);
+
+  it("REFUSES a cycle (A includes B, B includes A) instead of waiting on itself (review of #825)", async () => {
+    serve({ A: { codes: sct("a"), version: "a", members: ["B"] }, B: { codes: sct("a"), version: "b", members: ["A"] } }, { A: "a" });
+    await assert.rejects(settles(expandAtRelease("A", OPTS)), /form a cycle \(A -> B -> A\)/);
+  });
+
+  it("REFUSES a cycle entered from two groupings at once, sharing one cache (X -> Y and Y -> X)", async () => {
+    serve(
+      {
+        G1: { codes: sct("a"), version: "1", members: ["X"] },
+        G2: { codes: sct("a"), version: "1", members: ["Y"] },
+        X: { codes: sct("a"), version: "x", members: ["Y"] },
+        Y: { codes: sct("a"), version: "y", members: ["X"] },
+      },
+      { G1: "1", G2: "1" },
+    );
+    const cache = new Map();
+    const both = Promise.allSettled([expandAtRelease("G1", { ...OPTS, cache }), expandAtRelease("G2", { ...OPTS, cache })]);
+    const [one, two] = await settles(both);
+    assert.equal(one.status, "rejected");
+    assert.equal(two.status, "rejected");
+    assert.match(String(one.reason), /form a cycle/);
+    assert.match(String(two.reason), /form a cycle/);
+  });
+
+  it("leaves a grouping that names a member at an explicit VERSION to VSAC (a release expansion cannot honour it)", async () => {
+    serve(
+      { G: { codes: sct("a", "b", "x"), version: "g1", members: ["M|v9"] }, M: { codes: sct("a", "b"), version: "m-latest" } },
+      { G: "g1" },
+    );
+    const result = await expandAtRelease("G", OPTS);
+    assert.deepEqual(result.codes, canonicalize(sct("a", "b", "x")), "VSAC's grouping answer, unchanged");
+    assert.equal(result.drift, undefined);
+    assert.equal(expansionsOf("M"), 0, "the member is never expanded at an unchosen version");
+  });
+
   it("limitConcurrency never runs more than `limit` requests at once", async () => {
     let inFlight = 0;
     let peak = 0;

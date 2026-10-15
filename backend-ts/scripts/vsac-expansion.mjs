@@ -362,7 +362,8 @@ async function readReleasePins(vsacManifest, { vsacBase, apiKey, fetch: fetchImp
 
 /**
  * The member OIDs of a GROUPING value set at one version, or null when the set is not a pure grouping
- * (any concept list, filter, system include or exclude makes it something only VSAC can expand).
+ * (any concept list, filter, system include or exclude makes it something only VSAC can expand) or names
+ * a member at an explicit version.
  */
 function groupingMembers(oid, version, opts) {
   const key = `def|${oid}|${version}`;
@@ -383,7 +384,17 @@ async function readGroupingMembers(oid, version, { vsacBase, apiKey, fetch: fetc
     includes.length > 0 &&
     (compose.exclude ?? []).length === 0 &&
     includes.every((inc) => Array.isArray(inc.valueSet) && inc.valueSet.length > 0 && !inc.system && !inc.concept && !inc.filter);
-  return pure ? [...new Set(includes.flatMap((inc) => inc.valueSet.map((url) => oidFromValueSetUrl(url))))] : null;
+  // A member named WITH a version (`ValueSet/<oid>|<version>`) is the grouping choosing that version, which
+  // a member expansion at the release cannot reproduce; such a grouping is left to VSAC (review of #825).
+  const versioned = pure && includes.some((inc) => inc.valueSet.some((url) => String(url).includes("|")));
+  return pure && !versioned ? [...new Set(includes.flatMap((inc) => inc.valueSet.map((url) => oidFromValueSetUrl(url))))] : null;
+}
+
+/** `expandComplete`, its promise shared per run: a member several groupings name is fetched once. */
+function sharedExpansion(oid, opts) {
+  const key = `exp|${oid}`;
+  if (!opts.cache.has(key)) opts.cache.set(key, expandComplete(oid, opts));
+  return opts.cache.get(key);
 }
 
 /**
@@ -404,20 +415,19 @@ async function readGroupingMembers(oid, version, { vsacBase, apiKey, fetch: fetc
  * grouping), so each is held to `expandComplete`'s guards. Any failure throws: there is no path that
  * returns a set this cannot account for.
  */
-export function expandAtRelease(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache = new Map() }, depth = 0) {
-  if (depth > MAX_GROUPING_DEPTH) {
-    return Promise.reject(new Error(`grouping value sets nest deeper than ${MAX_GROUPING_DEPTH} levels at ${oid}; refusing to resolve a possible cycle`));
+export async function expandAtRelease(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache = new Map() }, path = []) {
+  // Only the network calls are shared (an expansion, a definition, the release), each a fetch that waits
+  // on nothing else. The recursion itself is not: a cached promise for a grouping still resolving would
+  // let a cycle (A includes B, B includes A, or X->Y and Y->X entered from two groupings at once) wait on
+  // itself forever, and the vendor step would hang instead of refusing (review of #825).
+  if (path.includes(oid)) {
+    throw new Error(`grouping value sets form a cycle (${[...path, oid].join(" -> ")}); refusing to resolve it`);
   }
-  const memo = `exp|${oid}`;
+  if (path.length > MAX_GROUPING_DEPTH) {
+    throw new Error(`grouping value sets nest deeper than ${MAX_GROUPING_DEPTH} levels at ${oid}; refusing to resolve them`);
+  }
   const opts = { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache };
-  // The promise is cached, so a member shared by several groupings expanding at once is fetched once.
-  if (!cache.has(memo)) cache.set(memo, resolveAtRelease(oid, opts, depth));
-  return cache.get(memo);
-}
-
-async function resolveAtRelease(oid, opts, depth) {
-  const { vsacManifest } = opts;
-  const grouping = await expandComplete(oid, opts);
+  const grouping = await sharedExpansion(oid, opts);
   const pins = await releasePins(vsacManifest, opts);
   // The version the release pins, where it pins one (a top-level declared set); else the version VSAC
   // says it expanded (a member, which the release does not pin and its parent names without a version).
@@ -428,7 +438,7 @@ async function resolveAtRelease(oid, opts, depth) {
   const members = await groupingMembers(oid, version, opts);
   let result = grouping;
   if (members) {
-    const expandedMembers = await Promise.all(members.map((member) => expandAtRelease(member, opts, depth + 1)));
+    const expandedMembers = await Promise.all(members.map((member) => expandAtRelease(member, opts, [...path, oid])));
     const union = canonicalize(expandedMembers.flatMap((m) => m.codes));
     const key = (c) => `${c.system}|${c.code}`;
     const inGrouping = new Set(grouping.codes.map(key));
