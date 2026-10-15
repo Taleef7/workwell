@@ -5,6 +5,20 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-15
+
+- **VSAC moved a value set at a pinned release, and the deploy now survives it.** Overnight, VSAC's
+  expansion of Advanced Illness (1082) at the eCQM Update 2026-05-14 went from 2,025 codes (the published
+  release) to 2,027: 1082 groups two member sets, one gained a version on 2026-10-15, and VSAC resolves a
+  grouping's members at their latest version. The pin check failed closed, so CI and every deploy of
+  cms122/125/130/165 stopped. Vendoring now expands each pure grouping member by member at the release
+  (the members win, with a WARNING), and `--fallback-image` restores a sidecar from the last deployed
+  image when VSAC still disagrees or is down, judged by the same pin. No pin changed. By afternoon the
+  same two codes reached the official artifacts' Advanced Illness completion at `ecqm-fhir-update-2025`
+  (2,000 -> 2,002), failing every deploy's reproducibility gate on both stacks; the official vendor now
+  restores the committed manifest and the pinned sidecar from the image when only the terminology moved.
+  Member expansion is not used there: at that release the members disagree with both answers.
+
 ## 2026-10-14
 
 - **CMS2 for 2027: WorkWell's translation of CMS2v16, routed on Maui (#822).** Ported as written (owner
