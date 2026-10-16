@@ -125,12 +125,18 @@ export const MAUI_ACCOUNTS = {
   admin: { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN" },
 } as const;
 
+/** Where an account lands after signing in: a case manager on the work list, everyone else on Programs. */
+export function homeFor(email: string): RegExp {
+  const account = Object.values(MAUI_ACCOUNTS).find((a) => a.email === email);
+  return account?.role === "ROLE_CASE_MANAGER" ? /\/worklist/ : /\/programs/;
+}
+
 export async function loginAs(page: Page, email: string, password: string = MAUI_PASSWORD) {
   await page.goto("/login");
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/programs/, { timeout: 15_000 });
+  await expect(page).toHaveURL(homeFor(email), { timeout: 15_000 });
 }
 
 export async function expectNoErrorPage(page: Page) {
