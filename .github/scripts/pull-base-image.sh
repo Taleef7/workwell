@@ -9,7 +9,7 @@
 # runner's own Docker builds the image (the `docker` buildx driver), so it uses the pulled copy.
 #
 # The start-ci-postgres.sh fallback (#808), applied to the deploys. A Dockerfile FROM names ONE registry, and
-# three of six deploys failed on 2026-10-16 when AWS's mirror answered "429 Data limit exceeded" before any
+# three of eight deploy runs failed on 2026-10-16 when AWS's mirror answered "429 Data limit exceeded" before any
 # step of the build ran. Each registry has refused anonymous pulls at some point, and Google's mirror is a cache that
 # may evict an image. The digest is what makes the fallback safe: a pull by digest yields the identical image
 # from every registry, or fails, so the image a deploy ships never depends on which registry answered. No
@@ -40,7 +40,8 @@ base_image_of() {
 pull_base_image() {
   local image="$1" registry
   for registry in "${REGISTRIES[@]}"; do
-    if docker pull --quiet "${registry}/${image}" >&2; then
+    # Bounded: a registry that hangs rather than refusing must not hold the build until the job times out.
+    if timeout "${PULL_TIMEOUT_SECONDS:-300}" docker pull --quiet "${registry}/${image}" >&2; then
       printf '%s/%s\n' "$registry" "$image"
       return 0
     fi

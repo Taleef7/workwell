@@ -18,6 +18,7 @@ calls="${tmp_dir}/calls"
 DIGEST="sha256:$(printf 'a%.0s' $(seq 1 64))"
 
 refusing=""   # registries whose pull fails, space-separated
+timeout() { shift; "$@"; }   # the bound itself is the coreutils command's; the stub only passes through
 docker() {
   [ "$1" = "pull" ] || fail "unexpected docker $*"
   local ref="${!#}"
@@ -37,6 +38,13 @@ dockerfile() {
 for df in backend-ts/Dockerfile frontend/Dockerfile; do
   got="$(base_image_of "${repo_root}/${df}")"
   [[ "$got" =~ ^node@sha256:[0-9a-f]{64}$ ]] || fail "${df}: read '${got}'"
+  # Every stage starts FROM the build arg or an earlier stage: a stage naming a registry itself would pull
+  # from that one registry alone, which is the failure this exists to remove.
+  stages=" "
+  while read -r from ref as name; do
+    [ "$ref" = '${NODE_IMAGE}' ] || [[ "$stages" == *" ${ref} "* ]] || fail "${df}: a stage starts FROM ${ref}"
+    stages="${stages}${name} "
+  done < <(tr -d '' < "${repo_root}/${df}" | grep -E '^FROM ')
 done
 [ "$(base_image_of "$(dockerfile "ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine@${DIGEST}" 'FROM ${NODE_IMAGE}')")" = "node@${DIGEST}" ] \
   || fail "the tag is dropped and the digest kept"
@@ -80,14 +88,46 @@ main "$(dockerfile "ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-bookwor
 
 # ── every deploy build uses it ───────────────────────────────────────────────
 # A build step without the pull step and the build arg would build FROM the Dockerfile's default registry
-# alone, which is the failure this exists to remove.
+# alone, which is the failure this exists to remove. Each build must also be handed the image of the Dockerfile
+# it builds: a frontend build given the backend's would build on Debian rather than Alpine, without an error.
+# Prints "<builds> <problems>" for one workflow.
+check_builds() {
+  tr -d '\r' < "$1" | grep -v '^[[:space:]]*#' | awk '
+    function close_build() {
+      if (file != pulled) bad = bad " " file "<-" (pulled == "" ? "nothing" : pulled)
+      if (!arg) bad = bad " " file ":no-NODE_IMAGE"
+      building = 0; pulled = ""
+    }
+    building && NF > 0 && match($0, /^ */) && RLENGTH <= 6 && $0 !~ /uses: docker\/build-push-action/ { close_build() }
+    /run: bash \.github\/scripts\/pull-base-image\.sh / { pulled = $NF; next }
+    /uses: docker\/build-push-action/ { if (building) close_build(); building = 1; builds++; file = "?"; arg = 0; next }
+    building && /^ +file: / { file = $2; sub(/^\.\//, "", file); next }
+    building && index($0, "NODE_IMAGE=${{ steps.base.outputs.image }}") { arg = 1 }
+    END { if (building) close_build(); printf "%d%s\n", builds, bad }'
+}
 for wf in "${repo_root}"/.github/workflows/deploy-*.yml; do
-  builds="$(grep -c 'uses: docker/build-push-action' "$wf" || true)"
-  pulls="$(grep -c 'run: bash .github/scripts/pull-base-image.sh ' "$wf" || true)"
-  args="$(grep -c 'NODE_IMAGE=${{ steps.base.outputs.image }}' "$wf" || true)"
+  read -r builds bad <<< "$(check_builds "$wf")"
   [ "$builds" -gt 0 ] || continue
-  [ "$pulls" -eq "$builds" ] && [ "$args" -eq "$builds" ] \
-    || fail "$(basename "$wf"): ${builds} image builds, ${pulls} base-image pulls, ${args} NODE_IMAGE build args"
+  [ -z "$bad" ] || fail "$(basename "$wf"): ${bad}"
 done
+
+# The check above can see each fault it exists for.
+fixture="${tmp_dir}/deploy.yml"
+build_step() {  # <pulled Dockerfile or ""> <built Dockerfile> <with the NODE_IMAGE arg: yes|no>
+  [ -n "$1" ] && printf '      - name: Pull the Node base image\n        id: base\n        run: bash .github/scripts/pull-base-image.sh %s\n' "$1"
+  printf '      - uses: docker/build-push-action@v7\n        with:\n          file: ./%s\n          build-args: |\n' "$2"
+  [ "$3" = yes ] && printf '            NODE_IMAGE=${{ steps.base.outputs.image }}\n'
+  printf '            OTHER=1\n          tags: x\n'
+}
+{ build_step backend-ts/Dockerfile backend-ts/Dockerfile yes; build_step frontend/Dockerfile frontend/Dockerfile yes; } > "$fixture"
+[ "$(check_builds "$fixture")" = "2" ] || fail "a correct workflow passes: $(check_builds "$fixture")"
+{ build_step backend-ts/Dockerfile backend-ts/Dockerfile yes; build_step backend-ts/Dockerfile frontend/Dockerfile yes; } > "$fixture"
+[[ "$(check_builds "$fixture")" == *"frontend/Dockerfile<-backend-ts/Dockerfile"* ]] || fail "a build handed another Dockerfile's image is caught"
+{ build_step "" frontend/Dockerfile yes; } > "$fixture"
+[[ "$(check_builds "$fixture")" == *"<-nothing"* ]] || fail "a build with no pull step is caught"
+{ build_step frontend/Dockerfile frontend/Dockerfile no; } > "$fixture"
+[[ "$(check_builds "$fixture")" == *":no-NODE_IMAGE"* ]] || fail "a build without the NODE_IMAGE arg is caught"
+{ printf '      # - run: bash .github/scripts/pull-base-image.sh frontend/Dockerfile\n'; build_step "" frontend/Dockerfile yes; } > "$fixture"
+[[ "$(check_builds "$fixture")" == *"<-nothing"* ]] || fail "a commented-out pull step does not count"
 
 echo "pull-base-image: all checks passed"
