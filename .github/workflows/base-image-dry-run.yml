@@ -1,0 +1,44 @@
+name: Base image dry run (temporary)
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/base-image-dry-run.yml
+      - .github/scripts/pull-base-image.sh
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { dockerfile: backend-ts/Dockerfile, context: . }
+          - { dockerfile: frontend/Dockerfile, context: ./frontend }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker
+      - name: Pull with the first registry unreachable
+        id: base
+        run: |
+          source .github/scripts/pull-base-image.sh
+          REGISTRIES=(unreachable.invalid/library "${REGISTRIES[@]}")
+          main "${{ matrix.dockerfile }}"
+      - name: Block the registry that served it, then build FROM the pulled reference
+        env:
+          IMAGE: ${{ steps.base.outputs.image }}
+        run: |
+          case "$IMAGE" in mirror.gcr.io/*|public.ecr.aws/*|docker.io/*) ;; *) echo "::error::unexpected $IMAGE"; exit 1 ;; esac
+          host="${IMAGE%%/*}"; [ "$host" = docker.io ] && host="registry-1.docker.io"
+          echo "127.0.0.1 ${host}" | sudo tee -a /etc/hosts
+          # The real Dockerfile, in full, as a deploy builds it (no push).
+          docker buildx build --build-arg NODE_IMAGE="$IMAGE" --file "${{ matrix.dockerfile }}" --tag dry-run "${{ matrix.context }}"
+          docker image inspect dry-run --format '{{.Id}}'
