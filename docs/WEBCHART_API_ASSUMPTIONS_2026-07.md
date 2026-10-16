@@ -81,8 +81,8 @@ differ. Open asks that follow from these are in `OPEN_QUESTIONS.md` §4.
 - **Orders and medications (checked 2026-10-09, read-only, all 36 patients; composed since #713):**
   - MedicationRequest, ServiceRequest and Coverage each answer a per-patient search with 200, unpaged.
   - **MedicationRequest:** 69 on 9 patients. Every one names the drug inline (`medicationCodeableConcept`),
-    coded only in `http://terminology.hl7.org/CodeSystem/FDDC`, never RxNorm. None references a
-    Medication.
+    coded only in `http://terminology.hl7.org/CodeSystem/FDDC`, never RxNorm, though most of the codes are
+    RxNorm ids (20 of 29 distinct codes are current RxCUIs, 2026-10-15). None references a Medication.
   - **ServiceRequest:** 134 on 13 patients. 125 carry no code; the rest are LOINC.
   - **Coverage:** see below.
   - So the CMS medication and order value sets match nothing on the trial yet, and nothing may supply a

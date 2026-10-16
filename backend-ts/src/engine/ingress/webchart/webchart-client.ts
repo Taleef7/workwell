@@ -374,7 +374,8 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
    * records born on/before 1900-01-01, incl. default/garbage birthdates), and `listPopulation` can only
    * detect a paging shortfall, not a query that under-matches — so an authoritative run would silently
    * miss subjects (Codex P1 #328). Completeness is the operator's to own via
-   * `WORKWELL_WEBCHART_PATIENT_SEARCH`; `Group/$export` is the only provably-complete enumeration.
+   * `WORKWELL_WEBCHART_PATIENT_SEARCH`. `Group/$export` is not complete either: WebChart's Groups are
+   * partitions, not the practice (7 of 36 trial patients are in no Group; checked 2026-10-15).
    */
   function enumerationRequired(e: unknown): WebChartNonRetryableError | undefined {
     if (patientEnumeration) return undefined; // the operator's own query failed — that's a real error
