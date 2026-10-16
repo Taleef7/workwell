@@ -4,8 +4,8 @@
  * misconfigured production deploy crashes loudly instead of silently shipping an
  * auth-disabled / weak-secret / wrong-cookie backend.
  *
- * (Demo-flag checks stay with the Java validator until those flags are ported; the
- * auth, cookie, and CORS-origin invariants are the ones #105 owns.)
+ * Demo configuration is not checked here: the hardcoded demo accounts still sign in on a
+ * production-like stack, and only Maui's pilot hash is guarded (`auth/demo-users.ts`).
  */
 import { parseAllowedOrigins } from "./cors.ts";
 const PRODUCTION_LIKE_PROFILES = new Set(["prod", "production", "fly", "staging"]);
