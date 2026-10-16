@@ -60,6 +60,13 @@ export const canExportData = (role: string | null | undefined): boolean =>
 /** Download the audit ledger (/api/audit-events/export) — ADMIN only, mirroring the backend gate. */
 export const canExportAudit = (role: string | null | undefined): boolean => isAdmin(role);
 
+/**
+ * Where a signed-in user starts: a case manager's day is the work list, everyone else's the Programs
+ * overview.
+ */
+export const homeRouteFor = (role: string | null | undefined): "/worklist" | "/programs" =>
+  normRole(role) === ROLES.CASE_MANAGER ? "/worklist" : "/programs";
+
 /** Launch bulk outreach campaigns + view campaign history (/api/campaigns/**). */
 export const canRunCampaigns = (role: string | null | undefined): boolean =>
   hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);

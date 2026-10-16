@@ -22,6 +22,7 @@ import { DEMO_EMAIL, DEMO_PASSWORD, signInWithCredentials } from "@/lib/auth/dem
 import { fraunces } from "@/app/fonts";
 import { SUBJECT } from "@/lib/terminology";
 import { PUBLIC_DEMO } from "@/lib/public-demo";
+import { homeRouteFor } from "@/lib/rbac";
 
 const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
@@ -47,7 +48,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!token || !user) return;
-    router.replace("/programs");
+    router.replace(homeRouteFor(user.role));
   }, [router, token, user]);
 
   function fillDemoCredentials() {
