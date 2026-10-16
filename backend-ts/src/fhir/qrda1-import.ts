@@ -76,7 +76,8 @@ export const SYSTEM_FOR_OID: Record<string, string> = {
  * | Assessment, Performed | `Observation` | (screening/assessment) |
  *
  * The libraries read `authoredOn` (orders), `performed` (Procedure), `effective` (Observation) and
- * `value`. **They also read `status` and `intent`** — every retrieve on the exclusion paths is wrapped in
+ * `value`, and a Procedure's `recorded` where no performed time is stated (CMS2v16's translation, #822).
+ * **They also read `status` and `intent`** — every retrieve on the exclusion paths is wrapped in
  * a `Status.is*` predicate (`isMedicationActive`, `isEncounterPerformed`, `isProcedurePerformed`,
  * `isSymptom`, `isAssessmentPerformed`), and the `Status` library reads `status` 22 times and `intent` 6.
  * So the status values below are chosen **to satisfy those predicates**, not merely to state the QDM
@@ -1139,6 +1140,7 @@ function procedureFrom(node: CdaNode, i: string): unknown {
     resourceType: "Procedure",
     id: idOf(node, `qrda1-procedure-${i}`),
     ...identifierOf(node),
+    ...recordedOf(node),
     status: "completed",
     code,
     ...bodySiteOf(node),
@@ -1147,6 +1149,23 @@ function procedureFrom(node: CdaNode, i: string): unknown {
       ? { performedPeriod: { ...(t.start ? { start: t.start } : {}), ...(t.end ? { end: t.end } : {}) } }
       : {}),
   };
+}
+
+const QICORE_RECORDED = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-recorded";
+
+/**
+ * QDM's Author dateTime on a performed Procedure or Intervention → QI-Core's `recorded` extension, when the
+ * procedure was first captured in the record. CMS2v16 falls back to it when no performed time is stated
+ * (#822). A dateTime, so a stated date is kept as a date. Only one stated time, under one author or several,
+ * as `issuedOf`; never the entry's own effectiveTime, which is when it was performed.
+ */
+function recordedOf(node: CdaNode): { extension?: Array<{ url: string; valueDateTime: string }> } {
+  const stated = childrenNamed(node, "author")
+    .flatMap((author) => childrenNamed(author, "time"))
+    .filter((time) => time.attrs.nullFlavor === undefined);
+  if (stated.length !== 1) return {};
+  const time = isoFromHl7(stated[0]!.attrs.value);
+  return time ? { extension: [{ url: QICORE_RECORDED, valueDateTime: time }] } : {};
 }
 
 /**

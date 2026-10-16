@@ -987,6 +987,37 @@ test("import: Intervention Performed → Procedure, Intervention Order → Servi
   assert.equal(order!.intent, "order");
 });
 
+test("#822: a performed Procedure's one stated author time is QI-Core's recorded, never its performed time", () => {
+  const RECORDED = "http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-recorded";
+  const author = (time: string) => `<author><templateId root="2.16.840.1.113883.10.20.24.3.155" extension="2019-12-01"/>${time}</author>`;
+  const intervention = (replacement: string) => {
+    const timed = "<id root=\"1.3.6.1.4.1.115\" extension=\"intervention-1\"/>\n      <code code=\"103735009\" codeSystem=\"2.16.840.1.113883.6.96\"/>\n      <statusCode code=\"completed\"/>\n      <effectiveTime value='20240602081000'/>";
+    assert.ok(exclusionDocument.includes(timed), "the fixture's intervention entry");
+    const imported = importQrda1Document(exclusionDocument.replace(timed, timed.replace("<effectiveTime value='20240602081000'/>", replacement)));
+    return imported.bundle.entry.map((e) => e.resource as Record<string, any>).find((r) => r.id === "intervention-1")!;
+  };
+  const recordedOf = (r: Record<string, any>) => (r.extension ?? []).filter((x: { url: string }) => x.url === RECORDED);
+
+  // As Cypress's CMS2v16 deck states one: an author time and no effectiveTime. CMS2v16 reads it.
+  const authorOnly = intervention(author("<time value='20250201080000'/>"));
+  assert.deepEqual(recordedOf(authorOnly), [{ url: RECORDED, valueDateTime: "2025-02-01T08:00:00Z" }]);
+  assert.equal(authorOnly.performedDateTime, undefined, "the author time is never the performed time");
+  assert.equal(authorOnly.performedPeriod, undefined);
+
+  // Beside a performed time, both are kept, each in its own place.
+  const both = intervention(`<effectiveTime value='20240602081000'/>${author("<time value='20240603090000'/>")}`);
+  assert.equal(both.performedDateTime, "2024-06-02T08:10:00Z");
+  assert.deepEqual(recordedOf(both), [{ url: RECORDED, valueDateTime: "2024-06-03T09:00:00Z" }]);
+
+  // A dateTime: a stated date stays a date.
+  assert.deepEqual(recordedOf(intervention(author("<time value='20250201'/>"))), [{ url: RECORDED, valueDateTime: "2025-02-01" }]);
+  // Two stated times are two statements with no rule to choose between; a nullFlavored one states none.
+  assert.deepEqual(recordedOf(intervention(author("<time value='20250201080000'/>") + author("<time value='20250202080000'/>"))), []);
+  assert.deepEqual(recordedOf(intervention(author("<time nullFlavor='UNK'/>"))), []);
+  // The fixture as written states no author: nothing is recorded.
+  assert.deepEqual(recordedOf(exclusionResources().of("Procedure").find((p) => p.id === "intervention-1")!), []);
+});
+
 test("import: a Device Order is coded from the playingDevice, the only place the device appears", () => {
   // The `<supply>` carries the template but no code of its own, and the only `<code>` up the tree is the
   // enclosing act's ActClass literal "SPLY" — so walking up yields a DeviceRequest coded "Supply", which
