@@ -69,6 +69,23 @@ describe("LoginPage", () => {
     expect(mockLogin).toHaveBeenCalledWith("tok", "admin@workwell.dev", "ROLE_ADMIN");
   });
 
+  it("sends a signed-in case manager to the work list and everyone else to Programs", () => {
+    for (const [role, home] of [
+      ["ROLE_CASE_MANAGER", "/worklist"],
+      ["case_manager", "/worklist"],
+      ["ROLE_ADMIN", "/programs"],
+      ["ROLE_VIEWER", "/programs"],
+      ["ROLE_AUTHOR", "/programs"],
+    ] as const) {
+      mockReplace.mockClear();
+      authState.token = "tok";
+      authState.user = { email: "someone@workwell.dev", role };
+      const { unmount } = render(<LoginPage />);
+      expect(mockReplace).toHaveBeenCalledWith(home);
+      unmount();
+    }
+  });
+
   // Security regression guard: with demo mode off (the production build — NEXT_PUBLIC_DEMO_MODE=true
   // fails the prod build), the login page must NOT advertise the admin demo credential. Previously the
   // "Fill demo credentials" button and the "Demo: admin@workwell.dev" hint rendered unconditionally,

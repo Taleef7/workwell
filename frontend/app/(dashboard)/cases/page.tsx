@@ -24,7 +24,7 @@ import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
 import { canExportAudit, canExportData, canManageCases } from "@/lib/rbac";
 import { worklistHref } from "@/lib/worklist-links";
-import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
+import { dueSoonPossible, useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
@@ -237,7 +237,7 @@ export default function CasesPage() {
   const isPatientTerm = SUBJECT.singular === "patient";
   // `measureLabelFor` names a measure in the filter (unversioned: a filter spans years); a case row names
   // the logic that scored its own outcome (#769).
-  const { labelFor: measureLabelFor, compactLabelFor, titleFor } = useMeasureIdentities();
+  const { labelFor: measureLabelFor, compactLabelFor, titleFor, measures: catalogMeasures } = useMeasureIdentities();
   const isPhone = useMediaQuery(BELOW_MD);
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [measures, setMeasures] = useState<MeasureOption[]>([]);
@@ -455,16 +455,18 @@ export default function CasesPage() {
     [cases]
   );
   // Outcome bucket ("why flagged") — distinct from case status. Drives the new ?outcome= filter.
+  // "Due Soon" only where a measure in scope can emit it (CMS's logic never does), or when the URL asks.
+  const showDueSoon = outcomeFilter === "DUE_SOON" || dueSoonPossible(catalogMeasures, measureFilter);
   const outcomeOptions = useMemo(
     () => [
       { value: "", label: "All Outcomes" },
       { value: "OVERDUE", label: labelFor(OUTCOME_LABELS, "OVERDUE") },
-      { value: "DUE_SOON", label: labelFor(OUTCOME_LABELS, "DUE_SOON") },
+      ...(showDueSoon ? [{ value: "DUE_SOON", label: labelFor(OUTCOME_LABELS, "DUE_SOON") }] : []),
       { value: "MISSING_DATA", label: labelFor(OUTCOME_LABELS, "MISSING_DATA") },
       { value: "COMPLIANT", label: labelFor(OUTCOME_LABELS, "COMPLIANT") },
       { value: "EXCLUDED", label: labelFor(OUTCOME_LABELS, "EXCLUDED") }
     ],
-    []
+    [showDueSoon]
   );
   const pageSizeOptions = useMemo(
     () => [25, 50, 100, 200, 500].map((n) => ({ value: String(n), label: `${n} / page` })),

@@ -20,10 +20,11 @@ const ACCOUNTS = [
 
 // This spec is ABOUT signing in, so it drives the form and takes no shared storage state.
 test.describe("Maui authentication", () => {
-  test("every Maui account logs in and lands on /programs", async ({ page }) => {
+  test("every Maui account logs in and lands on its home: case managers on the work list, others on Programs", async ({ page }) => {
     for (const account of ACCOUNTS) {
       await loginAs(page, account.email);
-      await expect(page, `${account.email} should land on /programs`).toHaveURL(/\/programs/);
+      const home = account.role === "ROLE_CASE_MANAGER" ? /\/worklist/ : /\/programs/;
+      await expect(page, `${account.email} should land on ${home.source}`).toHaveURL(home);
       await expectNoErrorPage(page);
       await page.getByRole("button", { name: /log ?out|sign out/i }).click();
       await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });

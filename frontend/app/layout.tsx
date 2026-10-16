@@ -15,7 +15,8 @@ const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const APP_TAGLINE = process.env.NEXT_PUBLIC_APP_TAGLINE || `${complianceTerm} compliance.`;
 
 export const metadata: Metadata = {
-  title: APP_NAME,
+  // Each route's layout names its page (`pageTitle`); a page without one shows the app name alone.
+  title: { default: APP_NAME, template: `%s · ${APP_NAME}` },
   description: `${APP_NAME} — ${APP_TAGLINE}`,
 };
 

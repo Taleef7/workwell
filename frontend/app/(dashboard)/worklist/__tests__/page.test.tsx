@@ -302,6 +302,44 @@ describe("WorklistPage", () => {
     expect(verified.getAttribute("title")).not.toContain("still counted by CQL");
   });
 
+  it("offers 'Due Soon' only where a measure in scope can emit it: CMS's logic never does", async () => {
+    const gapStatusOptions = async () => {
+      const [select] = await screen.findAllByRole("combobox", { name: /gap status/i });
+      await userEvent.click(select!);
+      const names = screen.getAllByRole("option").map((o) => o.textContent);
+      await userEvent.keyboard("{Escape}");
+      return names;
+    };
+    // Every measure routed to CMS's logic (Maui): no measure can emit it.
+    withMeasures([
+      { id: "cms125", name: "Breast Cancer Screening", status: "Active", identity: ROUTED_IDENTITIES.cms125 },
+      { id: "cms137", name: "Substance Use Treatment", status: "Active", identity: ROUTED_IDENTITIES.cms137 },
+    ]);
+    const { unmount } = render(<WorklistPage />);
+    await waitFor(() => expect(get).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/measures/)));
+    await waitFor(async () => expect(await gapStatusOptions()).not.toContain("Due Soon"));
+    expect(await gapStatusOptions()).toContain("Overdue");
+    unmount();
+
+    // One measure running authored CQL (TWH): it can.
+    withMeasures([
+      { id: "cms125", name: "Breast Cancer Screening", status: "Active", identity: ROUTED_IDENTITIES.cms125 },
+      { id: "audiogram", name: "Audiogram", status: "Active", identity: null },
+    ]);
+    render(<WorklistPage />);
+    await waitFor(async () => expect(await gapStatusOptions()).toContain("Due Soon"));
+  });
+
+  it("keeps 'Due Soon' when the URL already asks for it, so the filter shows what is applied", async () => {
+    withMeasures([{ id: "cms125", name: "Breast Cancer Screening", status: "Active", identity: ROUTED_IDENTITIES.cms125 }]);
+    navHolder.current.setUrl("/worklist?outcome=DUE_SOON");
+    render(<WorklistPage />);
+    await waitFor(() => expect(get).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/measures/)));
+    const [select] = await screen.findAllByRole("combobox", { name: /gap status/i });
+    await userEvent.click(select!);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toContain("Due Soon");
+  });
+
   it("reads the PCP filter from the URL and sends it on", async () => {
     navHolder.current.setUrl("/worklist?providerId=maui-prov-012");
     render(<WorklistPage />);
