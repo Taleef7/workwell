@@ -59,6 +59,10 @@ jobs:
       # Deploy workflows only RUN on push to main — i.e. after merge — so a shell syntax error in one is
       # invisible to every PR check. PR-9c put an apostrophe inside a single-quoted jq program and turned
       # the production deploy step into a parse error; nothing before merge could see it (#356).
+      # The deploy builds take their Node base image from the first registry that serves it, by digest. Deploy
+      # workflows run only after merge, so the choice, and that every build uses it, is tested here.
+      - name: A deploy build survives a registry refusing its base image
+        run: bash .github/scripts/pull-base-image.test.sh
       - name: Every workflow run-block parses as shell
         run: bash .github/scripts/workflow-run-blocks.test.sh
 

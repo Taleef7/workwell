@@ -151,6 +151,11 @@ jobs:
       - name: The committed artifact is reproducible from its pin
         run: git diff --exit-code backend-ts/measures/official backend-ts/measures/derived
 
+      # The Node base image from the first registry that serves it, by the digest the Dockerfile pins:
+      # every registry has refused an anonymous pull at some point (2026-10-16: AWS's mirror, 429).
+      - name: Pull the Node base image
+        id: base
+        run: bash .github/scripts/pull-base-image.sh backend-ts/Dockerfile
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -168,6 +173,7 @@ jobs:
           # caveat governs the PHI phase, not the sandbox. The WorkWell translations of CMS137v15, CMS130v15, CMS125v15, CMS165v15, CMS122v15 and CMS2v16
           # (WORKWELL_DERIVED_MEASURES) score 2027 only; CMS's artifacts still score every other year.
           build-args: |
+            NODE_IMAGE=${{ steps.base.outputs.image }}
             WORKWELL_BUILD_SHA=${{ github.sha }}
             WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137
             WORKWELL_DERIVED_MEASURES=cms137,cms130,cms125,cms165,cms122,cms2
@@ -205,12 +211,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The Node base image from the first registry that serves it, by the digest the Dockerfile pins:
+      # every registry has refused an anonymous pull at some point (2026-10-16: AWS's mirror, 429).
+      - name: Pull the Node base image
+        id: base
+        run: bash .github/scripts/pull-base-image.sh frontend/Dockerfile
       - uses: docker/build-push-action@v7
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: true
           build-args: |
+            NODE_IMAGE=${{ steps.base.outputs.image }}
             NEXT_PUBLIC_API_URL=${{ env.BACKEND_TS_URL }}
             NEXT_PUBLIC_APP_NAME=${{ env.APP_NAME }}
             NEXT_PUBLIC_APP_TAGLINE=${{ env.APP_TAGLINE }}

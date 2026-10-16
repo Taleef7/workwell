@@ -129,6 +129,11 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # The Node base image from the first registry that serves it, by the digest the Dockerfile pins:
+      # every registry has refused an anonymous pull at some point (2026-10-16: AWS's mirror, 429).
+      - name: Pull the Node base image
+        id: base
+        run: bash .github/scripts/pull-base-image.sh backend-ts/Dockerfile
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -136,6 +141,7 @@ jobs:
           push: true
           # The commit, baked into the image and served on /health (#625).
           build-args: |
+            NODE_IMAGE=${{ steps.base.outputs.image }}
             WORKWELL_BUILD_SHA=${{ github.sha }}
           tags: |
             ${{ env.BACKEND_TS_IMAGE }}:staging-latest
@@ -165,6 +171,11 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # The Node base image from the first registry that serves it, by the digest the Dockerfile pins:
+      # every registry has refused an anonymous pull at some point (2026-10-16: AWS's mirror, 429).
+      - name: Pull the Node base image
+        id: base
+        run: bash .github/scripts/pull-base-image.sh frontend/Dockerfile
       - uses: docker/build-push-action@v7
         with:
           context: ./frontend
@@ -173,6 +184,7 @@ jobs:
           # NEXT_PUBLIC_API_URL is inlined at BUILD time, so staging needs its own image aimed at the
           # staging backend. DEMO_MODE stays OFF (a production-like build fails if it is true).
           build-args: |
+            NODE_IMAGE=${{ steps.base.outputs.image }}
             NEXT_PUBLIC_API_URL=${{ env.BACKEND_TS_URL }}
             NEXT_PUBLIC_APP_NAME=${{ env.APP_NAME }}
             NEXT_PUBLIC_APP_TAGLINE=${{ env.APP_TAGLINE }}

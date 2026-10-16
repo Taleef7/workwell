@@ -143,6 +143,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The Node base image from the first registry that serves it, by the digest the Dockerfile pins:
+      # every registry has refused an anonymous pull at some point (2026-10-16: AWS's mirror, 429).
+      - name: Pull the Node base image
+        id: base
+        run: bash .github/scripts/pull-base-image.sh backend-ts/Dockerfile
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -161,6 +166,7 @@ jobs:
           # 2027 only, as on Maui; CMS's artifacts still score every other year. Each id must be vendored
           # above with --verify-pin. TWH's other measures are authored occupational ones with no CMS version.
           build-args: |
+            NODE_IMAGE=${{ steps.base.outputs.image }}
             WORKWELL_BUILD_SHA=${{ github.sha }}
             WORKWELL_OFFICIAL_MEASURES=cms122,cms125
             WORKWELL_DERIVED_MEASURES=cms125,cms122
@@ -195,12 +201,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The Node base image from the first registry that serves it, by the digest the Dockerfile pins:
+      # every registry has refused an anonymous pull at some point (2026-10-16: AWS's mirror, 429).
+      - name: Pull the Node base image
+        id: base
+        run: bash .github/scripts/pull-base-image.sh frontend/Dockerfile
       - uses: docker/build-push-action@v7
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: true
           build-args: |
+            NODE_IMAGE=${{ steps.base.outputs.image }}
             NEXT_PUBLIC_API_URL=${{ env.BACKEND_TS_URL }}
             NEXT_PUBLIC_APP_NAME=${{ env.APP_NAME }}
             NEXT_PUBLIC_APP_TAGLINE=${{ env.APP_TAGLINE }}

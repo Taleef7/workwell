@@ -1,4 +1,10 @@
-FROM public.ecr.aws/docker/library/node:24-alpine AS deps
+# The Node base image, pinned by digest. The deploy builds pass the same image back from whichever registry
+# served it first (.github/scripts/pull-base-image.sh reads this default), so a registry refusing
+# anonymous pulls no longer fails the build. To move to a newer Node 24 patch, replace the digest with
+# the tag's current one (every registry answers the same index digest).
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f
+
+FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
@@ -8,7 +14,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY vendor ./vendor
 RUN pnpm install --frozen-lockfile
 
-FROM public.ecr.aws/docker/library/node:24-alpine AS build
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
@@ -35,7 +41,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build
 
-FROM public.ecr.aws/docker/library/node:24-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
