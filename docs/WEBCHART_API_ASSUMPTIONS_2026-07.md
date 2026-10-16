@@ -55,7 +55,7 @@ Question references point to `docs/archive/MIE_INTEGRATION_QUESTIONS_2026-07-09.
 | HTTP 429 and 5xx responses are transient and should be retried with bounded backoff. | [ASSUMED] | A4 |
 | 4xx responses other than 429 (and the single 401 re-auth) are terminal for that request. | [ASSUMED] | A3, A4 |
 | Every request is bounded by an AbortController timeout. | design invariant | A4, C16 |
-| A malformed or failed per-resource search degrades that patient to a Patient-only collection Bundle plus an OperationOutcome marker, so the evaluator classifies that known subject as MISSING_DATA without aborting the batch. | design invariant (ADR-028) | A2, A4, C16 |
+| A malformed or failed per-resource search degrades that patient to a Patient-only collection Bundle plus an OperationOutcome marker. The run never evaluates it: the subject is an evaluation error (`source fetch failed`), the run is PARTIAL_FAILURE and no case changes, without aborting the batch. | design invariant (ADR-028) | A2, A4, C16 |
 | A failed population page cannot invent patient ids that were never listed, so only already-listed patients are evaluated. | design invariant | A2, C16 |
 | The transport is read-only and writes no `audit_events`; downstream state-changing run/case workflows retain the audit invariant. | design invariant | C14 |
 

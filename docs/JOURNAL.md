@@ -7,6 +7,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-16
 
+- **A patient WebChart could not read is an evaluation error, not "outside the population".** The client
+  degrades such a patient to a bare Patient, and official logic read that as out of population: the patient
+  left the denominator and an open case closed on missing data. The run now records it as
+  `source fetch failed` (PARTIAL_FAILURE, no case or rollover change) and never evaluates it. A Patient search
+  that answers with something other than a Bundle is refused rather than read as an empty population.
 - **A deploy no longer fails when one registry refuses the Node base image.** AWS's public mirror answered
   "429 Data limit exceeded" on three of the day's eight deploy runs, each before the build ran (re-runs
   passed). The Dockerfiles now take the base image as a build arg, pinned by digest, and each deploy build

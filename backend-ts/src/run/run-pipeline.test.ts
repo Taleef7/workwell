@@ -401,17 +401,47 @@ test("a _B64-only SMART env drives the live path (the scheduled-run selector, #3
   }
 });
 
-test("a degraded Patient-only WebChart bundle evaluates MISSING_DATA and reports degradedCount", async () => {
-  const { p, runStore, outcomeStore } = await freshPipelineDb();
+test("T3: a subject WebChart could not read is an evaluation error, never 'out of population', and its case stays open", async () => {
+  // Official logic reads a bare Patient as outside the initial population: before T3 the degraded subject
+  // left the denominator and its open case closed RESOLVED/OUT_OF_POPULATION on missing data.
+  const { p, runStore, outcomeStore, caseStore } = await freshPipelineDb();
   const audits: unknown[] = [];
+  const evaluated: string[] = [];
+  const subjectOf = (bundle: unknown) => (bundle as { entry: Array<{ resource: { id: string } }> }).entry[0]!.resource.id;
   try {
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z" });
+    const period = bucketPeriodForMeasure("audiogram", "2026-06-01");
+    const open = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "wc|unread-1", measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+    assert.equal(open?.status, "OPEN");
+
+    const unread = patientOnly("unread-1");
+    (unread as { entry: unknown[] }).entry.push({
+      resource: { resourceType: "OperationOutcome", issue: [{ severity: "warning", code: "processing", diagnostics: "Observation search timed out" }] },
+    });
+    const engine = {
+      async evaluate(input: { measureId: string; patientBundle: unknown }) {
+        evaluated.push(subjectOf(input.patientBundle));
+        return { outcome: "MISSING_DATA", evidence: { official: { populationResults: { ipp: false } } }, inInitialPopulation: false };
+      },
+      async evaluateBatch(_measureId: string, subjects: () => Array<{ subjectId: string; patientBundle: unknown }>) {
+        const results = new Map<string, unknown>();
+        for (const s of subjects()) {
+          evaluated.push(subjectOf(s.patientBundle));
+          results.set(s.subjectId, { outcome: "MISSING_DATA", evidence: { official: { populationResults: { ipp: false } } }, inInitialPopulation: false });
+        }
+        return results;
+      },
+      logicFor: () => ({ version: "official-fqm:1.0.000:artifact:terminology", kind: "official" as const, warning: null }),
+    } as unknown as RunPipelineDeps["engine"];
+
     const result = await executeManualRun({
       runStore,
       outcomeStore,
-      engine: createWorkwellEngine(),
+      caseStore,
+      engine,
       employees: [],
       webChartEnv: WEBCHART_ENV,
-      webChartClient: fixtureWebChartClient([patientOnly("degraded-patient", true)]),
+      webChartClient: fixtureWebChartClient([unread, patientOnly("read-1"), patientOnly("bare-marker", true)]),
       events: { async appendAudit(input) { audits.push(input); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); }, async recordCaseEvents() {} },
     }, {
       scopeType: "MEASURE",
@@ -419,14 +449,24 @@ test("a degraded Patient-only WebChart bundle evaluates MISSING_DATA and reports
       evaluationDate: "2026-06-01",
     });
 
+    assert.deepEqual(evaluated, ["read-1"], "only the readable subject reaches the engine, in the batch or alone");
     const rows = await outcomeStore.listOutcomes(result.runId);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0]!.subjectId, "wc|degraded-patient");
-    assert.equal(rows[0]!.status, "MISSING_DATA", "the unchanged CQL engine owns the degraded outcome");
+    const row = (id: string) => rows.find((r) => r.subjectId === `wc|${id}`)!;
+    assert.deepEqual(row("unread-1").evidence, { evaluationError: "source fetch failed", message: "Observation search timed out" });
+    assert.equal(row("unread-1").status, "MISSING_DATA");
+    assert.notEqual(row("unread-1").outOfPopulation, true, "an unread subject is not a claim about the population");
+    assert.deepEqual(row("bare-marker").evidence, { evaluationError: "source fetch failed", message: "WebChart's record for this patient could not be read" });
+    assert.equal(row("read-1").outOfPopulation, true, "a readable subject is still scored by the logic");
+    assert.equal(result.status, "PARTIAL_FAILURE");
+
+    const still = await caseStore.getCase(open!.id);
+    assert.equal(still?.status, "OPEN", "a failed evaluation never changes a case (DATA_MODEL §4)");
+    assert.equal(still?.closedReason ?? null, null);
+
     const terminal = audits.find((entry) =>
-      (entry as { eventType?: string }).eventType === "RUN_COMPLETED"
+      ["RUN_COMPLETED", "RUN_PARTIAL_FAILURE"].includes((entry as { eventType?: string }).eventType ?? "")
     ) as { payload: { liveTenant?: { degradedCount?: number; status?: string } } } | undefined;
-    assert.equal(terminal?.payload.liveTenant?.degradedCount, 1);
+    assert.equal(terminal?.payload.liveTenant?.degradedCount, 2);
     assert.equal(terminal?.payload.liveTenant?.status, "COMPLETED");
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
