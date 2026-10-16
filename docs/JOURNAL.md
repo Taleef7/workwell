@@ -7,6 +7,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-15
 
+- **Bulk downloads are CASE_MANAGER/ADMIN, the audit ledger ADMIN** (owner decision D5). The read-only VIEWER
+  (the public sandbox, the Maui clinician seat) could download every patient's rows, QRDA I documents and the
+  audit ledger. Browsing in the app is unchanged; the run and cases pages no longer offer a download a role
+  would only meet a 403 on.
 - **Maui's outcome retention is paused** (owner decision from the production-readiness review). No compaction
   had deleted yet; the first would have been an unattended, unmeasured bulk DELETE in the ~11-30 nightly. It
   returns after a measured hand pass on a restored copy. Storage grows meanwhile on the metered Neon plan.

@@ -22,7 +22,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases } from "@/lib/rbac";
+import { canExportAudit, canExportData, canManageCases } from "@/lib/rbac";
 import { worklistHref } from "@/lib/worklist-links";
 import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
@@ -232,6 +232,8 @@ export default function CasesPage() {
   const view = searchParams.get("view") ?? "all";
   const { user } = useAuth();
   const canManage = canManageCases(user?.role);
+  const mayExport = canExportData(user?.role);
+  const mayExportAudit = canExportAudit(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
   // `measureLabelFor` names a measure in the filter (unversioned: a filter spans years); a case row names
   // the logic that scored its own outcome (#769).
@@ -684,24 +686,30 @@ export default function CasesPage() {
               : `${cases.length} case${cases.length !== 1 ? "s" : ""} loaded`}
         </p>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const params = caseFilterParams();
-              params.set("format", "csv");
-              void exportCsv(`/api/exports/cases?${params.toString()}`, "cases.csv");
-            }}
-          >
-            Export cases CSV
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => void exportCsv("/api/audit-events/export?format=csv", "audit-events.csv")}
-          >
-            Export audit CSV
-          </Button>
+          {/* Bulk downloads are CASE_MANAGER/ADMIN and the audit ledger ADMIN (D5); the backend refuses
+              everyone else, so the buttons are not offered to a role that would only meet a 403. */}
+          {mayExport ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const params = caseFilterParams();
+                params.set("format", "csv");
+                void exportCsv(`/api/exports/cases?${params.toString()}`, "cases.csv");
+              }}
+            >
+              Export cases CSV
+            </Button>
+          ) : null}
+          {mayExportAudit ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void exportCsv("/api/audit-events/export?format=csv", "audit-events.csv")}
+            >
+              Export audit CSV
+            </Button>
+          ) : null}
         </div>
       </div>
 

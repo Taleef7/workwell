@@ -58,6 +58,10 @@ them) when re-vendoring. Both live in `src/components/table/useKeyboardNav.ts` (
    `containerRef`; `scrollActiveRowIntoView` queries within it instead of `document`, so pages with
    multiple grids (e.g. `/admin` ×3, each numbering rows from 0) scroll the right grid's row.
    `PlainTable.tsx` passes its `tableRef`.
+3. **`allowExport` on `DataGrid`** (`src/components/DataGrid.tsx`, default `true`). False withholds the
+   title bar's `onExportCsv` and `onCopyClipboard`, so "Download CSV" and "Copy to Clipboard" do not
+   render. WorkWell passes it from the role check: bulk downloads are CASE_MANAGER/ADMIN (D5), and the
+   run page's Outcomes grid holds every row of a run.
 
 ## Upgrading
 

@@ -27,7 +27,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { TERMINAL_RUN_STATUSES, isReportableRunStatus } from "@/lib/run-status";
-import { canManageCases, canRunMeasures } from "@/lib/rbac";
+import { canExportData, canManageCases, canRunMeasures } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -272,6 +272,8 @@ export default function RunsPage() {
   const router = useRouter();
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role);
+  // Bulk downloads (CSV, MeasureReport, QRDA) are CASE_MANAGER/ADMIN, mirroring the backend gate (D5).
+  const mayExport = canExportData(user?.role);
   const mayManageCases = canManageCases(user?.role);
   const { startTracking } = useRunStatus();
   const [showRunConfirm, setShowRunConfirm] = useState(false);
@@ -846,31 +848,35 @@ export default function RunsPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-2xl font-semibold">Run History</h2>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const query = runFilterParams();
-              query.set("format", "csv");
-              void downloadFile(`/api/exports/runs?${query.toString()}`, "runs-export.csv");
-            }}
-          >
-            Export runs CSV
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              void downloadFile(
-                // `site` too: outcomes belong to sites and `/api/exports/outcomes` accepts it (§6.2). The
-                // runs list and the grid are not narrowed by it (#668), so the grid's note names the site.
-                `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}${siteId ? `&site=${encodeURIComponent(siteId)}` : ""}`,
-                "outcomes.csv"
-              )
-            }
-          >
-            Export outcomes CSV
-          </Button>
+          {mayExport ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const query = runFilterParams();
+                query.set("format", "csv");
+                void downloadFile(`/api/exports/runs?${query.toString()}`, "runs-export.csv");
+              }}
+            >
+              Export runs CSV
+            </Button>
+          ) : null}
+          {mayExport ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                void downloadFile(
+                  // `site` too: outcomes belong to sites and `/api/exports/outcomes` accepts it (§6.2). The
+                  // runs list and the grid are not narrowed by it (#668), so the grid's note names the site.
+                  `/api/exports/outcomes?format=csv${selectedRunId ? `&runId=${encodeURIComponent(selectedRunId)}` : ""}${siteId ? `&site=${encodeURIComponent(siteId)}` : ""}`,
+                  "outcomes.csv"
+                )
+              }
+            >
+              Export outcomes CSV
+            </Button>
+          ) : null}
           {mayRun ? (
             <Button
               variant="outline"
@@ -1285,7 +1291,8 @@ export default function RunsPage() {
               ) : null}
               {/* Standards exports — single-measure runs only (the endpoints 422 on ALL_PROGRAMS), and only
                   REPORTABLE runs: FAILED/CANCELLED are terminal but the backend refuses them with 409 (ADR-077). */}
-              {normalizeEnumValue(selectedRun.scopeType) === "MEASURE" &&
+              {mayExport &&
+              normalizeEnumValue(selectedRun.scopeType) === "MEASURE" &&
               isReportableRunStatus(selectedRun.status) &&
               !reconciliation?.compaction.exposed ? (
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1344,7 +1351,7 @@ export default function RunsPage() {
         {runOutcomesTotal !== null && runOutcomesTotal > runOutcomes.length ? (
           <p className="text-xs text-neutral-500 dark:text-neutral-400" data-testid="outcomes-capped">
             Showing {runOutcomes.length.toLocaleString()} of {runOutcomesTotal.toLocaleString()}.{" "}
-            {siteId ? `The outcomes CSV has every ${siteId} row.` : "The outcomes CSV has every row."}
+            {mayExport ? (siteId ? `The outcomes CSV has every ${siteId} row.` : "The outcomes CSV has every row.") : null}
           </p>
         ) : null}
         {runOutcomes.length === 0 ? (
@@ -1352,6 +1359,7 @@ export default function RunsPage() {
         ) : (
           <div className="mt-2">
             <NitroGrid
+              allowExport={mayExport}
               rows={outcomeRows}
               columns={outcomeColumns}
               sourceName="Outcomes"
