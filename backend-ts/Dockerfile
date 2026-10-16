@@ -11,8 +11,14 @@
 # Multi-stage: builder installs the full graph (incl. native toolchain for better-sqlite3), then
 # prunes to production deps. Runtime is node:24-bookworm-slim without the C++ toolchain.
 
+# The Node base image, pinned by digest. The deploy builds pass the same image back from whichever registry
+# served it first (.github/scripts/pull-base-image.sh reads this default), so a registry refusing
+# anonymous pulls no longer fails the build. To move to a newer Node 24 patch, replace the digest with
+# the tag's current one (every registry answers the same index digest).
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:24-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
+
 # ── builder ──────────────────────────────────────────────────────────────────
-FROM public.ecr.aws/docker/library/node:24-bookworm-slim AS builder
+FROM ${NODE_IMAGE} AS builder
 
 # better-sqlite3 (the SQLite floor driver + the store-contract tests) is a native module; the
 # `local` smoke-test target compiles it, so the builder needs a toolchain. The production `mieweb`
@@ -53,7 +59,7 @@ if (p.devDependencies && p.devDependencies.tsx) {\
   && CI=true pnpm install --prod --no-frozen-lockfile
 
 # ── runtime ──────────────────────────────────────────────────────────────────
-FROM public.ecr.aws/docker/library/node:24-bookworm-slim AS runtime
+FROM ${NODE_IMAGE} AS runtime
 
 # No python/make/g++: better-sqlite3's native binary was built in the builder stage on the same
 # node:24-bookworm-slim ABI and is copied in with node_modules. ca-certificates for outbound TLS.

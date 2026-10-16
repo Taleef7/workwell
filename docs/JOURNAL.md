@@ -5,6 +5,16 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-16
+
+- **A deploy no longer fails when one registry refuses the Node base image.** AWS's public mirror answered
+  "429 Data limit exceeded" on three of the day's eight deploy runs, each before the build ran (re-runs
+  passed). The Dockerfiles now take the base image as a build arg, pinned by digest, and each deploy build
+  pulls it from Google's mirror, then AWS's, then Docker Hub, as CI's Postgres already does (#808). The
+  digest makes every registry serve the identical image. A newer Node 24 patch now needs the digest bumped
+  by hand.
+- Merged #821 (TWH routes the CMS125/CMS122 translations), #824 (CMS2), #826 and #827; both stacks run them.
+
 ## 2026-10-15
 
 - **Bulk downloads are CASE_MANAGER/ADMIN, the audit ledger ADMIN** (owner decision D5). The read-only VIEWER
