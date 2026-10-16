@@ -136,9 +136,9 @@ const NEXT_ACTION_OVERRIDES: Record<string, Partial<Record<string, string>>> = {
   },
   cms122: {
     OVERDUE:
-      "Most recent glycemic status assessment (HbA1c or GMI) is above 9%, or none is on file for this " +
-      "measurement period. Review glycemic control; the gap closes when the most recent qualifying " +
-      "assessment in the period is at or below 9%.",
+      "No glycemic status assessment (HbA1c or GMI) this measurement period, the most recent has no " +
+      "result, or it is above 9%. Draw an HbA1c or review glycemic control; the gap closes when the most " +
+      "recent qualifying assessment in the period is at or below 9%.",
     // On the official path MISSING_DATA means "not in the initial population" (or an evaluation
     // failure — see official-executor-adapter.ts), not "no result could be found".
     MISSING_DATA: OFFICIAL_MISSING_DATA,

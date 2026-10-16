@@ -2,7 +2,7 @@
  * Official display table (Task 8): per-measure, per-status wording for measures evaluated by the
  * official published artifact (the `WORKWELL_OFFICIAL_MEASURES` allowlist). Authored-measure wording
  * describes a periodic exam; official CQL decides population membership, so OVERDUE for cms122 means
- * "most recent glycemic status above 9%", not "no record on file". `CQL alone decides the status; this
+ * "none this period, none with a result, or above 9%", not just "no record on file". CQL alone decides the status; this
  * table is prose for humans. Display wording is never a rule the engine honours.
  *
  * Wording is consumed at READ time (`deriveCell`, `nextActionFor`, `deriveWhyFlagged`) and never
@@ -50,10 +50,13 @@ const COMPLIANT = {
 };
 
 const OVERDUE = {
+  // CMS122 is inverse: its numerator (poor control) is the latest assessment above 9%, OR the latest
+  // without a result, OR none at all this period. A patient with no HbA1c is flagged here too, so the
+  // wording names every path and asserts no value (T2).
   cms122: {
-    method: "Most recent glycemic status assessment (HbA1c or GMI) above 9%.",
-    whyFlagged: "Flagged: the most recent glycemic status assessment (HbA1c or GMI) for this measurement period is above 9%. This is a result, not a missing record.",
-    nextAction: "Review glycemic control.",
+    method: "No glycemic status assessment (HbA1c or GMI) this period, the most recent has no result, or it is above 9%.",
+    whyFlagged: "Flagged: this measurement period has no glycemic status assessment (HbA1c or GMI), the most recent one has no result, or the most recent one is above 9%.",
+    nextAction: "Draw an HbA1c if none this period has a result; otherwise review glycemic control.",
   },
   cms125: {
     method: "No mammogram in the 27-month window.",
@@ -70,10 +73,13 @@ const OVERDUE = {
     whyFlagged: "Flagged: no colorectal cancer screening within the accepted interval for this measurement period.",
     nextAction: "Review screening history; order or document screening if none exists.",
   },
+  // CMS165's numerator needs a qualifying reading this period whose most recent day's lowest systolic is
+  // below 140 and lowest diastolic below 90. No qualifying reading also lands here, so the wording names
+  // both paths and asserts no value (T2).
   cms165: {
-    method: "Most recent blood pressure this period at or above 140/90.",
-    whyFlagged: "Flagged: most recent blood pressure this measurement period is at or above 140/90.",
-    nextAction: "Review blood pressure management.",
+    method: "No blood pressure this period that counts, or the most recent reading day's lowest blood pressure is not below 140/90.",
+    whyFlagged: "Flagged: no blood pressure reading this measurement period counts toward the measure, or on the most recent reading day the lowest systolic is 140 or more or the lowest diastolic is 90 or more.",
+    nextAction: "Take and record a blood pressure if none counts this period; otherwise review blood pressure management.",
   },
   // Multi-rate (ADR-074): the bucket is the WORST of Initiation and Engagement, so OVERDUE means the
   // episode had no treatment within 14 days OR treatment began and was not engaged within 34 days.

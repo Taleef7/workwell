@@ -7,6 +7,12 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-16
 
+- **CMS122 and CMS165 no longer state a value a patient may not have.** A patient with no HbA1c this year
+  read "the most recent ... is above 9%", and one whose readings did not count read "at or above 140/90",
+  on the work list, case page, roster and cards. CMS122's gap is now "none this period, none with a result,
+  or above 9%" (draw an HbA1c, or review control), and CMS165's is "no reading that counts, or the most
+  recent day's lowest not below 140/90". A guard test refuses an official OVERDUE line that states a
+  threshold without the no-record path.
 - **A patient WebChart could not read is an evaluation error, not "outside the population".** The client
   degrades such a patient to a bare Patient, and official logic read that as out of population: the patient
   left the denominator and an open case closed on missing data. The run now records it as

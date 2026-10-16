@@ -55,8 +55,8 @@ test("nextActionFor is measure-aware for non-OSHA measures (M1: no longer defaul
 
 test("nextActionFor: cms122 OVERDUE names both readings of the inverse numerator (poor control OR no result), never 'no HbA1c on file' alone", () => {
   const action = nextActionFor("OVERDUE", "cms122");
-  assert.match(action, /glycemic status assessment \(HbA1c or GMI\) is above 9%/);
-  assert.match(action, /or none is on file/);
+  assert.match(action, /No glycemic status assessment \(HbA1c or GMI\) this measurement period/);
+  assert.match(action, /the most recent has no result, or it is above 9%/);
   assert.match(action, /most recent qualifying assessment in the period is at or below 9%/, "states what closes the gap, in the measure's own terms");
   assert.doesNotMatch(action, /^No .* on file/);
   assert.doesNotMatch(action, /Order or document one/);
@@ -230,7 +230,7 @@ test("official-routed nextActionFor reads the official display table first", () 
   try {
     // The action is an ACTION. The reason the case is open is the method/why line's job; repeating it
     // here renders the same sentence twice in the case view.
-    assert.equal(nextActionFor("OVERDUE", "cms122"), "Review glycemic control.");
+    assert.equal(nextActionFor("OVERDUE", "cms122"), "Draw an HbA1c if none this period has a result; otherwise review glycemic control.");
     assert.notEqual(nextActionFor("OVERDUE", "cms122"), nextActionFor("OVERDUE", "cms125"));
   } finally {
     if (prior === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
