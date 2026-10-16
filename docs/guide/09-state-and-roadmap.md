@@ -156,7 +156,7 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
    clickable status-chip drill-downs, primary-care synthetic roster, MIPS↔CMS crosswalk in the UI —
    **all landed by 2026-09-01** — the crosswalk last, in #505 — and the Maui sandbox is live)
    → MM-1 (official-only measure onboarding for CMS2/CMS130/CMS165 — gated ≠ routable ≠ runnable —
-   per-measure gated flips, 2027 logic (CMS has not published FHIR versions of the 2027 measures, so WorkWell translates them itself; CMS137's, CMS130's, CMS125's, CMS165's and CMS122's translations are routed on Maui, #767, #779, #782, #816 and #818, CMS125's and CMS122's on TWH too, #820, and a measure without one scores a 2027 period with its 2026 draft), and, for the real-data phase, CMS137 only if Quality ID 305 survives the CY2027
+   per-measure gated flips, 2027 logic (CMS has not published FHIR versions of the 2027 measures, so WorkWell translates them itself; CMS137's, CMS130's, CMS125's, CMS165's, CMS122's and CMS2's translations are routed on Maui, #767, #779, #782, #816, #818 and #822, CMS125's and CMS122's on TWH too, #820, and a measure without one scores a 2027 period with its 2026 draft), and, for the real-data phase, CMS137 only if Quality ID 305 survives the CY2027
    final rule; **U1–U3 built by 2026-09-06**: the runnable rule and calendar period (ADR-072), the
    20,000-patient data-first corpus whose clinical facts follow the year each run scores (ADR-075),
    and CMS137 vendored, gated 45/45 and read as two rates with its strata carried into the
