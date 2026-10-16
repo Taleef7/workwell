@@ -8,7 +8,7 @@ import { canRunCampaigns } from "@/lib/rbac";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ScrollRegion } from "@/components/scroll-region";
 import { SUBJECT } from "@/lib/terminology";
-import { useMeasureIdentities } from "@/lib/measure-identity";
+import { dueSoonPossible, useMeasureIdentities } from "@/lib/measure-identity";
 
 // ── Backend contract (issue #75 E5 — outreach at scale) ────────────────────────
 type ProgramSummary = {
@@ -84,7 +84,7 @@ export default function CampaignsPage() {
 
   // Filter sources (shared with /programs).
   const [measures, setMeasures] = useState<ProgramSummary[]>([]);
-  const { labelFor: measureLabelFor } = useMeasureIdentities();
+  const { labelFor: measureLabelFor, measures: catalogMeasures } = useMeasureIdentities();
   const [sites, setSites] = useState<string[]>([]);
 
   // Launcher form state.
@@ -343,7 +343,10 @@ export default function CampaignsPage() {
               className={selectClass}
             >
               <option value="">All</option>
-              {OUTCOME_OPTIONS.map((o) => (
+              {/* "Due Soon" only where a measure in scope can emit it (CMS's logic never does). */}
+              {OUTCOME_OPTIONS.filter(
+                (o) => o !== "DUE_SOON" || outcomeStatus === o || dueSoonPossible(catalogMeasures, measureId),
+              ).map((o) => (
                 <option key={o} value={o}>
                   {o.replaceAll("_", " ")}
                 </option>

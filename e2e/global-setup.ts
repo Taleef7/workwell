@@ -1,6 +1,6 @@
 import { chromium, request } from "@playwright/test";
 import { BASE_URL } from "./base-url";
-import { AUTH_SESSIONS, ensureCompletedRun, MAUI_PASSWORD, storageStatePath } from "./tests/maui/helpers";
+import { AUTH_SESSIONS, ensureCompletedRun, homeFor, MAUI_PASSWORD, storageStatePath } from "./tests/maui/helpers";
 
 /**
  * Two jobs, both done ONCE for the whole suite rather than per test.
@@ -36,7 +36,7 @@ export default async function globalSetup() {
       await page.locator("#email").fill(s.email);
       await page.locator("#password").fill(MAUI_PASSWORD);
       await page.getByRole("button", { name: /sign in/i }).click();
-      await page.waitForURL(/\/programs/, { timeout: 30_000 });
+      await page.waitForURL(homeFor(s.email), { timeout: 30_000 });
       await page.context().storageState({ path: storageStatePath(s.email, s.tag) });
       await page.close();
     }

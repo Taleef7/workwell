@@ -27,7 +27,7 @@ import { emitToast } from "@/lib/toast";
 import { OUTCOME_LABELS, PRIORITY_LABELS, labelFor, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
-import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
+import { dueSoonPossible, useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { ScrollRegion } from "@/components/scroll-region";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
@@ -148,7 +148,7 @@ export default function WorklistPage() {
   const { user } = useAuth();
   const canManage = canManageCases(user?.role);
   const { siteId, from, to } = useGlobalFilters();
-  const { labelForId, shortLabelFor, titleFor } = useMeasureIdentities();
+  const { labelForId, shortLabelFor, titleFor, measures: catalogMeasures } = useMeasureIdentities();
 
   const { options: providerOptions, nameFor: providerNameFor } = usePanelProviders();
   const { options: payerOptions, groups: payerGroups, available: payersAvailable, nameFor: payerNameFor } = usePanelPayers();
@@ -651,7 +651,11 @@ export default function WorklistPage() {
           onValueChange={(v) => setParams((p) => (v ? p.set("outcome", v) : p.delete("outcome")))}
           options={[
             { value: "", label: "Any" },
-            ...["OVERDUE", "DUE_SOON", "MISSING_DATA"].map((s) => ({ value: s, label: labelFor(OUTCOME_LABELS, s) })),
+            // "Due Soon" only where a measure in scope can emit it (CMS's logic never does), or when the
+            // URL already asks for it.
+            ...["OVERDUE", "DUE_SOON", "MISSING_DATA"]
+              .filter((s) => s !== "DUE_SOON" || outcomeFilter === s || dueSoonPossible(catalogMeasures, measureFilter))
+              .map((s) => ({ value: s, label: labelFor(OUTCOME_LABELS, s) })),
           ]}
         />
         <Input
