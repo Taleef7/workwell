@@ -14,7 +14,7 @@
 > already answered. This file exists because an unanswered question with no home decays silently —
 > every entry below had been raised at least once, some three times, with no record of an answer.
 
-**As of 2026-10-14.** Twenty-four open; one answered (§5).
+**As of 2026-10-16.** Twenty-five open; one answered (§5).
 
 ---
 
@@ -198,7 +198,7 @@ searches would exceed the cap; bulk export would not.
 
 ### 4.3 Which provider is a patient's PCP?
 
-**Status:** unasked. Blocks the panels on live data (#564).
+**Status:** unasked. Blocks the panels on live data (#556).
 
 `user_patients` roles hold a patient's providers, and "Primary Care Physician" (role 290) exists unused.
 `Patient.generalPractitioner` follows the attending physician on the trial.
@@ -271,7 +271,8 @@ enrolled in.
 - Is `_include=MedicationRequest:medication` supported? Without it, every referenced Medication is a
   separate read. (On the trial no MedicationRequest references one; each names its drug inline.)
 - **Can WebChart send standard codes?** On the trial (2026-10-09):
-  - every medication is coded only in FDDC, while the CMS medication value sets are RxNorm;
+  - every medication is labelled FDDC, while the CMS medication value sets are RxNorm (most of the codes are
+    RxNorm ids: 20 of 29 checked 2026-10-15);
   - 125 of 134 orders carry no code at all.
 
   WorkWell may not supply or replace a code. Until WebChart sends RxNorm on medications and a coded order
@@ -332,6 +333,21 @@ CMS125's 2027 logic reads which breast a unilateral mastectomy was on from `Proc
 SNOMED "Entire left breast" (361716006) / "Entire right breast" (361715005). WebChart ingest passes a
 Procedure through as WebChart's FHIR server returns it, so the measure can use that path only if WebChart
 fills `bodySite` with those codes. A laterality qualifier or a "structure of" code does not match.
+
+### 4.15 Can WebChart's FHIR `Encounter.type` carry the billed visit code?
+
+**Status:** new 2026-10-16; not yet asked. Blocks every measure on WebChart data.
+
+On the trial (2026-10-15) all 89 encounters state `type` as text only ("Office Visit-Initial", "Pediatric
+Exam") with no coding. Each of the six measures admits a patient through a qualifying visit matched by a
+CPT, HCPCS or SNOMED CT code in `Encounter.type`, so no patient enters an initial population from WebChart
+data. WorkWell may not map the text to a code. The dev database holds billed E/M codes for some visits
+(`bill_procedure_codes`, 15 of 105).
+- Can the FHIR server send the visit's billed CPT/HCPCS code, or a SNOMED CT visit type, as `Encounter.type`
+  codings?
+- How is an unbilled visit (no charge, telephone) coded, and how long after the visit does the billed code
+  appear?
+- Does the pilot group's production server send the same text-only type?
 
 ---
 

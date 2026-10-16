@@ -57,6 +57,10 @@ What WorkWell emits across the eCQM toolchain, and the conformance level of each
 | Graded by | the measure stewards | the CQL WG's corpus | **us** |
 | Result | 455/455 across 9 measures | 1,612 / 1,823 | not applicable |
 
+MADiE scores test cases with fqm-execution, the engine WorkWell runs (MADiE 3.0.7 onward uses 1.8.5,
+WorkWell's pin). The stewards' expected results are checked in that engine, so agreement cannot reveal a
+defect the two share; `cqf-fhir-cr` (the second-engine row) is the independent check.
+
 **What may be claimed.** That `OshaHearingStandardThresholdShift-1.0.0` computes **what we read
 29 CFR 1910.95 to require**, with every define traced to its paragraph in
 `docs/measures/OSHA_1910_95_STS.md`, and that its test cases are boundary cases taken from the

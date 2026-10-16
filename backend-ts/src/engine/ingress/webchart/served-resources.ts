@@ -43,7 +43,14 @@ export const WEBCHART_SERVED_RESOURCES: readonly ServedResource[] = [
     caveat: "",
   },
   { type: "Immunization", how: "fetched", optional: false, derived: "", caveat: "" },
-  { type: "Encounter", how: "fetched", optional: false, derived: "", caveat: "" },
+  {
+    type: "Encounter",
+    how: "fetched",
+    optional: false,
+    derived: "",
+    caveat:
+      "WebChart's trial sends every visit type as text with no code (89 of 89 encounters), and each measure finds its qualifying visit by a coded type, so no patient enters an initial population from WebChart data (checked 2026-10-15).",
+  },
   // #713. Each was in WebChart's CapabilityStatement with search by patient, and answered 200 for every
   // patient on the trial instance (2026-10-09).
   {
@@ -52,7 +59,7 @@ export const WEBCHART_SERVED_RESOURCES: readonly ServedResource[] = [
     optional: true,
     derived: "",
     caveat:
-      "WebChart's trial codes every medication in FDDC (http://terminology.hl7.org/CodeSystem/FDDC), never RxNorm, which the CMS medication value sets match (checked 2026-10-09).",
+      "WebChart's trial codes every medication in FDDC (http://terminology.hl7.org/CodeSystem/FDDC). Most of the codes are RxNorm ids (20 of 29 distinct codes are current RxCUIs), but the CMS medication value sets match on the RxNorm system, so none counts, and WorkWell may not relabel a code system (checked 2026-10-09 and 2026-10-15).",
   },
   {
     type: "ServiceRequest",

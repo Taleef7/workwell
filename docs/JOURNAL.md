@@ -18,6 +18,15 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   where every tab read the app name alone. A case manager lands on the work list after signing in. The
   "Due Soon" filter appears only where a measure in scope runs authored CQL: CMS's logic never emits it, so
   on Maui it matched nothing.
+- **The WebChart record, corrected.** The trial sends every visit type as text with no code (89 of 89), so no
+  patient enters a measure's initial population from WebChart data: now a caveat on `pnpm data-coverage`'s
+  Encounter row and OPEN_QUESTIONS §4.15. Medications are labelled FDDC, but most of the codes are RxNorm ids.
+  `Group/$export` is not a complete enumeration (Groups are partitions). PRODUCTION_READINESS no longer
+  claims a complete audit trail, a refusal of demo configuration, or S3 storage; STANDARDS_CONFORMANCE says
+  MADiE grades in the same engine WorkWell runs.
+- **Correction to 2026-10-13 (#789):** WebChart's blood-pressure components state UCUM `mm[Hg]` as their
+  unit code (46 of 46 on the trial, 2026-10-15), so the unit does not block CMS165; its status and missing
+  encounter link do (OPEN_QUESTIONS §4.7).
 
 ## 2026-10-15
 

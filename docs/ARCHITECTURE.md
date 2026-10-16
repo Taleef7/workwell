@@ -250,7 +250,8 @@ Evidence downloads write `EVIDENCE_DOWNLOADED`.
 - A routed measure's batch failure (including "nothing retrieved for anybody") reaches every subject
   of that measure through the same per-subject isolation. Other measures are unaffected.
 - The exception is a calculation that threw on its input (`OfficialCalculationError`, #789): one
-  patient's unreadable data, such as a blood pressure in `mmHg`. That batch's subjects (more than one)
+  patient's unreadable data, such as a blood pressure whose unit code is `mmHg`, not UCUM's `mm[Hg]`. That
+  batch's subjects (more than one)
   are evaluated one at a time, so only the patient the engine refuses fails. A patient alone costs
   about nine times its share of a batch, so per measure and run the retry stops after 25 subjects fail
   alone or 1,000 have been retried; later failed batches then fail every subject again. Each retried
