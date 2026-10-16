@@ -21,6 +21,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-14
 
+- **TWH scores CMS125 and CMS122 with the 2027 translations too (#820).** TWH routes CMS's artifacts for
+  these two only, and its synthetic bundles are dated from the evaluation year, so from 2027-01-01 the
+  translations change its results as they do Maui's. The deploy vendors and pin-checks both, the health gate
+  expects them, and the flip-config test pins TWH's list and holds its vendor lines to it.
 - **CMS122 for 2027: WorkWell's translation of CMS122v15, routed on Maui (#818).** The frailty edit, and
   v15's choice of HbA1c/GMI reading: the most recent day counts only a result above 0 %, and the reading is
   the lowest number that day, else the most recent number, else the most recent result-less one. CMS's v14
