@@ -605,6 +605,11 @@ async function prepareLivePopulation(
     if (patientIds.length === 0) {
       throw new Error("WebChart returned zero usable Patient bundles");
     }
+    // Not one record read is an outage, not a population: a run of nothing but errors would become the
+    // current run and blank every screen until the next one. It fails instead, so the last good run stands.
+    if (degradedCount === fetchedCount) {
+      throw new Error(`WebChart could not read any patient's record (${degradedCount} of ${fetchedCount} degraded)`);
+    }
     replaceLiveDirectory(bundles);
     const roster = explicitRoster ?? enrollmentRosterFor(patientIds, undefined);
     const items: WorkItem[] = [];

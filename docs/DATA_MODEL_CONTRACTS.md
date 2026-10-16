@@ -128,9 +128,11 @@ WorkWell translation (decision 3) adds `official.kind: "derived"`, `label`, `url
 (422 `derived_logic_not_reportable`); a run whose evaluated rows were scored by more than one logic (CMS's
 artifact, a translation, authored CQL) or period is refused by QRDA I/III and every MeasureReport type
 (422 `mixed_logic`); an errored row counts as no logic.
-- **Evaluation failure** replaces the evidence with `{ "evaluationError": "engine failure",
-"message": "<error text>" }` (`"source fetch failed"` with WebChart's error when the subject's record could
-not be read) and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`.
+- **Evaluation failure** replaces the evidence with `{ "evaluationError": "<cause>", "message": "<error
+text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`. Readers test the
+key, never the cause: `"engine failure"` in the run pipeline, `"source fetch failed"` (with WebChart's error)
+when a subject's record could not be read, others on the seeding paths. A live run in which no record could
+be read fails instead.
 
 ## 6) CSV Export Contracts
 

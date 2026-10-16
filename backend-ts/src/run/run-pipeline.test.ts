@@ -652,6 +652,29 @@ test("synchronous configured execution finalizes FAILED before propagating a liv
   }
 });
 
+test("T3: a WebChart run that could read no patient's record fails, so the last good run stays current", async () => {
+  // An outage after the Patient list (an expired token) degrades every patient. Recorded patient by patient
+  // as errors, that run would become the current one and every screen would read "evaluation failed".
+  const { p, runStore, outcomeStore } = await freshPipelineDb();
+  try {
+    const deps: RunPipelineDeps = {
+      runStore,
+      outcomeStore,
+      engine: compliantEngine,
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: fixtureWebChartClient([patientOnly("outage-1", true), patientOnly("outage-2", true)]),
+    };
+    const planned = await planManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram" });
+    await finishOrFail(deps, planned);
+    assert.equal((await runStore.getRun(planned.run.id))?.status, "FAILED");
+    assert.equal((await outcomeStore.listOutcomes(planned.run.id)).length, 0);
+    assert.notEqual(profileForId("wc|outage-1")?.name, "Live outage-1", "the directory is not replaced by an unread population");
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
 test("a successful WebChart response with zero usable Patients fails before swapping the directory or writing outcomes", async () => {
   const { p, runStore, outcomeStore } = await freshPipelineDb();
   try {
