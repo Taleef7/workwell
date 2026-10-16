@@ -1,0 +1,114 @@
+[
+  {
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Most Recent Adolescent Depression Screening Positive and Depression Management Active",
+    "presentIn": "ours",
+    "reason": "CMS2v16's new path: a positive adolescent screen counts with active depression management (Active Depression Management, 2.16.840.1.113762.1.4.1248.413). CMS's 2026 logic has no such define."
+  },
+  {
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Most Recent Adolescent Depression Screening Positive and Depression Medication Active",
+    "presentIn": "ours",
+    "reason": "CMS2v16 (and v15) count a positive adolescent screen with an active depression medication over or after the encounter. CMS's FHIR draft folded that MedicationRequest into the follow-up union instead, so it has no define of this name."
+  },
+  {
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Most Recent Adult Depression Screening Positive and Depression Management Active",
+    "presentIn": "ours",
+    "reason": "CMS2v16's new path: a positive adult screen counts with active depression management (Active Depression Management, 2.16.840.1.113762.1.4.1248.413). CMS's 2026 logic has no such define."
+  },
+  {
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Most Recent Adult Depression Screening Positive and Depression Medication Active",
+    "presentIn": "ours",
+    "reason": "CMS2v16 (and v15) count a positive adult screen with an active depression medication over or after the encounter. CMS's FHIR draft folded that MedicationRequest into the follow-up union instead, so it has no define of this name."
+  },
+  {
+    "case": "d1fc6b6d-025e-446b-a941-e62a76217e28",
+    "populations": {
+      "cms": "11000",
+      "ours": "11010"
+    },
+    "reason": "Now in the numerator, through v16's active-medication path. Aged 18, a positive adult screen on 2026-06-15 and a visit on 2026-06-21; an antidepressant (doxepin) with status active and intent order, authored 2025-06-24, with no dosage or supply, so no stated end. v16 counts a depression medication active over and after the visit, with no timing on the order, and scores an active medication with no end as ongoing: the steward's own v16 results put two Cypress deck patients in the numerator on exactly that shape (a Medication, Active with no end). CMS's draft counts the order only as a follow-up, timed by its order date a year before the visit, so not in the numerator."
+  },
+  {
+    "case": "328248a7-33d6-4923-a99a-a56ec88c515e",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Follow Up Intervention for Positive Adult Depression Screening",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[{\"resourceType\":\"MedicationRequest\",\"id\":\"4238eefe-2827-40f5-b290-e354c50c55f5\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest\"]},\"status\":\"active\",\"intent\":\"order\",\"doNotPerform\":false,\"medicationCodeableConcept\":{\"coding\":[{\"code\":\"1190110\",\"display\":\"fluoxetine 60 MG Oral Tablet\",\"system\":\"http://www.nlm.nih.gov/research/umls/rxnorm\",\"userSelected\":true}]},\"subject\":{\"reference\":\"Patient/328248a7-33d6-4923-a99a-a56ec88c515e\"},\"authoredOn\":\"2026-06-21T08:00:00.000Z\",\"requester\":{\"reference\":\"Practitioner/123456\"},\"dispenseRequest\":{\"expectedSupplyDuration\":{\"code\":\"days\",\"system\":\"http://unitsofmeasure.org\",\"value\":30}}}]|\"TRUE\"|TRUE",
+    "reason": "The follow-up union's medication branch is the order alone in v16 (\"Medication, Order\"): an active depression-medication order. CMS's draft also required a positive, recent adult screen and a medication period over the visit, which this case's adult side does not have. No population moves: the numerator reads the union only beside a positive recent screen of the same age group."
+  },
+  {
+    "case": "4149c02e-ee5c-4b8d-a4ee-425dfa2460e7",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Follow Up Intervention for Positive Adult Depression Screening",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[{\"resourceType\":\"MedicationRequest\",\"id\":\"4864e5ec-287e-407f-a966-71b926ec2b55\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest\"]},\"status\":\"active\",\"intent\":\"order\",\"doNotPerform\":false,\"medicationCodeableConcept\":{\"coding\":[{\"code\":\"1190110\",\"display\":\"fluoxetine 60 MG Oral Tablet\",\"system\":\"http://www.nlm.nih.gov/research/umls/rxnorm\",\"userSelected\":true}]},\"subject\":{\"reference\":\"Patient/4149c02e-ee5c-4b8d-a4ee-425dfa2460e7\"},\"authoredOn\":\"2026-06-21T08:00:00.000Z\",\"requester\":{\"reference\":\"Practitioner/123456\"},\"dispenseRequest\":{\"expectedSupplyDuration\":{\"code\":\"days\",\"system\":\"http://unitsofmeasure.org\",\"value\":30}}}]|\"TRUE\"|TRUE",
+    "reason": "The follow-up union's medication branch is the order alone in v16 (\"Medication, Order\"): an active depression-medication order. CMS's draft also required a positive, recent adult screen and a medication period over the visit, which this case's adult side does not have. No population moves: the numerator reads the union only beside a positive recent screen of the same age group."
+  },
+  {
+    "case": "bc433eb4-fba6-45e0-a24b-de907e551556",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Follow Up Intervention for Positive Adolescent Depression Screening",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[{\"resourceType\":\"MedicationRequest\",\"id\":\"95d44a1c-3dda-455b-b9cf-a080641a86a6\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest\"]},\"status\":\"active\",\"intent\":\"order\",\"doNotPerform\":false,\"medicationCodeableConcept\":{\"coding\":[{\"code\":\"1190110\",\"display\":\"fluoxetine 60 MG Oral Tablet\",\"system\":\"http://www.nlm.nih.gov/research/umls/rxnorm\",\"userSelected\":true}]},\"subject\":{\"reference\":\"Patient/bc433eb4-fba6-45e0-a24b-de907e551556\"},\"authoredOn\":\"2026-06-24T08:00:00.000Z\",\"requester\":{\"display\":\"Patrick Pump\",\"reference\":\"Practitioner/f007\"}}]|\"TRUE\"|TRUE",
+    "reason": "The follow-up union's medication branch is the order alone in v16 (\"Medication, Order\"): an active depression-medication order. CMS's draft also required a positive, recent adolescent screen and a medication period over the visit, which this case's adolescent side does not have. No population moves: the numerator reads the union only beside a positive recent screen of the same age group."
+  },
+  {
+    "case": "bc433eb4-fba6-45e0-a24b-de907e551556",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Follow Up Intervention for Positive Adult Depression Screening",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[{\"resourceType\":\"MedicationRequest\",\"id\":\"95d44a1c-3dda-455b-b9cf-a080641a86a6\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest\"]},\"status\":\"active\",\"intent\":\"order\",\"doNotPerform\":false,\"medicationCodeableConcept\":{\"coding\":[{\"code\":\"1190110\",\"display\":\"fluoxetine 60 MG Oral Tablet\",\"system\":\"http://www.nlm.nih.gov/research/umls/rxnorm\",\"userSelected\":true}]},\"subject\":{\"reference\":\"Patient/bc433eb4-fba6-45e0-a24b-de907e551556\"},\"authoredOn\":\"2026-06-24T08:00:00.000Z\",\"requester\":{\"display\":\"Patrick Pump\",\"reference\":\"Practitioner/f007\"}}]|\"TRUE\"|TRUE",
+    "reason": "The follow-up union's medication branch is the order alone in v16 (\"Medication, Order\"): an active depression-medication order. CMS's draft also required a positive, recent adult screen and a medication period over the visit, which this case's adult side does not have. No population moves: the numerator reads the union only beside a positive recent screen of the same age group."
+  },
+  {
+    "case": "d1fc6b6d-025e-446b-a941-e62a76217e28",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Numerator",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "true|\"TRUE\"|TRUE",
+    "reason": "Now in the numerator (the active-medication path, as the population entry for this case states)."
+  },
+  {
+    "case": "d1fc6b6d-025e-446b-a941-e62a76217e28",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Medical or Patient Reason for Not Screening Adolescent for Depression",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[]|\"UNHIT\"|FALSE",
+    "reason": "Same value; marked unhit on the translation because the patient is now in the numerator, so fqm does not evaluate the denominator exceptions."
+  },
+  {
+    "case": "d1fc6b6d-025e-446b-a941-e62a76217e28",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Has Adolescent Depression Screening",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "false|\"UNHIT\"|FALSE",
+    "reason": "Same value; marked unhit on the translation because the patient is now in the numerator, so fqm does not evaluate the denominator exceptions."
+  },
+  {
+    "case": "d1fc6b6d-025e-446b-a941-e62a76217e28",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Medical or Patient Reason for Not Screening Adult for Depression",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[]|\"UNHIT\"|FALSE",
+    "reason": "Same value; marked unhit on the translation because the patient is now in the numerator, so fqm does not evaluate the denominator exceptions."
+  },
+  {
+    "case": "d1fc6b6d-025e-446b-a941-e62a76217e28",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Has Adult Depression Screening",
+    "cms": "true|\"TRUE\"|TRUE",
+    "ours": "true|\"UNHIT\"|FALSE",
+    "reason": "Same value; marked unhit on the translation because the patient is now in the numerator, so fqm does not evaluate the denominator exceptions."
+  },
+  {
+    "case": "d1fc6b6d-025e-446b-a941-e62a76217e28",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Denominator Exceptions",
+    "cms": "false|\"FALSE\"|TRUE",
+    "ours": "false|\"UNHIT\"|FALSE",
+    "reason": "Same value; marked unhit on the translation because the patient is now in the numerator, so fqm does not evaluate the denominator exceptions."
+  },
+  {
+    "case": "d5f7630a-6fcf-4cfc-ba20-dfd5ee88af9a",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Follow Up Intervention for Positive Adult Depression Screening",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[{\"resourceType\":\"MedicationRequest\",\"id\":\"9e8f5701-ba89-4800-b00b-6b576e7926f6\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest\"]},\"status\":\"active\",\"intent\":\"order\",\"doNotPerform\":false,\"medicationCodeableConcept\":{\"coding\":[{\"code\":\"1190110\",\"display\":\"fluoxetine 60 MG Oral Tablet\",\"system\":\"http://www.nlm.nih.gov/research/umls/rxnorm\",\"userSelected\":true}]},\"subject\":{\"reference\":\"Patient/d5f7630a-6fcf-4cfc-ba20-dfd5ee88af9a\"},\"authoredOn\":\"2026-06-21T08:00:00.000Z\",\"requester\":{\"reference\":\"Practitioner/123456\"},\"dispenseRequest\":{\"expectedSupplyDuration\":{\"code\":\"days\",\"system\":\"http://unitsofmeasure.org\",\"value\":30}}}]|\"TRUE\"|TRUE",
+    "reason": "The follow-up union's medication branch is the order alone in v16 (\"Medication, Order\"): an active depression-medication order. CMS's draft also required a positive, recent adult screen and a medication period over the visit, which this case's adult side does not have. No population moves: the numerator reads the union only beside a positive recent screen of the same age group."
+  },
+  {
+    "case": "ff6f7416-7e1d-4712-b4f5-aab79b2a7c01",
+    "key": "g0|CMS2FHIRPCSDepScreenAndFollowUp.Follow Up Intervention for Positive Adult Depression Screening",
+    "cms": "[]|\"FALSE\"|TRUE",
+    "ours": "[{\"resourceType\":\"MedicationRequest\",\"id\":\"d52ebbdf-7083-4187-b492-0fc50bac6c89\",\"meta\":{\"profile\":[\"http://hl7.org/fhir/us/qicore/StructureDefinition/qicore-medicationrequest\"]},\"status\":\"active\",\"intent\":\"order\",\"doNotPerform\":false,\"medicationCodeableConcept\":{\"coding\":[{\"code\":\"1190110\",\"display\":\"fluoxetine 60 MG Oral Tablet\",\"system\":\"http://www.nlm.nih.gov/research/umls/rxnorm\",\"userSelected\":true}]},\"subject\":{\"reference\":\"Patient/ff6f7416-7e1d-4712-b4f5-aab79b2a7c01\"},\"authoredOn\":\"2026-06-21T08:00:00.000Z\",\"requester\":{\"reference\":\"Practitioner/123456\"},\"dispenseRequest\":{\"expectedSupplyDuration\":{\"code\":\"days\",\"system\":\"http://unitsofmeasure.org\",\"value\":30}}}]|\"TRUE\"|TRUE",
+    "reason": "The follow-up union's medication branch is the order alone in v16 (\"Medication, Order\"): an active depression-medication order. CMS's draft also required a positive, recent adult screen and a medication period over the visit, which this case's adult side does not have. No population moves: the numerator reads the union only beside a positive recent screen of the same age group."
+  }
+]

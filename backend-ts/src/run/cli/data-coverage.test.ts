@@ -40,7 +40,7 @@ test("main: 0 with the report, 2 on a usage error or a measure with no CMS artif
   try {
     assert.equal(await main(["--measure", "cms2", "--json"]), 0);
     const tables = JSON.parse(printed.at(-1)!) as Array<{ measureId: string; kind: string }>;
-    assert.deepEqual(tables.map((table) => `${table.measureId} ${table.kind}`), ["cms2 cms-artifact"]);
+    assert.deepEqual(tables.map((table) => `${table.measureId} ${table.kind}`), ["cms2 cms-artifact", "cms2 workwell-translation"]);
     assert.equal(await main(["--bogus"]), 2);
     assert.equal(await main(["--measure", "cms999"]), 2);
     assert.match(printed.at(-1)!, /^cms999: no committed CMS artifact under measures\/official\//);

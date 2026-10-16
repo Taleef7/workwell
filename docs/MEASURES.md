@@ -106,6 +106,14 @@ or on a later day, no longer makes the patient "poor control". The 2027 Cypress 
 CMS's own test deck no patient moves; 12 hand-built patients test every edit
 (`backend-ts/measures/derived/cms122/README.md`).
 
+**For 2027, Maui scores CMS2 with WorkWell's translation of CMS2v16** (ww-2027.1, #822). A positive
+depression screen counts in three ways: a follow-up from the screening to two days after the visit (v15:
+during the visit, or ordered up to two days after it), active depression management (new in v16), or an
+antidepressant active over and after the visit, whenever it was ordered. CMS's FHIR draft had no separate
+active-medication path. The 2027 Cypress deck agrees on 379 of 379; on CMS's own test deck one patient
+moves into the numerator (an active antidepressant ordered a year before the visit, with no stated end); 19
+hand-built patients, 10 of which tell the logics apart (`backend-ts/measures/derived/cms2/README.md`).
+
 > **CMS165 reads a blood pressure by its profile, and nothing else by profile (#591, 2026-10-10).**
 > CMS165 is the only pilot measure whose decisive retrieve identifies a blood pressure by PROFILE alone
 > with no code filter. Read by resource type, it matched any final Observation, so a patient with any

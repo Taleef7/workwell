@@ -24,6 +24,18 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-14
 
+- **CMS2 for 2027: WorkWell's translation of CMS2v16, routed on Maui (#822).** Ported as written (owner
+  decision): a positive screen counts with a follow-up from the screening to two days after the visit,
+  with active depression management (new in v16), or with an antidepressant active over the visit (CMS's
+  draft had folded that path into the follow-up). The QRDA importer now maps a performed procedure's one
+  stated author time to QI-Core's `recorded`, which v16 falls back to. Cypress 379/379, MADiE one move (an
+  old, still-active antidepressant), 19 hand-built patients (10 discriminating). All six ACO measures now have
+  2027 logic. Review found that a QRDA-imported medication's stated end is invisible to CMS's period logic
+  (#823, every measure that reads one).
+- **TWH scores CMS125 and CMS122 with the 2027 translations too (#820).** TWH routes CMS's artifacts for
+  these two only, and its synthetic bundles are dated from the evaluation year, so from 2027-01-01 the
+  translations change its results as they do Maui's. The deploy vendors and pin-checks both, the health gate
+  expects them, and the flip-config test pins TWH's list and holds its vendor lines to it.
 - **CMS122 for 2027: WorkWell's translation of CMS122v15, routed on Maui (#818).** The frailty edit, and
   v15's choice of HbA1c/GMI reading: the most recent day counts only a result above 0 %, and the reading is
   the lowest number that day, else the most recent number, else the most recent result-less one. CMS's v14
