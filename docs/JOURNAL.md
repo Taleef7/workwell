@@ -14,6 +14,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   digest makes every registry serve the identical image. A newer Node 24 patch now needs the digest bumped
   by hand.
 - Merged #821 (TWH routes the CMS125/CMS122 translations), #824 (CMS2), #826 and #827; both stacks run them.
+- **Three small staff-facing fixes.** Each page names itself in the browser tab ("Work list · WorkWell Maui"),
+  where every tab read the app name alone. A case manager lands on the work list after signing in. The
+  "Due Soon" filter appears only where a measure in scope runs authored CQL: CMS's logic never emits it, so
+  on Maui it matched nothing.
 
 ## 2026-10-15
 

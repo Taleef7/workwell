@@ -194,6 +194,21 @@ export function singleScoringLogic(logics: readonly ScoringLogic[] | null | unde
 }
 
 /** How long to wait before retrying a failed first `/api/measures` fetch, one entry per retry. */
+/**
+ * Whether a "Due Soon" outcome can occur in a filter's scope: the selected measure, or every active
+ * measure when none is selected. CMS's logic (a measure routed to it carries `executed`) scores a patient
+ * in or out of the numerator and never emits DUE_SOON; only authored CQL does. So the option is offered
+ * only where some measure in scope runs authored CQL. Unknown (the catalog not loaded, an id not in it)
+ * answers true: the filter never hides an option it cannot rule out.
+ */
+export function dueSoonPossible(measures: readonly MeasureListItem[], selectedMeasureId: string): boolean {
+  const inScope = selectedMeasureId
+    ? measures.filter((m) => m.id === selectedMeasureId)
+    : measures.filter((m) => !m.status || m.status === "Active");
+  if (inScope.length === 0) return true;
+  return inScope.some((m) => !m.identity?.executed);
+}
+
 export const IDENTITY_RETRY_DELAYS_MS = [1000, 4000] as const;
 
 export function useMeasureIdentities() {
