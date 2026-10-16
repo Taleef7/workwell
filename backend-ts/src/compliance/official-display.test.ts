@@ -34,7 +34,7 @@ test("T2: cms122 and cms165 OVERDUE name every path into the gap, so no patient 
     assert.match(text, /no result/);
     assert.match(text, /above 9%/);
   }
-  assert.match(a1c.nextAction, /^Draw an HbA1c if none this period has a result; otherwise review glycemic control\.$/);
+  assert.match(a1c.nextAction, /^Draw an HbA1c if there is none this period or the latest has no result; otherwise review glycemic control\.$/);
   const bp = officialDisplayFor("cms165", "OVERDUE")!;
   for (const text of [bp.method, bp.whyFlagged]) {
     assert.match(text, /no blood pressure/i);

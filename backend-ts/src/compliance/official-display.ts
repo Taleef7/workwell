@@ -56,7 +56,7 @@ const OVERDUE = {
   cms122: {
     method: "No glycemic status assessment (HbA1c or GMI) this period, the most recent has no result, or it is above 9%.",
     whyFlagged: "Flagged: this measurement period has no glycemic status assessment (HbA1c or GMI), the most recent one has no result, or the most recent one is above 9%.",
-    nextAction: "Draw an HbA1c if none this period has a result; otherwise review glycemic control.",
+    nextAction: "Draw an HbA1c if there is none this period or the latest has no result; otherwise review glycemic control.",
   },
   cms125: {
     method: "No mammogram in the 27-month window.",

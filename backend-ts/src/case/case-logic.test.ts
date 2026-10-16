@@ -230,7 +230,7 @@ test("official-routed nextActionFor reads the official display table first", () 
   try {
     // The action is an ACTION. The reason the case is open is the method/why line's job; repeating it
     // here renders the same sentence twice in the case view.
-    assert.equal(nextActionFor("OVERDUE", "cms122"), "Draw an HbA1c if none this period has a result; otherwise review glycemic control.");
+    assert.equal(nextActionFor("OVERDUE", "cms122"), "Draw an HbA1c if there is none this period or the latest has no result; otherwise review glycemic control.");
     assert.notEqual(nextActionFor("OVERDUE", "cms122"), nextActionFor("OVERDUE", "cms125"));
   } finally {
     if (prior === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
