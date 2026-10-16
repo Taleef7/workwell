@@ -274,6 +274,12 @@ interface WorkItem {
   measureId: string;
   target?: TargetOutcome;
   liveBundle?: unknown;
+  /**
+   * Why WebChart could not read this subject's record (the client degraded it to Patient + OperationOutcome).
+   * Such a subject is never evaluated: official logic would read the bare Patient as "not in the population",
+   * shrinking the denominator and closing an open case on missing data. It is an evaluation error instead.
+   */
+  fetchFailure?: string;
 }
 
 /**
@@ -529,12 +535,21 @@ function patientIdOf(bundle: unknown): string | undefined {
   return undefined;
 }
 
-function isDegradedBundle(bundle: unknown): boolean {
-  if (!isObject(bundle) || !Array.isArray(bundle.entry)) return false;
-  return bundle.entry.some((entry) => {
+/**
+ * The failure a degraded WebChart bundle carries, or undefined for a readable one. The client's only
+ * OperationOutcome in a composed bundle is its own degraded-patient marker: it drops every OperationOutcome
+ * a search returns (`resourcesFromSearchset`).
+ */
+function fetchFailureOf(bundle: unknown): string | undefined {
+  if (!isObject(bundle) || !Array.isArray(bundle.entry)) return undefined;
+  for (const entry of bundle.entry) {
     const resource = isObject(entry) ? entry.resource : undefined;
-    return isObject(resource) && resource.resourceType === "OperationOutcome";
-  });
+    if (!isObject(resource) || resource.resourceType !== "OperationOutcome") continue;
+    const issue = Array.isArray(resource.issue) && isObject(resource.issue[0]) ? resource.issue[0] : undefined;
+    const diagnostics = issue && typeof issue.diagnostics === "string" ? issue.diagnostics.trim() : "";
+    return diagnostics || "WebChart's record for this patient could not be read";
+  }
+  return undefined;
 }
 
 function explicitEnrollmentRoster(raw: string): EnrollmentRoster {
@@ -584,11 +599,16 @@ async function prepareLivePopulation(
     });
     const bundles = await webChartDataSource(cfg, client).loadBundles();
     fetchedCount = bundles.length;
-    degradedCount = bundles.filter(isDegradedBundle).length;
+    degradedCount = bundles.filter((bundle) => fetchFailureOf(bundle) !== undefined).length;
     unsupportedResourceTypes = [...(client.unsupportedResourceTypes?.() ?? [])];
     const patientIds = bundles.map(patientIdOf).filter((id): id is string => id !== undefined);
     if (patientIds.length === 0) {
       throw new Error("WebChart returned zero usable Patient bundles");
+    }
+    // Not one record read is an outage, not a population: a run of nothing but errors would become the
+    // current run and blank every screen until the next one. It fails instead, so the last good run stands.
+    if (degradedCount === fetchedCount) {
+      throw new Error(`WebChart could not read any patient's record (${degradedCount} of ${fetchedCount} degraded)`);
     }
     replaceLiveDirectory(bundles);
     const roster = explicitRoster ?? enrollmentRosterFor(patientIds, undefined);
@@ -598,7 +618,10 @@ async function prepareLivePopulation(
       if (!patientId) continue;
       const employee = profileForId(`wc|${patientId}`, DIRECTORY);
       if (!employee) continue;
-      for (const measureId of planned.measureIds) items.push({ employee, measureId, liveBundle: bundle });
+      const fetchFailure = fetchFailureOf(bundle);
+      for (const measureId of planned.measureIds) {
+        items.push({ employee, measureId, liveBundle: bundle, ...(fetchFailure !== undefined ? { fetchFailure } : {}) });
+      }
     }
     return {
       items,
@@ -921,7 +944,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // authored engine still runs them one at a time, since each call holds the thread until done.
       const evaluateBatch = deps.engine.evaluateBatch.bind(deps.engine);
       await Promise.all([...new Set(chunkItems.map((i) => i.measureId))].map(async (measureId) => {
-        const forMeasure = chunkItems.filter((i) => i.measureId === measureId);
+        // A subject whose record could not be read is not offered: it is recorded as an error below.
+        const forMeasure = chunkItems.filter((i) => i.measureId === measureId && i.fetchFailure === undefined);
+        if (forMeasure.length === 0) return;
         let batched = false;
         // #563 — this await is the single longest synchronous stretch in the run, and nothing has ever
         // measured it. `bundleMs` accumulates rather than assigns because the factory is the executor's
@@ -1098,7 +1123,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // status can't have moved). A REUSE copies the prior CQL outcome forward with date-corrected evidence
       // and skips the ~68 ms evaluation; anything else (or the cache disabled) is a full evaluation. The
       // cache never authors a status — it only decides whether to re-ask the engine (ADR-008).
-      const plan = incremental
+      const plan = incremental && item.fetchFailure === undefined
         ? await incremental
             .plan(item.measureId, item.employee.externalId, period, bundle)
             .catch((err) => {
@@ -1126,7 +1151,15 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // subject would otherwise never see the refusal, and a profile/terminology misconfiguration would go
       // partially silent, which is precisely what the refusal exists to prevent (review #5).
       const batchFailed = batchFailure.has(item.measureId);
-      if (plan?.action === "reuse" && !batchFailed) {
+      if (item.fetchFailure !== undefined) {
+        // Never evaluated (T3): a bare Patient is not this subject's record. Recorded as an error, so the run
+        // is PARTIAL_FAILURE, no case or rollover changes for the pair, and reports count it as an error.
+        status = "MISSING_DATA";
+        evidence = { evaluationError: "source fetch failed", message: item.fetchFailure };
+        failures++;
+        evaluationFailed = true;
+        failedEvaluations.add(`${item.measureId}\u0000${item.employee.externalId}`);
+      } else if (plan?.action === "reuse" && !batchFailed) {
         status = plan.status;
         evidence = plan.evidence;
         evaluatedNow = false;

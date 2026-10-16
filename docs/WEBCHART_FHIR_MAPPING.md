@@ -416,8 +416,8 @@ The local conformance suite serves the committed dev-DB fixtures through an in-t
 asserts that the mock-HTTP path produces the same per-subject outcomes as the fixture-client path for the
 dev-DB goldens, plus timeout, 429-then-success, partial-page, malformed-resource, and empty-population
 failure modes. A malformed or failed per-patient `$everything` response degrades to a Patient-only
-collection bundle with an `OperationOutcome` marker, so the existing CQL evaluation path reports that
-known subject as missing data without aborting the rest of the batch. This is still **not** the final live
+collection bundle with an `OperationOutcome` marker; a run records that subject as an evaluation error
+(`source fetch failed`) rather than evaluating it, without aborting the rest of the batch. This is still **not** the final live
 transport: PR-2c must adjust request shaping, auth, pagination, and (if A1 says proprietary) add the
 row→FHIR mapper once MIE confirms the real contract. Inert-unless-configured remains unchanged:
 `resolveDataSource(env)` still selects WebChart only when both WebChart env vars are non-blank.

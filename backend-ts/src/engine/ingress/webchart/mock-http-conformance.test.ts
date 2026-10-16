@@ -454,6 +454,41 @@ test("strict population paging: a later page failure rejects instead of returnin
   );
 });
 
+test("a Patient search that answers 200 with something other than a Bundle is refused, not read as nobody (T3)", async () => {
+  const outcome = { resourceType: "OperationOutcome", issue: [{ severity: "error", code: "exception", diagnostics: "database unavailable" }] };
+  const fetchImpl = fetchShim((url) => (url.pathname === "/fhir/Patient" ? jsonResponse(outcome) : new Response("nf", { status: 404 })));
+  // Both the authoritative run and the lenient read-only CLI: an empty population is never what this means.
+  for (const failOnPartialPage of [true, false]) {
+    await assert.rejects(
+      () => httpSource(fetchImpl, { maxRetries: 0, failOnPartialPage }).loadBundles(),
+      /Patient search answered an OperationOutcome, not a Bundle/,
+    );
+  }
+});
+
+test("a later Patient page that is not a Bundle is a failed page: refused on an authoritative run (T3)", async () => {
+  const [first] = patientResources;
+  const routes = devDbRoutes();
+  const fetchImpl = fetchShim((url, init) => {
+    if (url.pathname === "/fhir/Patient" && !url.searchParams.has("_offset")) {
+      return jsonResponse({
+        resourceType: "Bundle",
+        type: "searchset",
+        entry: [{ resource: first }],
+        link: [{ relation: "next", url: "/fhir/Patient?_count=1&_offset=1" }],
+      });
+    }
+    if (url.pathname === "/fhir/Patient") return jsonResponse({ resourceType: "OperationOutcome", issue: [] });
+    return routes(url, init);
+  });
+  await assert.rejects(
+    () => httpSource(fetchImpl, { maxRetries: 0, failOnPartialPage: true }).loadBundles(),
+    /page 2 answered an OperationOutcome, not a Bundle/,
+  );
+  // The read-only CLI keeps what it listed, as it does for any failed later page.
+  assert.equal((await httpSource(fetchImpl, { maxRetries: 0 }).loadBundles()).length, 1);
+});
+
 test("malformed resource search: that patient becomes MISSING_DATA while the batch continues", async () => {
   const selected = ["wc-13", "wc-42"];
   const selectedPatients = selected.map((id) => patientResources.find((p) => p.id === id)!);

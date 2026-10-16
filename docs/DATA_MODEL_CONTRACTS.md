@@ -27,8 +27,9 @@ run (`compliance/live-cell.ts`).
 - **Out-of-population never opens a case (ADR-078):** the outcome persists as MISSING_DATA;
 `planCaseUpsert` no-ops, or closes an active case `RESOLVED`, `closed_reason='OUT_OF_POPULATION'`,
 `closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA from a completed evaluation opens one.
-- **A failed evaluation never changes a case.** An engine or batch error persists MISSING_DATA with
-`evaluationError` and marks the run PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
+- **A failed evaluation never changes a case.** An engine or batch error, or a subject whose WebChart record
+could not be read (never evaluated, T3), persists MISSING_DATA with `evaluationError` and marks the run
+PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
 over for that (subject, measure); the run logs a WARN with the count. A batch whose calculation threw on
 one patient's data is first retried one subject at a time (#789), so only the subjects that fail alone carry
 the error. A failed rerun-to-verify audits its
@@ -127,8 +128,11 @@ WorkWell translation (decision 3) adds `official.kind: "derived"`, `label`, `url
 (422 `derived_logic_not_reportable`); a run whose evaluated rows were scored by more than one logic (CMS's
 artifact, a translation, authored CQL) or period is refused by QRDA I/III and every MeasureReport type
 (422 `mixed_logic`); an errored row counts as no logic.
-- **Evaluation failure** replaces the evidence with `{ "evaluationError": "CQL engine failure",
-"message": "<error text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`.
+- **Evaluation failure** replaces the evidence with `{ "evaluationError": "<cause>", "message": "<error
+text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`. Readers test the
+key, never the cause: `"engine failure"` in the run pipeline, `"source fetch failed"` (with WebChart's error)
+when a subject's record could not be read, others on the seeding paths. A live run in which no record could
+be read fails instead.
 
 ## 6) CSV Export Contracts
 

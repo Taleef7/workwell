@@ -147,6 +147,18 @@ function nextLink(bundle: unknown): string | undefined {
   return undefined;
 }
 
+function isSearchsetBundle(payload: unknown): boolean {
+  return isObject(payload) && payload.resourceType === "Bundle";
+}
+
+/** What a payload is, for an error message: its resourceType, or its JSON type. */
+function describePayload(payload: unknown): string {
+  const kind = isObject(payload) && typeof payload.resourceType === "string"
+    ? payload.resourceType
+    : payload === null ? "null" : Array.isArray(payload) ? "array" : typeof payload;
+  return kind === "null" ? kind : `${/^[aeiou]/i.test(kind) ? "an" : "a"} ${kind}`;
+}
+
 function patientsFromSearchset(bundle: unknown): PatientRef[] {
   if (!isObject(bundle) || bundle.resourceType !== "Bundle" || !Array.isArray(bundle.entry)) return [];
   const patients: PatientRef[] = [];
@@ -258,9 +270,9 @@ function authProviderFor(cfg: WebChartConfig, fetchImpl: typeof globalThis.fetch
 /**
  * Live HTTP client for the verified WebChart FHIR contract (see module doc). One returned payload
  * always represents at most one patient. Any per-resource fetch failure degrades that patient to a
- * Patient-only bundle with an OperationOutcome marker (⇒ MISSING_DATA downstream, never partial-data
- * compliance); `evaluateBatch` keeps per-item isolation and the CQL engine remains the sole outcome
- * authority (ADR-008).
+ * Patient-only bundle with an OperationOutcome marker, never partial-data compliance. The run pipeline
+ * never evaluates that bundle: it records the patient as an evaluation error (`source fetch failed`),
+ * which changes no case.
  */
 export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartClientOptions): WebChartClient {
   const base = cfg.baseUrl.replace(/\/+$/, "");
@@ -417,6 +429,9 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
 
   async function listPopulation(): Promise<PatientRef[]> {
     let page = await fetchFirstPopulationPage();
+    // A 200 that is not a Bundle (an OperationOutcome, an HTML error page) lists nobody. Read as a
+    // searchset it would be an empty population, so it is refused here rather than mistaken for one.
+    if (!isSearchsetBundle(page)) throw new Error(`WebChart's Patient search answered ${describePayload(page)}, not a Bundle`);
     // Capture the searchset's advertised match count BEFORE the paging loop reassigns `page`.
     const reportedTotal = bundleTotal(page);
     // `url` reflects the profile actually used (countDisabled may have flipped) so relative `link[next]`
@@ -442,6 +457,10 @@ export function httpWebChartClient(cfg: WebChartConfig, options?: HttpWebChartCl
       url = next;
       try {
         page = await fetchJson(url);
+        // A later page that is not a Bundle is a failed page: it would end the listing as if it were the last.
+        if (!isSearchsetBundle(page)) {
+          throw new Error(`WebChart's Patient search page ${pages + 1} answered ${describePayload(page)}, not a Bundle`);
+        }
       } catch (e) {
         // A failed LATER page keeps the patients already listed (the read-only CLI contract); an
         // authoritative caller opts into failOnPartialPage to reject a truncated population instead.
