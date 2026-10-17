@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { officialDisplayFor } from "./official-display.ts";
+import { OFFICIAL_DISPLAY, officialDisplayFor } from "./official-display.ts";
 import { resolveDeploymentProfile } from "../config/deployment-profile.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 
@@ -25,8 +25,36 @@ test("every official measure the pilot can run has wording for every status — 
     assert.doesNotMatch(d.method, /on file/i); // official wording never claims a record's absence for OVERDUE
   }
 });
-test("cms122 OVERDUE says what the numerator means, not 'no record'", () => {
-  assert.match(officialDisplayFor("cms122", "OVERDUE")!.method, /above 9%/);
+test("T2: cms122 and cms165 OVERDUE name every path into the gap, so no patient with no result reads 'above 9%'", () => {
+  // CMS122's numerator is the latest above 9%, the latest without a result, or none this period; CMS165's
+  // gap is no qualifying reading, or the most recent day's lowest reading not below 140/90.
+  const a1c = officialDisplayFor("cms122", "OVERDUE")!;
+  for (const text of [a1c.method, a1c.whyFlagged]) {
+    assert.match(text, /no glycemic status assessment/i);
+    assert.match(text, /no result/);
+    assert.match(text, /above 9%/);
+  }
+  assert.match(a1c.nextAction, /^Draw an HbA1c if there is none this period or the latest has no result; otherwise review glycemic control\.$/);
+  const bp = officialDisplayFor("cms165", "OVERDUE")!;
+  for (const text of [bp.method, bp.whyFlagged]) {
+    assert.match(text, /no blood pressure/i);
+    assert.match(text, /140/);
+  }
+  assert.match(bp.nextAction, /^Take and record a blood pressure if none counts this period/);
+});
+
+test("T2: no official OVERDUE line asserts a value without naming the no-record path", () => {
+  // A line that states a threshold as the reason ("above 9%", "140/90") is only true for a patient with a
+  // result. Every official OVERDUE that names one must also say the gap can be no record at all.
+  for (const id of Object.keys(OFFICIAL_DISPLAY)) {
+    const display = officialDisplayFor(id, "OVERDUE");
+    if (!display) continue;
+    for (const text of [display.method, display.whyFlagged]) {
+      if (/\d+(\.\d+)?%|\d{2,3}\/\d{2,3}|\b1[0-9]{2}\b/.test(text)) {
+        assert.match(text, /\bno\b|\bnone\b/i, `${id} OVERDUE asserts a value with no no-record path: "${text}"`);
+      }
+    }
+  }
 });
 test("cms137 OVERDUE names BOTH rates, and its next action is treatment follow-up rather than a screening order", () => {
   // The bucket is the worst of Initiation and Engagement (ADR-074); wording that named only one would

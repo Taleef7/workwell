@@ -84,8 +84,8 @@
  * - **The display vocabulary lies about official EXCLUDED and OVERDUE.** `roster-vocabulary.ts`
  *   hardcodes "Contraindication / exemption on file" for every EXCLUDED — but this adapter routes three
  *   distinct conditions there (DENEX, DENEXCEP, out-of-denominator), and only the first is an exemption.
- *   Worse, it renders OVERDUE as "no record on file", which for cms122 is the factual opposite: OVERDUE
- *   means a *recorded* HbA1c above 9%. Both strings are written for authored recency measures and need
+ *   Worse, it renders OVERDUE as "no record on file", which for cms122 is only one of three paths: OVERDUE
+ *   means no HbA1c this period, one without a result, or one above 9%. Both strings are written for authored recency measures and need
  *   an official-aware branch before anything renders an official outcome to an operator.
  * - **EVERY rate is read** (ADR-074, superseding this file's original "only group 1" note). A measure
  *   with more than one group gets one outcome per rate, reduced to the worst among the rates that

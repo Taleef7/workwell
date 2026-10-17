@@ -132,7 +132,7 @@ test("official-routed deriveCell reads the official display table, not the autho
   process.env.WORKWELL_OFFICIAL_MEASURES = "cms122";
   try {
     const cell = deriveCell("OVERDUE", { expressionResults: [] }, "cms122", PERIOD);
-    assert.deepEqual(cell, { status: "OVERDUE", method: "Most recent glycemic status assessment (HbA1c or GMI) above 9%." });
+    assert.deepEqual(cell, { status: "OVERDUE", method: "No glycemic status assessment (HbA1c or GMI) this period, the most recent has no result, or it is above 9%." });
   } finally {
     // Restore, never delete — a deleted variable is not the same as the one this process started with.
     if (prior === undefined) delete process.env.WORKWELL_OFFICIAL_MEASURES;
