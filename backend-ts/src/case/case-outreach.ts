@@ -17,6 +17,7 @@ import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { resolveChannel, type ChannelType, type ChannelEnv, type OutreachChannel } from "./outreach-channel.ts";
 import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 import { outcomeForCase } from "./case-outcome.ts";
+import { careItemFor, joinCareItems } from "./care-item.ts";
 
 interface OutreachTemplateContent {
   id: string | null;
@@ -55,18 +56,21 @@ const TEMPLATES = {
   },
 } satisfies Record<string, OutreachTemplateContent>;
 
+// A patient's message names the care in plain words ({{careItem}}: "a mammogram"), never {{measureName}}:
+// the catalog title is jargon, and two titles disclose a diagnosis (care-item.ts). The subject stays neutral
+// because a subject line shows in notification previews.
 export const PATIENT_TEMPLATES = {
   general: {
     id: "patient-general",
     name: "General Clinic Reminder",
-    subject: "A screening you are due for: {{measureName}}",
-    bodyText: "Hello {{employeeName}}, our records show you are due for {{measureName}}. Please call the clinic to schedule, or reply to this message with a good time to reach you.",
+    subject: "A reminder from your clinic",
+    bodyText: "Hello {{employeeName}}, our records show you are due for {{careItem}}. Please call the clinic to schedule, or reply to this message with a good time to reach you.",
   },
   missing: {
     id: "patient-missing",
     name: "Missing Clinic Record Follow-Up",
-    subject: "We need a record for your {{measureName}}",
-    bodyText: "Hello {{employeeName}}, we could not find a record of your {{measureName}}. If you had it done elsewhere, please send us the report or call the clinic.",
+    subject: "A reminder from your clinic",
+    bodyText: "Hello {{employeeName}}, we could not find a record of {{careItem}}. If you had it done elsewhere, please send us the report or call the clinic.",
   },
 } satisfies Record<string, OutreachTemplateContent>;
 
@@ -143,10 +147,12 @@ function renderTemplate(
   measureName: string,
   dueDate: string,
   outcomeStatus: string,
+  careItem: string,
 ): string {
   return raw
     .replaceAll("{{employeeName}}", employeeName)
     .replaceAll("{{measureName}}", measureName)
+    .replaceAll("{{careItem}}", careItem)
     .replaceAll("{{dueDate}}", dueDate)
     .replaceAll("{{outcomeStatus}}", outcomeStatus);
 }
@@ -208,11 +214,12 @@ export async function previewOutreach(
   const { employeeName, measureName, dueDate } = await renderContext(deps, c);
   const isPatient = DEPLOYMENT_PROFILE.subjectTerm === "patient";
   const t = resolveTemplate(templateId, c.currentOutcomeStatus, measureName);
+  const careItem = careItemFor(c.measureId);
   return {
     templateId: t.id,
     templateName: t.name,
-    subject: renderTemplate(t.subject, employeeName, measureName, dueDate, c.currentOutcomeStatus),
-    bodyText: renderTemplate(t.bodyText, employeeName, measureName, dueDate, c.currentOutcomeStatus),
+    subject: renderTemplate(t.subject, employeeName, measureName, dueDate, c.currentOutcomeStatus, careItem),
+    bodyText: renderTemplate(t.bodyText, employeeName, measureName, dueDate, c.currentOutcomeStatus, careItem),
     employeeName,
     measureName,
     ...(isPatient ? {} : { dueDate }),
@@ -249,24 +256,70 @@ export async function dispatchOutreach(
   existing: CaseRecord,
   opts: DispatchOptions,
 ): Promise<DispatchResult> {
-  const { actor } = opts;
   const channelType: ChannelType = opts.channel ?? "EMAIL";
   const { employeeName, measureName, dueDate } = await renderContext(deps, existing);
   const t = resolveTemplate(opts.templateId, existing.currentOutcomeStatus, measureName);
-  const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
-  const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, existing.currentOutcomeStatus);
-  const toAddress =
-    channelType === "EMAIL" ? `${existing.employeeId}@workwell-demo.dev`
-    : channelType === "SMS" ? `sms:${existing.employeeId}`
-    : `tel:${existing.employeeId}`; // PHONE
-  const channel = channelFor(deps, channelType);
-  const delivery = channel.send({
+  const careItem = careItemFor(existing.measureId);
+  const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, existing.currentOutcomeStatus, careItem);
+  const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, existing.currentOutcomeStatus, careItem);
+  const delivery = sendMessage(deps, channelType, existing.employeeId, subject, body);
+  return recordDispatch(deps, existing, opts, channelType, t, subject, delivery);
+}
+
+/** The synthetic address for a subject on a channel (no contact data is held yet). */
+function toAddressFor(channelType: ChannelType, employeeId: string): string {
+  return channelType === "EMAIL" ? `${employeeId}@workwell-demo.dev`
+    : channelType === "SMS" ? `sms:${employeeId}`
+    : `tel:${employeeId}`; // PHONE
+}
+
+function sendMessage(deps: OutreachDeps, channelType: ChannelType, employeeId: string, subject: string, body: string) {
+  return channelFor(deps, channelType).send({
     channel: channelType,
-    to: toAddress,
+    to: toAddressFor(channelType, employeeId),
     subject: channelType === "EMAIL" ? subject : undefined,
     body,
   });
+}
 
+/**
+ * One message for every open gap of ONE patient (Q1): the care items joined ("a mammogram and an A1c blood
+ * test"), sent once, and recorded on each case with the same message id. A patient with three gaps gets
+ * one message, not three. The template is the missing-record one only when every gap is MISSING_DATA.
+ */
+export async function dispatchPatientOutreach(
+  deps: OutreachDeps,
+  cases: readonly CaseRecord[],
+  opts: DispatchOptions,
+): Promise<DispatchResult[]> {
+  const first = cases[0];
+  if (!first || cases.some((c) => c.employeeId !== first.employeeId)) {
+    throw new OutreachError("dispatchPatientOutreach takes one patient's cases");
+  }
+  const channelType: ChannelType = opts.channel ?? "EMAIL";
+  const { employeeName, measureName, dueDate } = await renderContext(deps, first);
+  const outcome = cases.every((c) => c.currentOutcomeStatus === "MISSING_DATA") ? "MISSING_DATA" : "OVERDUE";
+  const t = resolveTemplate(opts.templateId, outcome, measureName);
+  const careItem = joinCareItems(cases.map((c) => c.measureId));
+  const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, outcome, careItem);
+  const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, outcome, careItem);
+  const delivery = sendMessage(deps, channelType, first.employeeId, subject, body);
+  const results: DispatchResult[] = [];
+  for (const c of cases) results.push(await recordDispatch(deps, c, opts, channelType, t, subject, delivery));
+  return results;
+}
+
+/** Record one case's dispatch (action + audit, then the case patch) for a message already sent. */
+async function recordDispatch(
+  deps: OutreachDeps,
+  existing: CaseRecord,
+  opts: DispatchOptions,
+  channelType: ChannelType,
+  t: OutreachTemplateContent,
+  subject: string,
+  delivery: ReturnType<OutreachChannel["send"]>,
+): Promise<DispatchResult> {
+  const { actor } = opts;
   const { singular } = subjectNoun(DEPLOYMENT_PROFILE);
   const nextAction = `Wait for ${singular} follow-up, then rerun to verify closure.`;
   const actionPayload: Record<string, unknown> = {
