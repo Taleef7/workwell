@@ -12,6 +12,17 @@
  */
 export const SENSITIVE_MEASURES: ReadonlySet<string> = new Set(["cms2", "cms137"]);
 
+/** A measure id as the tables here key it: lower case, without a CMS version suffix (`CMS137v14` -> `cms137`). */
+function measureKey(measureId: string): string {
+  const id = measureId.trim().toLowerCase();
+  return /^cms\d+v\d+$/.test(id) ? id.replace(/v\d+$/, "") : id;
+}
+
+/** Whether a gap's measure may never be named to a patient or sent by campaign (CMS2, CMS137, any version). */
+export function isSensitiveMeasure(measureId: string): boolean {
+  return SENSITIVE_MEASURES.has(measureKey(measureId));
+}
+
 export const NEUTRAL_CARE_ITEM = "a visit with your care team";
 
 const CARE_ITEMS: Readonly<Record<string, string>> = {
@@ -22,7 +33,8 @@ const CARE_ITEMS: Readonly<Record<string, string>> = {
 };
 
 export function careItemFor(measureId: string): string {
-  return Object.hasOwn(CARE_ITEMS, measureId) ? CARE_ITEMS[measureId]! : NEUTRAL_CARE_ITEM;
+  const key = measureKey(measureId);
+  return Object.hasOwn(CARE_ITEMS, key) ? CARE_ITEMS[key]! : NEUTRAL_CARE_ITEM;
 }
 
 /** "a mammogram", "a mammogram and an A1c blood test", "a, b and c" — each phrase once, in first-seen order. */

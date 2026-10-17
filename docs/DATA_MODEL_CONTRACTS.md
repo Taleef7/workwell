@@ -58,17 +58,21 @@ audit-first paths there. `backend-ts/scripts/audit-order-sweep.py` lists every `
 write; keep the list below in step with it in the SAME change.
 - **Mutate-first exceptions:** the run-created case transition, import-driven finalize (`routes/runs.ts`),
 `recover-stuck-runs`, `batch-evaluate-scale` — run-boundary best-effort (`WARN`), so a finished run is
-never stranded. `dispatchOutreach` — the payload is `channel.send()`'s result; needs ADR-073 d4's
-intent/completion pair (owner call). The three identity-link writes — `upsertLink` returns the existing id
+never stranded. `dispatchOutreach` and `dispatchPatientOutreach` — the payload is `channel.send()`'s
+result; the patient path sends one message, then records each of the patient's cases, each record on its
+own (a failed one is reported, never retried). Needs ADR-073 d4's intent/completion pair (owner call). The
+sweep no longer lists them: the send happens in the caller before `recordDispatch`, whose audit is first. The three identity-link writes — `upsertLink` returns the existing id
 on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfill-trend-history` —
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
-- **The sweep reports 64 hits across 20 files (2026-10-08); check the count, not the labels.** The six
+- **The sweep reports 63 hits across 19 files (2026-10-17); check the count, not the labels.** The 64th,
+`dispatchOutreach`'s render before its audit, left when the record step became `recordDispatch`; the
+mutate-first exception above is unchanged. The six
 added since 2026-10-02 are all in `rerunToVerify`: #763 removed a local `const … = (` the matcher read as
 a function start, so that function's earlier run writes now show against its `CASE_RERUN_FAILED` audit.
 The code is unchanged; the old count was the undercount. The files
-above account for 10; the other 10 are not violations: `panel-assignment` (mapping before consequences),
+above account for 9; the other 10 are not violations: `panel-assignment` (mapping before consequences),
 `segments` and `outcome-compaction` (matcher artifacts / the ADR-073 d4 completion event),
 `subject-lists` (audit in `beforeComplete`), `evidence-service`, `audit-packet`, `materialize-run`,
 `measure-seed` (reads or pure computation), `case-event-store-postgres` (the audit writer itself) and

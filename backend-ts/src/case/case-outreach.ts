@@ -17,7 +17,7 @@ import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { resolveChannel, type ChannelType, type ChannelEnv, type OutreachChannel } from "./outreach-channel.ts";
 import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 import { outcomeForCase } from "./case-outcome.ts";
-import { careItemFor, joinCareItems } from "./care-item.ts";
+import { NEUTRAL_CARE_ITEM, careItemFor, joinCareItems } from "./care-item.ts";
 
 interface OutreachTemplateContent {
   id: string | null;
@@ -96,6 +96,15 @@ function templateForOutcome(outcomeStatus: string | null | undefined, measureNam
     return TEMPLATES.general;
   }
   return TEMPLATES.general; // OVERDUE + everything else → generic
+}
+
+/**
+ * The missing-record message asks for "the report" of the item, which only makes sense for a test or
+ * screening. For the neutral item ("a visit with your care team": CMS2, CMS137, an unmapped measure) the
+ * general reminder is sent instead, so the message neither reads oddly nor hints at something specific.
+ */
+function forCareItem(t: OutreachTemplateContent, careItem: string): OutreachTemplateContent {
+  return t === PATIENT_TEMPLATES.missing && careItem === NEUTRAL_CARE_ITEM ? PATIENT_TEMPLATES.general : t;
 }
 
 /** Look up a built-in template by its seeded id (V007/V008), else null. */
@@ -213,8 +222,8 @@ export async function previewOutreach(
   if (!c) return null;
   const { employeeName, measureName, dueDate } = await renderContext(deps, c);
   const isPatient = DEPLOYMENT_PROFILE.subjectTerm === "patient";
-  const t = resolveTemplate(templateId, c.currentOutcomeStatus, measureName);
   const careItem = careItemFor(c.measureId);
+  const t = forCareItem(resolveTemplate(templateId, c.currentOutcomeStatus, measureName), careItem);
   return {
     templateId: t.id,
     templateName: t.name,
@@ -258,8 +267,8 @@ export async function dispatchOutreach(
 ): Promise<DispatchResult> {
   const channelType: ChannelType = opts.channel ?? "EMAIL";
   const { employeeName, measureName, dueDate } = await renderContext(deps, existing);
-  const t = resolveTemplate(opts.templateId, existing.currentOutcomeStatus, measureName);
   const careItem = careItemFor(existing.measureId);
+  const t = forCareItem(resolveTemplate(opts.templateId, existing.currentOutcomeStatus, measureName), careItem);
   const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, existing.currentOutcomeStatus, careItem);
   const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, existing.currentOutcomeStatus, careItem);
   const delivery = sendMessage(deps, channelType, existing.employeeId, subject, body);
@@ -299,13 +308,25 @@ export async function dispatchPatientOutreach(
   const channelType: ChannelType = opts.channel ?? "EMAIL";
   const { employeeName, measureName, dueDate } = await renderContext(deps, first);
   const outcome = cases.every((c) => c.currentOutcomeStatus === "MISSING_DATA") ? "MISSING_DATA" : "OVERDUE";
-  const t = resolveTemplate(opts.templateId, outcome, measureName);
   const careItem = joinCareItems(cases.map((c) => c.measureId));
+  const t = forCareItem(resolveTemplate(opts.templateId, outcome, measureName), careItem);
   const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, outcome, careItem);
   const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, outcome, careItem);
   const delivery = sendMessage(deps, channelType, first.employeeId, subject, body);
+  // The message is out: each case is recorded on its own, so one case's failed record never turns the
+  // others (already recorded, already audited) into failures. A case whose record failed comes back FAILED
+  // with the message id, so the campaign row says the message went out but this case has no record of it.
   const results: DispatchResult[] = [];
-  for (const c of cases) results.push(await recordDispatch(deps, c, opts, channelType, t, subject, delivery));
+  for (const c of cases) {
+    try {
+      results.push(await recordDispatch(deps, c, opts, channelType, t, subject, delivery));
+    } catch {
+      results.push({
+        caseId: c.id, employeeId: c.employeeId, channel: channelType, toAddress: delivery.to,
+        status: "FAILED", messageId: delivery.messageId, templateName: t.name,
+      });
+    }
+  }
   return results;
 }
 

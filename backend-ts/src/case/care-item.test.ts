@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { NEUTRAL_CARE_ITEM, SENSITIVE_MEASURES, careItemFor, joinCareItems } from "./care-item.ts";
+import { NEUTRAL_CARE_ITEM, SENSITIVE_MEASURES, careItemFor, isSensitiveMeasure, joinCareItems } from "./care-item.ts";
 import { PATIENT_TEMPLATES } from "./case-outreach.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 
@@ -35,4 +35,11 @@ test("Q1 guard: no patient message can carry a measure's title, id, or a CMS/MIP
       assert.doesNotMatch(message, /\bCMS\d|\bMIPS\b|\{\{/, `${measure.id}: "${message}"`);
     }
   }
+});
+
+test("Q1: a versioned or upper-case id is the same measure (legacy ids like cms137v14)", () => {
+  assert.equal(careItemFor("CMS125v14"), "a mammogram");
+  assert.equal(careItemFor(" cms122 "), "an A1c blood test");
+  for (const id of ["cms2", "CMS2", "cms2v15", "cms137v14", "CMS137"]) assert.ok(isSensitiveMeasure(id), id);
+  for (const id of ["cms125", "cms22v14", "cms1370"]) assert.ok(!isSensitiveMeasure(id), id);
 });

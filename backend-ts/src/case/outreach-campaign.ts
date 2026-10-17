@@ -9,7 +9,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CampaignStore, CampaignRecord, CampaignRecipientRecord } from "../stores/campaign-store.ts";
 import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
 import { dispatchOutreach, dispatchPatientOutreach, type DispatchResult, type OutreachDeps } from "./case-outreach.ts";
-import { SENSITIVE_MEASURES } from "./care-item.ts";
+import { isSensitiveMeasure } from "./care-item.ts";
 import { isChannelType, type ChannelType, type OutreachChannel } from "./outreach-channel.ts";
 
 export interface CampaignDeps {
@@ -59,7 +59,7 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
   // message about either can disclose a condition, so contacting those patients is a staff decision, case by
   // case (Q1). A campaign aimed at one is refused; a campaign over every measure leaves them out, counted.
   const patientDeployment = DEPLOYMENT_PROFILE.subjectTerm === "patient";
-  if (patientDeployment && measureId && SENSITIVE_MEASURES.has(measureId)) {
+  if (patientDeployment && measureId && isSensitiveMeasure(measureId)) {
     throw new CampaignError("Campaigns never send for this measure; contact these patients from their case, one at a time");
   }
 
@@ -67,7 +67,7 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
   const matching = open.filter(
     (c) => (!site || eq(employeeById(c.employeeId)?.site ?? null, site)) && (!outcome || eq(c.currentOutcomeStatus, outcome)),
   );
-  const eligible = patientDeployment ? matching.filter((c) => !SENSITIVE_MEASURES.has(c.measureId)) : matching;
+  const eligible = patientDeployment ? matching.filter((c) => !isSensitiveMeasure(c.measureId)) : matching;
   const withheld = matching.length - eligible.length;
   // One message per patient on a patient deployment (every open gap in one message); one per case otherwise.
   const batches = patientDeployment ? groupByPatient(eligible) : eligible.map((c) => [c]);
@@ -103,12 +103,11 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
         });
       }
     } catch {
-      // A mid-loop dispatch throw must never abandon the campaign: record this batch's recipients FAILED
-      // and continue so the loop always completes and recordCampaign is always reached (makes the
-      // PARTIAL_FAILURE status reachable). A case already recorded before the throw keeps its row.
-      const recorded = new Set(recipients.map((r) => r.caseId));
+      // A dispatch throw must never abandon the campaign: record this batch's recipients FAILED and
+      // continue so the loop always completes and recordCampaign is always reached (makes the
+      // PARTIAL_FAILURE status reachable). The patient path throws only before its message is sent; a case
+      // whose record fails after the send comes back as its own FAILED result, carrying the message id.
       for (const c of batch) {
-        if (recorded.has(c.id)) continue;
         failed++;
         recipients.push({
           campaignId, caseId: c.id, employeeId: c.employeeId, employeeName: employeeById(c.employeeId)?.name ?? c.employeeId,
