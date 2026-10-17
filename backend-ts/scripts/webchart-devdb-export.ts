@@ -14,7 +14,8 @@
  *
  * Usage (Docker + the `wcdb` container running):
  *   pnpm tsx scripts/webchart-devdb-export.ts
- * Env overrides: WEBCHART_DEVDB_CONTAINER (wcdb), _DB (wc_miehr_wctroot), _USER (root), _PASS (pmg2bhok).
+ * Env: WEBCHART_DEVDB_PASS (required: the dev-wcdb image's published credential), and overrides
+ * WEBCHART_DEVDB_CONTAINER (wcdb), _DB (wc_miehr_wctroot), _USER (root).
  */
 import { execFileSync } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -24,7 +25,8 @@ import path from "node:path";
 const CONTAINER = process.env.WEBCHART_DEVDB_CONTAINER ?? "wcdb";
 const DB = process.env.WEBCHART_DEVDB_DB ?? "wc_miehr_wctroot";
 const USER = process.env.WEBCHART_DEVDB_USER ?? "root";
-const PASS = process.env.WEBCHART_DEVDB_PASS ?? "pmg2bhok";
+const PASS = process.env.WEBCHART_DEVDB_PASS ?? "";
+if (!PASS) throw new Error("WEBCHART_DEVDB_PASS is not set: this export has no default database password");
 
 const OUT_DIR = fileURLToPath(new URL("../spike/webchart", import.meta.url));
 
