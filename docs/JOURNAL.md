@@ -7,6 +7,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-16
 
+- **Dependabot's backend lockfiles stop failing CI.** Its pnpm (11) ignores package.json's `pnpm` field, so
+  #774's lockfile dropped the better-sqlite3 override and the cql-execution patch and failed every frozen
+  install. backend-ts keeps those settings in `pnpm-workspace.yaml` now, and backend-ts and frontend pin
+  `packageManager: pnpm@10.17.1`, the version CI and the images use.
 - **CMS122 and CMS165 no longer state a value a patient may not have.** A patient with no HbA1c this year
   read "the most recent ... is above 9%", and one whose readings did not count read "at or above 140/90",
   on the work list, case page, roster and cards. CMS122's gap is now "none this period, none with a result,
