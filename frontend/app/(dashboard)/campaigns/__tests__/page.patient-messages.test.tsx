@@ -34,7 +34,7 @@ describe("campaigns: one message per patient, sensitive measures withheld (Q1)",
     });
     render(<CampaignsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Dry run" }));
-    expect(await screen.findByText(/2 messages, one per (patient|employee), covering 3 gaps\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Dry run preview — 2 messages \(one per (patient|employee)\) covering 3 gaps \(EMAIL\)\. No messages sent\./)).toBeInTheDocument();
     expect(screen.getByText(/2 open gaps left out: campaigns never send for the depression or substance use measures\./)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Send campaign" }));
@@ -48,7 +48,7 @@ describe("campaigns: one message per patient, sensitive measures withheld (Q1)",
     });
     render(<CampaignsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Dry run" }));
-    await screen.findByText(/Dry run preview/);
+    expect(await screen.findByText(/Dry run preview — 2 recipients \(EMAIL\)\./)).toBeInTheDocument();
     expect(screen.queryByText(/one per (patient|employee)/)).not.toBeInTheDocument();
     expect(screen.queryByText(/left out/)).not.toBeInTheDocument();
   });
