@@ -7,6 +7,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-16
 
+- **Patient outreach in plain language, one message per patient.** Maui's messages named the measure
+  ("A screening you are due for: Diabetes: Glycemic Status Assessment Greater Than 9%"), and a campaign sent
+  one message per gap. A message now names the care ("a mammogram and an A1c blood test") under a neutral
+  subject, a campaign sends one message per patient, and it never sends for CMS2 or CMS137, whose names
+  disclose a condition (a campaign aimed at either is refused; the page says how many gaps it left out). A
+  guard test refuses any patient message carrying a measure's title, id or CMS/MIPS number. The wording
+  needs a practice clinician's sign-off before real data.
 - **Dependabot's backend lockfiles stop failing CI.** Its pnpm (11) ignores package.json's `pnpm` field, so
   #774's lockfile dropped the better-sqlite3 override and the cql-execution patch and failed every frozen
   install. backend-ts keeps those settings in `pnpm-workspace.yaml` now, and backend-ts and frontend pin

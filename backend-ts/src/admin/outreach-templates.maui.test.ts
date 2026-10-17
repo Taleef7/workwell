@@ -76,3 +76,16 @@ test("default profile: template create/update persist through the store and are 
   assert.deepEqual(out.audits, ["OUTREACH_TEMPLATE_UPDATED", "OUTREACH_TEMPLATE_CREATED"]);
   assert.deepEqual(out.listAfter, ["Edited subject", "New subject"]);
 });
+
+test("maui: the admin preview of a patient template fills every placeholder (Q1)", () => {
+  const out = runProfileChild("maui", `
+    import { previewTemplate } from "./src/admin/outreach-templates.ts";
+    const previews = [];
+    for (const id of ["patient-general", "patient-missing"]) previews.push(await previewTemplate({}, id));
+    console.log(JSON.stringify({ previews }));
+  `);
+  for (const preview of out.previews as Array<{ subject: string; bodyText: string }>) {
+    assert.doesNotMatch(preview.subject + preview.bodyText, /\{\{|\}\}/, JSON.stringify(preview));
+    assert.match(preview.bodyText, /a mammogram/);
+  }
+});

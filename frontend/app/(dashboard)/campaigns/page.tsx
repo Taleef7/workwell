@@ -35,6 +35,10 @@ type CampaignResult = {
   sent: number;
   failed: number;
   simulated: number;
+  /** Messages sent (or previewed): one per patient on a patient deployment, so fewer than `total` gaps. */
+  messages?: number;
+  /** Open gaps left out because campaigns never send for their measure (depression, substance use). */
+  withheld?: number;
   recipients: CampaignRecipient[];
 };
 
@@ -70,6 +74,18 @@ type LaunchBody = {
 
 const CHANNEL_OPTIONS = ["EMAIL", "SMS", "PHONE"] as const;
 const OUTCOME_OPTIONS = ["OVERDUE", "MISSING_DATA", "DUE_SOON"] as const;
+
+/**
+ * Who a campaign reaches, in the units it sends: "3 messages (one per patient) covering 5 gaps" where one
+ * message covers several gaps (a patient deployment), else "5 recipients" (one message per gap).
+ */
+function reachOf(result: { total: number; messages?: number }): string {
+  const gaps = `${result.total} gap${result.total === 1 ? "" : "s"}`;
+  if (result.messages !== undefined && result.messages !== result.total) {
+    return `${result.messages} message${result.messages === 1 ? "" : "s"} (one per ${SUBJECT.singular}) covering ${gaps}`;
+  }
+  return `${result.total} recipient${result.total === 1 ? "" : "s"}`;
+}
 
 function formatDateTime(value: string | null): string {
   if (!value) return "—";
@@ -207,14 +223,15 @@ export default function CampaignsPage() {
   // Send requires an explicit confirm. Resolve the recipient count first (reuse the latest dry-run, or
   // run a fresh one) so the confirm states exactly how many people will be contacted.
   async function requestSend() {
-    let count = result && result.dryRun ? result.total : null;
+    // Messages, not gaps: on a patient deployment one message covers every gap of a patient.
+    let count = result && result.dryRun ? (result.messages ?? result.total) : null;
     if (count == null) {
       setLaunching("dry");
       setLaunchError(null);
       try {
         const preview = await api.post<LaunchBody, CampaignResult>("/api/campaigns", buildBody(true));
         setResult(preview);
-        count = preview.total;
+        count = preview.messages ?? preview.total;
       } catch (err) {
         setLaunchError(err instanceof Error ? err.message : "Unknown error");
         setLaunching(null);
@@ -422,14 +439,13 @@ export default function CampaignsPage() {
             <div role="status" aria-live="polite" className="space-y-3">
             {result.dryRun ? (
               <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                Dry run preview — {result.total} recipient{result.total === 1 ? "" : "s"} ({result.channel}). No messages
-                sent.
+                Dry run preview — {reachOf(result)} ({result.channel}). No messages sent.
               </p>
             ) : result.simulated === result.total ? (
               // All-simulated (demo stack): one accurate line instead of peer Sent/Simulated counters
               // that read as double the recipients.
               <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-                Campaign dispatched via {result.channel} to {result.total} recipient{result.total === 1 ? "" : "s"} —{" "}
+                Campaign dispatched via {result.channel}: {reachOf(result)} —{" "}
                 <span className="font-semibold">simulated</span> (no real messages sent on the demo stack)
                 {result.failed > 0 ? ` · ${result.failed} failed` : ""}.
               </p>
@@ -439,7 +455,7 @@ export default function CampaignsPage() {
                   Channel: <span className="font-semibold">{result.channel}</span>
                 </span>
                 <span className="text-neutral-700 dark:text-neutral-300">
-                  Total: <span className="font-semibold">{result.total}</span>
+                  Gaps: <span className="font-semibold">{result.total}</span>
                 </span>
                 <span className="text-neutral-700 dark:text-neutral-300">
                   Sent: <span className="font-semibold">{result.sent}</span>
@@ -452,6 +468,12 @@ export default function CampaignsPage() {
                 </span>
               </div>
             )}
+            {result.withheld ? (
+              <p className="text-sm text-neutral-700 dark:text-neutral-300">
+                {result.withheld} open gap{result.withheld === 1 ? "" : "s"} left out: campaigns never send for the
+                depression or substance use measures. Contact those {SUBJECT.plural} from their case.
+              </p>
+            ) : null}
             </div>
 
             {result.recipients.length > 0 ? (
@@ -489,7 +511,7 @@ export default function CampaignsPage() {
                   <th scope="col" className="px-4 py-2 font-semibold">Created</th>
                   <th scope="col" className="px-4 py-2 font-semibold">Channel</th>
                   <th scope="col" className="px-4 py-2 font-semibold">Measure</th>
-                  <th scope="col" className="px-4 py-2 text-right font-semibold">Total</th>
+                  <th scope="col" className="px-4 py-2 text-right font-semibold">Gaps</th>
                   <th scope="col" className="px-4 py-2 text-right font-semibold">Sent</th>
                   <th scope="col" className="px-4 py-2 text-right font-semibold">Failed</th>
                   <th scope="col" className="px-4 py-2 font-semibold">Status</th>
@@ -557,7 +579,7 @@ export default function CampaignsPage() {
       <ConfirmDialog
         open={pendingSendCount !== null}
         title="Send this campaign?"
-        description={`This dispatches outreach to ${pendingSendCount ?? 0} recipient${pendingSendCount === 1 ? "" : "s"} via ${channel} (simulated on the demo stack). This cannot be undone.`}
+        description={`This sends ${pendingSendCount ?? 0} message${pendingSendCount === 1 ? "" : "s"} via ${channel} (simulated on the demo stack). This cannot be undone.`}
         confirmLabel="Send campaign"
         cancelLabel="Cancel"
         onCancel={() => setPendingSendCount(null)}

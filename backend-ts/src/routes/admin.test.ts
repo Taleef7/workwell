@@ -215,7 +215,10 @@ test("Maui outreach-template preview and update are profile-aware (patient previ
   assert.equal(output.employeePreviewStatus, 404);
   const patientBody = output.patientPreviewBody as { id: string; subject: string; bodyText: string };
   assert.equal(patientBody.id, "patient-general");
-  assert.match(patientBody.subject, /Breast Cancer Screening/);
+  // Q1: a patient message names the care item, never the measure title, under a neutral subject.
+  assert.equal(patientBody.subject, "A reminder from your clinic");
+  assert.match(patientBody.bodyText, /you are due for a mammogram\./);
+  assert.doesNotMatch(patientBody.subject + patientBody.bodyText, /Breast Cancer Screening|\{\{/);
   // The patient templates are code: an update has nothing to persist, so it is refused (not
   // acknowledged and then forgotten on the next list) and the list is unchanged.
   assert.equal(output.updatePatientStatus, 400);
