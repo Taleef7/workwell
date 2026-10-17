@@ -7,6 +7,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-16
 
+- **Patient outreach in plain language, one message per patient.** Maui's messages named the measure
+  ("A screening you are due for: Diabetes: Glycemic Status Assessment Greater Than 9%"), and a campaign sent
+  one message per gap. A message now names the care ("a mammogram and an A1c blood test") under a neutral
+  subject, a campaign sends one message per patient, and it never sends for CMS2 or CMS137, whose names
+  disclose a condition (a campaign aimed at either is refused; the page says how many gaps it left out). A
+  guard test refuses any patient message carrying a measure's title, id or CMS/MIPS number. The wording
+  needs a practice clinician's sign-off before real data.
 - **CMS122 and CMS165 no longer state a value a patient may not have.** A patient with no HbA1c this year
   read "the most recent ... is above 9%", and one whose readings did not count read "at or above 140/90",
   on the work list, case page, roster and cards. CMS122's gap is now "none this period, none with a result,

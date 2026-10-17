@@ -35,6 +35,10 @@ type CampaignResult = {
   sent: number;
   failed: number;
   simulated: number;
+  /** Messages sent (or previewed): one per patient on a patient deployment, so fewer than `total` gaps. */
+  messages?: number;
+  /** Open gaps left out because campaigns never send for their measure (depression, substance use). */
+  withheld?: number;
   recipients: CampaignRecipient[];
 };
 
@@ -207,14 +211,15 @@ export default function CampaignsPage() {
   // Send requires an explicit confirm. Resolve the recipient count first (reuse the latest dry-run, or
   // run a fresh one) so the confirm states exactly how many people will be contacted.
   async function requestSend() {
-    let count = result && result.dryRun ? result.total : null;
+    // Messages, not gaps: on a patient deployment one message covers every gap of a patient.
+    let count = result && result.dryRun ? (result.messages ?? result.total) : null;
     if (count == null) {
       setLaunching("dry");
       setLaunchError(null);
       try {
         const preview = await api.post<LaunchBody, CampaignResult>("/api/campaigns", buildBody(true));
         setResult(preview);
-        count = preview.total;
+        count = preview.messages ?? preview.total;
       } catch (err) {
         setLaunchError(err instanceof Error ? err.message : "Unknown error");
         setLaunching(null);
@@ -452,6 +457,18 @@ export default function CampaignsPage() {
                 </span>
               </div>
             )}
+            {result.messages !== undefined && result.messages !== result.total ? (
+              <p className="text-sm text-neutral-700 dark:text-neutral-300">
+                {result.messages} message{result.messages === 1 ? "" : "s"}, one per {SUBJECT.singular}, covering{" "}
+                {result.total} gap{result.total === 1 ? "" : "s"}.
+              </p>
+            ) : null}
+            {result.withheld ? (
+              <p className="text-sm text-neutral-700 dark:text-neutral-300">
+                {result.withheld} open gap{result.withheld === 1 ? "" : "s"} left out: campaigns never send for the
+                depression or substance use measures. Contact those {SUBJECT.plural} from their case.
+              </p>
+            ) : null}
             </div>
 
             {result.recipients.length > 0 ? (
@@ -557,7 +574,7 @@ export default function CampaignsPage() {
       <ConfirmDialog
         open={pendingSendCount !== null}
         title="Send this campaign?"
-        description={`This dispatches outreach to ${pendingSendCount ?? 0} recipient${pendingSendCount === 1 ? "" : "s"} via ${channel} (simulated on the demo stack). This cannot be undone.`}
+        description={`This sends ${pendingSendCount ?? 0} message${pendingSendCount === 1 ? "" : "s"} via ${channel} (simulated on the demo stack). This cannot be undone.`}
         confirmLabel="Send campaign"
         cancelLabel="Cancel"
         onCancel={() => setPendingSendCount(null)}
