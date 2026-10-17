@@ -62,6 +62,9 @@ services:
     environment:
       WCDB_HOST: wcdb
       WCDB_PORT: "3306"
+      # The shim has no default password (it would connect anywhere its host pointed). Here it is paired
+      # with the dev-wcdb container above, whose published credential its healthcheck uses too.
+      WCDB_PASSWORD: ${WCDB_PASSWORD:-pmg2bhok}
     ports:
       - "127.0.0.1:8085:8085" # loopback-only: the shim is unauthenticated by design
 
