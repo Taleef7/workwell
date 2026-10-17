@@ -62,13 +62,19 @@ export interface DbConfig {
   password: string;
 }
 
+/**
+ * The password has no default: a committed credential lets the shim connect wherever WCDB_HOST points
+ * without anyone setting one. For the dev-wcdb container, set it to that image's published credential.
+ */
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): DbConfig {
+  const password = env.WCDB_PASSWORD;
+  if (!password) throw new Error("WCDB_PASSWORD is not set: the shim has no default database password");
   return {
     host: env.WCDB_HOST ?? "localhost",
     port: Number(env.WCDB_PORT ?? 33306),
     database: env.WCDB_DATABASE ?? "wc_miehr_wctroot",
     user: env.WCDB_USER ?? "root",
-    password: env.WCDB_PASSWORD ?? "pmg2bhok", // dev-wcdb's published dev credential
+    password,
   };
 }
 

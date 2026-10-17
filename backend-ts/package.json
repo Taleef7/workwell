@@ -68,16 +68,5 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ],
-    "overrides": {
-      "better-sqlite3": "^12.0.0"
-    },
-    "patchedDependencies": {
-      "cql-execution@3.3.2": "patches/cql-execution@3.3.2.patch"
-    }
-  }
+  "packageManager": "pnpm@10.17.1"
 }

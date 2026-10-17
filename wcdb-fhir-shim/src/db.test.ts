@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { OBSERVATIONS_FOR_PATIENT_SQL } from "./db.ts";
+import { OBSERVATIONS_FOR_PATIENT_SQL, configFromEnv } from "./db.ts";
 
 const FINAL_ONLY = "o.obs_status IN ('','F')";
 
@@ -31,4 +31,13 @@ test("the fixture export reads observations by the same rule as the shim", () =>
   assert.ok(script.includes(FINAL_ONLY), "webchart-devdb-export.ts must filter the status as the shim does");
   assert.match(script, /FROM observations o JOIN/);
   assert.match(script, /DATE_FORMAT\(o\.observed_datetime,/);
+});
+
+test("the database password is required: no committed credential connects by default", () => {
+  assert.throws(() => configFromEnv({}), /WCDB_PASSWORD is not set/);
+  assert.throws(() => configFromEnv({ WCDB_PASSWORD: "" }), /WCDB_PASSWORD is not set/);
+  const cfg = configFromEnv({ WCDB_PASSWORD: "from-env", WCDB_HOST: "db.local" });
+  assert.equal(cfg.password, "from-env");
+  assert.equal(cfg.host, "db.local");
+  assert.equal(cfg.port, 33306, "the non-secret defaults stay");
 });
