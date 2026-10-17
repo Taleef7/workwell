@@ -7,6 +7,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-16
 
+- **The WebChart dev-DB shim and export script need their database password set.** Both defaulted to the
+  dev-wcdb image's published root credential, so either would connect wherever its host pointed with no one
+  choosing a password. `WCDB_PASSWORD` and `WEBCHART_DEVDB_PASS` are now required; the other defaults stay.
 - **CMS122 and CMS165 no longer state a value a patient may not have.** A patient with no HbA1c this year
   read "the most recent ... is above 9%", and one whose readings did not count read "at or above 140/90",
   on the work list, case page, roster and cards. CMS122's gap is now "none this period, none with a result,

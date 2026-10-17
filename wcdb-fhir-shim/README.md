@@ -27,7 +27,8 @@ npm start                       # SHIM_PORT=8085 by default
 ```
 
 Env: `WCDB_HOST` (localhost) · `WCDB_PORT` (33306) · `WCDB_DATABASE` (wc_miehr_wctroot) ·
-`WCDB_USER` (root) · `WCDB_PASSWORD` (dev-wcdb's published dev credential) · `SHIM_PORT` (8085).
+`WCDB_USER` (root) · `WCDB_PASSWORD` (**required**, no default: for the dev-wcdb container, its published dev
+credential) · `SHIM_PORT` (8085).
 
 ## Endpoints
 
