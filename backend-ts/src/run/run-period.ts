@@ -27,8 +27,15 @@ export function runMeasurementPeriod(measureIds: readonly string[], evalDate: st
  * as its reporting period. ADR-072 scoped the calendar-year change to officially-routed measures, so
  * changing the authored path here would be an undeclared behaviour change with regulatory output.
  */
-export function caseRerunMeasurementPeriod(measureId: string, evalDate: string): { start: string; end: string } {
-  if (isOfficialRouted(measureId)) return runMeasurementPeriod([measureId], evalDate);
+export function caseRerunMeasurementPeriod(
+  measureId: string,
+  evalDate: string,
+  official: boolean = isOfficialRouted(measureId),
+): { start: string; end: string } {
+  if (official) {
+    const year = evalDate.slice(0, 4);
+    return { start: `${year}-01-01T00:00:00.000Z`, end: `${year}-12-31T23:59:59.999Z` };
+  }
   const start = `${evalDate}T00:00:00.000Z`;
   return { start, end: new Date(new Date(start).getTime() + 86400000 - 1000).toISOString() };
 }
@@ -39,14 +46,12 @@ export function caseRerunMeasurementPeriod(measureId: string, evalDate: string):
  * the calendar year containing the evaluation date (and picks that year's logic), so a 2026 case verified
  * in January 2027 was scored on 2027's nearly empty year, by 2027's logic, and the answer written under
  * 2026 — typically "not in the initial population", which closes the case.
+ *
+ * `official` is the caller's engine's answer (`logicFor` is defined only for a routed measure), never a
+ * re-read of `process.env`: the engine may have been built from a worker env that routes differently.
  */
-export function caseRerunEvaluationDate(
-  measureId: string,
-  evaluationPeriod: string,
-  today: string,
-  env: Record<string, unknown> = process.env,
-): string {
-  if (!isOfficialRouted(measureId, env)) return today;
+export function caseRerunEvaluationDate(official: boolean, evaluationPeriod: string, today: string): string {
+  if (!official) return today;
   const year = /^(\d{4})-01-01$/.exec(evaluationPeriod)?.[1];
   return year && `${year}-12-31` < today ? `${year}-12-31` : today;
 }

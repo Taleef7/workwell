@@ -76,6 +76,21 @@ const verificationCaseStatus = (current: string, verified: string): string =>
 const verificationNextAction = (verified: string, measureId: string, evidence: unknown): string =>
   verified === "COMPLIANT" ? "No follow-up needed after compliant verification rerun." : nextActionFor(verified, measureId, evidence);
 
+/**
+ * Whether the rerun's own engine scores this measure with official logic: the router defines `logicFor`
+ * for a routed measure and answers `undefined` otherwise, so the period and date follow what will run.
+ * An engine without `logicFor` (the authored one) routes nothing; a `logicFor` that throws is a routed
+ * measure whose artifact failed, which the evaluation below then reports.
+ */
+function routedOfficially(engine: RerunDeps["engine"], measureId: string, today: string): boolean {
+  if (!engine.logicFor) return false;
+  try {
+    return engine.logicFor(measureId, today) !== undefined;
+  } catch {
+    return true;
+  }
+}
+
 const isClosing = (verified: string): boolean => verified === "COMPLIANT" || verified === "EXCLUDED";
 
 /** Re-evaluate the case subject and transition the case; returns the refreshed detail, or null if unknown. */
@@ -99,8 +114,10 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // Mirrors the Java rerunToVerify (`LocalDate evaluationDate = LocalDate.now()`), except that an
   // official measure's case from an earlier year is verified as of that year's last day: the official
   // period and logic follow the evaluation date's year, and the case is that year's.
-  const evalDate = caseRerunEvaluationDate(existing.measureId, existing.evaluationPeriod, new Date().toISOString().slice(0, 10));
-  const period = caseRerunMeasurementPeriod(existing.measureId, evalDate);
+  const today = new Date().toISOString().slice(0, 10);
+  const official = routedOfficially(deps.engine, existing.measureId, today);
+  const evalDate = caseRerunEvaluationDate(official, existing.evaluationPeriod, today);
+  const period = caseRerunMeasurementPeriod(existing.measureId, evalDate, official);
 
   const run = await deps.runStore.createRun({
     scopeType: "CASE",

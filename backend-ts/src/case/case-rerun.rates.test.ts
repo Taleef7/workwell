@@ -186,7 +186,8 @@ test("rerun-to-verify scores an earlier year's case as of that year's last day, 
   } as unknown as RerunDeps;
 
   await rerunToVerify(deps, lastYear.id, "tester");
-  assert.deepEqual(asked, ["2025-12-31", "logic:2025-12-31"], "the engine and the logic lookup both see the case's year");
+  // The first lookup only asks whether the engine routes the measure; every evaluation-time call sees 2025.
+  assert.deepEqual(asked.slice(1), ["2025-12-31", "logic:2025-12-31"], "the engine and the logic lookup both see the case's year");
   const scope = runScope as Record<string, unknown> | null;
   assert.equal(scope?.measurementPeriodStart, "2025-01-01T00:00:00.000Z");
   assert.equal((scope?.requestedScope as Record<string, unknown>).evaluationDate, "2025-12-31");
