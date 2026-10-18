@@ -183,7 +183,7 @@ function directoryForProfileRows(
     : directoryForRows(rows, isWebChartConfigured(webChartEnv ?? {}), webChartEnv, DIRECTORY);
 }
 
-async function latestVisibleOutcomeRunId(
+export async function latestVisibleOutcomeRunId(
   outcomeStore: OutcomeStore,
   runStore: RunStore,
   webChartEnv?: DataSourceEnv,

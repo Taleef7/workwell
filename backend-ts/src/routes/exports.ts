@@ -17,7 +17,7 @@ import { getStores } from "../stores/factory.ts";
 import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
 import { worklistQueryFor, wantsCurrentCycle } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
-import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
+import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream, latestVisibleOutcomeRunId } from "../export/export-csv.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { caseWindowFrom, calendarDayErrorBody } from "./query-dates.ts";
@@ -151,8 +151,11 @@ export async function handleExports(req: Request, env: ExportsEnv, actor = "syst
     const listedOutcomes = await withListFilter(s.subjectLists, q, parsed);
     if (!listedOutcomes.ok) return listNotFound(listedOutcomes.listId);
     const subjectFilters = listedOutcomes.filters;
-    const runId = q.get("runId") ?? undefined;
-    // The ledger's run reference names a run that exists; whatever was asked for stays in `params`.
+    const requested = q.get("runId") ?? undefined;
+    // With no `?runId=` the export takes the latest visible run: resolved HERE, once, so the record names
+    // the run whose rows the file carries and the stream reads that same run. A requested id is referenced
+    // only when the run exists; whatever was asked for stays in `params`.
+    const runId = requested ?? (await latestVisibleOutcomeRunId(s.outcomes, s.runs, env));
     const refRunId = runId?.trim() && (await s.runs.getRun(runId.trim())) ? runId.trim() : null;
     return auditedExport(s.events, { actor, kind: "outcomes_csv", path: pathname, params: q, runId: refRunId }, () => {
       // Streamed + paged (Fable H4) — bounded memory so a seed:scale run's 120k outcomes never

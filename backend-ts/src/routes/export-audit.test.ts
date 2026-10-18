@@ -77,6 +77,13 @@ test("A1: every bulk download is recorded with who took it, which export, its ru
   assert.equal(cases.actor, "cm@workwell.dev");
   assert.deepEqual(cases.payload.params, { format: "csv", search: "emp" }, "the filters it was taken under");
   assert.equal(events.find((e) => e.payload.kind === "outcomes_csv")!.refRunId, runId);
+  // With no ?runId= the export takes the latest run: the record names that run, not nothing.
+  const implicit = (await exportsGet("/api/exports/outcomes?format=csv"))!;
+  assert.equal(implicit.status, 200);
+  const rows = await implicit.text();
+  const implicitEvent = (await exportEvents()).at(-1)!;
+  assert.equal(implicitEvent.refRunId, runId, "the record names the run the file came from");
+  assert.match(rows, /emp-006/, "and the file carries that run's rows");
   assert.equal(events.find((e) => e.payload.kind === "qrda1")!.refRunId, runId);
   assert.equal(events.find((e) => e.payload.kind === "measure_report")!.actor, "admin@workwell.dev");
 });
