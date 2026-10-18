@@ -108,7 +108,8 @@ function readTerminology(artifact: OfficialArtifact): LoadedTerminology {
       ok: false,
       problem: absent
         ? `${catalogId}: official terminology is not present (measures/${artifactKind(artifact)}/${catalogId}/${pin.file}). ` +
-          `It is fetched at build, never committed — run 'pnpm vendor:official' for this measure. ` +
+          `It is never committed and never in an image: a deployed stack fetches it from its bucket at boot ` +
+          `(see the TERMINOLOGY_FETCH_FAILED alert), and a local checkout needs 'pnpm vendor:official' for this measure. ` +
           `Note this is NOT what 'pnpm resolve-valuesets' produces: official execution uses the ` +
           `artifact's own expansions, not our VSAC import.`
         : `${catalogId}: official terminology could not be read — ${err instanceof Error ? err.message : String(err)}`,

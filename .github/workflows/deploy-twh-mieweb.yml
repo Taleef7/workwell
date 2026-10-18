@@ -54,8 +54,33 @@ permissions:
   contents: read
 
 jobs:
+  # D4: a push deploy ships only a commit whose own CI passed. CI and this workflow start on the same push, so
+  # until now a commit whose tests failed was already deploying. A manual dispatch does not wait: it is the
+  # override for an urgent fix. Bounded, because the workflow holds the container-ops group while it waits.
+  ci-passed:
+    name: CI passed on this commit
+    runs-on: ubuntu-latest
+    # Above CI's slowest job (e2e, 45 min) plus runner queueing.
+    timeout-minutes: 75
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+      - name: Wait for CI on this commit
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/wait-for-ci.sh "${{ github.sha }}"
+      - name: A manual deploy does not wait
+        if: github.event_name != 'push'
+        run: echo "::notice::Manual dispatch, the urgent-fix override; not waiting for CI."
+
   build-backend-ts:
     name: Build backend-ts image (TypeScript — primary)
+    needs: ci-passed
     runs-on: ubuntu-latest
     # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
     # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the
@@ -82,8 +107,9 @@ jobs:
       # Official measure TERMINOLOGY is fetched at build and never committed (ADR-036): the expansions
       # carry licensed AMA CPT / SNOMED CT content that a public repo must not redistribute, so the
       # artifact's own value sets live in a gitignored `terminology.json` pinned by a SHA-256 in the
-      # committed manifest. The image needs it — `.dockerignore` deliberately keeps `measures/official/`
-      # and the Dockerfile COPYs the tree, so producing the file here is what puts it in the image.
+      # committed manifest. The backend needs it, but no image may carry it (D17): the build context excludes
+      # it (backend-ts/Dockerfile.dockerignore), the steps below store it in the stack's private bucket, and the
+      # backend fetches it at boot.
       #
       # Without this step the fidelity route's LITERAL tier degrades to the subset tier (visibly, in its
       # `mode` field) because terminology cannot be expanded, and PR-9's routed measures would refuse at
@@ -108,40 +134,82 @@ jobs:
       # VSAC availability. Deliberate — the alternative is an image whose sidecar the runtime refuses,
       # silently losing the literal fidelity diff — but see DEPLOY.md "Step 1a" for the consequence:
       # rolling BACK to a pre-ADR-041 image still works during an outage, rolling forward does not.
+      # Logged in BEFORE the restore step: it seeds the copies from the last deployed image, which must be
+      # pullable even if the package is made private.
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # D17: no image carries the sidecars any more (they hold licensed AMA CPT / SNOMED CT codes and the image
+      # package is anonymously pullable). The stack's private evidence bucket keeps a copy of each under
+      # terminology/<sha256>.json, and is the second line when VSAC does not reproduce a pin (--fallback-dir
+      # below; the pin check judges the copy). While the bucket is still empty (the first deploys), the last
+      # deployed image, which still carries sidecars, seeds the copies. Both are best effort: VSAC may reproduce
+      # every pin anyway.
+      - name: Restore the terminology copies
+        env:
+          TERMINOLOGY_BUCKET: workwell-evidence-twh
+          AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH }}
+          # R2 ignores the region, but SigV4 refuses to sign without one; `auto` is R2's documented value.
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          # A secret only because this repository is public and the endpoint embeds the account id.
+          TERMINOLOGY_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
+        run: |
+          bash .github/scripts/terminology-store.sh pull "$RUNNER_TEMP/terminology"
+          bash .github/scripts/terminology-store.sh seed "$RUNNER_TEMP/terminology" ghcr.io/taleef7/workwell-api-ts:latest
+
       - name: Vendor official terminology into the build context
         working-directory: backend-ts
         env:
           WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
         run: |
-          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
-          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
-          node scripts/vendor-official-measure.mjs --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
-          node scripts/vendor-official-measure.mjs --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
-          node scripts/vendor-official-measure.mjs --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
-          node scripts/vendor-official-measure.mjs --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
-          node scripts/vendor-official-measure.mjs --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
-          node scripts/vendor-official-measure.mjs --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          node scripts/vendor-official-measure.mjs --measure CMS122FHIRDiabetesAssessGT9Pct --catalog-id cms122 --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
+          node scripts/vendor-official-measure.mjs --measure CMS125FHIRBreastCancerScreen --catalog-id cms125 --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
+          node scripts/vendor-official-measure.mjs --measure CMS2FHIRPCSDepScreenAndFollowUp --catalog-id cms2 --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
+          node scripts/vendor-official-measure.mjs --measure CMS68FHIRDocumentationCurrentMeds --catalog-id cms68 --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
+          node scripts/vendor-official-measure.mjs --measure CMS951FHIRKidneyHealthEval --catalog-id cms951 --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
+          node scripts/vendor-official-measure.mjs --measure CMS138FHIRTobaccoScrnCessation --catalog-id cms138 --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
+          node scripts/vendor-official-measure.mjs --measure CMS130FHIRColorectalCancerScrn --catalog-id cms130 --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
+          node scripts/vendor-official-measure.mjs --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
           # Each WorkWell translation this stack routes, one explicit line per id. The list must equal the
           # WORKWELL_DERIVED_MEASURES build arg below, and every line must come before the image is
           # built; official-flip-config.test.ts enforces both. Every value set is re-expanded at
           # the VSAC release the committed manifest names, and --verify-pin exits 1 unless the bytes hash
           # to its pin. That gate has to run HERE: the worker boots even when the router refuses a
           # translation, then every evaluating route 500s while /actuator/health stays 200.
-          # When VSAC does not reproduce the pin or cannot be reached, --fallback-image copies the sidecar
-          # out of the last deployed image and the SAME pin check judges it.
-          node scripts/vendor-derived-terminology.mjs --catalog-id cms125 --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
-          node scripts/vendor-derived-terminology.mjs --catalog-id cms122 --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+          # When VSAC does not reproduce the pin or cannot be reached, --fallback-dir restores the stack's
+          # stored copy and the SAME pin check judges it.
+          node scripts/vendor-derived-terminology.mjs --catalog-id cms125 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
+          node scripts/vendor-derived-terminology.mjs --catalog-id cms122 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
       # The vendored artifacts must not have changed — only the gitignored sidecars are new. A non-empty
       # diff means a committed bundle does not match its pin, or a translation vendor step rewrote a
       # committed file instead of verifying it; neither may reach a deploy image.
       - name: The committed artifact is reproducible from its pin
         run: git diff --exit-code backend-ts/measures/official backend-ts/measures/derived
 
-      - uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      # Every sidecar this build vendored, into the stack's bucket BEFORE the image exists: the backend fetches
+      # them at boot (src/wiring/terminology-fetch.ts), so an image whose sidecars are not stored refuses every
+      # routed measure. Not best effort.
+      - name: Store the terminology in the stack's bucket
+        env:
+          TERMINOLOGY_BUCKET: workwell-evidence-twh
+          AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_TWH }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_TWH }}
+          # R2 ignores the region, but SigV4 refuses to sign without one; `auto` is R2's documented value.
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          # A secret only because this repository is public and the endpoint embeds the account id.
+          TERMINOLOGY_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
+        run: |
+          bash .github/scripts/terminology-store.sh collect "$RUNNER_TEMP/terminology"
+          bash .github/scripts/terminology-store.sh push "$RUNNER_TEMP/terminology"
+
 
       # The Node base image from the first registry that serves it, by the digest the Dockerfile pins:
       # every registry has refused an anonymous pull at some point (2026-10-16: AWS's mirror, 429).
@@ -152,7 +220,9 @@ jobs:
         with:
           context: .
           file: ./backend-ts/Dockerfile
-          push: true
+          # Loaded, not pushed: the step after it checks the image before anything is published.
+          push: false
+          load: true
           # The commit, baked into the image and served on /health (#625), and the routing list, set nowhere
           # else (#768): an image serves only the artifacts committed in it, so the list travels with it.
           #
@@ -174,8 +244,18 @@ jobs:
             ${{ env.BACKEND_TS_IMAGE }}:latest
             ${{ env.BACKEND_TS_IMAGE }}:sha-${{ github.sha }}
 
+      # Built locally, checked, then pushed: an image holding a sidecar is never published (the build context
+      # excludes them in backend-ts/Dockerfile.dockerignore; this is the check that the exclusion held).
+      - name: The image carries no licensed terminology
+        run: bash .github/scripts/terminology-store.sh assert-clean "${{ env.BACKEND_TS_IMAGE }}:sha-${{ github.sha }}"
+      - name: Push the image
+        run: |
+          docker push "${{ env.BACKEND_TS_IMAGE }}:sha-${{ github.sha }}"
+          docker push "${{ env.BACKEND_TS_IMAGE }}:latest"
+
   build-frontend:
     name: Build twh frontend image
+    needs: ci-passed
     runs-on: ubuntu-latest
     # Bounded because this job holds the `twh-mieweb-container-ops` concurrency group while it runs,
     # and the GitHub default is 360 min. A flaky manager can compound retries (request 6x, the

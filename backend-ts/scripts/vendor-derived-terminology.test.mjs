@@ -639,6 +639,59 @@ describe("--fallback-image (VSAC drift, 2026-10-15)", () => {
   });
 });
 
+describe("--fallback-dir (D17: images no longer carry sidecars)", () => {
+  const drifted = () => {
+    const table = vsacTable();
+    table["9.9.2"].codes = codes("two", 6);
+    return table;
+  };
+  /** A directory holding `text` under the name the pin gives it: `<hex>.json`. */
+  async function copies(pin, text) {
+    const dir = await mkdtemp(join(tmpdir(), "ww-fallback-dir-"));
+    if (text !== undefined) await writeFile(join(dir, `${pin.slice("sha256:".length)}.json`), text);
+    return dir;
+  }
+
+  it("restores the sidecar the pin names from the directory when VSAC does not reproduce it", async () => {
+    const { dir, terminology, sidecar } = await committedTranslation();
+    const store = await copies(terminology.sha256, sidecar);
+
+    const result = await run(verifyArgs(dir, "--verify-pin", "--fallback-dir", store), { fetch: vsacStub(drifted()).fetch });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stderr, /restored it from .*ww-fallback-dir-/);
+    assert.equal(await readFile(join(dir, "terminology.json"), "utf8"), sidecar, "the pinned bytes, not VSAC's");
+  });
+
+  it("REFUSES a copy stored under the pin's name that does not hash to it", async () => {
+    const { dir, terminology, sidecar } = await committedTranslation();
+    const tampered = sidecar.replace("two-0", "two-X");
+    const store = await copies(terminology.sha256, tampered);
+
+    const result = await run(verifyArgs(dir, "--verify-pin", "--fallback-dir", store), { fetch: vsacStub(drifted()).fetch });
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /the copy from .*hashes to .* but the manifest pins/);
+    assert.notEqual(await readFile(join(dir, "terminology.json"), "utf8"), tampered);
+  });
+
+  it("fails as before when the directory holds no copy", async () => {
+    const { dir, terminology } = await committedTranslation();
+    const store = await copies(terminology.sha256);
+
+    const result = await run(verifyArgs(dir, "--verify-pin", "--fallback-dir", store), { fetch: vsacStub(drifted()).fetch });
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /no sidecar could be copied from/);
+  });
+
+  it("refuses --fallback-dir without --verify-pin, and together with --fallback-image (usage, exit 2)", async () => {
+    const dir = await translationDir({ manifest: { terminology: { completion: { manifest: RELEASE_COMMITTED } } } });
+    assert.equal((await run(verifyArgs(dir, "--fallback-dir", dir))).code, 2);
+    assert.equal((await run(verifyArgs(dir, "--verify-pin", "--fallback-dir", dir, "--fallback-image", "img"))).code, 2);
+  });
+});
+
 describe("emit mode refuses to pin over a grouping disagreement", () => {
   it("writes nothing and names the set when VSAC's grouping and its members disagree at the release", async () => {
     const dir = await translationDir({ base: baseSidecar() });

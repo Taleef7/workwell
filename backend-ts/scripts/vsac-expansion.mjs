@@ -463,6 +463,18 @@ export async function expandAtRelease(oid, { vsacBase, vsacManifest, apiKey, fet
 }
 
 /**
+ * A pinned sidecar from a directory of content-addressed copies, `<dir>/<hex>.json`: the deploy's copy of
+ * its stack's bucket, or CI's build cache (D17: images no longer carry sidecars, so the last deployed image
+ * is no longer a place they can come from). Throws when the pin is unusable or the copy is absent; the
+ * caller's pin check judges what it returns, never this function.
+ */
+export function readPinnedFromDir(dir, pin, readFile = (path) => readFileSync(path, "utf8")) {
+  const hex = /^sha256:([0-9a-f]{64})$/.exec(String(pin ?? ""))?.[1];
+  if (!hex) throw new Error(`no usable terminology pin (${pin})`);
+  return readFile(join(dir, `${hex}.json`));
+}
+
+/**
  * One file's text as the image `ref` holds it, through the docker CLI: create a stopped container (pulling
  * the image if absent; nothing in it runs), copy the one file out, remove the container. Throws if any
  * step fails. The vendor scripts use it to restore a pinned sidecar from the last deployed image when
