@@ -4,6 +4,7 @@
  * undefined render as the empty string. Header + rows are joined with CRLF.
  */
 export function csvCell(value: unknown): string {
+  if (value instanceof TextCell) return csvTextCell(value.value);
   if (value === null || value === undefined) return "";
   const s = String(value);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -28,6 +29,16 @@ export function csvTextCell(value: unknown): string {
   const s = String(value);
   return csvCell(FORMULA_LEAD.has(s[0] ?? "") ? `'${s}` : s);
 }
+
+/**
+ * A free-text value in a row: a name, an identifier, a site, a note, anything a person or another system
+ * wrote. `csvCell` writes it through `csvTextCell`; every other value (a count, a date, a status) is
+ * written as it is, so a negative number stays a number.
+ */
+export class TextCell {
+  constructor(readonly value: unknown) {}
+}
+export const text = (value: unknown): TextCell => new TextCell(value);
 
 /** Build a CSV document from a header row + data rows (each row an array of cell values). */
 export function toCsv(headers: readonly string[], rows: readonly unknown[][]): string {

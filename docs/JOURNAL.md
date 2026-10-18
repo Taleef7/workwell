@@ -5,6 +5,13 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-17
+
+- **Every bulk download is recorded before it leaves, and CSV cells cannot run as formulas.** The CSVs, the
+  audit ledger, QRDA I/III and MeasureReport now write `EXPORT_GENERATED` (who, which export, its run and
+  filters) and answer 503 when that cannot be recorded, so no patient file leaves unaccounted for. A
+  free-text cell starting `=`, `+`, `-` or `@` (a typed next action, a name) gains a leading apostrophe.
+
 ## 2026-10-16
 
 - **Patient outreach in plain language, one message per patient.** Maui's messages named the measure

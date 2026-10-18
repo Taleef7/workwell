@@ -16,7 +16,7 @@ import { measureDisplayName } from "../measure/measure-name.ts";
 import { formatScoringLogic, measureVersionOf, scoringLogicOf } from "../measure/measure-identity.ts";
 import { caseLogicKey, scoringForCases } from "../case/case-scoring-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { toCsv, csvCell } from "./csv.ts";
+import { toCsv, csvCell, text } from "./csv.ts";
 import { closureKindOf } from "../case/case-logic.ts";
 import { hasNoSingleWindow } from "../case/case-detail-read-model.ts";
 import { matchesCaseSearch, shownStatusFor, siteMatches } from "../case/worklist-read-model.ts";
@@ -82,7 +82,7 @@ export async function runsCsv(
     const s = toRunSummaryFromCounts(run, await outcomeStore.countOutcomesByStatus(run.id));
     const count = (status: string) => s.outcomeCounts.find((c) => c.status === status)?.count ?? 0;
     rows.push([
-      s.runId, s.measureName, s.measureVersion, s.scopeType, s.triggerType, s.status, s.startedAt, s.completedAt,
+      s.runId, text(s.measureName), s.measureVersion, s.scopeType, s.triggerType, s.status, s.startedAt, s.completedAt,
       s.durationMs, s.totalEvaluated, s.compliantCount, count("DUE_SOON"), count("OVERDUE"), count("MISSING_DATA"),
       count("EXCLUDED"), s.passRate, s.dataFreshAsOf, s.notInPopulation,
     ]);
@@ -167,10 +167,10 @@ function outcomeRowCells(
   const emp = employeeLookup(o.subjectId);
   const wf = whyFlagged(o.evidence, o.measureId);
   return [
-    o.id, o.runId, o.subjectId, emp?.name ?? o.subjectId, emp?.role ?? "—", emp?.site ?? "—",
-    measureName(o.measureId), measureVersionOf(o.measureId, o.evidence), o.evaluationPeriod, o.status,
+    o.id, o.runId, text(o.subjectId), text(emp?.name ?? o.subjectId), text(emp?.role ?? "—"), text(emp?.site ?? "—"),
+    text(measureName(o.measureId)), measureVersionOf(o.measureId, o.evidence), o.evaluationPeriod, o.status,
     wf.lastExamDate, wf.complianceWindowDays, wf.daysOverdue, true, true, wf.waiverStatus, o.evaluatedAt,
-    emp?.providerId ?? "", emp?.payer ?? "", executedLogicCell(o.evidence),
+    text(emp?.providerId ?? ""), text(emp?.payer ?? ""), executedLogicCell(o.evidence),
   ];
 }
 
@@ -447,13 +447,13 @@ export async function casesCsv(
     const liveStatus = fields ? (fields.outcomeStatus ?? "UNKNOWN") : "";
     const liveState = fields ? fields.state : "";
     return [
-      c.id, c.employeeId, emp?.name ?? c.employeeId, emp?.role ?? "—", emp?.site ?? "—",
+      c.id, text(c.employeeId), text(emp?.name ?? c.employeeId), text(emp?.role ?? "—"), text(emp?.site ?? "—"),
       // The cited row's version (`measureVersionOf` on it), in place: "" when there is no row or
       // nothing named scored it, never the authored library's version for a row CMS's artifact scored.
-      measureName(c.measureId), scored?.version ?? "", c.evaluationPeriod, c.status, c.priority, c.assignee,
-      c.currentOutcomeStatus, c.nextAction, c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
-      emp?.providerId ?? "", emp?.payer ?? "",
-      c.closedReason ?? "", c.closedBy ?? "", liveState, liveStatus, fields?.runId ?? "",
+      text(measureName(c.measureId)), scored?.version ?? "", c.evaluationPeriod, c.status, c.priority, text(c.assignee),
+      c.currentOutcomeStatus, text(c.nextAction), c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
+      text(emp?.providerId ?? ""), text(emp?.payer ?? ""),
+      text(c.closedReason ?? ""), text(c.closedBy ?? ""), liveState, liveStatus, fields?.runId ?? "",
       formatScoringLogic(scored?.logic) ?? "",
     ];
   });
@@ -490,7 +490,7 @@ function auditRowCells(e: AuditEvent, caseEmployee: Map<string, string>): unknow
     (e.refCaseId ? caseEmployee.get(e.refCaseId) : undefined) ??
     "";
   const name = e.refMeasureVersionId ? measureName(e.refMeasureVersionId.replace(/-v[\d.]+$/, "")) : "";
-  return [e.occurredAt, e.eventType, e.refCaseId, e.refRunId, name, employeeId, e.actor, JSON.stringify(e.payload)];
+  return [e.occurredAt, e.eventType, e.refCaseId, e.refRunId, text(name), text(employeeId), text(e.actor), JSON.stringify(e.payload)];
 }
 
 export async function auditCsv(eventStore: CaseEventStore, caseStore: CaseStore): Promise<string> {
