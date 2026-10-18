@@ -30,6 +30,7 @@ import { attachValueSet, detachValueSet, createTerminologyMapping } from "../mea
 import { createAuthHandler } from "../routes/auth.ts";
 import { createJwt } from "../auth/jwt.ts";
 import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
+import { auditedExport } from "./export-audit.ts";
 
 /** A ledger that records what it was asked to append, in order. */
 function ledger() {
@@ -354,4 +355,13 @@ test("auth login families (#688): each event survives a failed store write", asy
   assert.equal((await post("/api/auth/refresh", replayed))?.status, 401);
   assert.equal((await post("/api/auth/logout", replayed))?.status, 204);
   assert.deepEqual(events, ["AUTH_LOGIN", "AUTH_REFRESH_REUSE_DETECTED", "AUTH_LOGOUT"]);
+});
+
+test("auditedExport (A1): the EXPORT_GENERATED event survives an export that then fails to build", async () => {
+  const l = ledger();
+  await assert.rejects(
+    auditedExport(l, { actor: "cm@test", kind: "cases_csv", path: "/api/exports/cases", params: new URLSearchParams("format=csv") }, explode),
+    BOOM,
+  );
+  assert.deepEqual(l.types(), ["EXPORT_GENERATED"]);
 });

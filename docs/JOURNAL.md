@@ -7,6 +7,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-17
 
+- **Every bulk download is recorded before it leaves, and CSV cells cannot run as formulas.** The CSVs, the
+  audit ledger, QRDA I/III and MeasureReport now write `EXPORT_GENERATED` (who, which export, its run and
+  filters) and answer 503 when that cannot be recorded, so no patient file leaves unaccounted for. A
+  free-text cell starting `=`, `+`, `-` or `@` (a typed next action, a name) gains a leading apostrophe.
 - **Security floors for the dependency alerts.** fqm-execution 1.8.5 pins handlebars, axios and moment below
   their fixes (two critical handlebars injections), and MIE's @mieweb/cloud pulls an old hono, so Dependabot
   could not move them. pnpm overrides now hold handlebars 4.7.10, axios 1.20.0, moment 2.31.0 and hono

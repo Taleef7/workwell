@@ -8,16 +8,20 @@
  *
  * Non-csv `format` → 400 "Unsupported format. Use format=csv." (Java parity). Responses are
  * `text/csv` with `Content-Disposition: attachment`. Reads from the existing stores — no new data.
+ *
+ * Each export is recorded (`EXPORT_GENERATED`) after its checks pass and before any row is read, and is
+ * refused (503) when it cannot be (`audit/export-audit.ts`).
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { listNotFoundBody, withListFilter } from "../compliance/subject-list-filter.ts";
 import { worklistQueryFor, wantsCurrentCycle } from "../case/worklist-read-model.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
-import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream } from "../export/export-csv.ts";
+import { runsCsv, outcomesCsvStream, casesCsv, auditCsvStream, latestVisibleOutcomeRunId } from "../export/export-csv.ts";
 import { subjectFiltersFromQuery, subjectFilterErrorBody, SubjectFilterError } from "../compliance/subject-filters.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { caseWindowFrom, calendarDayErrorBody } from "./query-dates.ts";
+import { auditedExport } from "../audit/export-audit.ts";
 
 interface ExportsEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -109,7 +113,7 @@ const listNotFound = (listId: string): Response =>
  */
 const caseStatusQuery = (raw: string | null) => worklistQueryFor(raw, { blank: "all" });
 
-export async function handleExports(req: Request, env: ExportsEnv): Promise<Response | null> {
+export async function handleExports(req: Request, env: ExportsEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
   const { pathname } = url;
   if (req.method !== "GET") return null;
@@ -124,7 +128,7 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
     const runWindow = caseWindowFrom(q);
     if (!runWindow.ok) return badRequest(calendarDayErrorBody(runWindow.name, runWindow.value));
     const s = await getStores(env);
-    return csvResponse(
+    return auditedExport(s.events, { actor, kind: "runs_csv", path: pathname, params: q }, async () => csvResponse(
       "runs.csv",
       await runsCsv(s.runs, s.outcomes, clampExportLimit(q.get("limit")), {
         status: q.get("status")?.trim() || undefined,
@@ -134,7 +138,7 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
         from: runWindow.from,
         to: runWindow.to,
       }),
-    );
+    ));
   }
 
   if (pathname === "/api/exports/outcomes") {
@@ -147,15 +151,23 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
     const listedOutcomes = await withListFilter(s.subjectLists, q, parsed);
     if (!listedOutcomes.ok) return listNotFound(listedOutcomes.listId);
     const subjectFilters = listedOutcomes.filters;
-    // Streamed + paged (Fable H4) — bounded memory so a seed:scale run's 120k outcomes never
-    // materialize at once (parity with the audit-events streaming export below).
-    const stream = outcomesCsvStream(s.outcomes, s.runs, q.get("runId") ?? undefined, env, {
-      site: q.get("site")?.trim() || undefined,
-      ...subjectFilters,
-    });
-    return new Response(stream, {
-      status: 200,
-      headers: { "content-type": "text/csv", "content-disposition": `attachment; filename="outcomes.csv"` },
+    const requested = q.get("runId") ?? undefined;
+    // With no `?runId=` the export takes the latest visible run: resolved HERE, once, so the record names
+    // the run whose rows the file carries and the stream reads that same run. A requested id is referenced
+    // only when the run exists; whatever was asked for stays in `params`.
+    const runId = requested ?? (await latestVisibleOutcomeRunId(s.outcomes, s.runs, env));
+    const refRunId = runId?.trim() && (await s.runs.getRun(runId.trim())) ? runId.trim() : null;
+    return auditedExport(s.events, { actor, kind: "outcomes_csv", path: pathname, params: q, runId: refRunId }, () => {
+      // Streamed + paged (Fable H4) — bounded memory so a seed:scale run's 120k outcomes never
+      // materialize at once (parity with the audit-events streaming export below).
+      const stream = outcomesCsvStream(s.outcomes, s.runs, runId, env, {
+        site: q.get("site")?.trim() || undefined,
+        ...subjectFilters,
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/csv", "content-disposition": `attachment; filename="outcomes.csv"` },
+      });
     });
   }
 
@@ -175,42 +187,46 @@ export async function handleExports(req: Request, env: ExportsEnv): Promise<Resp
     // that said otherwise, which is the reporting-integrity half of the same defect.
     const window = caseWindowFrom(q);
     if (!window.ok) return badRequest(calendarDayErrorBody(window.name, window.value));
-    const csv = await casesCsv(s.cases, s.events, {
-      ...caseStatusQuery(q.get("status")),
-      measureId: q.get("measureId") ?? undefined,
-      priority: q.get("priority") ?? undefined,
-      assignee: q.get("assignee") ?? undefined,
-      site: q.get("site")?.trim() || undefined,
-      caseIds: caseIds?.length ? caseIds : undefined,
-      createdFrom: window.from,
-      createdTo: window.to,
-      // Normalized exactly as `/api/cases` normalizes it — upper-cased with separators folded — so
-      // `?outcome=due-soon` means the same thing on both surfaces rather than matching on one.
-      outcome: q.get("outcome")?.trim().toUpperCase().replace(/[\s-]+/g, "_") || undefined,
-      // Case-folded by `casesCsv` with the work list's own predicate, so both surfaces fold it once
-      // and identically.
-      search: q.get("search")?.trim() || undefined,
-      // `?period=` (#603). `current` means each measure's current compliance cycle, exactly as the
-      // work list's open and staff-closed lists mean it; ANY other non-blank value is a literal
-      // evaluation period and reaches the store as one. **Blank or absent means ALL HISTORY here** —
-      // `wantsCurrentCycle`'s `blankMeans` argument is where the two surfaces legitimately differ, and
-      // this endpoint is documented as all-history (§6.3), so its default is unchanged.
-      currentCycleOnly: wantsCurrentCycle(q.get("status") ?? undefined, q.get("period") ?? undefined, "all"),
-      period: periodLiteral(q.get("period")),
-      ...subjectFilters,
-    }, env, { outcomeStore: s.outcomes, cellCache: rosterCellCache });
-    return csvResponse("cases.csv", csv);
+    return auditedExport(s.events, { actor, kind: "cases_csv", path: pathname, params: q }, async () => {
+      const csv = await casesCsv(s.cases, s.events, {
+        ...caseStatusQuery(q.get("status")),
+        measureId: q.get("measureId") ?? undefined,
+        priority: q.get("priority") ?? undefined,
+        assignee: q.get("assignee") ?? undefined,
+        site: q.get("site")?.trim() || undefined,
+        caseIds: caseIds?.length ? caseIds : undefined,
+        createdFrom: window.from,
+        createdTo: window.to,
+        // Normalized exactly as `/api/cases` normalizes it — upper-cased with separators folded — so
+        // `?outcome=due-soon` means the same thing on both surfaces rather than matching on one.
+        outcome: q.get("outcome")?.trim().toUpperCase().replace(/[\s-]+/g, "_") || undefined,
+        // Case-folded by `casesCsv` with the work list's own predicate, so both surfaces fold it once
+        // and identically.
+        search: q.get("search")?.trim() || undefined,
+        // `?period=` (#603). `current` means each measure's current compliance cycle, exactly as the
+        // work list's open and staff-closed lists mean it; ANY other non-blank value is a literal
+        // evaluation period and reaches the store as one. **Blank or absent means ALL HISTORY here** —
+        // `wantsCurrentCycle`'s `blankMeans` argument is where the two surfaces legitimately differ, and
+        // this endpoint is documented as all-history (§6.3), so its default is unchanged.
+        currentCycleOnly: wantsCurrentCycle(q.get("status") ?? undefined, q.get("period") ?? undefined, "all"),
+        period: periodLiteral(q.get("period")),
+        ...subjectFilters,
+      }, env, { outcomeStore: s.outcomes, cellCache: rosterCellCache });
+      return csvResponse("cases.csv", csv);
+    });
   }
 
   if (pathname === "/api/audit-events/export") {
     if (!isCsv) return badFormat();
     const s = await getStores(env);
-    // #150 M9: stream the ledger in pages instead of building the whole CSV string first — bounded
-    // memory regardless of audit-trail size (parity with the Java StreamingResponseBody export).
-    const stream = auditCsvStream(s.events, s.cases);
-    return new Response(stream, {
-      status: 200,
-      headers: { "content-type": "text/csv", "content-disposition": `attachment; filename="audit-events.csv"` },
+    return auditedExport(s.events, { actor, kind: "audit_csv", path: pathname, params: q }, () => {
+      // #150 M9: stream the ledger in pages instead of building the whole CSV string first — bounded
+      // memory regardless of audit-trail size (parity with the Java StreamingResponseBody export).
+      const stream = auditCsvStream(s.events, s.cases);
+      return new Response(stream, {
+        status: 200,
+        headers: { "content-type": "text/csv", "content-disposition": `attachment; filename="audit-events.csv"` },
+      });
     });
   }
 
