@@ -107,6 +107,7 @@ function render(raw: string): string {
   return raw
     .replace(/\{employee_name\}|\{\{employeeName\}\}/g, "Jane Smith")
     .replace(/\{measure_name\}|\{\{measureName\}\}/g, measureName)
+    .replace(/\{\{careItem\}\}/g, "a mammogram")
     .replace(/\{due_date\}|\{\{dueDate\}\}/g, "2026-05-30")
     .replace(/\{assignee_name\}|\{\{assigneeName\}\}/g, "Sarah Mitchell");
 }

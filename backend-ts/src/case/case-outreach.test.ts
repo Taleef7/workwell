@@ -135,23 +135,23 @@ test("patient profile renders clinic wording with no compliance phrasing or due-
     };
     const run = await new SqliteRunStore(db).createRun({
       scopeType: "MEASURE",
-      scopeId: "mammography",
+      scopeId: "cms125",
       triggeredBy: "test",
-      requestedScope: { measureId: "mammography" },
+      requestedScope: { measureId: "cms125" },
       measurementPeriodStart: "2026-01-01T00:00:00.000Z",
       measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
     });
     const overdue = await deps.cases.upsertFromOutcome({
       runId: run.id,
       subjectId: "pat-1",
-      measureId: "mammography",
+      measureId: "cms125",
       evaluationPeriod: "2026-01-01",
       outcomeStatus: "OVERDUE",
     });
     await deps.outcomes.recordOutcome({
       runId: run.id,
       subjectId: "pat-1",
-      measureId: "mammography",
+      measureId: "cms125",
       evaluationPeriod: "2026-01-01",
       status: "OVERDUE",
       evidence: {
@@ -165,14 +165,14 @@ test("patient profile renders clinic wording with no compliance phrasing or due-
     const missing = await deps.cases.upsertFromOutcome({
       runId: run.id,
       subjectId: "pat-2",
-      measureId: "mammography",
+      measureId: "cms125",
       evaluationPeriod: "2026-01-01",
       outcomeStatus: "MISSING_DATA",
     });
     await deps.outcomes.recordOutcome({
       runId: run.id,
       subjectId: "pat-2",
-      measureId: "mammography",
+      measureId: "cms125",
       evaluationPeriod: "2026-01-01",
       status: "MISSING_DATA",
       evidence: { expressionResults: [{ define: "Outcome Status", result: "MISSING_DATA" }] },
@@ -192,10 +192,14 @@ test("patient profile renders clinic wording with no compliance phrasing or due-
   assert.ok(rendered.missing, `missing preview rendered: ${JSON.stringify(output)}`);
   const measureName = rendered.general.measureName as string;
   const patientName = rendered.general.employeeName as string;
-  assert.equal(rendered.general.subject, `A screening you are due for: ${measureName}`);
-  assert.equal(rendered.general.bodyText, `Hello ${patientName}, our records show you are due for ${measureName}. Please call the clinic to schedule, or reply to this message with a good time to reach you.`);
-  assert.equal(rendered.missing.subject, `We need a record for your ${measureName}`);
-  assert.equal(rendered.missing.bodyText, `Hello ${rendered.missing.employeeName}, we could not find a record of your ${measureName}. If you had it done elsewhere, please send us the report or call the clinic.`);
+  assert.equal(rendered.general.subject, "A reminder from your clinic");
+  assert.equal(rendered.general.bodyText, `Hello ${patientName}, our records show you are due for a mammogram. Please call the clinic to schedule, or reply to this message with a good time to reach you.`);
+  assert.equal(rendered.missing.subject, "A reminder from your clinic");
+  assert.equal(rendered.missing.bodyText, `Hello ${rendered.missing.employeeName}, we could not find a record of a mammogram. If you had it done elsewhere, please send us the report or call the clinic.`);
+  // Q1: the catalog title is never in what the patient reads (the preview still names it for staff).
+  for (const preview of [rendered.general, rendered.missing]) {
+    assert.ok(!String(preview.subject).includes(measureName) && !String(preview.bodyText).includes(measureName), "the measure title reaches the patient");
+  }
   assert.equal(rendered.general.dueDate, undefined);
   assert.equal(rendered.missing.dueDate, undefined);
   assert.equal(output.sentNextAction, "Wait for patient follow-up, then rerun to verify closure.");
@@ -243,4 +247,81 @@ test("default preview keeps the employee general template and dueDate field", as
   assert.match(preview!.subject, /^Outreach Reminder for /u);
   assert.match(preview!.bodyText, /pending .* requirement and complete the required follow-up/u);
   assert.equal(typeof preview!.dueDate, "string");
+});
+
+test("Q1: a patient campaign sends one message per patient listing every gap, and never CMS2 or CMS137", () => {
+  const output = runProfileChild("maui", `
+    import { runCampaign, CampaignError } from "./src/case/outreach-campaign.ts";
+    const sends = [];
+    const audits = [];
+    const mk = (id, employeeId, measureId, outcome = "OVERDUE") => ({
+      id, employeeId, measureId, evaluationPeriod: "2026-01-01", status: "OPEN", priority: "HIGH", assignee: null, nextAction: null,
+      currentOutcomeStatus: outcome, lastRunId: "run-q1", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+      closedAt: null, closedReason: null, closedBy: null,
+    });
+    const cases = [mk("c1", "pat-001", "cms125"), mk("c2", "pat-001", "cms122"), mk("c3", "pat-001", "cms137"), mk("c4", "pat-002", "cms2"), mk("c5", "pat-003", "cms165", "MISSING_DATA"), mk("c6", "pat-004", "cms130"), mk("c7", "pat-004", "cms165", "MISSING_DATA"), mk("c8", "pat-005", "mammography", "MISSING_DATA")];
+    const deps = {
+      cases: { listCases: async () => cases, getCase: async (id) => cases.find((c) => c.id === id), patchCase: async () => null },
+      events: { recordCaseEvent: async ({ audit }) => audits.push(audit) },
+      outcomes: { listOutcomes: async () => [] },
+      campaigns: { recordCampaign: async () => {} },
+      channels: () => ({ type: "EMAIL", send: (m) => { sends.push(m); return { channel: "EMAIL", provider: "simulated", status: "SIMULATED", messageId: "msg-" + sends.length, to: m.to, sentAt: "2026-01-01T00:00:00.000Z", errorDetail: null }; } }),
+    };
+    const result = await runCampaign(deps, { channel: "EMAIL" }, "cm@pilot.test");
+    const preview = await runCampaign(deps, { channel: "EMAIL", dryRun: true }, "cm@pilot.test");
+    let refused = null;
+    for (const measureId of ["cms2", "cms137"]) {
+      try { await runCampaign(deps, { channel: "EMAIL", measureId }, "cm@pilot.test"); } catch (e) { refused = (refused ?? []).concat(e instanceof CampaignError ? measureId : "other"); }
+    }
+    console.log(JSON.stringify({ result, preview: { messages: preview.messages, withheld: preview.withheld, total: preview.total }, sends, auditCases: audits.map((a) => [a.refCaseId, a.payload.action.emailMessageId]), refused }));
+  `);
+  const result = output.result as { messages: number; withheld: number; total: number; sent: number };
+  const sends = output.sends as Array<{ to: string; subject: string; body: string }>;
+  assert.equal(sends.length, 4, "one message per patient: pat-001 (two gaps), pat-003, pat-004 (two gaps) and pat-005");
+  assert.equal(result.messages, 4);
+  assert.equal(result.withheld, 2, "the CMS137 and CMS2 cases are left out, counted");
+  assert.equal(result.total, 6);
+  assert.match(sends[0]!.body, /you are due for a mammogram and an A1c blood test\./);
+  assert.match(sends[1]!.body, /we could not find a record of a blood pressure check\./, "a patient whose only gap is missing data gets the record request");
+  assert.match(sends[2]!.body, /you are due for a colorectal cancer screening and a blood pressure check\./, "one gap overdue and one missing data: the due reminder, not the record request");
+  assert.match(sends[3]!.body, /you are due for a visit with your care team\./, "a neutral item never gets the request for a report");
+  for (const m of sends) {
+    assert.equal(m.subject, "A reminder from your clinic");
+    assert.doesNotMatch(m.body, /substance|depression|CMS|MIPS|Glycemic/i);
+  }
+  assert.deepEqual(output.auditCases, [["c1", "msg-1"], ["c2", "msg-1"], ["c5", "msg-2"], ["c6", "msg-3"], ["c7", "msg-3"], ["c8", "msg-4"]], "each case records the send, sharing its patient's message");
+  assert.deepEqual(output.preview, { messages: 4, withheld: 2, total: 6 }, "the dry run says the same");
+  assert.deepEqual(output.refused, ["cms2", "cms137"], "a campaign aimed at either is refused");
+});
+
+test("Q1: when one case's record fails after its patient's message went out, the other cases keep theirs", () => {
+  const output = runProfileChild("maui", `
+    import { runCampaign } from "./src/case/outreach-campaign.ts";
+    let calls = 0;
+    const audits = [];
+    const mk = (id, employeeId, measureId) => ({
+      id, employeeId, measureId, evaluationPeriod: "2026-01-01", status: "OPEN", priority: "HIGH", assignee: null, nextAction: null,
+      currentOutcomeStatus: "OVERDUE", lastRunId: "run-q1", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+      closedAt: null, closedReason: null, closedBy: null,
+    });
+    const cases = [mk("c1", "pat-001", "cms125"), mk("c2", "pat-001", "cms122"), mk("c3", "pat-002", "cms130")];
+    const deps = {
+      cases: { listCases: async () => cases, getCase: async (id) => cases.find((c) => c.id === id), patchCase: async () => null },
+      events: { recordCaseEvent: async ({ audit }) => { calls++; if (calls === 2) throw new Error("ledger down"); audits.push(audit.refCaseId); } },
+      outcomes: { listOutcomes: async () => [] },
+      campaigns: { recordCampaign: async () => {} },
+      channels: () => ({ type: "EMAIL", send: (m) => ({ channel: "EMAIL", provider: "simulated", status: "SIMULATED", messageId: "msg-" + m.to, to: m.to, sentAt: "2026-01-01T00:00:00.000Z", errorDetail: null }) }),
+    };
+    const result = await runCampaign(deps, { channel: "EMAIL" }, "cm@pilot.test");
+    console.log(JSON.stringify({ result, audits }));
+  `);
+  const result = output.result as { sent: number; failed: number; recipients: Array<{ caseId: string; status: string; messageId: string | null }> };
+  const row = (id: string) => result.recipients.find((r) => r.caseId === id)!;
+  assert.deepEqual(output.audits, ["c1", "c3"], "c1 and c3 were recorded; c2's record failed");
+  assert.equal(row("c1").status, "SIMULATED", "a recorded case is not turned into a failure by its neighbour");
+  assert.equal(row("c2").status, "FAILED");
+  assert.equal(row("c2").messageId, row("c1").messageId, "the failed case still says which message went out");
+  assert.equal(row("c3").status, "SIMULATED");
+  assert.equal(result.sent, 2);
+  assert.equal(result.failed, 1);
 });
