@@ -436,7 +436,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (ordersResponse) return ordersResponse;
 
   // Exports — runs/outcomes/cases/audit CSV downloads (#108).
-  const exportsResponse = await handleExports(req, env);
+  const exportsResponse = await handleExports(req, env, actor);
   if (exportsResponse) return exportsResponse;
 
   // Auditor packets — downloadable run / measure-version evidence bundles (#108). Role gates

@@ -29,6 +29,7 @@
  */
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
+import { auditedExport } from "../audit/export-audit.ts";
 import { warmReadModels } from "../program/warm-read-models.ts";
 import { isCompletedRun, isPopulationRun } from "../program/rollup-shared.ts";
 import type { CreateRunInput, RunStore } from "../stores/run-store.ts";
@@ -1315,19 +1316,21 @@ export async function handleRuns(
     // Mixed first: it is the deeper fault, and it does not depend on which row was read first.
     if (scoring.mixed) return mixedLogic("QRDA I");
     if (scoring.derived) return derivedNotReportable("QRDA I");
-    const documents = buildQrda1Documents(run, measureId, rows, await qrda1BundleLookup(env, rows.map((r) => r.subjectId)));
-    const nonConformant = documents.filter((d) => !d.conformant).length;
-    return json({
-      runId: qrda1Id,
-      measureId,
-      count: documents.length,
-      // Surfaced, not hidden: a document with no QDM patient data cannot be recalculated from and is not
-      // a conformant QRDA I (CONF:67-14567). The caller learns that from the response, not by validating.
-      // `withCaveats` is a SEPARATE axis — a structurally conformant document whose recalculation may
-      // still differ from the run's (roster-derived evidence is deliberately not exported).
-      nonConformant,
-      withCaveats: documents.filter((d) => d.caveats.length > 0).length,
-      documents,
+    return auditedExport((await getStores(env)).events, { actor, kind: "qrda1", path: pathname, params: url.searchParams, runId: qrda1Id }, async () => {
+      const documents = buildQrda1Documents(run, measureId, rows, await qrda1BundleLookup(env, rows.map((r) => r.subjectId)));
+      const nonConformant = documents.filter((d) => !d.conformant).length;
+      return json({
+        runId: qrda1Id,
+        measureId,
+        count: documents.length,
+        // Surfaced, not hidden: a document with no QDM patient data cannot be recalculated from and is not
+        // a conformant QRDA I (CONF:67-14567). The caller learns that from the response, not by validating.
+        // `withCaveats` is a SEPARATE axis — a structurally conformant document whose recalculation may
+        // still differ from the run's (roster-derived evidence is deliberately not exported).
+        nonConformant,
+        withCaveats: documents.filter((d) => d.caveats.length > 0).length,
+        documents,
+      });
     });
   }
 
@@ -1370,7 +1373,7 @@ export async function handleRuns(
     // 2026-09-06 rather than emit rate 1 under the measure's identity; the exporter now reports each
     // group under its own criterion names, with its own performance rate and Reporting Strata.
     const counts = aggregate.counts.length > 1 ? aggregate.counts : aggregate.counts[0]!;
-    return new Response(buildQrda3DocumentFromCounts(run, measureId, counts, aggregate.official, aggregate.strata), {
+    return auditedExport((await getStores(env)).events, { actor, kind: "qrda3", path: pathname, params: url.searchParams, runId: qrdaId }, () => new Response(buildQrda3DocumentFromCounts(run, measureId, counts, aggregate.official, aggregate.strata), {
       status: 200,
       headers: {
         "content-type": "application/xml",
@@ -1378,7 +1381,7 @@ export async function handleRuns(
         [EVALUATION_ERRORS_HEADER]: String(aggregate.evaluationErrors),
         "content-disposition": `attachment; filename="qrda3-${qrdaId}.xml"`,
       },
-    });
+    }));
   }
 
   // FHIR MeasureReport for a completed single-measure run (#89 / E3.1).
@@ -1403,15 +1406,17 @@ export async function handleRuns(
     }
     const measureId = measureIds[0]!;
     const type = url.searchParams.get("type") ?? "summary";
+    const events = (await getStores(env)).events;
+    // Every success path goes through here, so each MeasureReport type is recorded before it leaves.
     const fhir = (data: unknown, extraHeaders: Record<string, string> = {}) =>
-      new Response(JSON.stringify(data), {
+      auditedExport(events, { actor, kind: "measure_report", path: pathname, params: url.searchParams, runId: mrId }, () => new Response(JSON.stringify(data), {
         status: 200,
         headers: {
           "content-type": "application/fhir+json",
           "content-disposition": `attachment; filename="measure-report-${mrId}-${type}.json"`,
           ...extraHeaders,
         },
-      });
+      }));
     // summary = aggregate counts only → bounded status histogram, never the per-subject rows (Fable H4).
     if (type === "summary") {
       const aggregate = await aggregateCountsForRun(os, mrId, measureId, env);
