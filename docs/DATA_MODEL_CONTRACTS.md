@@ -142,7 +142,8 @@ be read fails instead.
 **Every export is recorded before it leaves** (`audit/export-audit.ts`): the §6 CSVs, the audit ledger,
 QRDA I/III and MeasureReport write `EXPORT_GENERATED` (actor, kind, run, filters) after their checks pass, and
 answer **503 `export_not_recorded`**, serving nothing, when that write fails. **Free-text cells** (names,
-identifiers, role, site, measure name, assignee, next action, closed reason/by, provider, payer, actor) pass
+identifiers, role, site, measure name, assignee, next action, closed reason/by, provider, payer, actor, the
+ledger's case and run references) pass
 through `csvTextCell`: a value starting `=`, `+`, `-`, `@`, tab or CR gains a leading apostrophe. Counts,
 dates and statuses are written as they are.
 

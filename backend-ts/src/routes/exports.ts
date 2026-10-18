@@ -152,7 +152,9 @@ export async function handleExports(req: Request, env: ExportsEnv, actor = "syst
     if (!listedOutcomes.ok) return listNotFound(listedOutcomes.listId);
     const subjectFilters = listedOutcomes.filters;
     const runId = q.get("runId") ?? undefined;
-    return auditedExport(s.events, { actor, kind: "outcomes_csv", path: pathname, params: q, runId }, () => {
+    // The ledger's run reference names a run that exists; whatever was asked for stays in `params`.
+    const refRunId = runId?.trim() && (await s.runs.getRun(runId.trim())) ? runId.trim() : null;
+    return auditedExport(s.events, { actor, kind: "outcomes_csv", path: pathname, params: q, runId: refRunId }, () => {
       // Streamed + paged (Fable H4) — bounded memory so a seed:scale run's 120k outcomes never
       // materialize at once (parity with the audit-events streaming export below).
       const stream = outcomesCsvStream(s.outcomes, s.runs, runId, env, {

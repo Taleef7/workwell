@@ -20,6 +20,7 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { handleExports } from "./exports.ts";
 import { handleRuns } from "./runs.ts";
+import { toCsv, text } from "../export/csv.ts";
 
 const dbPath = join(tmpdir(), `workwell-export-audit-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -62,6 +63,7 @@ test("A1: every bulk download is recorded with who took it, which export, its ru
     ["audit_csv", () => exportsGet("/api/audit-events/export?format=csv")],
     ["qrda3", () => runsGet(`/api/runs/${runId}/qrda`)],
     ["measure_report", () => runsGet(`/api/runs/${runId}/measure-report?type=summary`)],
+    ["measure_report", () => runsGet(`/api/runs/${runId}/measure-report?type=individual`)],
     ["qrda1", () => runsGet(`/api/runs/${runId}/qrda1`)],
   ];
   for (const [kind, call] of paths) {
@@ -79,26 +81,47 @@ test("A1: every bulk download is recorded with who took it, which export, its ru
   assert.equal(events.find((e) => e.payload.kind === "measure_report")!.actor, "admin@workwell.dev");
 });
 
-test("A1: an export that cannot be recorded is refused (503) and serves no data", async () => {
+test("A1: an export that cannot be recorded is refused (503) and serves nothing", async () => {
   const real = SqliteCaseEventStore.prototype.appendAudit;
   SqliteCaseEventStore.prototype.appendAudit = async () => { throw new Error("ledger unavailable"); };
+  // Every row reader the exports use, counted: a refused export must not have read the data it refused.
+  let rowReads = 0;
+  const counted: Array<[object, string]> = [
+    [SqliteOutcomeStore.prototype, "listOutcomes"],
+    [SqliteCaseStore.prototype, "listCases"],
+    [SqliteCaseEventStore.prototype, "listAuditEvents"],
+    [SqliteCaseEventStore.prototype, "streamAuditEvents"],
+  ];
+  const originals = counted.map(([proto, name]) => (proto as Record<string, unknown>)[name]);
+  counted.forEach(([proto, name], i) => {
+    const original = originals[i] as ((...args: unknown[]) => unknown) | undefined;
+    if (typeof original !== "function") return;
+    (proto as Record<string, unknown>)[name] = function (this: unknown, ...args: unknown[]) { rowReads++; return original.apply(this, args); };
+  });
   try {
-    for (const res of [
-      await exportsGet("/api/exports/cases?format=csv"),
-      await exportsGet(`/api/exports/outcomes?format=csv&runId=${runId}`),
-      await exportsGet("/api/exports/runs?format=csv"),
-      await exportsGet("/api/audit-events/export?format=csv"),
-      await runsGet(`/api/runs/${runId}/qrda`),
-      await runsGet(`/api/runs/${runId}/measure-report?type=summary`),
-      await runsGet(`/api/runs/${runId}/qrda1`),
-    ]) {
-      assert.equal(res!.status, 503);
-      const body = await res!.text();
-      assert.match(body, /export_not_recorded/);
-      assert.doesNotMatch(body, /emp-006/, "no patient row leaves");
+    // QRDA I must read its rows before it can refuse a run scored by mixed or translated logic, so it reads
+    // and then serves nothing; every other export is refused before its first row read.
+    const calls: Array<[string, () => Promise<Response | null>, boolean]> = [
+      ["cases csv", () => exportsGet("/api/exports/cases?format=csv"), false],
+      ["outcomes csv", () => exportsGet(`/api/exports/outcomes?format=csv&runId=${runId}`), false],
+      ["runs csv", () => exportsGet("/api/exports/runs?format=csv"), false],
+      ["audit csv", () => exportsGet("/api/audit-events/export?format=csv"), false],
+      ["qrda3", () => runsGet(`/api/runs/${runId}/qrda`), false],
+      ["measure report", () => runsGet(`/api/runs/${runId}/measure-report?type=summary`), false],
+      ["qrda1", () => runsGet(`/api/runs/${runId}/qrda1`), true],
+    ];
+    for (const [name, call, readsForItsChecks] of calls) {
+      rowReads = 0;
+      const res = (await call())!;
+      assert.equal(res.status, 503, name);
+      const body = await res.text();
+      assert.match(body, /export_not_recorded/, name);
+      assert.doesNotMatch(body, /emp-006/, `${name}: no row leaves`);
+      if (!readsForItsChecks) assert.equal(rowReads, 0, `${name}: refused before any row was read`);
     }
   } finally {
     SqliteCaseEventStore.prototype.appendAudit = real;
+    counted.forEach(([proto, name], i) => { if (typeof originals[i] === "function") (proto as Record<string, unknown>)[name] = originals[i]; });
   }
 });
 
@@ -108,4 +131,24 @@ test("A1: a free-text cell that would run as a spreadsheet formula is defused; n
   assert.doesNotMatch(csv, /(^|,)"?=HYPERLINK/m, "no cell starts with the formula");
   const outcomes = await (await exportsGet(`/api/exports/outcomes?format=csv&runId=${runId}`))!.text();
   assert.match(outcomes, /,emp-006,/, "an ordinary identifier is unchanged");
+  // Only text is defused: a negative number is written as a number.
+  assert.equal(toCsv(["a", "b"], [[text("-5"), -5]]), "a,b\r\n'-5,-5");
+});
+
+test("A1: a run id the caller made up never reaches the ledger as a reference, nor the audit CSV as a formula", async () => {
+  const forged = '=HYPERLINK("http://evil.test","x")';
+  const res = (await exportsGet(`/api/exports/outcomes?format=csv&runId=${encodeURIComponent(forged)}`))!;
+  assert.equal(res.status, 200);
+  await res.text();
+  const recorded = (await exportEvents()).at(-1)!;
+  assert.equal(recorded.refRunId, null, "only a run that exists is referenced");
+  assert.equal((recorded.payload.params as Record<string, string>).runId, forged, "what was asked for stays in the filters");
+  // And whatever reference a row does carry is written as text, never as a formula.
+  await new SqliteCaseEventStore(db as never).appendAudit({
+    eventType: "CASE_ESCALATED", entityType: "case", entityId: "c-x", actor: "@cm", refRunId: "=1+1", refCaseId: "+SUM(A1)",
+    refMeasureVersionId: null, payload: {},
+  });
+  const ledger = await (await exportsGet("/api/audit-events/export?format=csv"))!.text();
+  assert.doesNotMatch(ledger, /(^|,)"?[=+@]/m, "no ledger cell starts with a formula character");
+  assert.match(ledger, /,'=1\+1,/, "the run reference is defused, not dropped");
 });

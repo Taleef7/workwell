@@ -490,7 +490,8 @@ function auditRowCells(e: AuditEvent, caseEmployee: Map<string, string>): unknow
     (e.refCaseId ? caseEmployee.get(e.refCaseId) : undefined) ??
     "";
   const name = e.refMeasureVersionId ? measureName(e.refMeasureVersionId.replace(/-v[\d.]+$/, "")) : "";
-  return [e.occurredAt, e.eventType, e.refCaseId, e.refRunId, text(name), text(employeeId), text(e.actor), JSON.stringify(e.payload)];
+  // The case and run references are text too: an export records the run id its caller asked for.
+  return [e.occurredAt, e.eventType, text(e.refCaseId), text(e.refRunId), text(name), text(employeeId), text(e.actor), JSON.stringify(e.payload)];
 }
 
 export async function auditCsv(eventStore: CaseEventStore, caseStore: CaseStore): Promise<string> {
