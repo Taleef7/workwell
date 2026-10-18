@@ -32,3 +32,21 @@ export function caseRerunMeasurementPeriod(measureId: string, evalDate: string):
   const start = `${evalDate}T00:00:00.000Z`;
   return { start, end: new Date(new Date(start).getTime() + 86400000 - 1000).toISOString() };
 }
+
+/**
+ * The date a single-case rerun evaluates as of: today, unless the case belongs to an EARLIER calendar year
+ * of an officially routed measure, which is then verified as of that year's last day. Official logic scores
+ * the calendar year containing the evaluation date (and picks that year's logic), so a 2026 case verified
+ * in January 2027 was scored on 2027's nearly empty year, by 2027's logic, and the answer written under
+ * 2026 — typically "not in the initial population", which closes the case.
+ */
+export function caseRerunEvaluationDate(
+  measureId: string,
+  evaluationPeriod: string,
+  today: string,
+  env: Record<string, unknown> = process.env,
+): string {
+  if (!isOfficialRouted(measureId, env)) return today;
+  const year = /^(\d{4})-01-01$/.exec(evaluationPeriod)?.[1];
+  return year && `${year}-12-31` < today ? `${year}-12-31` : today;
+}

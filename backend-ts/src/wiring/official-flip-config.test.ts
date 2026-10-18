@@ -43,6 +43,7 @@ import { requiredOids } from "./official-executor-adapter.ts";
 import { OFFICIAL_GATED_MEASURES } from "../standards/official-cases.ts";
 import { OFFICIAL_MEASURE_SEMANTICS } from "./official-measure-semantics.ts";
 import { buildSummaryMeasureReport } from "../fhir/measure-report.ts";
+import { uncoveredRoutedMeasures, yearsToCover } from "./translation-routing.ts";
 
 /**
  * DERIVED, not listed. The previous hardcoded three-name array was the #380/#400 guard-scope shape:
@@ -1211,4 +1212,37 @@ test("#768: the hand-copied Maui lists match the image's build arg", () => {
     if (match) fallback = match[1]!;
   }
   assert.deepEqual(asIds(parse(fallback)), official, "flip-gate.yml's `routed` default must be the list deploy-maui-mieweb.yml ships");
+});
+
+/**
+ * T6: a deployment never reaches a year with a routed measure that no logic covers. From 1 October CI
+ * also requires the next year, so a missing translation fails a build a quarter before the year's first
+ * nightly instead of scoring it, unnoticed, with the year before's logic.
+ */
+test("T6: every measure a workflow routes has logic for this year, and from October for the next", () => {
+  const years = yearsToCover(new Date().toISOString().slice(0, 10));
+  for (const workflow of WORKFLOWS) {
+    const official = shippedMeasures(workflow);
+    if (official === null) continue;
+    const env = { [OFFICIAL_KEY]: official.join(","), [DERIVED_KEY]: (shippedDerived(workflow) ?? []).join(",") };
+    for (const year of years) {
+      assert.deepEqual(uncoveredRoutedMeasures(year, env), [], `${workflow} routes measures with no ${year} logic`);
+    }
+  }
+});
+
+test("T6: the coverage rule fires on a measure only another year's logic covers", () => {
+  const manifest = (year: number) => ({ effectivePeriod: { start: `${year}-01-01`, end: `${year}-12-31` } }) as never;
+  const manifests = {
+    official: (id: string) => (id === "cms1" || id === "cms2" ? manifest(2026) : null),
+    derived: (id: string) => (id === "cms1" ? manifest(2027) : null),
+  };
+  const env = { [OFFICIAL_KEY]: "cms1,cms2", [DERIVED_KEY]: "cms1" };
+  assert.deepEqual(uncoveredRoutedMeasures(2026, env, manifests), []);
+  assert.deepEqual(uncoveredRoutedMeasures(2027, env, manifests), ["cms2"], "CMS's 2026 artifact is not 2027 logic");
+  assert.deepEqual(uncoveredRoutedMeasures(2027, { ...env, [DERIVED_KEY]: "" }, manifests), ["cms1", "cms2"], "a translation counts only when routed");
+  assert.deepEqual(uncoveredRoutedMeasures(2028, env, manifests), ["cms1", "cms2"]);
+  assert.deepEqual(yearsToCover("2026-09-30"), [2026]);
+  assert.deepEqual(yearsToCover("2026-10-01"), [2026, 2027]);
+  assert.deepEqual(yearsToCover("2027-01-01"), [2027]);
 });

@@ -25,7 +25,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { priorityFor, nextActionFor } from "./case-logic.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
-import { caseRerunMeasurementPeriod } from "../run/run-period.ts";
+import { caseRerunEvaluationDate, caseRerunMeasurementPeriod } from "../run/run-period.ts";
 import { isFqmScored, type RoutedEngine } from "../wiring/executor-router.ts";
 import { outcomeForCase } from "./case-outcome.ts";
 
@@ -96,8 +96,10 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // stays keyed to the case's existing compliance-cycle period (`existing.evaluationPeriod`, the
   // idempotency key, used unchanged below). Decoupling the two is the #150 H1/M6 fix: the period
   // buckets the cycle (so rerun upserts, never duplicates); the eval date drives the numbers.
-  // Mirrors the Java rerunToVerify (`LocalDate evaluationDate = LocalDate.now()`).
-  const evalDate = new Date().toISOString().slice(0, 10);
+  // Mirrors the Java rerunToVerify (`LocalDate evaluationDate = LocalDate.now()`), except that an
+  // official measure's case from an earlier year is verified as of that year's last day: the official
+  // period and logic follow the evaluation date's year, and the case is that year's.
+  const evalDate = caseRerunEvaluationDate(existing.measureId, existing.evaluationPeriod, new Date().toISOString().slice(0, 10));
   const period = caseRerunMeasurementPeriod(existing.measureId, evalDate);
 
   const run = await deps.runStore.createRun({
@@ -133,7 +135,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     verifiedStatus = result.outcome;
     evidence = result.evidence;
     // The date the evaluation used, so the answer describes the logic that just ran (a 2026 case
-    // verified during 2027 is scored by the 2027 logic, as before — the case keeps its own period).
+    // verified during 2027 is evaluated as of 2026-12-31, by 2026's logic).
     outOfPopulation = isFqmScored(deps.engine.logicFor?.(existing.measureId, evalDate))
       ? result.inInitialPopulation === false
       : undefined;
