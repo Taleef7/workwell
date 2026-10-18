@@ -46,3 +46,35 @@ export function routedTranslationFor(
   const translation = manifests.derived(measureId);
   return translation && effectivePeriodCovers(translation, period) === true ? translation : null;
 }
+
+/**
+ * The officially routed measures that no logic covers for a calendar year: neither CMS's artifact nor a
+ * routed translation declares that year, so a run would score it with another year's logic (the
+ * prior-year warning). Pure over the env and the manifests, so CI can hold every deploy's lists to it.
+ */
+export function uncoveredRoutedMeasures(
+  year: number,
+  env: Record<string, unknown> = process.env,
+  manifests: { official: (id: string) => OfficialManifest | null; derived: (id: string) => OfficialManifest | null } = {
+    official: loadOfficialManifest,
+    derived: loadDerivedManifest,
+  },
+): string[] {
+  const period = { start: `${year}-01-01`, end: `${year}-12-31` };
+  return [...officialMeasureIds(env)]
+    .filter((id) => {
+      const official = manifests.official(id);
+      if (official && effectivePeriodCovers(official, period) === true) return false;
+      return routedTranslationFor(id, year, env, manifests) === null;
+    })
+    .sort();
+}
+
+/**
+ * The years a deployment must already cover on `today` (`YYYY-MM-DD`): its own, and from 1 October the
+ * next, so the logic for a new performance year is in place a quarter before the year's first nightly.
+ */
+export function yearsToCover(today: string): number[] {
+  const year = Number(today.slice(0, 4));
+  return today.slice(5, 7) >= "10" ? [year, year + 1] : [year];
+}

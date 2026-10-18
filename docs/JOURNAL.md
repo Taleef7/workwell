@@ -7,6 +7,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-17
 
+- **No routed measure reaches a year without its logic, and a January rerun verifies the case's own year.**
+  CI now fails when a deploy routes a measure that neither CMS's artifact nor a routed translation covers for
+  the current year, and from 1 October for the next one. Rerun-to-verify on an earlier year's official case
+  evaluated as of today, so in January a 2026 case was scored by 2027's logic on 2027's nearly empty year
+  and usually closed "not in the population"; it is now evaluated as of that year's 31 December.
+- **#837 merged:** every export and report download is recorded in the audit log before it is served, and is
+  refused (503) when it cannot be.
 - **Every bulk download is recorded before it leaves, and CSV cells cannot run as formulas.** The CSVs, the
   audit ledger, QRDA I/III and MeasureReport now write `EXPORT_GENERATED` (who, which export, its run and
   filters) and answer 503 when that cannot be recorded, so no patient file leaves unaccounted for. A

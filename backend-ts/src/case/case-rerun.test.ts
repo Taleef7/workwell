@@ -74,3 +74,27 @@ test("rerunToVerify — wc CASE is a typed unsupported result before every mutat
   assert.deepEqual(await deps.outcomes.listOutcomes(existing.lastRunId), [], "existing outcome state is unchanged");
   assert.deepEqual(await deps.runStore.listRuns(), [], "run count is unchanged");
 });
+
+test("rerunToVerify — the year rule follows the rerun's own engine, not process.env's routing", async () => {
+  // This file routes nothing through process.env; the engine below routes cms122, as an engine built from
+  // a worker env would. An earlier year's case must still be verified as of that year's last day.
+  assert.equal(process.env.WORKWELL_OFFICIAL_MEASURES ?? "", "");
+  const lastYear: CaseRecord = { ...existing, id: "case-122-2025", employeeId: "emp-001", measureId: "cms122", evaluationPeriod: "2025-01-01" };
+  const asked: string[] = [];
+  let created: Record<string, unknown> | null = null;
+  const noop = async () => undefined;
+  const deps = {
+    cases: { getCase: async () => lastYear, patchCase: async (_id: string, patch: Record<string, unknown>) => ({ ...lastYear, ...patch }) },
+    events: { recordCaseEvent: noop, appendAudit: noop, caseTimeline: async () => [], latestOutreachDeliveryStatus: async () => null },
+    outcomes: { recordOutcome: noop, listOutcomes: async () => [] },
+    runStore: { createRun: async (input: Record<string, unknown>) => { created = input; return { id: "run-122" }; }, markRunning: noop, appendLog: noop, finalizeRun: noop },
+    engine: {
+      evaluate: async (input: { evaluationDate: string }) => { asked.push(input.evaluationDate); return { outcome: "OVERDUE", evidence: { expressionResults: [] } }; },
+      logicFor: () => ({ version: "v", kind: "official" as const, warning: null }),
+    },
+  } as unknown as RerunDeps;
+
+  await rerunToVerify(deps, lastYear.id, "tester");
+  assert.deepEqual(asked, ["2025-12-31"]);
+  assert.equal((created as Record<string, unknown> | null)?.measurementPeriodStart, "2025-01-01T00:00:00.000Z", "the official calendar year, not a one-day window");
+});

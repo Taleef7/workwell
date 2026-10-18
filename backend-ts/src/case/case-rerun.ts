@@ -25,7 +25,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { priorityFor, nextActionFor } from "./case-logic.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
-import { caseRerunMeasurementPeriod } from "../run/run-period.ts";
+import { caseRerunEvaluationDate, caseRerunMeasurementPeriod } from "../run/run-period.ts";
 import { isFqmScored, type RoutedEngine } from "../wiring/executor-router.ts";
 import { outcomeForCase } from "./case-outcome.ts";
 
@@ -76,6 +76,21 @@ const verificationCaseStatus = (current: string, verified: string): string =>
 const verificationNextAction = (verified: string, measureId: string, evidence: unknown): string =>
   verified === "COMPLIANT" ? "No follow-up needed after compliant verification rerun." : nextActionFor(verified, measureId, evidence);
 
+/**
+ * Whether the rerun's own engine scores this measure with official logic: the router defines `logicFor`
+ * for a routed measure and answers `undefined` otherwise, so the period and date follow what will run.
+ * An engine without `logicFor` (the authored one) routes nothing; a `logicFor` that throws is a routed
+ * measure whose artifact failed, which the evaluation below then reports.
+ */
+function routedOfficially(engine: RerunDeps["engine"], measureId: string, today: string): boolean {
+  if (!engine.logicFor) return false;
+  try {
+    return engine.logicFor(measureId, today) !== undefined;
+  } catch {
+    return true;
+  }
+}
+
 const isClosing = (verified: string): boolean => verified === "COMPLIANT" || verified === "EXCLUDED";
 
 /** Re-evaluate the case subject and transition the case; returns the refreshed detail, or null if unknown. */
@@ -96,9 +111,13 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // stays keyed to the case's existing compliance-cycle period (`existing.evaluationPeriod`, the
   // idempotency key, used unchanged below). Decoupling the two is the #150 H1/M6 fix: the period
   // buckets the cycle (so rerun upserts, never duplicates); the eval date drives the numbers.
-  // Mirrors the Java rerunToVerify (`LocalDate evaluationDate = LocalDate.now()`).
-  const evalDate = new Date().toISOString().slice(0, 10);
-  const period = caseRerunMeasurementPeriod(existing.measureId, evalDate);
+  // Mirrors the Java rerunToVerify (`LocalDate evaluationDate = LocalDate.now()`), except that an
+  // official measure's case from an earlier year is verified as of that year's last day: the official
+  // period and logic follow the evaluation date's year, and the case is that year's.
+  const today = new Date().toISOString().slice(0, 10);
+  const official = routedOfficially(deps.engine, existing.measureId, today);
+  const evalDate = caseRerunEvaluationDate(official, existing.evaluationPeriod, today);
+  const period = caseRerunMeasurementPeriod(existing.measureId, evalDate, official);
 
   const run = await deps.runStore.createRun({
     scopeType: "CASE",
@@ -133,7 +152,7 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     verifiedStatus = result.outcome;
     evidence = result.evidence;
     // The date the evaluation used, so the answer describes the logic that just ran (a 2026 case
-    // verified during 2027 is scored by the 2027 logic, as before — the case keeps its own period).
+    // verified during 2027 is evaluated as of 2026-12-31, by 2026's logic).
     outOfPopulation = isFqmScored(deps.engine.logicFor?.(existing.measureId, evalDate))
       ? result.inInitialPopulation === false
       : undefined;

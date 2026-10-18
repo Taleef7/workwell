@@ -158,3 +158,37 @@ test("rerun-to-verify closes a case whose subject the OFFICIAL logic finds outsi
   await rerunToVerify(authored, existing.id, "tester");
   assert.equal((patched as Record<string, unknown> | null)?.status, "OPEN", "an authored out-of-population subject keeps the case open, unchanged");
 });
+
+test("rerun-to-verify scores an earlier year's case as of that year's last day, and records that period", async () => {
+  const { rerunToVerify } = await import("./case-rerun.ts");
+  const lastYear = { ...existing, id: "case-137-2025", evaluationPeriod: "2025-01-01" };
+  const asked: string[] = [];
+  let runScope: Record<string, unknown> | null = null;
+  const noop = async () => undefined;
+  const deps = {
+    cases: {
+      getCase: async () => lastYear,
+      patchCase: async (_id: string, patch: Record<string, unknown>) => ({ ...lastYear, ...patch }),
+      listCases: async () => [lastYear],
+      upsertFromOutcome: noop,
+      countByLastRun: async () => 1,
+    },
+    events: { recordCaseEvent: noop, appendAudit: noop, caseTimeline: async () => [], latestOutreachDeliveryStatus: async () => null },
+    outcomes: { recordOutcome: noop, listOutcomes: async () => [] },
+    runStore: {
+      createRun: async (input: Record<string, unknown>) => { runScope = input; return { id: "run-rerun-2025" }; },
+      markRunning: noop, appendLog: noop, finalizeRun: noop, listRuns: async () => [],
+    },
+    engine: {
+      evaluate: async (input: { evaluationDate: string }) => { asked.push(input.evaluationDate); return { outcome: "OVERDUE", evidence: NOT_ENGAGED }; },
+      logicFor: (_id: string, date: string) => { asked.push(`logic:${date}`); return { version: "v", kind: "official" as const, warning: null }; },
+    },
+  } as unknown as RerunDeps;
+
+  await rerunToVerify(deps, lastYear.id, "tester");
+  // The first lookup only asks whether the engine routes the measure; every evaluation-time call sees 2025.
+  assert.deepEqual(asked.slice(1), ["2025-12-31", "logic:2025-12-31"], "the engine and the logic lookup both see the case's year");
+  const scope = runScope as Record<string, unknown> | null;
+  assert.equal(scope?.measurementPeriodStart, "2025-01-01T00:00:00.000Z");
+  assert.equal((scope?.requestedScope as Record<string, unknown>).evaluationDate, "2025-12-31");
+});
