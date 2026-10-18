@@ -6,3 +6,9 @@ ignoredBuiltDependencies:
 # below the fixed 3.4.9, so `pnpm update` cannot reach it. Drop this once monaco-editor ships >= 3.4.9.
 overrides:
   dompurify: ^3.4.9
+  # Security floors (2026-10-17): sharp (librsvg CVE, via next), source-map-js (DoS), vite (fs.deny bypass on
+  # Windows; dev and test only), moment (path traversal). Drop each once its parent requires the fixed version.
+  sharp: ^0.35.5
+  source-map-js: ^1.2.2
+  vite: ~8.0.16
+  moment: ^2.31.0

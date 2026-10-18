@@ -5,6 +5,15 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-17
+
+- **Security floors for the dependency alerts.** fqm-execution 1.8.5 pins handlebars, axios and moment below
+  their fixes (two critical handlebars injections), and MIE's @mieweb/cloud pulls an old hono, so Dependabot
+  could not move them. pnpm overrides now hold handlebars 4.7.10, axios 1.20.0, moment 2.31.0 and hono
+  4.13.13 in the backend, and sharp, source-map-js, vite and moment in the frontend, with Next.js 16.3.8.
+  Each stays within its major. Left: csv-parse and uuid (the fix is a major jump their parents may not
+  survive; medium) and braces and sprintf-js (no fix yet).
+
 ## 2026-10-16
 
 - **Patient outreach in plain language, one message per patient.** Maui's messages named the measure

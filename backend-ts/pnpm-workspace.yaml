@@ -25,6 +25,16 @@ onlyBuiltDependencies:
 
 overrides:
   better-sqlite3: ^12.0.0
+  # Security floors (2026-10-17) for packages fqm-execution 1.8.5 and @mieweb/cloud pin below their fixes:
+  # handlebars (two critical: JavaScript injection in compile), axios (high: prototype pollution, ReDoS,
+  # HTTP/2 DoS), moment (path traversal), hono (several mediums). Each stays within the major its dependents
+  # declare. fqm-execution's numbers are re-proved by CI's MADiE gate; drop a floor once its parent ships it.
+  # hono is only an auto-installed peer of @hono/node-server: a lockfile that already holds an older one keeps
+  # it until that snapshot is re-resolved.
+  handlebars: ^4.7.10
+  axios: ^1.20.0
+  moment: ^2.31.0
+  hono: ^4.13.7
 
 patchedDependencies:
   cql-execution@3.3.2: patches/cql-execution@3.3.2.patch
