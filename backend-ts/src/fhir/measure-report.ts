@@ -593,6 +593,24 @@ export function reportingPeriod(
 }
 
 /**
+ * The artifact that scored this outcome, when it is still the one vendored: its sha matches the evidence's
+ * (or the evidence predates recording one), and a translation's url matches too. A re-vendor between the run
+ * and the export changes the sha, and the current artifact's canonical or ids would then describe logic the
+ * counts were not produced by.
+ */
+const reportArtifact = (measureId: string, official: OfficialReportIdentity | null): OfficialArtifact | null => {
+  if (!official) return null;
+  const artifact = official.kind === "derived" ? loadDerivedArtifact(measureId) : loadOfficialArtifact(measureId);
+  if (!artifact) return null;
+  if (official.artifactSha256 && artifact.manifest.sha256 !== official.artifactSha256) return null;
+  if (official.kind === "derived" && official.url && artifact.manifest.url !== official.url) return null;
+  return artifact;
+};
+
+/** `url|version` (`deqm-0`: the canonical SHALL carry the version), or the bare url when none is known. */
+const versioned = (url: string, version: string | undefined): string => (version ? `${url}|${version}` : url);
+
+/**
  * THE TRIO (ADR-046, discharging the PR-7 obligation this file has carried since PR-3).
  *
  * The prohibition used to read: WorkWell's numerator is compliance-oriented (including inverted CMS122
@@ -612,22 +630,6 @@ export function reportingPeriod(
  * All three now derive from the same place — the outcome's own official evidence — so they cannot
  * disagree by construction.
  */
-/**
- * The artifact that scored this outcome, when it is still the one vendored: its sha matches the evidence's
- * (or the evidence predates recording one). A re-vendor between the run and the export changes the sha, and
- * the current artifact's canonical or ids would then describe logic the counts were not produced by.
- */
-const reportArtifact = (measureId: string, official: OfficialReportIdentity | null): OfficialArtifact | null => {
-  if (!official) return null;
-  const artifact = official.kind === "derived" ? loadDerivedArtifact(measureId) : loadOfficialArtifact(measureId);
-  if (!artifact) return null;
-  if (official.artifactSha256 && artifact.manifest.sha256 !== official.artifactSha256) return null;
-  return artifact;
-};
-
-/** `url|version` (`deqm-0`: the canonical SHALL carry the version), or the bare url when none is known. */
-const versioned = (url: string, version: string | undefined): string => (version ? `${url}|${version}` : url);
-
 const measureCanonical = (measureId: string, official: OfficialReportIdentity | null): string => {
   if (!official) return `urn:workwell:measure:${measureId}`;
   // A WorkWell translation reports under its OWN canonical, checked before anything else: the branch

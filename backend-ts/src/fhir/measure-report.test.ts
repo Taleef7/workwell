@@ -16,7 +16,7 @@ import {
   buildIndividualMeasureReport,
   buildMeasureReportBundle,
 } from "./measure-report.ts";
-import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
+import { loadDerivedArtifact, loadOfficialArtifact } from "../wiring/official-artifacts.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 
@@ -530,6 +530,34 @@ test("DEQM 1.0.0 linkId: every group, population, stratifier and stratum populat
       }
     }
   }
+});
+
+test("a translation's report links to its OWN artifact's ids, and only when the evidence names that artifact", () => {
+  const translation = loadDerivedArtifact("cms122");
+  assert.ok(translation, "the cms122 translation is vendored");
+  const derivedOc = (url: string): OutcomeRecord => ({
+    ...routedOc("cms122", true),
+    evidence: {
+      official: {
+        kind: "derived", url, label: "WorkWell translation of CMS122v14", derivedFrom: "CMS122v14", ecqmId: null,
+        version: translation.manifest.version, artifactSha256: translation.manifest.sha256,
+        populationResults: [
+          { populationType: "initial-population", result: true },
+          { populationType: "denominator", result: true },
+          { populationType: "denominator-exclusion", result: false },
+          { populationType: "numerator", result: true },
+        ],
+      },
+    },
+  });
+  const mr = buildSummaryMeasureReport(run, "cms122", [derivedOc(translation.manifest.url)], GENERATED_AT);
+  assert.equal(mr.measure, `${translation.manifest.url}|${translation.manifest.version}`);
+  assert.ok(!mr.measure.includes("madie.cms.gov"), "never CMS's canonical (LOCKED §4.3)");
+  assert.equal(linkOf("group", mr.group[0]!), "Group_1");
+  assert.equal(linkOf("group.population", mr.group[0]!.population[0]!), "InitialPopulation_1");
+  // Evidence naming a different translation (a later year's, say) gets no ids from this one.
+  const other = buildSummaryMeasureReport(run, "cms122", [derivedOc("urn:workwell:measure:cms122:translation-2099")], GENERATED_AT);
+  assert.ok(!JSON.stringify(other).includes("linkId"));
 });
 
 test("DEQM gap [deqm-7]: a stratifier carries no code — owner decision 2026-10-19, not yet", async () => {
