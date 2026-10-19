@@ -221,6 +221,14 @@ jobs:
           cache-dependency-path: backend-ts/pnpm-lock.yaml
       - name: Install deps
         run: pnpm install --frozen-lockfile
+      - name: DIAG swap in fqm-execution master (temporary, not for merge)
+        working-directory: backend-ts
+        run: |
+          git clone --depth 1 https://github.com/projecttacoma/fqm-execution "$RUNNER_TEMP/fqm"
+          (cd "$RUNNER_TEMP/fqm" && git log -1 --format='fqm master %h %cs %s' && npm ci --ignore-scripts --no-audit --no-fund >/dev/null && npm run build >/dev/null)
+          n=0; for d in node_modules/.pnpm/fqm-execution@*/node_modules/fqm-execution; do rm -rf "$d/build" && cp -r "$RUNNER_TEMP/fqm/build" "$d/build" && n=$((n+1)) && echo "swapped $d"; done
+          [ "$n" -gt 0 ] || { echo "::error::no fqm-execution install found"; exit 1; }
+          grep -c normalizeMeasurementPeriodDate node_modules/.pnpm/fqm-execution@*/node_modules/fqm-execution/build/execution/Execution.js
       - name: Test (SQLite floor + Postgres ceiling)
         env:
           WORKWELL_TEST_PG_URL: postgres://workwell:workwell@localhost:5432/workwell
@@ -321,6 +329,14 @@ jobs:
           cache-dependency-path: backend-ts/pnpm-lock.yaml
       - name: Install deps
         run: pnpm install --frozen-lockfile
+      - name: DIAG swap in fqm-execution master (temporary, not for merge)
+        working-directory: backend-ts
+        run: |
+          git clone --depth 1 https://github.com/projecttacoma/fqm-execution "$RUNNER_TEMP/fqm"
+          (cd "$RUNNER_TEMP/fqm" && git log -1 --format='fqm master %h %cs %s' && npm ci --ignore-scripts --no-audit --no-fund >/dev/null && npm run build >/dev/null)
+          n=0; for d in node_modules/.pnpm/fqm-execution@*/node_modules/fqm-execution; do rm -rf "$d/build" && cp -r "$RUNNER_TEMP/fqm/build" "$d/build" && n=$((n+1)) && echo "swapped $d"; done
+          [ "$n" -gt 0 ] || { echo "::error::no fqm-execution install found"; exit 1; }
+          grep -c normalizeMeasurementPeriodDate node_modules/.pnpm/fqm-execution@*/node_modules/fqm-execution/build/execution/Execution.js
       # The content is pinned to a fixed commit inside the fetch script, so the cache key is stable and
       # a hit is always correct. Saves a ~34MB clone on every push.
       - name: Cache official content

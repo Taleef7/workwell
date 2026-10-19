@@ -1,7 +1,6 @@
 name: Diagnose translation library conformance (temporary)
 on:
-  push:
-    branches: [diag/convert-days]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
