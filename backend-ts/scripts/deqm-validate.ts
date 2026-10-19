@@ -1,9 +1,14 @@
 /**
- * Measure our FHIR MeasureReports against the DEQM STU5 profiles — the FHIR-column counterpart of
- * `qrda-schematron-check.py` (ROADMAP_2026-08-04 §4 V3, milestone B6).
+ * Measure our FHIR MeasureReports against DEQM — the FHIR-column counterpart of `qrda-schematron-check.py`
+ * (ROADMAP_2026-08-04 §4 V3, milestone B6).
  *
  *     corepack pnpm exec tsx scripts/deqm-validate.ts --validator <path/to/validator_cli.jar> \
- *         [--out <dir>] [--json] [--inject-invalid]
+ *         [--ig uv|us] [--out <dir>] [--json] [--inject-invalid]
+ *
+ * `--ig uv` (the default) is DEQM 1.0.0, the universal-realm guide on QM IG 2.0.0 that the reports are
+ * shaped to (owner decision on #849, 2026-10-19). `--ig us` is Da Vinci DEQM STU5, the US realm's current
+ * guide and the August baseline. The two define different scoring extensions, so `deqm-3` passes under
+ * one only.
  *
  * ## Exit code: the FLOOR is enforced, the GAP is not
  *
@@ -19,10 +24,10 @@
  *
  * ## The findings ARE pinned in CI — in `src/fhir/measure-report.test.ts`
  *
- * Four tests pin the measured gap: `deqm-0` (canonical carries no version), the contained reporter's
- * inability to satisfy `qicore-organization`, `deqm-3` (no measure-scoring on root or group), and the
- * full-float `measureScore` that `qrda3-export.ts` formats differently. They pin the NON-CONFORMANT state
- * deliberately — we do not claim a DEQM `meta.profile`, so they record the distance to it. **When one is
+ * What is fixed is asserted fixed (`deqm-0` on official and derived reports, `deqm-3`, the 1.0.0 `linkId`s);
+ * what remains is pinned as a gap (the authored canonical's missing version, STU5's `qicore-organization`
+ * reporter, `deqm-7`'s stratifier code, and the full-float `measureScore` that `qrda3-export.ts` formats
+ * differently). We do not claim a DEQM `meta.profile`, so the gaps record the distance to it. **When one is
  * fixed, invert the test rather than deleting it, and re-run this script** so the error count is measured
  * to have fallen rather than asserted to have.
  *
@@ -78,13 +83,20 @@ import {
 import type { OutcomeRecord } from "../src/stores/outcome-store.ts";
 import type { RunRecord } from "../src/stores/run-store.ts";
 
-const DEQM_IG = "hl7.fhir.us.davinci-deqm#5.0.0";
-const P = "http://hl7.org/fhir/us/davinci-deqm/StructureDefinition";
-/** DEQM's MeasureReport profiles, by the report shape each one governs. */
-const PROFILE = {
-  summary: `${P}/summary-measurereport-deqm`,
-  individual: `${P}/indv-measurereport-deqm`,
+/** Each guide's package and its MeasureReport profiles, by the report shape each one governs. */
+const GUIDES = {
+  uv: {
+    ig: "hl7.fhir.uv.deqm#1.0.0",
+    summary: "http://hl7.org/fhir/uv/deqm/StructureDefinition/deqm-summarymeasurereport",
+    individual: "http://hl7.org/fhir/uv/deqm/StructureDefinition/deqm-individualmeasurereport",
+  },
+  us: {
+    ig: "hl7.fhir.us.davinci-deqm#5.0.0",
+    summary: "http://hl7.org/fhir/us/davinci-deqm/StructureDefinition/summary-measurereport-deqm",
+    individual: "http://hl7.org/fhir/us/davinci-deqm/StructureDefinition/indv-measurereport-deqm",
+  },
 } as const;
+type Guide = (typeof GUIDES)[keyof typeof GUIDES];
 
 /**
  * A fixed generation timestamp and fixed period, so two runs of this script differ only where the
@@ -125,22 +137,30 @@ const officialOutcome = {
 
 interface Case {
   name: string;
-  profile: string;
+  shape: "summary" | "individual";
   /** Why this case is in the set — printed, so the sample is legible rather than arbitrary. */
   why: string;
   report: MeasureReport;
 }
 
+/** CMS137's three age strata in each of its two rates, with the artifact's own stratifier ids. */
+const cms137Strata = [1, 2].map((g) => [1, 2, 3].map((k) => ({
+  id: `Stratification_${g}_${k}`,
+  inStratum: { ipp: 15, denom: 15, denex: 1, numer: 6, denexcep: 0 },
+  notInStratum: { ipp: 30, denom: 30, denex: 2, numer: 10, denexcep: 0 },
+})));
+
 /**
- * The four report shapes a receiver can actually be handed. Both provenance paths are here on purpose:
- * an official-routed report and an authored one, which ADR-046 makes structurally different in `measure`
- * and `improvementNotation`. cms122 is included because its official numerator is INVERSE, so it is the
- * one report whose `improvementNotation` is `decrease`.
+ * The report shapes a receiver can actually be handed. Every provenance path is here on purpose: CMS's
+ * artifact, a WorkWell translation and an authored measure, which ADR-046 makes structurally different in
+ * `measure` and `improvementNotation`. cms122 is included because its official numerator is INVERSE, so it
+ * is the one report whose `improvementNotation` is `decrease`; cms137 for two rates and their strata; cms68
+ * because it declares an exception and no exclusion.
  */
 const cases = (): Case[] => [
   {
     name: "summary-official-cms125",
-    profile: PROFILE.summary,
+    shape: "summary",
     why: "the routed, proportion-scored summary a receiver would aggregate",
     report: buildSummaryMeasureReportFromCounts(
       run, "cms125", { ipp: 150, denom: 150, denex: 47, numer: 2, denexcep: 0 }, GENERATED_AT, officialIdentity,
@@ -148,7 +168,7 @@ const cases = (): Case[] => [
   },
   {
     name: "summary-official-cms122-inverse",
-    profile: PROFILE.summary,
+    shape: "summary",
     why: "the INVERSE measure — improvementNotation 'decrease' (ADR-046)",
     report: buildSummaryMeasureReportFromCounts(
       run, "cms122",
@@ -159,15 +179,45 @@ const cases = (): Case[] => [
   },
   {
     name: "summary-authored-audiogram",
-    profile: PROFILE.summary,
+    shape: "summary",
     why: "the AUTHORED path — urn:workwell:measure, which ADR-046 d3 keeps deliberately local",
     report: buildSummaryMeasureReportFromCounts(
       run, "audiogram", { ipp: 10, denom: 10, denex: 1, numer: 6, denexcep: 0 }, GENERATED_AT, null,
     ),
   },
   {
+    name: "summary-official-cms137-multirate-stratified",
+    shape: "summary",
+    why: "two rates (Group_1/Group_2), three strata each — where the linkIds and deqm-7 apply",
+    report: buildSummaryMeasureReportFromCounts(
+      run, "cms137",
+      [{ ipp: 45, denom: 45, denex: 3, numer: 20, denexcep: 0 }, { ipp: 45, denom: 45, denex: 3, numer: 12, denexcep: 0 }],
+      GENERATED_AT,
+      { version: "1.0.000", ecqmId: "CMS137FHIR" } as unknown as Parameters<typeof buildSummaryMeasureReportFromCounts>[4],
+      cms137Strata,
+    ),
+  },
+  {
+    name: "summary-official-cms68-exception",
+    shape: "summary",
+    why: "declares a denominator exception and no exclusion — the report states exactly those populations",
+    report: buildSummaryMeasureReportFromCounts(
+      run, "cms68", { ipp: 19, denom: 19, denex: 0, numer: 12, denexcep: 2 }, GENERATED_AT,
+      { version: "1.0.000", ecqmId: "CMS68FHIR" } as unknown as Parameters<typeof buildSummaryMeasureReportFromCounts>[4],
+    ),
+  },
+  {
+    name: "summary-derived-cms122",
+    shape: "summary",
+    why: "a WorkWell translation — its own urn canonical and version, never CMS's (LOCKED §4.3)",
+    report: buildSummaryMeasureReportFromCounts(
+      run, "cms122", { ipp: 64, denom: 64, denex: 32, numer: 31, denexcep: 0 }, GENERATED_AT,
+      { kind: "derived", url: "urn:workwell:measure:cms122:translation", version: "ww-2027.1" } as unknown as Parameters<typeof buildSummaryMeasureReportFromCounts>[4],
+    ),
+  },
+  {
     name: "individual-official-cms125",
-    profile: PROFILE.individual,
+    shape: "individual",
     why: "one subject's membership — the QRDA Category I analogue",
     report: buildIndividualMeasureReport(officialOutcome, run, "cms125", GENERATED_AT),
   },
@@ -220,11 +270,14 @@ function main(): void {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const jar = arg("--validator");
-  if (!jar) {
-    console.error("usage: tsx scripts/deqm-validate.ts --validator <validator_cli.jar> [--out <dir>] [--json]");
+  const guideName = arg("--ig") ?? "uv";
+  if (!jar || !(guideName in GUIDES)) {
+    console.error("usage: tsx scripts/deqm-validate.ts --validator <validator_cli.jar> [--ig uv|us] [--out <dir>] [--json]");
     console.error("get the jar: https://github.com/hapifhir/org.hl7.fhir.core/releases/latest/download/validator_cli.jar");
     process.exit(2);
   }
+  const guide: Guide = GUIDES[guideName as keyof typeof GUIDES];
+  const DEQM_IG = guide.ig;
   const out = arg("--out") ?? join(process.cwd(), ".deqm-validate");
   mkdirSync(out, { recursive: true });
 
@@ -252,12 +305,13 @@ function main(): void {
     // Run 1 — base R4. The floor: this must stay at 0 errors whatever DEQM says.
     const base = validate(jar, file, []);
     // Run 2 — the DEQM profile, requested explicitly. A GAP measurement, not a claim.
-    const deqm = validate(jar, file, ["-ig", DEQM_IG, "-profile", c.profile]);
+    const profile = guide[c.shape];
+    const deqm = validate(jar, file, ["-ig", DEQM_IG, "-profile", profile]);
     if (deqm.packages.length) packages = deqm.packages;
 
     const errs = (is: Issue[]) => is.filter((i) => i.severity === "error" || i.severity === "fatal");
     results.push({
-      case: c.name, why: c.why, profile: c.profile,
+      case: c.name, why: c.why, profile,
       base: { errors: errs(base.issues).length, issues: base.issues },
       deqm: { errors: errs(deqm.issues).length, issues: deqm.issues },
     });
@@ -281,7 +335,7 @@ function main(): void {
   const uscore = packages.find((p) => p.startsWith("hl7.fhir.us.core"));
   if (qicore || uscore) {
     console.log(`resolved quality stack: ${[qicore, uscore].filter(Boolean).join(", ")}`);
-    console.log("  ^ the published stack DEQM STU5 binds — see ROADMAP_2026-08-04 §6 correction 2");
+    console.log(`  ^ the published stack ${DEQM_IG} binds — see ROADMAP_2026-08-04 §6 correction 2`);
   }
 
   let deqmTotal = 0;
