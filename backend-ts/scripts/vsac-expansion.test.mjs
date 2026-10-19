@@ -21,6 +21,7 @@ import {
   expandFromVsac,
   limitConcurrency,
   officialRestoreDecision,
+  readPinnedFromDir,
   IncompleteExpansionError,
   oidFromValueSetUrl,
   sortValueSets,
@@ -1070,5 +1071,24 @@ describe("officialRestoreDecision (an official re-vendor VSAC moved, 2026-10-15)
     assert.equal(officialRestoreDecision({ committedManifestText: text(manifest()), regeneratedManifestText: text(manifest()), imageSidecarText: SIDECAR }).restore, false);
     assert.equal(officialRestoreDecision({ committedManifestText: text(manifest()), regeneratedManifestText: moved, imageSidecarText: undefined }).restore, false);
     assert.equal(officialRestoreDecision({ committedManifestText: null, regeneratedManifestText: moved, imageSidecarText: SIDECAR }).restore, false);
+  });
+});
+
+describe("readPinnedFromDir (D17: a directory of copies named by their pin)", () => {
+  const HEX = "ab".repeat(32);
+  it("reads <dir>/<hex>.json for a well-formed pin", () => {
+    const asked = [];
+    const text = readPinnedFromDir("/store", `sha256:${HEX}`, (path) => {
+      asked.push(path.replace(/\\/g, "/"));
+      return "{}";
+    });
+    assert.equal(text, "{}");
+    assert.deepEqual(asked, [`/store/${HEX}.json`]);
+  });
+  it("refuses a missing or malformed pin before touching the directory", () => {
+    const never = () => assert.fail("read the directory");
+    for (const pin of [undefined, "", `md5:${HEX}`, `sha256:${HEX.slice(1)}`, `sha256:../${HEX}`]) {
+      assert.throws(() => readPinnedFromDir("/store", pin, never), /no usable terminology pin/);
+    }
   });
 });

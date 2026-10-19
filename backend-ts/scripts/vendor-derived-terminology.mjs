@@ -65,6 +65,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   copyFileFromImage,
+  readPinnedFromDir,
   DEFAULT_VSAC_BASE,
   declaredValueSets,
   expandAtRelease,
@@ -84,7 +85,7 @@ const VSAC_VALUESET_CANONICAL = "http://cts.nlm.nih.gov/fhir/ValueSet/";
 const SIDECAR = "terminology.json";
 
 const USAGE =
-  "usage: --catalog-id <id> [--verify-pin [--fallback-image <ref>]] [--vsac-base <url>] [--output-dir <dir>]\n" +
+  "usage: --catalog-id <id> [--verify-pin [--fallback-image <ref> | --fallback-dir <dir>]] [--vsac-base <url>] [--output-dir <dir>]\n" +
   "       --catalog-id <id> --emit-block --base-terminology <path> --vsac-manifest <canonical>" +
   " [--vsac-base <url>] [--output-dir <dir>]";
 
@@ -113,15 +114,19 @@ function parseArgs(argv) {
     else if (flag === "--vsac-base") args.vsacBase = valueOf(flag, argv[++i]);
     else if (flag === "--output-dir") args.outputDir = resolve(valueOf(flag, argv[++i]));
     else if (flag === "--fallback-image") args.fallbackImage = valueOf(flag, argv[++i]);
+    else if (flag === "--fallback-dir") args.fallbackDir = resolve(valueOf(flag, argv[++i]));
     else throw new UsageError(`unknown argument: ${flag}\n${USAGE}`);
   }
   if (!args.catalogId) throw new UsageError(USAGE);
   if (!/^[a-z0-9]+$/.test(args.catalogId)) {
     throw new UsageError(`--catalog-id must be lowercase alphanumeric (got "${args.catalogId}")`);
   }
-  if (args.fallbackImage !== undefined && (args.emitBlock || !args.verifyPin)) {
+  if ((args.fallbackImage !== undefined || args.fallbackDir !== undefined) && (args.emitBlock || !args.verifyPin)) {
     // Only where the pin decides: emit mode produces a pin, and verify without --verify-pin decides nothing.
-    throw new UsageError("--fallback-image is accepted only with --verify-pin, where the pin judges the copied bytes");
+    throw new UsageError("--fallback-image and --fallback-dir are accepted only with --verify-pin, where the pin judges the copied bytes");
+  }
+  if (args.fallbackImage !== undefined && args.fallbackDir !== undefined) {
+    throw new UsageError("--fallback-image and --fallback-dir are two sources of the same copy; pass one");
   }
   if (args.emitBlock) {
     if (args.verifyPin) {
@@ -380,11 +385,14 @@ function restoreFromImage(args, { fs, out, err, extract }) {
   const bundle = readJson(fs, join(args.outputDir, "bundle.json"), "the translation's bundle.json");
   const manifest = readJson(fs, join(args.outputDir, "manifest.json"), "the translation's manifest.json");
   const pinned = manifest.terminology?.sha256;
+  const from = args.fallbackDir ?? args.fallbackImage;
   let text;
   try {
-    text = extract(args.fallbackImage, imageSidecarPath(args.catalogId));
+    text = args.fallbackDir
+      ? readPinnedFromDir(args.fallbackDir, pinned, (path) => fs.readFileSync(path, "utf8"))
+      : extract(args.fallbackImage, imageSidecarPath(args.catalogId));
   } catch (cause) {
-    err(`  ERROR ${args.catalogId}: no sidecar could be copied from ${args.fallbackImage}: ${String(cause.message).split("\n")[0]}\n`);
+    err(`  ERROR ${args.catalogId}: no sidecar could be copied from ${from}: ${String(cause.message).split("\n")[0]}\n`);
     return 1;
   }
   let problems;
@@ -394,15 +402,15 @@ function restoreFromImage(args, { fs, out, err, extract }) {
     problems = [`it is not a sidecar: ${cause.message}`];
   }
   if (problems.length > 0) {
-    for (const problem of problems) err(`  ERROR ${args.catalogId}: the copy from ${args.fallbackImage}: ${problem}\n`);
+    for (const problem of problems) err(`  ERROR ${args.catalogId}: the copy from ${from}: ${problem}\n`);
     return 1;
   }
   fs.writeFileSync(join(args.outputDir, SIDECAR), text);
   err(
-    `  WARNING ${args.catalogId}: VSAC did not reproduce the pinned sidecar; restored it from ${args.fallbackImage}` +
+    `  WARNING ${args.catalogId}: VSAC did not reproduce the pinned sidecar; restored it from ${from}` +
       " (it matches the manifest pin byte for byte)\n",
   );
-  out(`  ${args.catalogId} translation terminology restored from ${args.fallbackImage}; matches the manifest pin\n`);
+  out(`  ${args.catalogId} translation terminology restored from ${from}; matches the manifest pin\n`);
   return 0;
 }
 
@@ -433,7 +441,7 @@ export async function main(argv, deps = {}) {
     err(`  ERROR ${args.catalogId}: ${cause.message}\n`);
     code = 1;
   }
-  if (code === 1 && args.fallbackImage) {
+  if (code === 1 && (args.fallbackImage || args.fallbackDir)) {
     try {
       return restoreFromImage(args, { fs, out, err, extract: deps.extractFromImage ?? copyFileFromImage });
     } catch (cause) {
