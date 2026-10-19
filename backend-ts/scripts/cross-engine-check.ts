@@ -156,36 +156,45 @@ async function main(): Promise<void> {
       valueSets: Array<{ url: string; codes: Array<{ system: string; code: string }> }>;
     };
     let replaced = 0;
+    let created = 0;
     for (const vs of sidecar.valueSets) {
       const found = (await (await fetch(`${server}/ValueSet?url=${encodeURIComponent(vs.url)}`)).json()) as {
         entry?: Array<{ resource: Record<string, unknown> }>;
       };
       const existing = found.entry?.[0]?.resource;
-      if (!existing) continue;
-      const body = {
-        ...existing,
-        expansion: {
-          timestamp: "2026-01-01T00:00:00Z",
-          total: vs.codes.length,
-          contains: vs.codes.map((c) => ({ system: c.system, code: c.code })),
-        },
+      const expansion = {
+        timestamp: "2026-01-01T00:00:00Z",
+        total: vs.codes.length,
+        contains: vs.codes.map((c) => ({ system: c.system, code: c.code })),
       };
-      const put = await fetch(`${server}/ValueSet/${String(existing.id)}`, {
+      // A value set the upstream bundle does not ship at all (CMS138's `…3.526.3.1278`, which the MADiE gate
+      // supplements from the sidecar, ADR-053) is CREATED, under its OID as the id, so the second engine
+      // reads the same set our engine does rather than the sweep refusing for a value set it cannot replace.
+      const id = existing ? String(existing.id) : vs.url.split("/").pop() ?? "";
+      if (!/^[A-Za-z0-9\-.]{1,64}$/.test(id)) continue;
+      const body = existing ? { ...existing, expansion } : { resourceType: "ValueSet", id, url: vs.url, status: "active", expansion };
+      const put = await fetch(`${server}/ValueSet/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/fhir+json" },
         body: JSON.stringify(body),
       });
-      if (put.ok) replaced++;
+      if (!put.ok) continue;
+      if (existing) replaced++;
+      else created++;
     }
     // stderr, not stdout: with --json this line would otherwise sit in front of the document and
     // make the output unparseable — which it did, silently, until a consumer tried to read it.
-    console.error(`loaded completed terminology: ${replaced}/${sidecar.valueSets.length} value sets replaced`);
+    console.error(
+      `loaded completed terminology: ${replaced + created}/${sidecar.valueSets.length} value sets ` +
+        `(${replaced} replaced, ${created} created because the bundle does not ship them)`,
+    );
+    const loaded = replaced + created;
     // ALL or nothing. The entire purpose of this flag is that both engines read identical codes, so a
     // 31/32 load silently reintroduces the ambiguity it exists to remove — a disagreement could then be
     // terminology rather than engine, and we would attribute it to the engine (Codex, #393).
-    if (replaced !== sidecar.valueSets.length) {
+    if (loaded !== sidecar.valueSets.length) {
       console.error(
-        `FAIL: ${sidecar.valueSets.length - replaced} of ${sidecar.valueSets.length} value sets did not load.\n` +
+        `FAIL: ${sidecar.valueSets.length - loaded} of ${sidecar.valueSets.length} value sets did not load.\n` +
           `Partial terminology makes an engine comparison unattributable — a difference could be either.\n` +
           `Is the measure bundle loaded on this server?`,
       );
