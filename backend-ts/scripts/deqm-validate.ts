@@ -228,9 +228,11 @@ interface Issue { severity: string; expression: string; text: string; constraint
 /** `deqm-0`, `deqm-3`, `dom-6` … — the key is what a regression test cites, so pull it out explicitly. */
 const CONSTRAINT = /Constraint failed: ([A-Za-z][A-Za-z0-9-]*)\b/;
 
-function validate(jar: string, file: string, args: string[]): { issues: Issue[]; packages: string[] } {
+function validate(jar: string, file: string, run: "base" | "deqm", args: string[]): { issues: Issue[]; packages: string[] } {
   let raw: string;
-  const outcomeFile = `${file}.outcome.json`;
+  // One outcome file per run: with one shared path the DEQM run overwrote the base run's, so a base error
+  // left nothing to read it from.
+  const outcomeFile = `${file}.${run}.outcome.json`;
   try {
     raw = execFileSync(
       "java",
@@ -302,11 +304,14 @@ function main(): void {
       : c.report;
     writeFileSync(file, JSON.stringify(report, null, 2));
 
-    // Run 1 — base R4. The floor: this must stay at 0 errors whatever DEQM says.
-    const base = validate(jar, file, []);
+    // Run 1 — base R4. The floor: this must stay at 0 errors whatever DEQM says. DEQM 1.0.0's package is
+    // loaded for its DEFINITIONS only, because the reports carry its scoring extension and a validator that
+    // cannot resolve an hl7.org extension reports it as an error. No `-profile`, so nothing is checked
+    // against a DEQM profile here, whichever guide `--ig` measures below.
+    const base = validate(jar, file, "base", ["-ig", GUIDES.uv.ig]);
     // Run 2 — the DEQM profile, requested explicitly. A GAP measurement, not a claim.
     const profile = guide[c.shape];
-    const deqm = validate(jar, file, ["-ig", DEQM_IG, "-profile", profile]);
+    const deqm = validate(jar, file, "deqm", ["-ig", DEQM_IG, "-profile", profile]);
     if (deqm.packages.length) packages = deqm.packages;
 
     const errs = (is: Issue[]) => is.filter((i) => i.severity === "error" || i.severity === "fatal");
@@ -343,6 +348,9 @@ function main(): void {
     deqmTotal += r.deqm.errors;
     console.log(`\n── ${r.case}  (${r.why})`);
     console.log(`   base R4      : ${r.base.errors} error(s)`);
+    for (const i of r.base.issues.filter((x) => x.severity === "error" || x.severity === "fatal")) {
+      console.log(`     ! ${i.expression}: ${i.text.split("\n")[0]}`);
+    }
     console.log(`   DEQM profile : ${r.deqm.errors} error(s)   [${r.profile.split("/").pop()}]`);
     for (const i of r.deqm.issues.filter((x) => x.severity === "error" || x.severity === "fatal")) {
       console.log(`     - ${i.constraint ? `[${i.constraint}] ` : ""}${i.expression}: ${i.text.split("\n")[0]}`);
