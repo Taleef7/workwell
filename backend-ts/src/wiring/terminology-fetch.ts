@@ -188,30 +188,54 @@ export async function fetchSidecars(
   const timeoutMs = opts.perObjectTimeoutMs ?? PER_OBJECT_TIMEOUT_MS;
   const attempts = opts.attempts ?? ATTEMPTS;
   const backoff = opts.backoffMs ?? BACKOFF_MS;
-  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms).unref?.()));
-  /** One read: the text, `null` for a 404, or the reason it failed (retried by the caller). */
-  const readOnce = async (key: string): Promise<{ text: string | null } | { failed: "timedOut" | "readFailed"; err: unknown }> => {
+  // Referenced timers, on purpose: this runs before the host listens, so an unreferenced backoff would be the
+  // only pending work and Node would exit mid-retry (Codex on #842).
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  type Failed = { failed: "timedOut" | "readFailed"; err: unknown; pending?: Promise<unknown> };
+  /** One read: the text, `null` for a 404, or why it failed; a timed-out read hands back the read still running. */
+  const readOnce = async (key: string): Promise<{ text: string | null } | Failed> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<"timeout">((resolve) => {
       timer = setTimeout(() => resolve("timeout"), timeoutMs);
-      timer.unref?.();
     });
+    const read = (async () => {
+      const object = await bucket.get(key);
+      return object ? Buffer.from(await object.arrayBuffer()).toString("utf8") : null;
+    })();
     try {
-      const read = (async () => {
-        const object = await bucket.get(key);
-        return object ? Buffer.from(await object.arrayBuffer()).toString("utf8") : null;
-      })();
       const text = await Promise.race([read, timedOut]);
-      return text === "timeout" ? { failed: "timedOut", err: Object.assign(new Error("timed out"), { code: "TIMEOUT" }) } : { text };
+      return text === "timeout"
+        ? { failed: "timedOut", err: Object.assign(new Error("timed out"), { code: "TIMEOUT" }), pending: read.catch(() => undefined) }
+        : { text };
     } catch (err) {
       return { failed: "readFailed", err };
     } finally {
       clearTimeout(timer);
     }
   };
+  /**
+   * The client cannot abort a read, so a timed-out one is waited for (one more bound) before anything else
+   * starts: retries and the next sidecar must not pile reads onto a struggling connection (Codex on #842).
+   * A read that outlives that too means the connection is stuck, and the rest of the fetch is abandoned.
+   */
+  let stuck = false;
+  const settle = async (pending: Promise<unknown>): Promise<boolean> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      pending.then(() => "settled" as const),
+      new Promise<"stuck">((resolve) => {
+        timer = setTimeout(() => resolve("stuck"), timeoutMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    return outcome === "settled";
+  };
   const fetchOne = async (target: SidecarTarget) => {
     const key = `${TERMINOLOGY_PREFIX}${PIN.exec(target.sha256)![1]}.json`;
-    let last: { failed: "timedOut" | "readFailed"; err: unknown } | null = null;
+    if (stuck) {
+      return miss(target, "timedOut", `${key} not attempted: an earlier read never finished, so the connection is stuck`);
+    }
+    let last: Failed | null = null;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (attempt > 0) {
         report.retries += 1;
@@ -221,6 +245,10 @@ export async function fetchSidecars(
       if ("failed" in got) {
         noteCode(got.err);
         last = got;
+        if (got.pending && !(await settle(got.pending))) {
+          stuck = true;
+          break;
+        }
         continue;
       }
       if (got.text === null) return miss(target, "notInBucket", `${key} is not in the bucket`);
@@ -235,7 +263,7 @@ export async function fetchSidecars(
       return;
     }
     if (last) {
-      miss(target, last.failed, `${key} could not be read after ${attempts} attempts: ${last.failed === "timedOut" ? `no answer within ${timeoutMs} ms` : message(last.err)}`);
+      miss(target, last.failed, `${key} could not be read${stuck ? " (the read never finished)" : ` after ${attempts} attempts`}: ${last.failed === "timedOut" ? `no answer within ${timeoutMs} ms` : message(last.err)}`);
     }
   };
   const queue = [...missing];

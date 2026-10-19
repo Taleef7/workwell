@@ -192,3 +192,39 @@ test("after the last attempt, a read failure is reported once with its code", as
   assert.deepEqual(report.errorCodes, { http503: 4 }, "four attempts, each counted");
   assert.match(report.problems.join(), /after 4 attempts/);
 });
+
+test("a timed-out read is waited for before a retry starts, so reads never overlap", async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let calls = 0;
+  const deps: FetchDeps = {
+    bucket: async () => ({
+      get: async () => {
+        calls += 1;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        // The first read outlives the 20 ms bound but finishes within the next one; later reads are quick.
+        await new Promise((r) => setTimeout(r, calls === 1 ? 30 : 1));
+        inFlight -= 1;
+        return { arrayBuffer: async () => new TextEncoder().encode(GOOD).buffer } as never;
+      },
+    }) as never,
+    exists: () => false, read: () => "", write: () => {},
+  };
+  const report = await fetchSidecars([target("/p"), { ...target("/q"), catalogId: "cms2" }], deps, { perObjectTimeoutMs: 20, sleep: async () => {} });
+  assert.equal(maxInFlight, 1, "never two reads at once");
+  assert.equal(report.fetched.length, 2);
+  assert.deepEqual(report.errorCodes, { TIMEOUT: 1 });
+});
+
+test("a read that never finishes stops the fetch instead of piling more reads onto the connection", async () => {
+  let calls = 0;
+  const deps: FetchDeps = {
+    bucket: async () => ({ get: () => { calls += 1; return new Promise(() => {}) as never; } }) as never,
+    exists: () => false, read: () => "", write: () => {},
+  };
+  const report = await fetchSidecars([target("/p"), { ...target("/q"), catalogId: "cms2" }], deps, { perObjectTimeoutMs: 10, sleep: async () => {} });
+  assert.equal(calls, 1, "no retry and no next read while the first is still hung");
+  assert.equal(report.failures.timedOut, 2);
+  assert.match(report.problems.join(), /connection is stuck/);
+});
