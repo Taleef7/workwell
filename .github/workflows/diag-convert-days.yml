@@ -1,4 +1,4 @@
-name: Diagnose DEQM 1.0.0 gap (temporary)
+name: Diagnose translation library conformance (temporary)
 on:
   push:
     branches: [diag/convert-days]
@@ -31,25 +31,21 @@ jobs:
         run: |
           curl -sSL -o "$RUNNER_TEMP/validator_cli.jar" https://github.com/hapifhir/org.hl7.fhir.core/releases/latest/download/validator_cli.jar
           java -jar "$RUNNER_TEMP/validator_cli.jar" -version 2>&1 | head -3 || true
-      - name: Against Da Vinci DEQM STU5 (the documented baseline)
-        run: pnpm exec tsx scripts/deqm-validate.ts --validator "$RUNNER_TEMP/validator_cli.jar" --out "$RUNNER_TEMP/stu5" | grep -v "^\s*$"
-      - name: Against DEQM 1.0.0 (UV)
-        env:
-          DEQM_IG: hl7.fhir.uv.deqm#1.0.0
-          DEQM_P: http://hl7.org/fhir/uv/deqm/StructureDefinition
-          DEQM_SUMMARY: deqm-summarymeasurereport
-          DEQM_INDIVIDUAL: deqm-individualmeasurereport
-        run: pnpm exec tsx scripts/deqm-validate.ts --validator "$RUNNER_TEMP/validator_cli.jar" --out "$RUNNER_TEMP/uv1" | grep -v "^\s*$"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: deqm-validate
-          path: |
-            ${{ runner.temp }}/stu5
-            ${{ runner.temp }}/uv1
-      - name: CMS's own MADiE deck report against DEQM 1.0.0 (comparison)
+      - name: Extract CMS122 Library + Measure (upstream full, our vendored, our translation)
         run: |
           pwsh -NoProfile -File scripts/fetch-official-cases.ps1 >/dev/null 2>&1 || true
-          R=$(ls .official-content/input/tests/measure/CMS137FHIRSUDTxInitEngagement/*/MeasureReport*.json | head -1)
-          echo "file: $R"
-          java -jar "$RUNNER_TEMP/validator_cli.jar" "$R" -version 4.0.1 -ig hl7.fhir.uv.deqm#1.0.0 -profile http://hl7.org/fhir/uv/deqm/StructureDefinition/deqm-individualmeasurereport 2>&1 | grep -E "^\s*(Error|Warning) @|^(Success|\*FAILURE\*)" | sed -E 's/\(from [^)]*\)//; s/Note that other slices.*//; s/\[[0-9]+\]/[n]/g' | sort | uniq -c | sort -rn | head -25
+          mkdir -p "$RUNNER_TEMP/lib"
+          node -e '
+            const fs=require("fs");const out=process.argv[1];
+            const src={upstream:".official-content/bundles/measure/CMS122FHIRDiabetesAssessGT9Pct/CMS122FHIRDiabetesAssessGT9Pct-bundle.json",vendored:"measures/official/cms122/bundle.json",translation:"measures/derived/cms122/bundle.json"};
+            for(const [k,p] of Object.entries(src)){const b=JSON.parse(fs.readFileSync(p,"utf8"));const rs=b.entry.map(e=>e.resource);
+              const M=rs.find(r=>r.resourceType==="Measure");const L=rs.find(r=>r.resourceType==="Library"&&(M.library||[]).some(u=>u.split("|")[0]===r.url));
+              for(const [t,r] of [["Library",L],["Measure",M]]){fs.writeFileSync(`${out}/${k}-${t}.json`,JSON.stringify(r));console.log(k,t,r.url,r.version,(r.content||[]).map(c=>c.contentType).join(","));}}' "$RUNNER_TEMP/lib"
+      - name: Validate against the profiles each resource claims
+        run: |
+          for f in "$RUNNER_TEMP"/lib/*.json; do
+            echo "=================== $(basename "$f")"
+            java -jar "$RUNNER_TEMP/validator_cli.jar" "$f" -version 4.0.1 -ig hl7.fhir.uv.crmi -ig hl7.fhir.uv.cql -ig hl7.fhir.us.cqfmeasures -tx n/a 2>&1 \
+              | grep -E "^\s*(Error|Warning) @|^(Success|\*FAILURE\*)|Package Summary" \
+              | sed -E 's/\(line [0-9]+, col[0-9]+\)//; s/\[[0-9]+\]/[n]/g' | sort | uniq -c | sort -rn | head -30
+          done
