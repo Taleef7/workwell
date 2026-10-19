@@ -5,22 +5,6 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
-## 2026-10-18
-
-- **The licensed code lists leave the published images.** Every backend image carried the VSAC
-  `terminology.json` files (AMA CPT and SNOMED CT codes), and the image package hands anonymous pull
-  tokens to anyone, so every deploy republished them. Each deploy now stores its stack's copies in that
-  stack's private evidence bucket under `terminology/<sha256>.json`, builds the image without them, checks
-  the image holds none, and only then pushes it. The backend fetches them at boot and keeps only bytes
-  that hash to the committed pin; a routed measure's list that cannot be fetched is a `/health` problem,
-  as a missing file always was. When VSAC no longer reproduces a pin, deploys restore it from their
-  bucket and CI from Maui's, in one step that alone holds the key (an Actions cache was ruled out: fork
-  pull requests can read one). Left: delete the old image versions that still carry the files (owner's
-  OK), then tell MIE the exposure and its fix date.
-- **A push deploy waits for CI on its own commit.** CI and both deploys started on the same merge, so a
-  commit whose tests failed was already deploying. The deploys now wait for that commit's CI run and stop
-  unless it passed; a manual dispatch is the urgent-fix override.
-
 ## 2026-10-17
 
 - **No routed measure reaches a year without its logic, and a January rerun verifies the case's own year.**

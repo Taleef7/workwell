@@ -60,23 +60,12 @@ Plain `node`, no install; retries transport errors and 5xx, a 4xx is final. With
 fidelity diff silently degrades from `literal` to `subset`/`estimate`, and a routed measure refuses.
 Locally: `pnpm vendor:official --measure <MADiE name> --catalog-id <id> --strip-elm-annotations`.
 
-**Never in an image (D17).** The image package is anonymously pullable, so a sidecar in an image is
-redistributed. The build context excludes them (`backend-ts/Dockerfile.dockerignore`). After vendoring,
-`.github/scripts/terminology-store.sh` stores each one in the stack's private evidence bucket as
-`terminology/<sha256>.json` (the manifest's pin). The image is built locally, checked to hold no
-sidecar (`assert-clean`), and only then pushed. At boot, before it listens, the backend fetches every
-vendored sidecar from that bucket and keeps only bytes that hash to the pin
-(`src/wiring/terminology-fetch.ts`). A routed measure's sidecar that cannot be fetched logs
-`WORKWELL_ALERT TERMINOLOGY_FETCH_FAILED` and shows on `/health` as a routing problem, the same as a
-missing file always did. Copies are named by content, so an older image's sidecars stay fetchable after a
-newer deploy; **never delete the bucket's `terminology/` objects**, or a rollback boots without them.
-
 Maui also vendors the sidecar of each WorkWell translation it routes (`measures/derived/<id>/`), one line
 per id, before `docker build`:
 
 ```bash
-node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
-node scripts/vendor-derived-terminology.mjs --catalog-id cms130 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
+node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
+node scripts/vendor-derived-terminology.mjs --catalog-id cms130 --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
 ```
 
 Every value set is re-expanded from VSAC at the release the committed manifest names. `--verify-pin`
@@ -91,18 +80,15 @@ translation declaring it failed its pin). Two defences:
 - each pure grouping is also expanded member by member at the release; when that differs from VSAC's
   grouping answer the members win, which is the release, and the log says `WARNING … differs from its
   members` with the codes;
-- `--fallback-dir` restores the stack's stored copy (pulled from its bucket before vendoring; CI pulls
-  Maui's in one step that alone holds the bucket key) when VSAC still does not reproduce the pin or
-  cannot be reached, and the same pin check judges the copy. Until the old images that carry sidecars are
-  deleted, the restore step also seeds copies from the last deployed image. The log says `WARNING … restored
+- `--fallback-image` copies the sidecar out of the last deployed image when VSAC still does not reproduce
+  the pin or cannot be reached, and the same pin check judges the copy. The log says `WARNING … restored
   it from`. A deploy that needed it is fine to ship; a translation whose pin changed has no older copy,
   so it still needs VSAC.
 - `--emit-block` (producing a NEW pin) REFUSES when a grouping and its members disagree: the members are
   the release at `ecqm-update-2026-05-14` (checked against its published file) but not at every release,
   so a pin is never produced over a disagreement without checking the published value-set file.
 
-On Maui the registry login runs before the restore step, so its seed from the last image works even if
-the package is made private.
+The registry login runs before vendoring so the image stays pullable if the package is made private.
 
 #### Step 1a — `--complete-terminology`: value sets the bundle does not fully carry (ADR-041, ADR-053)
 
@@ -113,9 +99,9 @@ content names (old name `--complete-capped-expansions` still accepted).
 - **`WORKWELL_VSAC_API_KEY_VENDOR` missing, or VSAC unreachable** ⇒ capped codes ship, the manifest no
   longer matches the committed one, and **the deploy fails at the reproducibility gate**. So every
   deploy needs NLM VSAC reachable: any post-ADR-041 SHA, forward *or* rollback, fails during an outage.
-- **VSAC moved a completed set (2026-10-15)** ⇒ every deploy and CI line passes `--fallback-dir
-  "$RUNNER_TEMP/terminology"`. When the re-vendored manifest differs from the committed
-  one in its `terminology` block ALONE, and the stored copy hashes to the committed pin, the committed
+- **VSAC moved a completed set (2026-10-15)** ⇒ every deploy and CI line passes `--fallback-image
+  ghcr.io/taleef7/workwell-api-ts:maui-latest`. When the re-vendored manifest differs from the committed
+  one in its `terminology` block ALONE, and the image's sidecar hashes to the committed pin, the committed
   manifest and that sidecar are put back (`WARNING … restored the committed manifest`). Anything else
   stands and the gate fails as before. Member-by-member expansion is NOT used here: at
   `ecqm-fhir-update-2025` a grouping's members disagree with both VSAC's answer and the release.

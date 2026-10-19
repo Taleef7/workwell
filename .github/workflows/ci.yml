@@ -63,12 +63,6 @@ jobs:
       # workflows run only after merge, so the choice, and that every build uses it, is tested here.
       - name: A deploy build survives a registry refusing its base image
         run: bash .github/scripts/pull-base-image.test.sh
-      # D17: the deploys store the licensed terminology in the stack's bucket and push only an image without it.
-      - name: No image carries the licensed terminology
-        run: bash .github/scripts/terminology-store.test.sh
-      # D4: a push deploy waits for CI on its own commit and stops unless it passed.
-      - name: A deploy ships only a commit whose CI passed
-        run: bash .github/scripts/wait-for-ci.test.sh
       - name: Every workflow run-block parses as shell
         run: bash .github/scripts/workflow-run-blocks.test.sh
 
@@ -347,30 +341,6 @@ jobs:
       # unconditionally there would regenerate the capped manifests while Git records the completed
       # ones, and the reproducibility check below would then fail every Dependabot run for a reason
       # that has nothing to do with its change. So the step reports whether it ran credentialed, and the check adapts.
-      # D17: no image carries the sidecars any more, so when VSAC no longer reproduces a pin the copy comes from
-      # the Maui evidence bucket, where the Maui deploy stores each one under its pin (`--fallback-dir`; the pin
-      # check judges every copy). The bucket key is scoped to this one step, as the VSAC key is, and a fork pull
-      # request never receives it. Not an Actions cache: other runs in this public repo, fork PRs included, can
-      # restore one, and these are licensed expansions. Best effort: VSAC may reproduce every pin anyway.
-      - name: Restore the terminology copies (Maui bucket)
-        env:
-          TERMINOLOGY_BUCKET: workwell-evidence-maui
-          AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_MAUI }}
-          AWS_DEFAULT_REGION: auto
-          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-          TERMINOLOGY_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
-        run: |
-          if [ -n "$AWS_ACCESS_KEY_ID" ]; then
-            bash "$GITHUB_WORKSPACE/.github/scripts/terminology-store.sh" pull "$RUNNER_TEMP/terminology"
-          else
-            echo "::notice::No bucket credential in this context (Dependabot); only the image seed below can restore a sidecar."
-          fi
-          # Until the first deploys fill the bucket, the last deployed image (which still carries sidecars)
-          # seeds the copies, so a VSAC drift on the merge commit's own CI cannot block the deploy that would
-          # fill the bucket. A no-op once the bucket's copies are restored.
-          bash "$GITHUB_WORKSPACE/.github/scripts/terminology-store.sh" seed "$RUNNER_TEMP/terminology" ghcr.io/taleef7/workwell-api-ts:maui-latest
       - name: Vendor official terminology (the runtime's own expansions, same pin)
         id: vendor
         env:
@@ -378,9 +348,9 @@ jobs:
         run: |
           if [ -n "$WORKWELL_VSAC_API_KEY" ]; then
             echo "credentialed=true" >> "$GITHUB_OUTPUT"
-            # A completed value set VSAC has since moved is restored from the bucket's copy, judged by the
-            # committed pin (vendor-official-measure.mjs --fallback-dir).
-            COMPLETE="--complete-terminology --fallback-dir $RUNNER_TEMP/terminology"
+            # A completed value set VSAC has since moved is restored from the last deployed image, judged by the
+            # committed pin (vendor-official-measure.mjs --fallback-image).
+            COMPLETE="--complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest"
           else
             echo "credentialed=false" >> "$GITHUB_OUTPUT"
             COMPLETE=
@@ -443,9 +413,9 @@ jobs:
         run: |
           n=0
           for id in $TRANSLATIONS; do
-            # As the deploy does: a sidecar VSAC no longer reproduces is restored from the bucket's copy,
-            # and judged by the same pin.
-            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
+            # As the deploy does: a sidecar VSAC no longer reproduces is restored from the last deployed
+            # image, and judged by the same pin.
+            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
             n=$((n + 1))
           done
           if [ "$n" -eq 0 ]; then
@@ -818,30 +788,6 @@ jobs:
       # workflow runs in this PUBLIC repo, including a fork pull request whose code we do not control.
       # Re-vendoring costs about a minute; putting licensed expansions somewhere fork-authored code can
       # read them is not worth a minute.
-      # D17: no image carries the sidecars any more, so when VSAC no longer reproduces a pin the copy comes from
-      # the Maui evidence bucket, where the Maui deploy stores each one under its pin (`--fallback-dir`; the pin
-      # check judges every copy). The bucket key is scoped to this one step, as the VSAC key is, and a fork pull
-      # request never receives it. Not an Actions cache: other runs in this public repo, fork PRs included, can
-      # restore one, and these are licensed expansions. Best effort: VSAC may reproduce every pin anyway.
-      - name: Restore the terminology copies (Maui bucket)
-        env:
-          TERMINOLOGY_BUCKET: workwell-evidence-maui
-          AWS_ACCESS_KEY_ID: ${{ secrets.WORKWELL_BUCKET_S3_ACCESS_KEY_ID_MAUI }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.WORKWELL_BUCKET_S3_SECRET_ACCESS_KEY_MAUI }}
-          AWS_DEFAULT_REGION: auto
-          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-          TERMINOLOGY_ENDPOINT: ${{ secrets.WORKWELL_R2_S3_ENDPOINT }}
-        run: |
-          if [ -n "$AWS_ACCESS_KEY_ID" ]; then
-            bash "$GITHUB_WORKSPACE/.github/scripts/terminology-store.sh" pull "$RUNNER_TEMP/terminology"
-          else
-            echo "::notice::No bucket credential in this context (Dependabot); only the image seed below can restore a sidecar."
-          fi
-          # Until the first deploys fill the bucket, the last deployed image (which still carries sidecars)
-          # seeds the copies, so a VSAC drift on the merge commit's own CI cannot block the deploy that would
-          # fill the bucket. A no-op once the bucket's copies are restored.
-          bash "$GITHUB_WORKSPACE/.github/scripts/terminology-store.sh" seed "$RUNNER_TEMP/terminology" ghcr.io/taleef7/workwell-api-ts:maui-latest
       - name: Vendor each routed measure's terminology, completed from VSAC
         working-directory: backend-ts
         env:
@@ -856,7 +802,7 @@ jobs:
           for id in "${MEASURES[@]}"; do
             NAME="$(pnpm exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${id}') ?? '')")"
             if [ -z "$NAME" ]; then echo "::error::${id} is not an official measure id"; exit 1; fi
-            pnpm vendor:official --measure "$NAME" --catalog-id "$id" --strip-elm-annotations --complete-terminology --fallback-dir "$RUNNER_TEMP/terminology"
+            pnpm vendor:official --measure "$NAME" --catalog-id "$id" --strip-elm-annotations --complete-terminology --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
             TRUNCATED=$(jq -r '.terminology.truncated | length' "measures/official/${id}/manifest.json")
             if [ "$TRUNCATED" != "0" ]; then
               echo "::error::${id}'s vendored terminology still reports ${TRUNCATED} TRUNCATED expansion(s) — refusing to run the suite against capped expansions."
@@ -868,7 +814,7 @@ jobs:
           # hash to that pin, so the suite never boots a translation the router would refuse.
           IFS=',' read -ra TRANSLATIONS <<< "$ROUTED_TRANSLATIONS"
           for id in "${TRANSLATIONS[@]}"; do
-            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
+            node scripts/vendor-derived-terminology.mjs --catalog-id "$id" --verify-pin --fallback-image ghcr.io/taleef7/workwell-api-ts:maui-latest
           done
       # Only the gitignored sidecars may be new; the committed artifacts must still match their pins.
       - name: The committed artifacts are reproducible from their pins

@@ -112,7 +112,6 @@ import {
   DEFAULT_VSAC_MANIFEST,
   completeTerminology,
   copyFileFromImage,
-  readPinnedFromDir,
   declaredValueSets,
   flattenExpansion,
   officialRestoreDecision,
@@ -165,7 +164,6 @@ function parseArgs(argv) {
     else if (flag === "--content-dir") args.contentDir = resolve(argv[++i]);
     else if (flag === "--output-dir") args.outputDir = resolve(argv[++i]);
     else if (flag === "--fallback-image") args.fallbackImage = argv[++i];
-    else if (flag === "--fallback-dir") args.fallbackDir = resolve(argv[++i]);
     else throw new Error(`unknown argument: ${flag}`);
   }
   if (args.testsOnly && args.withTests) throw new Error("--tests-only and --with-tests are mutually exclusive");
@@ -584,20 +582,14 @@ if (args.withTests) {
 // differs and the image holds a sidecar hashing to the committed pin, the committed manifest and that
 // sidecar are put back (`officialRestoreDecision` decides; it is tested directly). Anything else stands,
 // and the gate fails on it as before.
-//
-// `--fallback-dir <dir>` (D17) is the same second line from a directory of copies named by their pin (the
-// deploy's copy of its stack's bucket, or CI's build cache): images no longer carry sidecars.
-if (args.fallbackImage || args.fallbackDir) {
-  const fallbackFrom = args.fallbackDir ?? args.fallbackImage;
+if (args.fallbackImage) {
   let imageSidecarText;
   try {
-    imageSidecarText = args.fallbackDir
-      ? readPinnedFromDir(args.fallbackDir, committedManifestText === null ? undefined : JSON.parse(committedManifestText).terminology?.sha256)
-      : copyFileFromImage(args.fallbackImage, `/app/backend-ts/measures/official/${args.catalogId}/terminology.json`);
+    imageSidecarText = copyFileFromImage(args.fallbackImage, `/app/backend-ts/measures/official/${args.catalogId}/terminology.json`);
   } catch (cause) {
     imageSidecarText = undefined;
     if (committedManifestText !== null && committedManifestText !== readFileSync(join(outDir, "manifest.json"), "utf8")) {
-      console.warn(`  WARNING could not copy ${args.catalogId}'s sidecar from ${fallbackFrom}: ${String(cause.message).split("\n")[0]}`);
+      console.warn(`  WARNING could not copy ${args.catalogId}'s sidecar from ${args.fallbackImage}: ${String(cause.message).split("\n")[0]}`);
     }
   }
   const decision = officialRestoreDecision({
@@ -610,10 +602,10 @@ if (args.fallbackImage || args.fallbackDir) {
     writeFileSync(join(outDir, "manifest.json"), committedManifestText);
     console.warn(
       `  WARNING ${args.catalogId}: VSAC no longer reproduces the committed terminology pin; restored the committed` +
-        ` manifest and the pinned sidecar from ${fallbackFrom} (the summary below describes the re-vendor that was discarded)`,
+        ` manifest and the pinned sidecar from ${args.fallbackImage} (the summary below describes the re-vendor that was discarded)`,
     );
   } else if (committedManifestText !== null && committedManifestText !== readFileSync(join(outDir, "manifest.json"), "utf8")) {
-    console.warn(`  NOTE ${args.catalogId}: not restored from ${fallbackFrom}: ${decision.reason}`);
+    console.warn(`  NOTE ${args.catalogId}: not restored from ${args.fallbackImage}: ${decision.reason}`);
   }
 }
 

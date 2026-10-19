@@ -44,28 +44,6 @@ async function main(): Promise<void> {
     await import("@mieweb/cloud-os" as string);
   }
 
-  // D17: the licensed terminology sidecars are not in the image; the routed measures' ones come from the
-  // stack's bucket before the first request runs the routing check that reads them. Bounded, so a bucket
-  // that never answers delays the listener by a minute at most; a sidecar still missing then is reported
-  // by that check (`/health` problems) exactly as an absent file always was.
-  {
-    const { fetchRoutedTerminologyAtBoot } = await import("./wiring/terminology-fetch.ts");
-    let timer: NodeJS.Timeout | undefined;
-    await Promise.race([
-      fetchRoutedTerminologyAtBoot(process.env).catch((err) =>
-        console.error(`WORKWELL_ALERT ${JSON.stringify({ kind: "TERMINOLOGY_FETCH_FAILED", problems: [String((err as Error)?.message ?? err).split("\n")[0]] })}`),
-      ),
-      new Promise((resolve) => {
-        timer = setTimeout(() => {
-          console.error(`WORKWELL_ALERT ${JSON.stringify({ kind: "TERMINOLOGY_FETCH_FAILED", problems: ["timed out after 60 s"] })}`);
-          resolve(undefined);
-        }, 60_000);
-        timer.unref();
-      }),
-    ]);
-    clearTimeout(timer);
-  }
-
   const host = await startLocalHost({ config });
   console.log(`[workwell] backend-ts host listening on :${host.port} (target=${target})`);
 

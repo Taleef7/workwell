@@ -52,8 +52,3 @@ backend-ts/.env.*
 backend-ts/**/*.tsbuildinfo
 backend-ts/dist
 backend-ts/build
-
-# D17: the terminology sidecars carry licensed AMA CPT and SNOMED CT codes and the image package is
-# anonymously pullable, so they never enter an image. The deploy stores them in the stack's private bucket
-# and the backend fetches them at boot (src/wiring/terminology-fetch.ts).
-backend-ts/measures/**/terminology.json

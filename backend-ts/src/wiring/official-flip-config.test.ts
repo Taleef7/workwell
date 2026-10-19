@@ -542,10 +542,9 @@ function jobLines(yaml: string, job: string): string[] {
 
 /**
  * The one form of a translation vendor line that fails a deploy: an explicit id, `--verify-pin`, and at
- * most one fallback source, `--fallback-dir <dir>` or `--fallback-image <ref>` (whose copy the same pin check
- * judges), nothing after.
+ * most a `--fallback-image <ref>` (whose copy the same pin check judges), nothing after.
  */
-const VENDOR_TRANSLATION = /^\s*node scripts\/vendor-derived-terminology\.mjs --catalog-id ([a-z0-9]+) --verify-pin(?: --fallback-(?:dir|image) \S+)?\s*$/;
+const VENDOR_TRANSLATION = /^\s*node scripts\/vendor-derived-terminology\.mjs --catalog-id ([a-z0-9]+) --verify-pin(?: --fallback-image \S+)?\s*$/;
 /** The image build, as a build-push-action step or a `docker build` / `docker buildx build` command. */
 const IMAGE_BUILD = /^\s*-?\s*uses:\s*docker\/build-push-action@|\bdocker\s+(?:buildx\s+)?build\b/;
 
@@ -671,8 +670,6 @@ test("the vendor reader keeps to one job, refuses a fail-soft line, and finds th
   assert.equal(read(workflow(run, "          node scripts/vendor-derived-terminology.mjs --catalog-id cms137", image)).unread.length, 1, "no --verify-pin");
   assert.deepEqual(read(workflow(run, vendor(" --fallback-image ghcr.io/x/y:maui-latest"), image)).vendored.map((v) => v.id), ["cms137"], "a fallback image is read");
   assert.deepEqual(read(workflow(run, vendor(" --fallback-image ghcr.io/x/y:maui-latest || true"), image)).unread.length, 1, "a fallback line made fail-soft is not");
-  assert.deepEqual(read(workflow(run, vendor(' --fallback-dir "$RUNNER_TEMP/terminology"'), image)).vendored.map((v) => v.id), ["cms137"], "a fallback directory is read");
-  assert.deepEqual(read(workflow(run, vendor(' --fallback-dir "$RUNNER_TEMP/terminology" || true'), image)).unread.length, 1, "and is not fail-soft either");
   const cli = read(workflow(run, vendor(), "          docker buildx build ."));
   assert.ok(cli.build > cli.vendored[0]!.line, "a docker build command counts as the build");
   assert.equal(read(workflow(run, vendor())).build, -1, "no build in the job");
