@@ -118,21 +118,23 @@ test("a slow object times out without holding the others back, and each miss is 
     write: (path, text) => { written[path] = text; },
   };
   const targets = [target("/slow", '{"slow":1}'), target("/fast", fast), target("/absent", '{"absent":1}'), target("/bad", '{"bad":1}')];
-  const report = await fetchSidecars(targets, deps, { perObjectTimeoutMs: 20, concurrency: 2 });
+  const report = await fetchSidecars(targets, deps, { perObjectTimeoutMs: 20, concurrency: 2, attempts: 1 });
   assert.deepEqual(Object.keys(written), ["/fast"], "the fast one arrived although a slow one never did");
-  assert.deepEqual(report.failures, { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 1, timedOut: 1, readFailed: 0 });
+  assert.deepEqual(report.failures, { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 1, timedOut: 1, readFailed: 0, writeFailed: 0 });
   assert.equal(report.problems.length, 3);
 });
 
 test("the published health is counts only, and the boot step records it before and after, then re-checks routing", async () => {
   const { fetchRoutedTerminologyAtBoot, terminologyHealthOf } = await import("./terminology-fetch.ts");
   const health = terminologyHealthOf([target("/a"), { ...target("/b", GOOD, false), catalogId: "cms2" }], {
-    present: [], fetched: ["official/cms1"], problems: [], notes: ["x"], durationMs: 12,
-    failures: { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 0, timedOut: 0, readFailed: 0 },
+    present: [], fetched: ["official/cms1"], problems: [], notes: ["x"], durationMs: 12, retries: 2,
+    failures: { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 0, timedOut: 0, readFailed: 0, writeFailed: 0 },
+    errorCodes: { ECONNRESET: 2 },
   }, true);
   assert.deepEqual(health, {
     finished: true, durationMs: 12, required: 1, fetched: 1, alreadyPresent: 0, missingRequired: 0, missingOptional: 1,
-    failures: { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 0, timedOut: 0, readFailed: 0 },
+    failures: { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 0, timedOut: 0, readFailed: 0, writeFailed: 0 },
+    errorCodes: { ECONNRESET: 2 }, retries: 2,
   });
   assert.doesNotMatch(JSON.stringify(health), /terminology\/|official\/cms|sha256/, "no key, label or pin is published");
 
@@ -146,4 +148,83 @@ test("the published health is counts only, and the boot step records it before a
   );
   assert.deepEqual(recorded, [false, true], "recorded as running, then as finished");
   assert.equal(rechecked, 1, "the routing check is re-run once the fetch is done");
+});
+
+test("a read that fails is retried with backoff, and every failed attempt's code is counted, never its message", async () => {
+  let calls = 0;
+  const slept: number[] = [];
+  const written: Record<string, string> = {};
+  const deps: FetchDeps = {
+    bucket: async () => ({
+      get: async () => {
+        calls += 1;
+        if (calls <= 2) throw Object.assign(new Error("socket hang up at https://acct123.r2.example"), { code: "ECONNRESET" });
+        return { arrayBuffer: async () => new TextEncoder().encode(GOOD).buffer } as never;
+      },
+    }) as never,
+    exists: () => false,
+    read: () => "",
+    write: (path, text) => { written[path] = text; },
+  };
+  const report = await fetchSidecars([target("/p")], deps, { sleep: async (ms) => { slept.push(ms); } });
+  assert.deepEqual(report.fetched, ["official/cms1"], "the third attempt succeeded");
+  assert.equal(report.retries, 2);
+  assert.deepEqual(slept, [1000, 2000], "backs off between attempts");
+  assert.deepEqual(report.errorCodes, { ECONNRESET: 2 });
+  assert.doesNotMatch(JSON.stringify(report.errorCodes), /acct123|socket/, "a code, never the message");
+});
+
+test("a sidecar read but not writable is a write failure, not a read failure", async () => {
+  const { deps } = harness({}, { [keyOf(GOOD)]: GOOD });
+  deps.write = () => { throw Object.assign(new Error("read-only file system"), { code: "EROFS" }); };
+  const report = await fetchSidecars([target("/p")], deps, { sleep: async () => {} });
+  assert.deepEqual({ write: report.failures.writeFailed, read: report.failures.readFailed }, { write: 1, read: 0 });
+  assert.deepEqual(report.errorCodes, { EROFS: 1 });
+});
+
+test("after the last attempt, a read failure is reported once with its code", async () => {
+  const deps: FetchDeps = {
+    bucket: async () => ({ get: async () => { throw Object.assign(new Error("nope"), { $metadata: { httpStatusCode: 503 } }); } }) as never,
+    exists: () => false, read: () => "", write: () => {},
+  };
+  const report = await fetchSidecars([target("/p")], deps, { sleep: async () => {} });
+  assert.equal(report.failures.readFailed, 1);
+  assert.deepEqual(report.errorCodes, { http503: 4 }, "four attempts, each counted");
+  assert.match(report.problems.join(), /after 4 attempts/);
+});
+
+test("a timed-out read is waited for before a retry starts, so reads never overlap", async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  let calls = 0;
+  const deps: FetchDeps = {
+    bucket: async () => ({
+      get: async () => {
+        calls += 1;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        // The first read outlives the 20 ms bound but finishes within the next one; later reads are quick.
+        await new Promise((r) => setTimeout(r, calls === 1 ? 30 : 1));
+        inFlight -= 1;
+        return { arrayBuffer: async () => new TextEncoder().encode(GOOD).buffer } as never;
+      },
+    }) as never,
+    exists: () => false, read: () => "", write: () => {},
+  };
+  const report = await fetchSidecars([target("/p"), { ...target("/q"), catalogId: "cms2" }], deps, { perObjectTimeoutMs: 20, sleep: async () => {} });
+  assert.equal(maxInFlight, 1, "never two reads at once");
+  assert.equal(report.fetched.length, 2);
+  assert.deepEqual(report.errorCodes, { TIMEOUT: 1 });
+});
+
+test("a read that never finishes stops the fetch instead of piling more reads onto the connection", async () => {
+  let calls = 0;
+  const deps: FetchDeps = {
+    bucket: async () => ({ get: () => { calls += 1; return new Promise(() => {}) as never; } }) as never,
+    exists: () => false, read: () => "", write: () => {},
+  };
+  const report = await fetchSidecars([target("/p"), { ...target("/q"), catalogId: "cms2" }], deps, { perObjectTimeoutMs: 10, sleep: async () => {} });
+  assert.equal(calls, 1, "no retry and no next read while the first is still hung");
+  assert.equal(report.failures.timedOut, 2);
+  assert.match(report.problems.join(), /connection is stuck/);
 });

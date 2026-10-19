@@ -535,13 +535,16 @@ export interface TerminologyHealth {
   alreadyPresent: number;
   missingRequired: number;
   missingOptional: number;
-  failures: { bucketUnavailable: number; notInBucket: number; hashMismatch: number; timedOut: number; readFailed: number };
+  failures: { bucketUnavailable: number; notInBucket: number; hashMismatch: number; timedOut: number; readFailed: number; writeFailed: number };
+  /** Failed attempts by error code (`ECONNRESET`, `EACCES`, `http503`, a class name): never a message. */
+  errorCodes: Record<string, number>;
+  retries: number;
 }
 
 let terminology: TerminologyHealth | null = null;
 
 export function recordTerminologyHealth(value: TerminologyHealth): void {
-  terminology = { ...value, failures: { ...value.failures } };
+  terminology = { ...value, failures: { ...value.failures }, errorCodes: { ...value.errorCodes } };
 }
 
 /** The public `/health` view: counts, timings and the routed measure ids only (see WHAT IS PUBLIC above). */
