@@ -1,0 +1,56 @@
+name: Diagnose Java convert-to-days (temporary)
+on:
+  push:
+    branches: [diag/convert-days]
+permissions:
+  contents: read
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        measure: [cms2, cms122, cms125, cms130]
+        image: ["v8.10.0-3", "v8.12.0-2"]
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+      - name: Vendor terminology, completed from VSAC
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          NAME="$(pnpm exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${{ matrix.measure }}') ?? '')")"
+          pnpm vendor:official --measure "$NAME" --catalog-id "${{ matrix.measure }}" --strip-elm-annotations --with-tests --complete-terminology
+      - name: Sweep
+        env:
+          HAPI_IMAGE: hapiproject/hapi:${{ matrix.image }}
+        run: |
+          bash scripts/cross-engine-sweep.sh "${{ matrix.measure }}" --keep -- --json > "$RUNNER_TEMP/r.json" || true
+          echo "engine versions in the image log:"; docker logs hapi-cr 2>&1 | grep -oiE "(clinical[- ]reasoning|cqf-fhir|cql-engine|cql)[^ ]*[ :]*v?[0-9]+\.[0-9]+\.[0-9]+[^ ]*" | sort -u | head -8 || true
+          docker exec hapi-cr sh -c 'ls /app 2>/dev/null; find / -name "*.jar" 2>/dev/null | grep -iE "cqf-fhir-cr|engine-fhir|cql-engine|elm-fhir|cqf-fhir-utility" | head -10' 2>/dev/null || true
+          docker rm -f hapi-cr >/dev/null 2>&1 || true
+          f="$RUNNER_TEMP/r.json"
+          echo "RESULT ${{ matrix.measure }} @ ${{ matrix.image }}: agree $(jq '[.results[]|select(.agrees)]|length' "$f")/$(jq '.results|length' "$f"), errors $(jq '[.results[]|select(.error!=null or .java==null)]|length' "$f")"
+          echo "DISAGREE: $(jq -r '[.results[]|select(.agrees|not)|.case[0:8]]|join(",")' "$f")"
+          mkdir -p ../diag-out && cp "$f" "../diag-out/${{ matrix.measure }}-${{ matrix.image }}.json"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: convert-days-${{ matrix.measure }}-${{ matrix.image }}
+          path: diag-out/
