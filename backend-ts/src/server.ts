@@ -45,25 +45,29 @@ async function main(): Promise<void> {
   }
 
   // D17: the licensed terminology sidecars are not in the image; the routed measures' ones come from the
-  // stack's bucket before the first request runs the routing check that reads them. Bounded, so a bucket
-  // that never answers delays the listener by a minute at most; a sidecar still missing then is reported
-  // by that check (`/health` problems) exactly as an absent file always was.
+  // stack's bucket before the first request runs the routing check that reads them. The listener waits for
+  // the fetch up to TERMINOLOGY_BOOT_WAIT_MS; a fetch still running then keeps going in the background and,
+  // when it finishes, re-records the routing check, so `/health` reports what the files on disk support
+  // rather than a snapshot taken before they arrived. Its progress is on `/health` as counts (`terminology`).
   {
     const { fetchRoutedTerminologyAtBoot } = await import("./wiring/terminology-fetch.ts");
+    const waitMs = Number(process.env.WORKWELL_TERMINOLOGY_BOOT_WAIT_MS ?? "") || 180_000;
+    const fetching = fetchRoutedTerminologyAtBoot(process.env).catch((err) => {
+      console.error(`WORKWELL_ALERT ${JSON.stringify({ kind: "TERMINOLOGY_FETCH_FAILED", problems: [String((err as Error)?.message ?? err).split("\n")[0]] })}`);
+      return null;
+    });
     let timer: NodeJS.Timeout | undefined;
-    await Promise.race([
-      fetchRoutedTerminologyAtBoot(process.env).catch((err) =>
-        console.error(`WORKWELL_ALERT ${JSON.stringify({ kind: "TERMINOLOGY_FETCH_FAILED", problems: [String((err as Error)?.message ?? err).split("\n")[0]] })}`),
-      ),
-      new Promise((resolve) => {
-        timer = setTimeout(() => {
-          console.error(`WORKWELL_ALERT ${JSON.stringify({ kind: "TERMINOLOGY_FETCH_FAILED", problems: ["timed out after 60 s"] })}`);
-          resolve(undefined);
-        }, 60_000);
+    const outcome = await Promise.race([
+      fetching.then(() => "done" as const),
+      new Promise<"waiting">((resolve) => {
+        timer = setTimeout(() => resolve("waiting"), waitMs);
         timer.unref();
       }),
     ]);
     clearTimeout(timer);
+    if (outcome === "waiting") {
+      console.error(`WORKWELL_ALERT ${JSON.stringify({ kind: "TERMINOLOGY_FETCH_SLOW", problems: [`still running after ${waitMs} ms; listening anyway`] })}`);
+    }
   }
 
   const host = await startLocalHost({ config });

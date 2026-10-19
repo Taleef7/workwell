@@ -44,8 +44,16 @@ verify_routing_health() {
       problems="$(printf '%s' "$body" | jq_raw '.routing.problems')"
       official="$(canonical_ids "$(printf '%s' "$body" | jq_raw '.routing.official | join(",")')")"
       derived="$(canonical_ids "$(printf '%s' "$body" | jq_raw '.routing.derived | join(",")')")"
+      # The boot terminology fetch's counts (D17), when the image fetches any: which way it went (still
+      # running, timed out, not in the bucket, wrong pin), without needing the container log.
+      local fetch
+      fetch="$(printf '%s' "$body" | jq -c '.terminology // empty' 2>/dev/null || true)"
+      if [ "$problems" != "0" ] && printf '%s' "$body" | jq -e '.terminology.finished == false' > /dev/null 2>&1; then
+        # Not final yet: the fetch re-records the routing check when it finishes.
+        [ "$attempt" -lt "$attempts" ] && { sleep "$delay"; continue; }
+      fi
       if [ "$problems" != "0" ]; then
-        echo "::error::build ${sha} reports ${problems} routing problem(s): the router refuses its routing (grep the container log for OFFICIAL_ROUTING_MISCONFIGURED)" >&2
+        echo "::error::build ${sha} reports ${problems} routing problem(s): the router refuses its routing (grep the container log for OFFICIAL_ROUTING_MISCONFIGURED)${fetch:+; terminology fetch: ${fetch}}" >&2
         return 1
       fi
       if [ "$official" != "$want_official" ] || [ "$derived" != "$want_derived" ]; then

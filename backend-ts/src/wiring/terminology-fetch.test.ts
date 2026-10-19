@@ -100,3 +100,50 @@ test("a boot fetches every vendored CMS artifact's sidecar (required when routed
     "nothing routed: every vendored sidecar is optional",
   );
 });
+
+test("a slow object times out without holding the others back, and each miss is counted by kind", async () => {
+  const fast = '{"fast":true}';
+  const objects: Record<string, string> = { [keyOf(fast)]: fast, [keyOf('{"bad":1}')]: '{"tampered":1}' };
+  const written: Record<string, string> = {};
+  const deps: FetchDeps = {
+    bucket: async () => ({
+      get: async (key: string) => {
+        if (key === keyOf('{"slow":1}')) return new Promise(() => {}) as never; // never answers
+        const text = objects[key];
+        return text === undefined ? null : ({ arrayBuffer: async () => new TextEncoder().encode(text).buffer } as never);
+      },
+    }) as never,
+    exists: () => false,
+    read: () => "",
+    write: (path, text) => { written[path] = text; },
+  };
+  const targets = [target("/slow", '{"slow":1}'), target("/fast", fast), target("/absent", '{"absent":1}'), target("/bad", '{"bad":1}')];
+  const report = await fetchSidecars(targets, deps, { perObjectTimeoutMs: 20, concurrency: 2 });
+  assert.deepEqual(Object.keys(written), ["/fast"], "the fast one arrived although a slow one never did");
+  assert.deepEqual(report.failures, { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 1, timedOut: 1, readFailed: 0 });
+  assert.equal(report.problems.length, 3);
+});
+
+test("the published health is counts only, and the boot step records it before and after, then re-checks routing", async () => {
+  const { fetchRoutedTerminologyAtBoot, terminologyHealthOf } = await import("./terminology-fetch.ts");
+  const health = terminologyHealthOf([target("/a"), { ...target("/b", GOOD, false), catalogId: "cms2" }], {
+    present: [], fetched: ["official/cms1"], problems: [], notes: ["x"], durationMs: 12,
+    failures: { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 0, timedOut: 0, readFailed: 0 },
+  }, true);
+  assert.deepEqual(health, {
+    finished: true, durationMs: 12, required: 1, fetched: 1, alreadyPresent: 0, missingRequired: 0, missingOptional: 1,
+    failures: { bucketUnavailable: 0, notInBucket: 1, hashMismatch: 0, timedOut: 0, readFailed: 0 },
+  });
+  assert.doesNotMatch(JSON.stringify(health), /terminology\/|official\/cms|sha256/, "no key, label or pin is published");
+
+  const recorded: boolean[] = [];
+  let rechecked = 0;
+  const { deps } = harness({}, {});
+  await fetchRoutedTerminologyAtBoot(
+    { WORKWELL_OFFICIAL_MEASURES: "cms122" },
+    { record: (h) => recorded.push(h.finished), refreshRouting: () => { rechecked += 1; return 0; } },
+    deps,
+  );
+  assert.deepEqual(recorded, [false, true], "recorded as running, then as finished");
+  assert.equal(rechecked, 1, "the routing check is re-run once the fetch is done");
+});
