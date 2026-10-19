@@ -12,8 +12,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   change a result. Measured: a CMS165 onset entered the population under Tokyo time and not under UTC.
   - Every entry point now imports `src/engine/utc.ts` first: the server, the dev worker, the calculation
     thread, every CLI and every top-level script. A test refuses one that does not.
-  - The image sets `TZ=UTC`, the test runner and CI are pinned, and the authored engine states offset 0
-    itself.
+  - The image sets `TZ=UTC`, and the test runner and CI are pinned.
+  - The published measure-engine package keeps evaluating in its caller's zone. Its patient data takes that
+    zone too, and fixing the period alone would split them (Codex review).
   - `/health` reports the zone, and the deploy gate refuses a build whose offset is not 0.
   - A guard runs every committed bundle's QICoreCommon on our engine: a resolved Condition with no
     abatement is never prevalent. On cql-execution 4.0.0-beta.1 the same check fails, which is the
