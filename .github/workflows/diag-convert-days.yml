@@ -47,3 +47,9 @@ jobs:
           path: |
             ${{ runner.temp }}/stu5
             ${{ runner.temp }}/uv1
+      - name: CMS's own MADiE deck report against DEQM 1.0.0 (comparison)
+        run: |
+          pwsh -NoProfile -File scripts/fetch-official-cases.ps1 >/dev/null 2>&1 || true
+          R=$(ls .official-content/input/tests/measure/CMS137FHIRSUDTxInitEngagement/*/MeasureReport*.json | head -1)
+          echo "file: $R"
+          java -jar "$RUNNER_TEMP/validator_cli.jar" "$R" -version 4.0.1 -ig hl7.fhir.uv.deqm#1.0.0 -profile http://hl7.org/fhir/uv/deqm/StructureDefinition/deqm-individualmeasurereport 2>&1 | grep -E "^\s*(Error|Warning) @|^(Success|\*FAILURE\*)" | sed -E 's/\(from [^)]*\)//; s/Note that other slices.*//; s/\[[0-9]+\]/[n]/g' | sort | uniq -c | sort -rn | head -25

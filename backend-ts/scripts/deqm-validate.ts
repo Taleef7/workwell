@@ -173,8 +173,8 @@ const cases = (): Case[] => [
       [{ ipp: 45, denom: 45, denex: 3, numer: 20, denexcep: 0 }, { ipp: 45, denom: 45, denex: 3, numer: 12, denexcep: 0 }],
       GENERATED_AT,
       { measureUrl: "https://madie.cms.gov/Measure/CMS137FHIRSUDTxInitEngagement", version: "1.0.000", ecqmId: "137FHIR" } as unknown as Parameters<typeof buildSummaryMeasureReportFromCounts>[4],
-      [0, 1].map(() => ["Stratification_1", "Stratification_2", "Stratification_3"].map((id) => ({
-        id,
+      [1, 2].map((g) => [1, 2, 3].map((k) => ({
+        id: `Stratification_${g}_${k}`,
         inStratum: { ipp: 15, denom: 15, denex: 1, numer: 6, denexcep: 0 },
         notInStratum: { ipp: 30, denom: 30, denex: 2, numer: 10, denexcep: 0 },
       }))),
