@@ -552,7 +552,7 @@ test("a translation's report links to its OWN artifact's ids, and only when the 
   });
   const mr = buildSummaryMeasureReport(run, "cms122", [derivedOc(translation.manifest.url)], GENERATED_AT);
   assert.equal(mr.measure, `${translation.manifest.url}|${translation.manifest.version}`);
-  assert.ok(!mr.measure.includes("madie.cms.gov"), "never CMS's canonical (LOCKED §4.3)");
+  assert.ok(mr.measure.startsWith("urn:workwell:"), "a translation reports under a WorkWell urn, never CMS's canonical (LOCKED §4.3)");
   assert.equal(linkOf("group", mr.group[0]!), "Group_1");
   assert.equal(linkOf("group.population", mr.group[0]!.population[0]!), "InitialPopulation_1");
   // Evidence naming a different translation (a later year's, say) gets no ids from this one.
