@@ -4,13 +4,16 @@
  * An entry point is anything a person or a container runs directly:
  * - the server, the dev worker and the official-calculation thread;
  * - every `*-bin.ts` / `bin.ts` CLI;
- * - every top-level `scripts/*.ts`.
+ * - every top-level `scripts/*.ts`;
+ * - every `.mjs` under `scripts/` or `spike/` that imports an evaluation engine (fqm-execution,
+ *   cql-execution, cql-exec-fhir, the official executor or the measure engine), for example the parity and
+ *   cost-curve scripts and the published-package check. Node 24 loads the `.ts` pin under plain `node`
+ *   (type stripping), so these import the same pin.
  *
- * They are found by rule, not listed, so a new CLI cannot skip the pin by being new. ESM evaluates imports
- * in order, so "first" is what guarantees the pin runs before anything reads a date.
- *
- * Plain `.mjs` scripts run under bare `node` and cannot import a `.ts` file. None of them evaluates a
- * measure, and the image's `TZ=UTC` covers them in a container.
+ * They are found by rule, not listed, so a new CLI or script cannot skip the pin by being new. ESM evaluates
+ * imports in order, so "first" is what guarantees the pin runs before anything reads a date. `.mjs` scripts
+ * that evaluate nothing (vendoring, packaging) are not entry points for this purpose; the image's `TZ=UTC`
+ * covers them in a container anyway.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -39,7 +42,14 @@ function entryPoints(): string[] {
   const topLevelScripts = readdirSync(join(backendRoot, "scripts"))
     .filter((n) => n.endsWith(".ts") && !n.endsWith(".test.ts"))
     .map((n) => join(backendRoot, "scripts", n));
-  const all = new Set([...FIXED.map((f) => join(backendRoot, f)), ...bins, ...topLevelScripts]);
+  // A `.mjs` script counts when it imports an evaluation engine, judged by its import specifiers, so a new
+  // measure-running script is caught without anyone remembering to list it.
+  const ENGINE_IMPORT = /(?:from|import\()\s*["'][^"']*(?:fqm-execution|cql-execution|cql-exec-fhir|official-executor|measure-engine)[^"']*["']/;
+  const evaluatingScripts = walk(join(backendRoot, "scripts"))
+    .concat(walk(join(backendRoot, "spike")))
+    .filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs"))
+    .filter((f) => ENGINE_IMPORT.test(readFileSync(f, "utf8")));
+  const all = new Set([...FIXED.map((f) => join(backendRoot, f)), ...bins, ...topLevelScripts, ...evaluatingScripts]);
   return [...all].map((f) => relative(backendRoot, f).split(sep).join("/")).sort();
 }
 
@@ -53,10 +63,10 @@ function firstImport(source: string): string | null {
 test("#845: every entry point imports the UTC pin first", () => {
   const files = entryPoints();
   // Non-vacuity: the rule must find the entry points we know exist, or it is checking nothing.
-  for (const known of ["src/server.ts", "src/run/cli/official-cases-bin.ts", "scripts/cql-tests/bin.ts", "scripts/cross-engine-check.ts"]) {
+  for (const known of ["src/server.ts", "src/run/cli/official-cases-bin.ts", "scripts/cql-tests/bin.ts", "scripts/cross-engine-check.ts", "spike/parity.mjs", "scripts/batch-cost-curve.mjs"]) {
     assert.ok(files.includes(known), `the discovery rule must find ${known}`);
   }
-  assert.ok(files.length >= 27, `expected at least 27 entry points, found ${files.length}`);
+  assert.ok(files.length >= 32, `expected at least 32 entry points, found ${files.length}`);
 
   const wrong: string[] = [];
   for (const rel of files) {

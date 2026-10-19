@@ -13,6 +13,7 @@
  *   node --import tsx scripts/batch-cost-curve.mjs
  *   WORKWELL_CURVE_SIZES=25,100,500 WORKWELL_CURVE_MEASURE=cms122 node --import tsx scripts/batch-cost-curve.mjs
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { corpusDirectory } from "../src/engine/synthetic/corpus/corpus-directory.ts";
 import { DEFAULT_CORPUS_SEED } from "../src/engine/synthetic/corpus/corpus-parameters.ts";
 import { corpusBundleSource } from "../src/wiring/corpus-bundle-source.ts";
