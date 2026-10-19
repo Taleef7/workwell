@@ -42,24 +42,21 @@ jobs:
             const fs=require("fs");const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));let n=0;
             for(const e of b.entry){const r=e.resource;if(r.resourceType==="Condition"&&typeof r.onsetDateTime==="string"&&r.onsetDateTime.startsWith("2026-06-30T23:59:59.000")){r.onsetDateTime=r.onsetDateTime.replace("23:59:59.000","12:00:00.000");n++;}}
             fs.writeFileSync(process.argv[2],JSON.stringify(b));console.log("onsets moved:",n);' "$B" "$RUNNER_TEMP/cms165-mutated.json"
-      - name: "A: baseline (period sent as dates)"
-        run: bash scripts/cross-engine-sweep.sh cms165 -- --json > "$RUNNER_TEMP/A.json" || true
-      - name: "B: no period parameters (the library's own millisecond default)"
-        env:
-          CROSS_ENGINE_NO_PERIOD: "1"
-        run: bash scripts/cross-engine-sweep.sh cms165 -- --json > "$RUNNER_TEMP/B.json" || true
-      - name: "C: mutated onsets, period sent as dates"
-        run: bash scripts/cross-engine-sweep.sh cms165 --bundle "$RUNNER_TEMP/cms165-mutated.json" -- --json > "$RUNNER_TEMP/C.json" || true
-      - name: Summary
+      - name: "D: keep the server, then read the raw report for case 45e01fed"
         run: |
-          echo "image: $HAPI_IMAGE"
-          for r in A B C; do
-            f="$RUNNER_TEMP/$r.json"
-            echo "== $r: agree $(jq '[.results[]|select(.agrees)]|length' "$f")/$(jq '.results|length' "$f"), errors $(jq '[.results[]|select(.error!=null or .java==null)]|length' "$f"), java period $(jq -c '.javaPeriod' "$f")"
+          bash scripts/cross-engine-sweep.sh cms165 --keep -- --json > "$RUNNER_TEMP/D.json" || true
+          P=45e01fed-56bb-483d-a860-af3d566bda11
+          mkdir -p ../diag-out
+          for q in "periodStart=2026-01-01&periodEnd=2026-12-31" ""; do
+            curl -s "http://localhost:8899/fhir/Measure/CMS165FHIRControllingHighBP/\$evaluate-measure?subject=Patient/$P&reportType=subject${q:+&$q}" > "../diag-out/raw-${q:+period}${q:-noperiod}.json"
           done
-          echo "== per-case (A/B/C agree):"
-          jq -s -r '[.[0].results, .[1].results, .[2].results] | transpose | .[] | "\(.[0].case)\t\(.[0].agrees)\t\(.[1].agrees)\t\(.[2].agrees)"' "$RUNNER_TEMP/A.json" "$RUNNER_TEMP/B.json" "$RUNNER_TEMP/C.json" | sort | awk -F'\t' '{k=$2"/"$3"/"$4; c[k]++} END{for(k in c) print k, c[k]}'
-          mkdir -p ../diag-out && cp "$RUNNER_TEMP"/A.json "$RUNNER_TEMP"/B.json "$RUNNER_TEMP"/C.json ../diag-out/
+          for f in ../diag-out/raw-*.json; do
+            echo "== $f"
+            jq -c '{populations:[.group[0].population[]|{c:.code.coding[0].code,n:.count}], contained:[.contained[]?|{t:.resourceType, issue:[.issue[]?|{s:.severity,d:(.details.text // .diagnostics // "")[0:400]}]}], ext:[.extension[]?|.url|split("/")|last]}' "$f"
+          done
+          curl -s "http://localhost:8899/fhir/MedicationRequest?subject=Patient/$P" | jq -c '[.entry[]?.resource|{id, med:(.medicationReference // .medicationCodeableConcept), status, intent}]'
+          curl -s "http://localhost:8899/fhir/Medication?_count=5" | jq -c '[.entry[]?.resource|{id, code:.code.coding[0].code}]'
+          docker rm -f hapi-cr >/dev/null 2>&1 || true
       - uses: actions/upload-artifact@v7
         if: always()
         with:
