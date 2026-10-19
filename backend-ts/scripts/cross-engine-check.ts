@@ -286,6 +286,10 @@ async function main(): Promise<void> {
   const evaluated = results.filter((r) => r.java !== null);
   if (evaluated.length === 0) {
     console.error(`\nFAIL: ${results.length} case(s) discovered but NONE evaluated — every request failed or every case threw.`);
+    // The reasons, so a refused sweep can be diagnosed from its log alone (the JSON is not written here).
+    const reasons = [...new Set(results.map((r) => r.error ?? `engine: ${r.engineError}`))];
+    for (const reason of reasons.slice(0, 3)) console.error(`  ${reason.slice(0, 300)}`);
+    if (reasons.length > 3) console.error(`  … and ${reasons.length - 3} other distinct reason(s)`);
     process.exitCode = 1;
     return;
   }
