@@ -172,7 +172,15 @@ async function main(): Promise<void> {
       // reads the same set our engine does rather than the sweep refusing for a value set it cannot replace.
       const id = existing ? String(existing.id) : vs.url.split("/").pop() ?? "";
       if (!/^[A-Za-z0-9\-.]{1,64}$/.test(id)) continue;
-      const body = existing ? { ...existing, expansion } : { resourceType: "ValueSet", id, url: vs.url, status: "active", expansion };
+      // A created set states its codes as a `compose` too, as every shipped set does: HAPI keeps ValueSets in its
+      // terminology tables, and an expansion alone was not found by the Java engine ("Unable to locate ValueSet").
+      const compose = {
+        include: [...new Set(vs.codes.map((c) => c.system))].map((system) => ({
+          system,
+          concept: vs.codes.filter((c) => c.system === system).map((c) => ({ code: c.code })),
+        })),
+      };
+      const body = existing ? { ...existing, expansion } : { resourceType: "ValueSet", id, url: vs.url, status: "active", compose, expansion };
       const put = await fetch(`${server}/ValueSet/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/fhir+json" },
