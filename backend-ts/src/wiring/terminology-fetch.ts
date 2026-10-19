@@ -51,7 +51,7 @@ export interface FetchDeps {
   redact?: (text: string) => string;
 }
 
-export type FailureKind = "bucketUnavailable" | "notInBucket" | "hashMismatch" | "timedOut" | "readFailed";
+export type FailureKind = "bucketUnavailable" | "notInBucket" | "hashMismatch" | "timedOut" | "readFailed" | "writeFailed";
 
 export interface FetchReport {
   present: string[];
@@ -62,12 +62,37 @@ export interface FetchReport {
   notes: string[];
   /** Every miss by kind, required or not: what `/health` publishes (counts only). */
   failures: Record<FailureKind, number>;
+  /**
+   * Each failed attempt's error code (`ECONNRESET`, `EACCES`, `http503`, a class name), counted: identifier-free,
+   * so `/health` can publish it, and enough to tell a network fault from a filesystem one without the log.
+   */
+  errorCodes: Record<string, number>;
+  /** Attempts beyond the first, across every sidecar. */
+  retries: number;
   durationMs: number;
 }
 
-/** Sidecars fetched at once, and how long one may take: a slow first connection must not serialise them all. */
-export const FETCH_CONCURRENCY = 4;
+/**
+ * One at a time, each bounded, each retried with backoff. The first deploys showed fast read failures from
+ * MIE's network that a sequential fetch mostly survived and four at once mostly did not (the same client reads
+ * every object cleanly from elsewhere), so the fetch favours a quiet connection over speed: it is seconds either way.
+ */
+export const FETCH_CONCURRENCY = 1;
 export const PER_OBJECT_TIMEOUT_MS = 30_000;
+export const ATTEMPTS = 4;
+export const BACKOFF_MS = [1_000, 2_000, 4_000];
+
+const EMPTY_FAILURES = (): Record<FailureKind, number> => ({
+  bucketUnavailable: 0, notInBucket: 0, hashMismatch: 0, timedOut: 0, readFailed: 0, writeFailed: 0,
+});
+
+/** An error's identifier-free code: its `code`, an HTTP status, or its class name; never its message. */
+export function errorCodeOf(err: unknown): string {
+  const e = err as { code?: unknown; name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
+  const status = e?.$metadata?.httpStatusCode;
+  const raw = typeof e?.code === "string" ? e.code : typeof status === "number" ? `http${status}` : typeof e?.name === "string" ? e.name : "unknown";
+  return /^[A-Za-z0-9_.:-]{1,40}$/.test(raw) ? raw : "other";
+}
 
 const sha256Of = (text: string): string => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
@@ -119,7 +144,7 @@ function listDirs(root: URL): string[] {
 export async function fetchSidecars(
   targets: readonly SidecarTarget[],
   deps: FetchDeps,
-  opts: { concurrency?: number; perObjectTimeoutMs?: number; now?: () => number } = {},
+  opts: { concurrency?: number; perObjectTimeoutMs?: number; now?: () => number; attempts?: number; backoffMs?: readonly number[]; sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<FetchReport> {
   const now = opts.now ?? Date.now;
   const started = now();
@@ -128,8 +153,14 @@ export async function fetchSidecars(
     fetched: [],
     problems: [],
     notes: [],
-    failures: { bucketUnavailable: 0, notInBucket: 0, hashMismatch: 0, timedOut: 0, readFailed: 0 },
+    failures: EMPTY_FAILURES(),
+    errorCodes: {},
+    retries: 0,
     durationMs: 0,
+  };
+  const noteCode = (err: unknown) => {
+    const code = errorCodeOf(err);
+    report.errorCodes[code] = (report.errorCodes[code] ?? 0) + 1;
   };
   const miss = (target: SidecarTarget, kind: FailureKind, text: string) => {
     report.failures[kind] += 1;
@@ -149,13 +180,17 @@ export async function fetchSidecars(
   try {
     bucket = await deps.bucket();
   } catch (err) {
+    noteCode(err);
     const why = `the terminology bucket could not be opened: ${message(err)}`;
     for (const target of missing) miss(target, "bucketUnavailable", why);
     return done();
   }
   const timeoutMs = opts.perObjectTimeoutMs ?? PER_OBJECT_TIMEOUT_MS;
-  const fetchOne = async (target: SidecarTarget) => {
-    const key = `${TERMINOLOGY_PREFIX}${PIN.exec(target.sha256)![1]}.json`;
+  const attempts = opts.attempts ?? ATTEMPTS;
+  const backoff = opts.backoffMs ?? BACKOFF_MS;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms).unref?.()));
+  /** One read: the text, `null` for a 404, or the reason it failed (retried by the caller). */
+  const readOnce = async (key: string): Promise<{ text: string | null } | { failed: "timedOut" | "readFailed"; err: unknown }> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<"timeout">((resolve) => {
       timer = setTimeout(() => resolve("timeout"), timeoutMs);
@@ -167,24 +202,40 @@ export async function fetchSidecars(
         return object ? Buffer.from(await object.arrayBuffer()).toString("utf8") : null;
       })();
       const text = await Promise.race([read, timedOut]);
-      if (text === "timeout") {
-        miss(target, "timedOut", `${key} did not arrive within ${timeoutMs} ms`);
-        return;
-      }
-      if (text === null) {
-        miss(target, "notInBucket", `${key} is not in the bucket`);
-        return;
-      }
-      if (sha256Of(text) !== target.sha256) {
-        miss(target, "hashMismatch", `${key} does not hash to the committed pin`);
-        return;
-      }
-      deps.write(target.path, text);
-      report.fetched.push(label(target));
+      return text === "timeout" ? { failed: "timedOut", err: Object.assign(new Error("timed out"), { code: "TIMEOUT" }) } : { text };
     } catch (err) {
-      miss(target, "readFailed", `${key} could not be read: ${message(err)}`);
+      return { failed: "readFailed", err };
     } finally {
       clearTimeout(timer);
+    }
+  };
+  const fetchOne = async (target: SidecarTarget) => {
+    const key = `${TERMINOLOGY_PREFIX}${PIN.exec(target.sha256)![1]}.json`;
+    let last: { failed: "timedOut" | "readFailed"; err: unknown } | null = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (attempt > 0) {
+        report.retries += 1;
+        await sleep(backoff[Math.min(attempt - 1, backoff.length - 1)] ?? 0);
+      }
+      const got = await readOnce(key);
+      if ("failed" in got) {
+        noteCode(got.err);
+        last = got;
+        continue;
+      }
+      if (got.text === null) return miss(target, "notInBucket", `${key} is not in the bucket`);
+      if (sha256Of(got.text) !== target.sha256) return miss(target, "hashMismatch", `${key} does not hash to the committed pin`);
+      try {
+        deps.write(target.path, got.text);
+      } catch (err) {
+        noteCode(err);
+        return miss(target, "writeFailed", `${key} was read but could not be written to ${target.path}: ${message(err)}`);
+      }
+      report.fetched.push(label(target));
+      return;
+    }
+    if (last) {
+      miss(target, last.failed, `${key} could not be read after ${attempts} attempts: ${last.failed === "timedOut" ? `no answer within ${timeoutMs} ms` : message(last.err)}`);
     }
   };
   const queue = [...missing];
@@ -207,7 +258,9 @@ export function terminologyHealthOf(targets: readonly SidecarTarget[], report: F
     alreadyPresent: report?.present.length ?? 0,
     missingRequired: required.filter((t) => !have.has(label(t))).length,
     missingOptional: targets.filter((t) => !t.required && !have.has(label(t))).length,
-    failures: { ...(report?.failures ?? { bucketUnavailable: 0, notInBucket: 0, hashMismatch: 0, timedOut: 0, readFailed: 0 }) },
+    failures: { ...(report?.failures ?? EMPTY_FAILURES()) },
+    errorCodes: { ...(report?.errorCodes ?? {}) },
+    retries: report?.retries ?? 0,
   };
 }
 

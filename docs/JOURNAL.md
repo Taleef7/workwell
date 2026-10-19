@@ -14,6 +14,11 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   listened, and `/health` kept the routing check its first request took. Now the fetch runs four at a
   time with a 30 s bound per object, the boot waits up to 180 s, a late fetch re-records the routing check,
   and `/health` publishes the fetch's counts (`terminology`), which the deploy gate prints when it refuses.
+- **That deploy failed too, and the counts said why: reads failed fast, not slowly** (TWH 10 of 11, Maui 13 of
+  15, in ~1.2 s). From GitHub's network the same client reads all 15 stored lists cleanly, one at a time or
+  four at once, so the fault is between MIE's containers and the bucket. The fetch now reads one at a time,
+  retries each read up to four times with backoff, counts write failures apart from read failures, and
+  publishes each failed attempt's error code (`ECONNRESET`, `EACCES`, `http503`) on `/health`.
 
 ## 2026-10-18
 

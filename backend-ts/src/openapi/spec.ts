@@ -595,7 +595,7 @@ export function openApiDocument(): OpenApiDocument {
               type: ["object", "null"],
               description:
                 "The boot fetch of the licensed terminology sidecars from the stack's private bucket (D17): counts and timings only, never a key or an error text. Null where the stack fetches none. `finished: false` means it was still running when the listener started; it re-records `routing` when it finishes.",
-              required: ["finished", "durationMs", "required", "fetched", "alreadyPresent", "missingRequired", "missingOptional", "failures"],
+              required: ["finished", "durationMs", "required", "fetched", "alreadyPresent", "missingRequired", "missingOptional", "failures", "errorCodes", "retries"],
               properties: {
                 finished: { type: "boolean" },
                 durationMs: { type: "number" },
@@ -606,15 +606,22 @@ export function openApiDocument(): OpenApiDocument {
                 missingOptional: { type: "integer", description: "Unrouted measures' sidecars, read only by the fidelity diff." },
                 failures: {
                   type: "object",
-                  required: ["bucketUnavailable", "notInBucket", "hashMismatch", "timedOut", "readFailed"],
+                  required: ["bucketUnavailable", "notInBucket", "hashMismatch", "timedOut", "readFailed", "writeFailed"],
                   properties: {
                     bucketUnavailable: { type: "integer" },
                     notInBucket: { type: "integer" },
                     hashMismatch: { type: "integer" },
                     timedOut: { type: "integer" },
                     readFailed: { type: "integer" },
+                    writeFailed: { type: "integer", description: "Read and verified, but the file could not be written in the container." },
                   },
                 },
+                errorCodes: {
+                  type: "object",
+                  description: "Failed attempts by error code (ECONNRESET, EACCES, http503, a class name), counted. Never a message.",
+                  additionalProperties: { type: "integer" },
+                },
+                retries: { type: "integer", description: "Attempts beyond the first, across every sidecar." },
               },
             },
           },

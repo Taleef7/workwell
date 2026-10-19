@@ -68,10 +68,12 @@ sidecar (`assert-clean`), and only then pushed. At boot, before it listens, the 
 vendored sidecar from that bucket and keeps only bytes that hash to the pin
 (`src/wiring/terminology-fetch.ts`). A routed measure's sidecar that cannot be fetched logs
 `WORKWELL_ALERT TERMINOLOGY_FETCH_FAILED` and shows on `/health` as a routing problem, the same as a
-missing file always did. The fetch runs four at a time, each object bounded at 30 s; the listener waits
+missing file always did. The fetch reads one object at a time, each bounded at 30 s and tried up to four times with
+backoff (reads from MIE's network failed fast under parallel load); the listener waits
 for it up to 180 s (`WORKWELL_TERMINOLOGY_BOOT_WAIT_MS`), and a fetch still running then finishes in the
 background and re-records the routing check. `/health` carries its counts (`terminology`: finished,
-fetched, missing, failures by kind, never a key or an error text), and the deploy's routing gate keeps
+fetched, missing, failures by kind, failed attempts by error code such as `ECONNRESET` or `EACCES`, never
+a key or an error message), and the deploy's routing gate keeps
 polling while `terminology.finished` is false and prints those counts when it refuses. Copies are named by content, so an older image's sidecars stay fetchable after a
 newer deploy; **never delete the bucket's `terminology/` objects**, or a rollback boots without them.
 
