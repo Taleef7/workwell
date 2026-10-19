@@ -1,63 +1,37 @@
-name: Diagnose Java convert-to-days (temporary)
+name: Diagnose sort ties on the Java engine (temporary)
 on:
   push:
     branches: [diag/convert-days]
 permissions:
   contents: read
 jobs:
-  sweep:
+  sortcheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        measure: [cms125]
-        image: ["v8.12.0-2"]
-    defaults:
-      run:
-        working-directory: backend-ts
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 10.17.1
-          run_install: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: backend-ts/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
-      - name: Vendor terminology, completed from VSAC
-        env:
-          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+      - name: Start HAPI (cqf-fhir-cr), pinned digest
         run: |
-          NAME="$(pnpm exec tsx -e "import {officialMeasureName} from './src/standards/official-cases.ts'; process.stdout.write(officialMeasureName('${{ matrix.measure }}') ?? '')")"
-          pnpm vendor:official --measure "$NAME" --catalog-id "${{ matrix.measure }}" --strip-elm-annotations --with-tests --complete-terminology
-      - name: Sweep (only the 31 December 23:59:59.000 procedures moved to 12:00 the same day)
-        env:
-          HAPI_IMAGE: hapiproject/hapi:${{ matrix.image }}
+          docker run -d --name hapi-cr -p 8899:8080 \
+            -e hapi.fhir.fhir_version=R4 -e hapi.fhir.cr.enabled=true \
+            hapiproject/hapi@sha256:0ff86aac4c7bd13a1ee226444a70263bb46ed1c28ef543c30a44f865b80ca04e
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:8899/fhir/metadata -o meta.json && grep -q '"evaluate-measure"' meta.json; then echo ready; break; fi; sleep 5; done
+          echo "operations declared:"; jq -r '[.. | objects | select(has("definition") and has("name")) | .name] | unique | join(" ")' meta.json
+      - name: Run SortCheck.cql through $cql
         run: |
-          B=.official-content/bundles/measure/CMS125FHIRBreastCancerScreen/CMS125FHIRBreastCancerScreen-bundle.json
-          node -e '
-            const fs=require("fs");const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));let n=0;
-            for(const e of b.entry){const r=e.resource;if(r.resourceType!=="Procedure")continue;
-              const p=r.performedPeriod;if(p&&p.end&&p.end.startsWith("2026-12-31T23:59:59.000")){p.end=p.end.replace("23:59:59.000","12:00:00.000");if(p.start&&p.start.startsWith("2026-12-31T23:59:59.000"))p.start=p.start.replace("23:59:59.000","12:00:00.000");n++;}
-              if(typeof r.performedDateTime==="string"&&r.performedDateTime.startsWith("2026-12-31T23:59:59.000")){r.performedDateTime=r.performedDateTime.replace("23:59:59.000","12:00:00.000");n++;}}
-            fs.writeFileSync(process.argv[2],JSON.stringify(b));console.log("procedures moved:",n);' "$B" "$RUNNER_TEMP/mutated.json"
-          bash scripts/cross-engine-sweep.sh "${{ matrix.measure }}" --bundle "$RUNNER_TEMP/mutated.json" --keep -- --json > "$RUNNER_TEMP/r.json" || true
-          echo "engine versions in the image log:"; docker logs hapi-cr 2>&1 | grep -oiE "(clinical[- ]reasoning|cqf-fhir|cql-engine|cql)[^ ]*[ :]*v?[0-9]+\.[0-9]+\.[0-9]+[^ ]*" | sort -u | head -8 || true
-          docker exec hapi-cr sh -c 'ls /app 2>/dev/null; find / -name "*.jar" 2>/dev/null | grep -iE "cqf-fhir-cr|engine-fhir|cql-engine|elm-fhir|cqf-fhir-utility" | head -10' 2>/dev/null || true
-          docker rm -f hapi-cr >/dev/null 2>&1 || true
-          f="$RUNNER_TEMP/r.json"
-          echo "RESULT ${{ matrix.measure }} @ ${{ matrix.image }}: agree $(jq '[.results[]|select(.agrees)]|length' "$f")/$(jq '.results|length' "$f"), errors $(jq '[.results[]|select(.error!=null or .java==null)]|length' "$f")"
-          echo "DISAGREE: $(jq -r '[.results[]|select(.agrees|not)|.case[0:8]]|join(",")' "$f")"
-          mkdir -p ../diag-out && cp "$f" "../diag-out/${{ matrix.measure }}-${{ matrix.image }}.json"
-      - uses: actions/upload-artifact@v7
+          CQL="$(cat .github/diag/SortCheck.cql)"
+          jq -n --arg c "$CQL" '{resourceType:"Parameters",parameter:[{name:"content",valueString:$c}]}' > p.json
+          curl -s -X POST -H 'Content-Type: application/fhir+json' --data @p.json "http://localhost:8899/fhir/\$cql" -o out.json -w "HTTP %{http_code}\n"
+          jq -c '.parameter[]? | {name, v: (.valueString // .valueInteger // .valueDecimal // .valueDateTime // .valueBoolean // .resource.resourceType // (.part|tostring))}' out.json || cat out.json
+      - name: Fallback, Library/$evaluate
         if: always()
-        with:
-          name: convert-days-${{ matrix.measure }}-${{ matrix.image }}
-          path: diag-out/
+        run: |
+          B64="$(base64 -w0 .github/diag/SortCheck.cql)"
+          jq -n --arg d "$B64" '{resourceType:"Library",id:"SortCheck",url:"http://example.org/Library/SortCheck",name:"SortCheck",version:"1.0.0",status:"active",type:{coding:[{system:"http://terminology.hl7.org/CodeSystem/library-type",code:"logic-library"}]},content:[{contentType:"text/cql",data:$d}]}' > lib.json
+          curl -s -X PUT -H 'Content-Type: application/fhir+json' --data @lib.json http://localhost:8899/fhir/Library/SortCheck -o /dev/null -w "PUT %{http_code}\n"
+          curl -s -X POST -H 'Content-Type: application/fhir+json' --data '{"resourceType":"Parameters"}' "http://localhost:8899/fhir/Library/SortCheck/\$evaluate" -o ev.json -w "HTTP %{http_code}\n"
+          jq -c '.parameter[]? | {name, v: (.valueString // .valueInteger // .valueDecimal // .valueDateTime // .valueBoolean // .resource.resourceType // (.part|tostring))}' ev.json || cat ev.json
+      - name: Container log tail on failure
+        if: failure()
+        run: docker logs hapi-cr 2>&1 | tail -80
