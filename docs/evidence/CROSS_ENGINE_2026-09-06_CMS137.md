@@ -1,5 +1,7 @@
 # CMS137 through a second engine — the first multi-rate artifact cross-executed, and its one disagreement run to a cause
 
+> **Confirmed 2026-10-19 (#846, `CROSS_ENGINE_2026-10-19.md`).** The cause below stands: on the pinned v8.12.0-2 image CMS137 is 44/45 with the period sent and 45/45 with the library's default period, which isolates Java's second-precision period (cqframework/clinical-reasoning#1133).
+
 Date: 2026-09-06. **MM-1c's second-engine sweep for CMS137** (`docs/ROADMAP_2026-08-30.md` §5; the pattern
 of `CROSS_ENGINE_2026-08-04.md`). Command: `backend-ts/scripts/cross-engine-check.ts --measure cms137 --load-terminology`.
 

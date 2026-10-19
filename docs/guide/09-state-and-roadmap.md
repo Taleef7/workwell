@@ -54,7 +54,7 @@ rather than a two-engine diff, because an official-only measure has no authored 
 | QRDA Category I vs the HL7 ruler | 0 findings, XSD and Schematron (2026-08-02) | Cypress 7.5.1, 22 submissions |
 | QRDA Category III vs the HL7 ruler | 0 findings (2026-08-02) | same |
 | MeasureReport vs base FHIR R4 | 0 errors; the DEQM profile gap is exactly 3 findings per report | `measure-report.test.ts` |
-| Independent Java engine running our artifacts | 362 of 387 across eight measures (255 of 278 on 2026-08-04; CMS137 44 of 45 on both rates on 2026-09-06; CMS130 63 of 64 on 2026-09-07) | 22 of the 25 exceptions trace to one helper reading a medication order's period — 8 proven by single-variable mutation, 14 consistent-with by inventory. CMS137's one is a millisecond-versus-second precision difference at the period's first instant, isolated by two mutations. CMS165 was swept the same day and is deliberately NOT in this total: 56 of its 68 patients fall out of the initial population on the Java side, which needs diagnosing before it says anything about either engine |
+| Independent Java engine running our artifacts | 397 of 455 across all nine measures with the period sent, on a pinned image (2026-10-19) | Every exception has a cause: 57 are the Java engine's second-precision measurement period (none remain with the measure's default period) and one is a Java engine exception on a `MedicationRequest.medication` Reference. The earlier figure (362 of 387 across eight measures) came from an older image whose `convert … to days` bug caused 22 of its 25 |
 | Subject-level agreement vs Cypress's expected results | 64 of 64 and 150 of 150, every population (2026-08-03) | reproduced against a second independently generated archive |
 | Routed on the live sandboxes (synthetic data) | 6 on the Maui pilot sandbox, 2 on TWH (2026-09-08, ADR-078) | `WORKWELL_OFFICIAL_MEASURES` in `deploy-maui-mieweb.yml` (cms122, cms125, cms2, cms130, cms165, cms137) and in `deploy-twh-mieweb.yml` (cms122, cms125) |
 | Pilot page loads, BEFORE the 2026-09-10 read-path change (live Maui, 20,000 patients, ~1M retained outcome rows, warm second pass) | programs overview 6.3 s · site list 5.8 s (every page pays it) · order proposals 11.4 s for 10.7 MB · hierarchy rollup 8.7 s for 4.6 MB · roster page 2.8 s · cases page 0.5 s | `curl -w '%{time_total}'` against `maui-api-ts.os.mieweb.org` as the sandbox admin; the AFTER numbers are measured on the first deploy and recorded in `docs/JOURNAL.md` (2026-09-10), never predicted here |
@@ -131,14 +131,10 @@ other four are byte-identical either way.
   Deferred deliberately: today it moves no external number.
 - **Four CLI entry points still use `node:` builtins** — the last unmoved piece of the package
   extraction.
-- **Measure discrepancies, mostly diagnosed now:** two Procedure-only cases in CMS125 remain open, CMS130 and CMS165 were swept on 2026-09-07 from that
-  credentialed workflow: CMS130 agrees on 63/64, and CMS165's 11/68 is recorded as an open question
-  rather than a result, because 56 of 68 patients fall out of the initial population on the Java side
-  (issue #532). CMS2's seven numerator
-  flips are **no longer undiagnosed** (2026-09-07): the second engine takes a medication order's start
-  from `dosageInstruction.timing.repeat.boundsPeriod` and not from `authoredOn`, proven by mutation on
-  all seven. It is the same helper CMS122's and CMS125's disagreements were isolated to
-  (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`).
+- **Every cross-engine disagreement has a cause (2026-10-19).** On a pinned Java image the second engine
+  agrees on 397 of 455 cases with the measurement period sent. The rest are Java's second-precision
+  period (none remain with the measure's default period) and one Java engine exception
+  (`docs/evidence/CROSS_ENGINE_2026-10-19.md`).
 - **The Studio's SQL preview panel shows illustrative SQL**, not the parity-proven generated
   artifacts ([chapter 7](07-sql-and-the-bridge.md)). Either point it at the real files or relabel
   it.

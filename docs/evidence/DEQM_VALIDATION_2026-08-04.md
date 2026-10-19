@@ -1,5 +1,21 @@
 # MeasureReport vs DEQM STU5 — the first measurement of the FHIR reporting column
 
+> **Addendum 2026-10-19 (#849): re-measured after the fixes; the August figures below are history.**
+> HL7 validator 7.0.2 (jar sha256 `e3e50f06b806437821b7aef8189a1b790415cb96c5036e0812ed62981452b377`), seven
+> report shapes (`scripts/deqm-validate.ts`: official cms125, cms122, cms137 two-rate stratified, cms68; a cms122
+> translation; an authored measure; an official individual). Owner decisions: DEQM 1.0.0 (UV) is the target; no
+> stratifier code yet.
+>
+> | Report | Base R4 | DEQM 1.0.0 (`--ig uv`) | Da Vinci STU5 (`--ig us`) |
+> |---|---:|---:|---:|
+> | official cms125 (counts without strata), cms122, cms68 summaries; official cms125 individual; cms122 translation | 0 | **0** | 3 |
+> | official cms137, two rates, three strata each | 0 | 6 (`deqm-7`, one per stratifier) | 9 |
+> | authored | 0 | 11 (`deqm-0` and the `linkId`s: no published version or Measure) | 4 |
+>
+> STU5's 3 on every report: it does not know 1.0.0's scoring extension (an error), so `deqm-3` fails too, and its
+> reporter must be a QI-Core Organization. The base run loads DEQM 1.0.0's package for extension definitions only; without
+> it the validator rejects the scoring extension as unknown. `--inject-invalid` still gives 2 base errors, exit 1.
+
 Date: 2026-08-04. **ROADMAP_2026-08-04 §4 V3 / milestone B6** — the first of the two checks that replaced
 the retired Cypress bar (ADR-058). Command: `backend-ts/scripts/deqm-validate.ts`.
 

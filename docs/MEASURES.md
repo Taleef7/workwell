@@ -49,27 +49,15 @@ ID 305, by removing it from both `WORKWELL_OFFICIAL_MEASURES` and `WORKWELL_DERI
 "Turning a translation on or off"). For 2027, Maui scores it with WorkWell's translation of CMS137v15
 (ww-2027.1, #767), never under a CMS eCQM id.
 
-**CMS2's verification debt is paid (2026-09-07).** Its seven cross-engine disagreements, open and
-unexplained since 2026-08-04, are proven to one cause: the Java engine takes a medication order's start
-from `dosageInstruction.timing.repeat.boundsPeriod` and not from `authoredOn`, so the seven cases whose
-only depression follow-up is an antidepressant order are not credited there — adding that one field
-moves the sweep from 29/36 to 36/36 (`docs/evidence/CROSS_ENGINE_2026-09-07_CMS2.md`). It is the same
-helper CMS122's and CMS125's disagreements were isolated to, and it is now implicated in 22 of the 25
-known cross-engine disagreements — 8 of them proven by mutation, 14 consistent-with by inventory. Two
-CMS125 `Procedure`-only cases are still unexplained; CMS137's one is a separately proven period
-boundary. That clears the MM-1c precondition
-§4A.5 put on CMS2's flip; the flip itself is still the owner's workflow edit.
-
-**CMS130 and CMS165 were swept on 2026-09-07** from the credentialed `cross-engine-sweep` workflow —
-the last two measures never cross-executed, and the reason issue #532 existed
-(`docs/evidence/CROSS_ENGINE_2026-09-07_CMS130_CMS165.md`). **CMS130 agrees on 63 of 64**, its one
-disagreement a `DENEX 1→0` carrying the same no-`dosageInstruction` medication signature as CMS122's and
-CMS125's — attributed by signature, not yet by mutation. **CMS165 returned 11 of 68 and is NOT quoted as
-a cross-engine number:** the Java engine puts 56 of 68 patients out of the initial population entirely,
-which is the shape of a harness difference rather than a disagreement about the measure, and CMS137's
-period-boundary mechanism was ruled out (nine cases whose every encounter sits at the period's first
-millisecond were admitted anyway). Diagnosing it is #572 (#532 closed with the sweeps done); the running cross-engine total
-is **362 of 387 across eight measures**, CMS165 deliberately excluded.
+**Every cross-engine disagreement is run to a cause (2026-10-19, #846).** On a Java image pinned by
+digest (cqf-fhir-cr 4.13.0), the second engine agrees on **397 of 455** MADiE cases across all nine
+measures with the measurement period sent. The 57 that differ are Java's second-precision period, which
+makes an event at the period's last second "uncertain" to it: CMS165 54, CMS125 2, CMS137 1. With the
+measure's default period none remain. One CMS165 case makes the Java engine throw. CMS2's seven, and the
+other medication disagreements first seen in August, were an older Java image's bug in `convert … to days`
+and agree on the pinned image (`docs/evidence/CROSS_ENGINE_2026-10-19.md`). That closes #572, the
+cross-engine condition §4A.5 put on CMS165's PHI phase; its other condition, profile-stamped blood
+pressures at ingest (#591), stands.
 
 **For 2027, Maui scores CMS130 with WorkWell's translation of CMS130v15** (ww-2027.1, #779), never under a
 CMS eCQM id. v15 changes one line of logic, in the shared frailty library: an advanced-illness diagnosis
