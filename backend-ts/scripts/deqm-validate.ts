@@ -77,12 +77,12 @@ import {
 import type { OutcomeRecord } from "../src/stores/outcome-store.ts";
 import type { RunRecord } from "../src/stores/run-store.ts";
 
-const DEQM_IG = "hl7.fhir.us.davinci-deqm#5.0.0";
-const P = "http://hl7.org/fhir/us/davinci-deqm/StructureDefinition";
+const DEQM_IG = process.env.DEQM_IG ?? "hl7.fhir.us.davinci-deqm#5.0.0";
+const P = process.env.DEQM_P ?? "http://hl7.org/fhir/us/davinci-deqm/StructureDefinition";
 /** DEQM's MeasureReport profiles, by the report shape each one governs. */
 const PROFILE = {
-  summary: `${P}/summary-measurereport-deqm`,
-  individual: `${P}/indv-measurereport-deqm`,
+  summary: `${P}/${process.env.DEQM_SUMMARY ?? "summary-measurereport-deqm"}`,
+  individual: `${P}/${process.env.DEQM_INDIVIDUAL ?? "indv-measurereport-deqm"}`,
 } as const;
 
 /**
@@ -162,6 +162,22 @@ const cases = (): Case[] => [
     why: "the AUTHORED path — urn:workwell:measure, which ADR-046 d3 keeps deliberately local",
     report: buildSummaryMeasureReportFromCounts(
       run, "audiogram", { ipp: 10, denom: 10, denex: 1, numer: 6, denexcep: 0 }, GENERATED_AT, null,
+    ),
+  },
+  {
+    name: "summary-official-cms137-multirate-stratified",
+    profile: PROFILE.summary,
+    why: "diag: two rates (Group_1/Group_2), three strata each, as CMS137 reports",
+    report: buildSummaryMeasureReportFromCounts(
+      run, "cms137",
+      [{ ipp: 45, denom: 45, denex: 3, numer: 20, denexcep: 0 }, { ipp: 45, denom: 45, denex: 3, numer: 12, denexcep: 0 }],
+      GENERATED_AT,
+      { measureUrl: "https://madie.cms.gov/Measure/CMS137FHIRSUDTxInitEngagement", version: "1.0.000", ecqmId: "137FHIR" } as unknown as Parameters<typeof buildSummaryMeasureReportFromCounts>[4],
+      [0, 1].map(() => ["Stratification_1", "Stratification_2", "Stratification_3"].map((id) => ({
+        id,
+        inStratum: { ipp: 15, denom: 15, denex: 1, numer: 6, denexcep: 0 },
+        notInStratum: { ipp: 30, denom: 30, denex: 2, numer: 10, denexcep: 0 },
+      }))),
     ),
   },
   {
