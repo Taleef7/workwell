@@ -1,0 +1,67 @@
+name: Diagnose CMS165 cross-engine precision (temporary)
+on:
+  push:
+    branches: [diag/cms165-precision]
+permissions:
+  contents: read
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend-ts
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.17.1
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: backend-ts/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch official content (pinned commit)
+        run: pwsh -NoProfile -File scripts/fetch-official-cases.ps1
+      - name: Vendor cms165 terminology, completed from VSAC
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: pnpm vendor:official --measure CMS165FHIRControllingHighBP --catalog-id cms165 --strip-elm-annotations --with-tests --complete-terminology
+      - name: Pin one HAPI image for all three runs
+        run: |
+          docker pull hapiproject/hapi:latest
+          echo "HAPI_IMAGE=$(docker inspect --format '{{index .RepoDigests 0}}' hapiproject/hapi:latest)" >> "$GITHUB_ENV"
+      - name: Build the mutated bundle (only the 30 June 23:59:59.000 onsets move to 12:00 the same day)
+        run: |
+          B=.official-content/bundles/measure/CMS165FHIRControllingHighBP/CMS165FHIRControllingHighBP-bundle.json
+          node -e '
+            const fs=require("fs");const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));let n=0;
+            for(const e of b.entry){const r=e.resource;if(r.resourceType==="Condition"&&typeof r.onsetDateTime==="string"&&r.onsetDateTime.startsWith("2026-06-30T23:59:59.000")){r.onsetDateTime=r.onsetDateTime.replace("23:59:59.000","12:00:00.000");n++;}}
+            fs.writeFileSync(process.argv[2],JSON.stringify(b));console.log("onsets moved:",n);' "$B" "$RUNNER_TEMP/cms165-mutated.json"
+      - name: "A: baseline (period sent as dates)"
+        run: bash scripts/cross-engine-sweep.sh cms165 -- --json > "$RUNNER_TEMP/A.json" || true
+      - name: "B: no period parameters (the library's own millisecond default)"
+        env:
+          CROSS_ENGINE_NO_PERIOD: "1"
+        run: bash scripts/cross-engine-sweep.sh cms165 -- --json > "$RUNNER_TEMP/B.json" || true
+      - name: "C: mutated onsets, period sent as dates"
+        run: bash scripts/cross-engine-sweep.sh cms165 --bundle "$RUNNER_TEMP/cms165-mutated.json" -- --json > "$RUNNER_TEMP/C.json" || true
+      - name: Summary
+        run: |
+          echo "image: $HAPI_IMAGE"
+          for r in A B C; do
+            f="$RUNNER_TEMP/$r.json"
+            echo "== $r: agree $(jq '[.results[]|select(.agrees)]|length' "$f")/$(jq '.results|length' "$f"), errors $(jq '[.results[]|select(.error!=null or .java==null)]|length' "$f"), java period $(jq -c '.javaPeriod' "$f")"
+          done
+          echo "== per-case (A/B/C agree):"
+          jq -s -r '[.[0].results, .[1].results, .[2].results] | transpose | .[] | "\(.[0].case)\t\(.[0].agrees)\t\(.[1].agrees)\t\(.[2].agrees)"' "$RUNNER_TEMP/A.json" "$RUNNER_TEMP/B.json" "$RUNNER_TEMP/C.json" | sort | awk -F'\t' '{k=$2"/"$3"/"$4; c[k]++} END{for(k in c) print k, c[k]}'
+          mkdir -p ../diag-out && cp "$RUNNER_TEMP"/A.json "$RUNNER_TEMP"/B.json "$RUNNER_TEMP"/C.json ../diag-out/
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cms165-precision
+          path: diag-out/

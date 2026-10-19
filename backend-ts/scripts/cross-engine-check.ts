@@ -210,7 +210,10 @@ async function main(): Promise<void> {
 
     const url =
       `${server}/Measure/${name}/$evaluate-measure` +
-      `?subject=Patient/${patientId}&periodStart=${period?.start}&periodEnd=${period?.end}&reportType=subject`;
+      `?subject=Patient/${patientId}` +
+      // DIAG ONLY (branch diag/cms165-precision): omit the period so the library's own default applies.
+      (process.env.CROSS_ENGINE_NO_PERIOD === "1" ? "" : `&periodStart=${period?.start}&periodEnd=${period?.end}`) +
+      `&reportType=subject`;
     try {
       const res = await fetch(url);
       const body = (await res.json()) as { resourceType?: string; period?: unknown };
