@@ -502,11 +502,11 @@ function madieStub(calls: MadieCall[], options: MadieStubOptions = {}) {
         .map((c) => {
           if (c.uuid === options.skipEditCase) return { ...c };
           const actualRates = truth[c.uuid]![side];
-          const agreement = classifyPopulationAgreement("cms137", c.uuid, c.expected!, actualRates[0]!, { expected: c.expectedRates!, actual: actualRates });
+          const agreement = classifyPopulationAgreement(c.expected!, actualRates[0]!, { expected: c.expectedRates!, actual: actualRates });
           return { ...c, actual: actualRates[0], actualRates, agreement };
         });
       const agreeing = cases.filter((c) => c.agreement?.status === "expected-agreement").length;
-      return { ...shell, cases, summary: { total: cases.length, expectedAgreements: agreeing, referenceAgreements: 0, unexpectedMismatches: cases.length - agreeing, errors: 0 } };
+      return { ...shell, cases, summary: { total: cases.length, expectedAgreements: agreeing, unexpectedMismatches: cases.length - agreeing, errors: 0 } };
     }
 
     const main = mainLibraryName(bundle);
@@ -543,7 +543,7 @@ function madieStub(calls: MadieCall[], options: MadieStubOptions = {}) {
       ...shell,
       ...(calculationError ? { calculationError } : {}),
       cases,
-      summary: { total: cases.length, expectedAgreements: broken ? 0 : cases.length, referenceAgreements: 0, unexpectedMismatches: broken ? cases.length : 0, errors: 0 },
+      summary: { total: cases.length, expectedAgreements: broken ? 0 : cases.length, unexpectedMismatches: broken ? cases.length : 0, errors: 0 },
     };
   };
 }

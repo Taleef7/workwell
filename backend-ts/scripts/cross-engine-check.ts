@@ -2,11 +2,17 @@
  * Cross-execute the official MADiE test cases through a SECOND, independently written measure engine
  * and compare — ROADMAP_2026-08-04 §4 **V4**, milestone B7.
  *
- *     corepack pnpm exec tsx scripts/cross-engine-check.ts --measure cms125 [--server http://localhost:8899/fhir] [--json]
+ *     corepack pnpm exec tsx scripts/cross-engine-check.ts --measure cms125 [--server http://localhost:8899/fhir] [--json] [--library-period]
+ *
+ * `--library-period` sends no `periodStart`/`periodEnd`, so the measure library's own default period applies.
+ * cqf-fhir-cr builds a period it is SENT at second precision (cqframework/clinical-reasoning#1133), which
+ * makes an event at `…23:59:59.000` uncertain against the period's end; the library default is at
+ * millisecond precision, as fqm-execution's period is. Sweeping both ways separates that from a real
+ * disagreement (#846).
  *
  * ## Why this is the check that changes what we can say
  *
- * Our MADiE gate is 410/410 across eight measures, and that is real external evidence — the expected
+ * Our MADiE gate is 455/455 across nine measures, and that is real external evidence — the expected
  * answers are CMS/measure-developer-authored. But **the execution is entirely ours**: one engine
  * (`fqm-execution`) reading one artifact. `fqm-testify` and `deqm-test-server` cannot help, because both
  * WRAP `fqm-execution` — comparing against them compares our engine to itself.
@@ -27,7 +33,10 @@
  *       -e hapi.fhir.fhir_version=R4 -e hapi.fhir.cr.enabled=true \
  *       -e hapi.fhir.allow_external_references=true \
  *       -e hapi.fhir.enforce_referential_integrity_on_write=false \
- *       hapiproject/hapi:latest
+ *       hapiproject/hapi@sha256:0ff86aac4c7bd13a1ee226444a70263bb46ed1c28ef543c30a44f865b80ca04e
+ *
+ * That digest is v8.12.0-2 (clinical-reasoning 4.13.0), the image `cross-engine-sweep.sh` pins. Never
+ * `:latest`: the engine then changes under every sweep, and two sweeps' numbers stop being comparable.
  *
  * The property is `hapi.fhir.cr.enabled` — with `cr_enabled` the server starts fine and simply declares no
  * measure operations, which is a silent no-op rather than an error. Confirm before trusting a run:
@@ -68,11 +77,10 @@ import { join } from "node:path";
 import {
   officialMeasureName,
   populationCountsByRate,
-  type OfficialMeasureId,
   type PopulationAgreement,
   type PopulationCounts,
 } from "../src/standards/official-cases.ts";
-import { allZeroAcrossRates, compareReports } from "../src/standards/cross-engine.ts";
+import { allZeroAcrossRates, compareReports, engineErrorOf } from "../src/standards/cross-engine.ts";
 
 const CONTENT = ".official-content";
 
@@ -84,7 +92,13 @@ interface CaseResult {
   java: PopulationCounts | null;
   /** EVERY rate of both reports (ADR-074): a multi-rate measure agrees only when all of them do. */
   rates?: { expected: PopulationCounts[]; actual: PopulationCounts[] };
+  /** The request failed, so the case was never evaluated: a harness failure, and the sweep is partial. */
   error?: string;
+  /**
+   * The engine evaluated the case and reported its own exception (a contained `OperationOutcome` error).
+   * A finding about the engine, not a disagreement about the measure, and not a harness failure (#846).
+   */
+  engineError?: string;
   agreement?: PopulationAgreement;
   agrees: boolean;
 }
@@ -100,8 +114,9 @@ async function main(): Promise<void> {
   const arg = (f: string) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
   const measure = arg("--measure");
   const server = arg("--server") ?? "http://localhost:8899/fhir";
+  const libraryPeriod = argv.includes("--library-period");
   if (!measure) {
-    console.error("usage: tsx scripts/cross-engine-check.ts --measure <cms122|cms125|…> [--server URL] [--json]");
+    console.error("usage: tsx scripts/cross-engine-check.ts --measure <cms122|cms125|…> [--server URL] [--json] [--library-period]");
     process.exitCode = 2;
     return;
   }
@@ -210,8 +225,9 @@ async function main(): Promise<void> {
     const patientId = (JSON.parse(readFileSync(join(testsDir, dir, ptFile), "utf8")) as { id: string }).id;
 
     const url =
-      `${server}/Measure/${name}/$evaluate-measure` +
-      `?subject=Patient/${patientId}&periodStart=${period?.start}&periodEnd=${period?.end}&reportType=subject`;
+      `${server}/Measure/${name}/$evaluate-measure?subject=Patient/${patientId}` +
+      (libraryPeriod ? "" : `&periodStart=${period?.start}&periodEnd=${period?.end}`) +
+      "&reportType=subject";
     try {
       const res = await fetch(url);
       const body = (await res.json()) as { resourceType?: string; period?: unknown };
@@ -220,11 +236,16 @@ async function main(): Promise<void> {
         results.push({ case: dir, patientId, expected, java: null, error: `${res.status} ${body.resourceType}`, agrees: false });
         continue;
       }
-      // The SHARED classifier, not a local rule, over EVERY rate. It compares every gated population and
-      // isolates the six CMS122 defects NARROWLY — one difference, on numerator, expected 0 vs actual 1.
-      // Exempting those whole cases (the first version of this script) would let an IPP/DENOM/DENEX
-      // divergence or an HTTP error inside them pass unseen (Codex, #393).
-      const comparison = compareReports(measure as OfficialMeasureId, dir, mr, body);
+      // Checked before the counts: an exception's report is all zeros, which would otherwise be compared
+      // as an answer and counted as a disagreement.
+      const engineError = engineErrorOf(body);
+      if (engineError) {
+        results.push({ case: dir, patientId, expected, java: null, engineError, agrees: false });
+        continue;
+      }
+      // The SHARED classifier, not a local rule, over EVERY rate and every gated population, with no
+      // exemptions (#846).
+      const comparison = compareReports(mr, body);
       results.push({
         case: dir,
         patientId,
@@ -255,12 +276,14 @@ async function main(): Promise<void> {
 
   const evaluated = results.filter((r) => r.java !== null);
   if (evaluated.length === 0) {
-    console.error(`\nFAIL: ${results.length} case(s) discovered but NONE evaluated — every request failed.`);
+    console.error(`\nFAIL: ${results.length} case(s) discovered but NONE evaluated — every request failed or every case threw.`);
     process.exitCode = 1;
     return;
   }
   const agreed = results.filter((r) => r.agrees);
-  const referenceAgreements = results.filter((r) => r.agreement?.status === "reference-agreement");
+  const disagreed = results.filter((r) => r.java !== null && !r.agrees);
+  const engineErrors = results.filter((r) => r.engineError);
+  const requestFailures = results.filter((r) => r.error);
   const unexpected = results.filter((r) => !r.agrees);
 
   // The degenerate-sweep refusal — see the header. An all-zero sweep is a resolution failure wearing
@@ -277,28 +300,25 @@ async function main(): Promise<void> {
 
   if (argv.includes("--json")) {
     const rateCount = Math.max(1, ...results.map((r) => r.rates?.expected.length ?? 1));
-    console.log(JSON.stringify({ measure, name, server, period, javaPeriod, rateCount, results }, null, 2));
+    const periodSent = !libraryPeriod;
+    console.log(JSON.stringify({ measure, name, server, period, periodSent, javaPeriod, rateCount, results }, null, 2));
     process.exitCode = unexpected.length === 0 ? 0 : 1;
     return;
   }
 
   console.log(`\nmeasure       : ${measure} (${name})`);
   console.log(`engine        : cqf-fhir-cr via ${server}`);
-  console.log(`period        : ${period?.start} .. ${period?.end}`);
+  console.log(`period        : ${libraryPeriod ? "not sent (the library's default)" : `${period?.start} .. ${period?.end}`}`);
   console.log(`java period   : ${JSON.stringify(javaPeriod)}`);
   console.log(`cases         : ${results.length}  (evaluated ${evaluated.length})`);
   const rateCount = Math.max(1, ...results.map((r) => r.rates?.expected.length ?? 1));
   if (rateCount > 1) console.log(`rates         : ${rateCount} — every rate compared (ADR-074)`);
   console.log(`agreeing      : ${agreed.length}/${results.length}`);
-  if (referenceAgreements.length) {
-    console.log(
-      `reference-agr : ${referenceAgreements.length} — upstream's own expected is wrong and the engine ` +
-        `matches the REFERENCE (CMS122 numerator 0→1 only)`,
-    );
-  }
-  console.log(`UNEXPECTED    : ${unexpected.length}`);
+  console.log(`disagreeing   : ${disagreed.length}`);
+  console.log(`engine errors : ${engineErrors.length}${engineErrors.length ? " — the engine threw on these cases; not a disagreement" : ""}`);
+  console.log(`not evaluated : ${requestFailures.length}${requestFailures.length ? " — the request failed; this sweep is PARTIAL" : ""}`);
   for (const r of unexpected.slice(0, 20)) {
-    console.log(`  - ${r.case}${r.error ? ` ERROR ${r.error}` : ""}`);
+    console.log(`  - ${r.case}${r.error ? ` NOT EVALUATED ${r.error}` : ""}${r.engineError ? ` ENGINE ERROR ${r.engineError}` : ""}`);
     if (r.java) {
       console.log(`      expected ${JSON.stringify(r.expected)}`);
       console.log(`      java     ${JSON.stringify(r.java)}`);
@@ -309,7 +329,7 @@ async function main(): Promise<void> {
   console.log(
     unexpected.length === 0
       ? `\n=== ${agreed.length}/${results.length} — the Java engine agrees with every expected result ===`
-      : `\n=== ${unexpected.length} unexpected disagreement(s) — each needs a cause, not a re-run ===`,
+      : `\n=== ${disagreed.length} disagreement(s), ${engineErrors.length} engine error(s), ${requestFailures.length} not evaluated — each needs a cause, not a re-run ===`,
   );
   process.exitCode = unexpected.length === 0 ? 0 : 1;
 }

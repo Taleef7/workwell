@@ -126,7 +126,7 @@ test("loadOfficialMeasureCases assembles loose resources and expected population
   assert.equal(loaded.valueSets.truncated[0]!.availableCodes, 1);
 });
 
-test("classifyPopulationAgreement adjusts only the six known CMS122 numerator expecteds", async () => {
+test("classifyPopulationAgreement passes exact agreement only, and names the population that differs", async () => {
   const module = await import("./official-cases.ts");
   assert.equal(typeof module.classifyPopulationAgreement, "function", "classifier must be exported");
 
@@ -137,29 +137,46 @@ test("classifyPopulationAgreement adjusts only the six known CMS122 numerator ex
     numerator: 0,
     "denominator-exception": 0,
   } as const;
-  const referenceActual = { ...expected, numerator: 1 };
-  const known = module.classifyPopulationAgreement(
-    "cms122",
-    "ede0ee7a-18ab-4ba7-934c-23618f1270ea",
-    expected,
-    referenceActual,
-  );
-  assert.equal(known.status, "reference-agreement");
-  assert.equal(known.pass, true);
-  assert.deepEqual(known.differences, ["numerator"]);
+  const off = module.classifyPopulationAgreement(expected, { ...expected, numerator: 1 });
+  assert.equal(off.status, "mismatch");
+  assert.equal(off.pass, false);
+  assert.deepEqual(off.differences, ["numerator"]);
 
-  const unknown = module.classifyPopulationAgreement(
-    "cms122",
-    "090ad2fc-274b-4fef-bc5a-2077dbdc28f5",
-    expected,
-    referenceActual,
-  );
-  assert.equal(unknown.status, "mismatch");
-  assert.equal(unknown.pass, false);
-
-  const exact = module.classifyPopulationAgreement("cms125", "any-uuid", expected, expected);
+  const exact = module.classifyPopulationAgreement(expected, expected);
   assert.equal(exact.status, "expected-agreement");
   assert.equal(exact.pass, true);
+});
+
+test("#846: no case is exempt — a CMS122 case once passed on numerator 1 against MADiE's 0 now fails the gate", async () => {
+  // These six were passed as "reference agreement" when our engine answered numerator 1, on the premise
+  // that MADiE's expected 0 was wrong. The premise was an old Java image's bug; on cqf-fhir-cr 4.13.0 all
+  // six agree with MADiE. So our engine answering 1 on one of them is a regression the gate must report.
+  const module = await import("./official-cases.ts");
+  const formerlyExempt = [
+    "ede0ee7a-18ab-4ba7-934c-23618f1270ea",
+    "e61be907-af68-493f-a6bc-3d93ef8b6c6e",
+    "cade5021-b1bf-43e9-a0a4-659c05b386d0",
+    "3b62b0a8-44f2-4365-bcb9-7cadef5bab2e",
+    "9cba6cfa-9671-4850-803d-e286c7d59ee7",
+    "f5771b74-a7de-439a-a51f-49a3863e086b",
+  ];
+  for (const uuid of formerlyExempt) {
+    const loaded = loadedMeasureForRunner();
+    loaded.cases[0] = {
+      ...loaded.cases[0]!,
+      uuid,
+      patientId: uuid,
+      expected: { "initial-population": 1, denominator: 1, "denominator-exclusion": 0, numerator: 0, "denominator-exception": 0 },
+    };
+    const calculate = () =>
+      Promise.resolve(fqmResult(uuid, { "initial-population": true, denominator: true, "denominator-exclusion": false, numerator: true }));
+    const run = await module.runOfficialMeasureCases(loaded, { calculate });
+    assert.equal(run.cases[0]!.agreement!.status, "mismatch", uuid);
+    assert.deepEqual(run.summary, { total: 1, expectedAgreements: 0, unexpectedMismatches: 1, errors: 0 }, uuid);
+    const markdown = module.renderOfficialCaseReport([run], { generatedDate: "2026-10-19", sourceRevision: "sha" });
+    assert.match(markdown, new RegExp(`\`${uuid}\`.*\\| FAIL \\|`), uuid);
+    assert.doesNotMatch(markdown, /PASS†|reference/i);
+  }
 });
 
 function loadedMeasureForRunner() {
@@ -282,7 +299,6 @@ test("runOfficialMeasureCases calls Calculator once for the patient batch with l
   assert.deepEqual(run.summary, {
     total: 1,
     expectedAgreements: 1,
-    referenceAgreements: 0,
     unexpectedMismatches: 0,
     errors: 0,
   });
@@ -343,7 +359,9 @@ test("renderOfficialCaseReport emits summary and per-case expected/actual popula
     generatedDate: "2026-07-15",
     sourceRevision: "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab",
   });
-  assert.match(markdown, /\| CMS122 \| 1 \| 1 \(100\.0%\) \| 0 \| 1 \(100\.0%\) \| 0 \| 0 \|/);
+  assert.match(markdown, /\| Measure \| Cases \| Agreement with expected \| Mismatches \| Errors \|/);
+  assert.match(markdown, /\| CMS122 \| 1 \| 1 \(100\.0%\) \| 0 \| 0 \|/);
+  assert.match(markdown, /no case is exempt/);
   // FIVE population columns — the row is derived from `POPULATION_CODES`, so this asserts the report
   // renders every population it compares. It used to assert four while DENEXCEP was silently compared
   // and never shown (review, #358).
@@ -430,15 +448,12 @@ test("renderOfficialCaseReport documents primary end-of-day normalization withou
         uuid: "4cf81a94-81fb-4be2-b075-7d8f9ff02a6e",
         expected,
         actual,
-        agreement: module.classifyPopulationAgreement(
-          "cms125",
-          "4cf81a94-81fb-4be2-b075-7d8f9ff02a6e",
-          expected,
+        agreement: module.classifyPopulationAgreement(expected,
           actual,
         ),
       },
     ],
-    summary: { total: 1, expectedAgreements: 0, referenceAgreements: 0, unexpectedMismatches: 1, errors: 0 },
+    summary: { total: 1, expectedAgreements: 0, unexpectedMismatches: 1, errors: 0 },
   };
   const markdown = module.renderOfficialCaseReport([run], {
     generatedDate: "2026-07-15",
@@ -555,14 +570,14 @@ test("agreement over a multi-rate measure requires EVERY rate to match, not just
   // Initiated (rate 1 numerator 1) but not engaged (rate 2 numerator 0) — the real shape of those 8.
   const expected = [rate(1), rate(0)];
 
-  const bothRight = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+  const bothRight = module.classifyPopulationAgreement(expected[0]!, expected[0]!, {
     expected,
     actual: [rate(1), rate(0)],
   });
   assert.equal(bothRight.pass, true, "matching both rates is agreement");
 
   // Rate 1 still matches; rate 2 does not. This MUST fail — it is the case the old reader could not see.
-  const secondRateWrong = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+  const secondRateWrong = module.classifyPopulationAgreement(expected[0]!, expected[0]!, {
     expected,
     actual: [rate(1), rate(1)],
   });
@@ -572,16 +587,16 @@ test("agreement over a multi-rate measure requires EVERY rate to match, not just
 
   // A rate count that does not match the steward's is a mismatch, never a pass: silently comparing
   // fewer rates than the measure declares is the exact failure this guards.
-  const missingRate = module.classifyPopulationAgreement("cms137", "uuid", expected[0]!, expected[0]!, {
+  const missingRate = module.classifyPopulationAgreement(expected[0]!, expected[0]!, {
     expected,
     actual: [rate(1)],
   });
   assert.equal(missingRate.pass, false, "one rate returned for a two-rate measure is not agreement");
 
   // Single-rate measures are untouched: no `rates` argument means the original comparison.
-  const single = module.classifyPopulationAgreement("cms125", "uuid", rate(1), rate(1));
+  const single = module.classifyPopulationAgreement(rate(1), rate(1));
   assert.equal(single.pass, true);
-  assert.equal(module.classifyPopulationAgreement("cms125", "uuid", rate(1), rate(0)).pass, false);
+  assert.equal(module.classifyPopulationAgreement(rate(1), rate(0)).pass, false);
 });
 
 test("the evidence report renders EVERY rate's expected/actual, not rate 1 alone", async () => {

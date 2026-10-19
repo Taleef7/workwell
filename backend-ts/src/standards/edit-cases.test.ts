@@ -168,7 +168,7 @@ function engine(
       .map((c) => {
         if (c.uuid === over.skip) return { ...c };
         const actual = full(translated && c.uuid === "1" ? 1 : 0);
-        return { ...c, actual, actualRates: [actual], agreement: classifyPopulationAgreement("cms130", c.uuid, c.expected!, actual, { expected: c.expectedRates!, actual: [actual] }) };
+        return { ...c, actual, actualRates: [actual], agreement: classifyPopulationAgreement(c.expected!, actual, { expected: c.expectedRates!, actual: [actual] }) };
       });
     return {
       measure: "cms130",
@@ -183,7 +183,7 @@ function engine(
       engineWarnings: 0,
       ...(over.error ? { calculationError: over.error } : {}),
       cases,
-      summary: { total: cases.length, expectedAgreements: 0, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
+      summary: { total: cases.length, expectedAgreements: 0, unexpectedMismatches: 0, errors: 0 },
     };
   };
 }

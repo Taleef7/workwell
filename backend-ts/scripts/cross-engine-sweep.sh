@@ -45,7 +45,11 @@ done
 
 CONTAINER="${HAPI_CONTAINER:-hapi-cr}"
 PORT="${HAPI_PORT:-8899}"
-IMAGE="${HAPI_IMAGE:-hapiproject/hapi:latest}"
+# Pinned by digest: v8.12.0-2, clinical-reasoning 4.13.0 (#846). `:latest` changed the engine under every
+# sweep, so two sweeps' numbers were not comparable, and the old image's `convert … to days` bug
+# (cqframework/clinical_quality_language#1682) was read as 22 disagreements about the measures. Moving the
+# pin is a deliberate act: re-sweep every measure on the new digest and record it. HAPI_IMAGE overrides it.
+IMAGE="${HAPI_IMAGE:-hapiproject/hapi@sha256:0ff86aac4c7bd13a1ee226444a70263bb46ed1c28ef543c30a44f865b80ca04e}"
 BASE="http://localhost:${PORT}/fhir"
 CONTENT="${CROSS_ENGINE_CONTENT:-.official-content}"
 
