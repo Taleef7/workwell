@@ -65,6 +65,7 @@
  * That is independent confirmation of ROADMAP_2026-08-04 §6 correction 2: the published quality stack is
  * on **QI-Core 6**, not STU7. The run prints the resolved package list for that reason.
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";

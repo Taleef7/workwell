@@ -12,6 +12,7 @@
  * Postgres ceiling); compliance goes through the EvaluateMeasure compute
  * binding in src/engine (#106).
  */
+import "./engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import type {
   CloudDatabase,
   CloudBucket,

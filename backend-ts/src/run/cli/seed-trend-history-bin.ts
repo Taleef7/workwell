@@ -8,6 +8,7 @@
  * ON DELETE CASCADE; schema-qualify on the Postgres ceiling) — see the full SQL in the header of
  * ./seed-trend-history.ts.
  */
+import "../../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { main } from "./seed-trend-history.ts";
 
 main(process.argv.slice(2)).then((code) => process.exit(code));

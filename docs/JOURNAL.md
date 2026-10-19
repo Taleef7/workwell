@@ -7,6 +7,17 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-19
 
+- **Every process evaluates in UTC, and an engine upgrade cannot silently make a resolved diagnosis current
+  (#845).** A date-only FHIR value took the host's offset while fqm evaluates at 0, so a non-UTC host could
+  change a result. Measured: a CMS165 onset entered the population under Tokyo time and not under UTC.
+  - Every entry point now imports `src/engine/utc.ts` first: the server, the dev worker, the calculation
+    thread, every CLI and every top-level script. A test refuses one that does not.
+  - The image sets `TZ=UTC`, the test runner and CI are pinned, and the authored engine states offset 0
+    itself.
+  - `/health` reports the zone, and the deploy gate refuses a build whose offset is not 0.
+  - A guard runs every committed bundle's QICoreCommon on our engine: a resolved Condition with no
+    abatement is never prevalent. On cql-execution 4.0.0-beta.1 the same check fails, which is the
+    upstream translator bug (CQL issue 1871).
 - **The first deploy without code lists in the image left both stacks refusing their routing.** Each stored
   its lists in its bucket and pushed a clean image, but each new backend reported 4 routing problems, and
   no container log was reachable to say why. Locally the fetch works end to end against an S3 stand-in, so

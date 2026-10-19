@@ -43,6 +43,27 @@ const subtractMonths = (isoDate: string, months: number): string => {
   return d.toISOString().slice(0, 10);
 };
 
+/**
+ * The measurement period and the evaluation time, both stated at offset 0 (#845).
+ *
+ * Left offset-less, cql-execution gives each the host's current offset. The same evaluation then answered
+ * differently on a non-UTC host, and across a daylight-saving change. fqm-execution states 0 on the official
+ * path; this is the authored path's equivalent. It does not rely on the process being pinned to UTC,
+ * because this package is published and its callers' processes are not ours to pin.
+ */
+export function evaluationClock(evalDate: string, periodMonths: number) {
+  const startDate = periodMonths > 0 ? subtractMonths(evalDate, periodMonths) : evalDate;
+  return {
+    measurementPeriod: new cql.Interval(
+      cql.DateTime.parse(`${startDate}T00:00:00.0+00:00`),
+      cql.DateTime.parse(`${evalDate}T23:59:59.0+00:00`),
+      true,
+      true,
+    ),
+    executionDateTime: cql.DateTime.parse(`${evalDate}T00:00:00.0+00:00`),
+  };
+}
+
 /** Render a CQL value into the evidence_json contract (ADR-002): scalars + ISO dates. */
 const renderDefine = (v: unknown): unknown => {
   if (v == null) return null;
@@ -133,13 +154,7 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
     // E11.1: an optional pre-translated ELM (e.g. generated CQL) overrides the bundled library — same
     // measurement period / executor / extraction, so it proves codegen parity through the real engine path.
     const library = new cql.Library(input.elm ?? this.loadElm(libraryName), new cql.Repository({ FHIRHelpers: this.fhirHelpers }));
-    const startDate = meta.periodMonths > 0 ? subtractMonths(evalDate, meta.periodMonths) : evalDate;
-    const measurementPeriod = new cql.Interval(
-      cql.DateTime.parse(`${startDate}T00:00:00.0`),
-      cql.DateTime.parse(`${evalDate}T23:59:59.0`),
-      true,
-      true,
-    );
+    const { measurementPeriod, executionDateTime } = evaluationClock(evalDate, meta.periodMonths);
     const codeService = expand
       ? await buildCodeService(this.resolver(), meta.valueSets!)
       : new cql.CodeService({});
@@ -147,7 +162,7 @@ export class CqlExecutionEngine implements EvaluateMeasureBinding {
 
     const patientSource = cqlfhir.PatientSource.FHIRv401();
     patientSource.loadBundles([input.patientBundle]);
-    const results = await executor.exec(patientSource, cql.DateTime.parse(`${evalDate}T00:00:00.0`));
+    const results = await executor.exec(patientSource, executionDateTime);
 
     const entries = Object.entries(results.patientResults) as Array<[string, Record<string, unknown>]>;
     const first = entries[0];
