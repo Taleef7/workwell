@@ -56,6 +56,16 @@ verify_routing_health() {
         echo "::error::build ${sha} reports ${problems} routing problem(s): the router refuses its routing (grep the container log for OFFICIAL_ROUTING_MISCONFIGURED)${fetch:+; terminology fetch: ${fetch}}" >&2
         return 1
       fi
+      # #845: refuse a build that does not evaluate in UTC. The new build's /health reports
+      # `.timezone.utcOffsetMinutes` (0 once pinned). A build with no `timezone` block cannot show that, so it is
+      # refused too. A rollback (a dispatch at an earlier commit, DEPLOY.md) runs that commit's own copy of this
+      # script, so a rollback to a commit before the pin is not blocked by it.
+      local offset
+      offset="$(printf '%s' "$body" | jq_raw '.timezone.utcOffsetMinutes // empty' 2>/dev/null || true)"
+      if [ "$offset" != "0" ]; then
+        echo "::error::build ${sha} evaluates at UTC offset ${offset:-unreported} minutes; only 0 is promoted (#845: a date-only FHIR value takes the host's offset while the measurement period is at 0)" >&2
+        return 1
+      fi
       if [ "$official" != "$want_official" ] || [ "$derived" != "$want_derived" ]; then
         echo "::error::build ${sha} routes official=[${official}] derived=[${derived}]; its build args say official=[${want_official}] derived=[${want_derived}]" >&2
         return 1

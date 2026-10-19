@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node --import tsx
 /** Entry for `pnpm evaluate:webchart-devdb` (#246, PR-3). The lib (`devdb-cli.ts`) stays side-effect-free
  * and import-safe for tests; this bin unconditionally runs it, mirroring the other CLI bins. */
+import "../../utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { main } from "./devdb-cli.ts";
 
 main(process.argv.slice(2))

@@ -18,6 +18,7 @@
  * failure this whole tool exists to stop, so the live path is now real and the frozen one is named
  * `fixture` so nobody can reach for it by accident.
  */
+import "../../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

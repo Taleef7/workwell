@@ -10,6 +10,7 @@
  * NOT part of `pnpm test`: it needs ~34 MB of upstream content fetched at a pinned commit, and a developer
  * with no network must still get a green local suite. Same reasoning the `official-cases` CI job records.
  */
+import "../../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

@@ -538,6 +538,16 @@ export function openApiDocument(): OpenApiDocument {
                 problems: { type: "integer", description: "How many problems the router found with this routing; any is a refused configuration." },
               },
             },
+            timezone: {
+              type: "object",
+              description:
+                "The process's zone and current UTC offset (#845). Measures are evaluated at offset 0; a deploy promotes an image only when utcOffsetMinutes is 0.",
+              required: ["tz", "utcOffsetMinutes"],
+              properties: {
+                tz: { type: ["string", "null"], description: "The TZ setting, UTC once pinned; null when unset." },
+                utcOffsetMinutes: { type: "integer", description: "Minutes east of UTC right now; 0 in a pinned process." },
+              },
+            },
             startedAt: { type: "string", format: "date-time", description: "When this process started." },
             uptimeSeconds: { type: "integer" },
             eventLoop: {

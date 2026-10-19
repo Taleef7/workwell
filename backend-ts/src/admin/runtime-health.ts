@@ -553,6 +553,11 @@ export interface RuntimeHealth {
   routing: RoutingHealth | null;
   /** Null where the stack fetches no terminology (no bucket configured, nothing vendored). */
   terminology: TerminologyHealth | null;
+  /**
+   * The process's zone and current UTC offset (#845). Evaluation assumes offset 0: a date-only FHIR value
+   * takes the host's offset, while the measurement period is at 0. The deploy gate refuses any other offset.
+   */
+  timezone: { tz: string | null; utcOffsetMinutes: number };
   startedAt: string;
   uptimeSeconds: number;
   eventLoop: {
@@ -577,6 +582,8 @@ export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
     build: { sha: buildSha() },
     routing,
     terminology,
+    // `0 -` rather than unary minus, so UTC reports 0 and not -0.
+    timezone: { tz: process.env.TZ ?? null, utcOffsetMinutes: 0 - new Date(now).getTimezoneOffset() },
     startedAt: PROCESS_STARTED_AT,
     uptimeSeconds: Math.round((now - Date.parse(PROCESS_STARTED_AT)) / 1000),
     eventLoop: {

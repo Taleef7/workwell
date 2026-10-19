@@ -9,6 +9,7 @@
  * Inert without `WORKWELL_OUTCOME_RETENTION_DAYS`: it prints what is missing and exits 0 rather than
  * deleting anything on a deployment that has not opted in.
  */
+import "../../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { getStores } from "../../stores/factory.ts";
 import { compactOutcomes, retentionDaysFromEnv } from "../outcome-compaction.ts";
 

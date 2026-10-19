@@ -6,6 +6,7 @@
  * Requires WORKWELL_VSAC_API_KEY (+ optional WORKWELL_VSAC_BASE_URL); honors DATABASE_URL for Neon.
  * Rollback: DELETE FROM workwell_spike.value_sets WHERE source = 'VSAC'; (schema-qualify on Postgres).
  */
+import "../../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { main } from "./resolve-valuesets.ts";
 
 main(process.argv.slice(2))

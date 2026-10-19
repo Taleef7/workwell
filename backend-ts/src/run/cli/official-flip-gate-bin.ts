@@ -11,6 +11,7 @@
  * route it. `--subjects` caps how many are evaluated; the default keeps a corpus-sized roster inside one
  * batch's memory, and `all` lifts it for a deliberate full sweep.
  */
+import "../../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { resolveDeploymentProfile } from "../../config/deployment-profile.ts";
 import { gateMeasure, renderGate, writeGateJson, parseArgs, rosterSubjectsFor, FlipGateUsageError } from "./official-flip-gate.ts";
 

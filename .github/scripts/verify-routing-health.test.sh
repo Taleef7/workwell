@@ -35,8 +35,10 @@ curl() {
   printf '%s' "$health_body"
 }
 
-served() { # official-json derived-json problems
-  printf '{"status":"UP","build":{"sha":"%s"},"routing":{"official":%s,"derived":%s,"problems":%s}}' "$SHA" "$1" "$2" "$3"
+served() { # official-json derived-json problems [utc-offset-minutes, default 0; "none" omits the field]
+  local tz=',"timezone":{"tz":"UTC","utcOffsetMinutes":'"${4:-0}"'}'
+  [ "${4:-0}" = "none" ] && tz=""
+  printf '{"status":"UP","build":{"sha":"%s"},"routing":{"official":%s,"derived":%s,"problems":%s}%s}' "$SHA" "$1" "$2" "$3" "$tz"
 }
 
 run() { # expected-official expected-derived
@@ -93,5 +95,15 @@ health_body="$(served '[]' '[]' 0)"
 health_body="DOWN"
 [ "$(run "" "")" = 1 ] || fail "a backend that never answers must not be promoted"
 [ "$(grep -c '^health' "$calls")" = 4 ] || fail "a failed request should be retried up to the attempts"
+
+# 9. The new build evaluates in a zone other than UTC (#845): refuse, naming the offset.
+health_body="$(served '["cms122"]' '[]' 0 540)"; new_from=1
+[ "$(run "cms122" "")" = 1 ] || fail "a non-UTC build must not be promoted: $(cat "${tmp_dir}/out")"
+grep -q "540" "${tmp_dir}/out" || fail "should name the offset it refused: $(cat "${tmp_dir}/out")"
+
+# 10. A build that reports no timezone cannot show it evaluates in UTC: refuse (only the NEW sha is read,
+# so an older container still answering never trips this).
+health_body="$(served '["cms122"]' '[]' 0 none)"
+[ "$(run "cms122" "")" = 1 ] || fail "a build reporting no timezone must not be promoted: $(cat "${tmp_dir}/out")"
 
 echo "verify-routing-health: all cases pass"

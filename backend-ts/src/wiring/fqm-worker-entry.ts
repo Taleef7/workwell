@@ -5,6 +5,7 @@
  * reduces fqm's raw output (which carries every resource each patient's retrieves touched), and running
  * it here means the raw output never has to cross back to the main thread.
  */
+import "../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { parentPort } from "node:worker_threads";
 import { calculateOfficialWithSignal, type FqmCalculate, type OfficialCalculationInput } from "@work-well/official-executor";
 import type { WorkerRequest, WorkerResponse } from "./fqm-worker.ts";

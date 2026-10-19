@@ -62,6 +62,7 @@
  * it would otherwise read as a clean run. Same hazard PR-8f's batch-level retrieve refusal exists for, and
  * the same one ADR-043 says is silent by nature. This REFUSES rather than reporting a false pass.
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
