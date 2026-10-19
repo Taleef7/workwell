@@ -5,6 +5,16 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-19
+
+- **The first deploy without code lists in the image left both stacks refusing their routing.** Each stored
+  its lists in its bucket and pushed a clean image, but each new backend reported 4 routing problems, and
+  no container log was reachable to say why. Locally the fetch works end to end against an S3 stand-in, so
+  the likely cause is a slow first bucket access on MIE's network: the 60 s boot bound ran out, the server
+  listened, and `/health` kept the routing check its first request took. Now the fetch runs four at a
+  time with a 30 s bound per object, the boot waits up to 180 s, a late fetch re-records the routing check,
+  and `/health` publishes the fetch's counts (`terminology`), which the deploy gate prints when it refuses.
+
 ## 2026-10-18
 
 - **The licensed code lists leave the published images.** Every backend image carried the VSAC

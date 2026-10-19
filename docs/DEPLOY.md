@@ -68,7 +68,11 @@ sidecar (`assert-clean`), and only then pushed. At boot, before it listens, the 
 vendored sidecar from that bucket and keeps only bytes that hash to the pin
 (`src/wiring/terminology-fetch.ts`). A routed measure's sidecar that cannot be fetched logs
 `WORKWELL_ALERT TERMINOLOGY_FETCH_FAILED` and shows on `/health` as a routing problem, the same as a
-missing file always did. Copies are named by content, so an older image's sidecars stay fetchable after a
+missing file always did. The fetch runs four at a time, each object bounded at 30 s; the listener waits
+for it up to 180 s (`WORKWELL_TERMINOLOGY_BOOT_WAIT_MS`), and a fetch still running then finishes in the
+background and re-records the routing check. `/health` carries its counts (`terminology`: finished,
+fetched, missing, failures by kind, never a key or an error text), and the deploy's routing gate keeps
+polling while `terminology.finished` is false and prints those counts when it refuses. Copies are named by content, so an older image's sidecars stay fetchable after a
 newer deploy; **never delete the bucket's `terminology/` objects**, or a rollback boots without them.
 
 Maui also vendors the sidecar of each WorkWell translation it routes (`measures/derived/<id>/`), one line

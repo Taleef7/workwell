@@ -513,15 +513,43 @@ export interface RoutingHealth {
 
 let routing: RoutingHealth | null = null;
 
-/** Recorded once per process by the worker's boot check, from the same check that raises the routing alert. */
+/**
+ * Recorded by the worker's boot check, from the same check that raises the routing alert, and again by the
+ * boot terminology fetch when it finishes after the first request (D17), so a late fetch is not reported
+ * as a refusal for the life of the process.
+ */
 export function recordRoutingHealth(value: RoutingHealth): void {
   routing = { official: [...value.official].sort(), derived: [...value.derived].sort(), problems: value.problems };
+}
+
+/**
+ * The boot fetch of the licensed terminology sidecars from the stack's bucket (D17): counts and timings only,
+ * so a deploy whose routing is refused can say which way the fetch went without anyone reading the container
+ * log. `finished: false` means the fetch was still running when the listener had to start.
+ */
+export interface TerminologyHealth {
+  finished: boolean;
+  durationMs: number;
+  required: number;
+  fetched: number;
+  alreadyPresent: number;
+  missingRequired: number;
+  missingOptional: number;
+  failures: { bucketUnavailable: number; notInBucket: number; hashMismatch: number; timedOut: number; readFailed: number };
+}
+
+let terminology: TerminologyHealth | null = null;
+
+export function recordTerminologyHealth(value: TerminologyHealth): void {
+  terminology = { ...value, failures: { ...value.failures } };
 }
 
 /** The public `/health` view: counts, timings and the routed measure ids only (see WHAT IS PUBLIC above). */
 export interface RuntimeHealth {
   build: { sha: string | null };
   routing: RoutingHealth | null;
+  /** Null where the stack fetches no terminology (no bucket configured, nothing vendored). */
+  terminology: TerminologyHealth | null;
   startedAt: string;
   uptimeSeconds: number;
   eventLoop: {
@@ -545,6 +573,7 @@ export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
   return {
     build: { sha: buildSha() },
     routing,
+    terminology,
     startedAt: PROCESS_STARTED_AT,
     uptimeSeconds: Math.round((now - Date.parse(PROCESS_STARTED_AT)) / 1000),
     eventLoop: {
@@ -597,4 +626,5 @@ export function __resetRuntimeHealth(): void {
   lastAlertAt = 0;
   suppressedAlerts = 0;
   routing = null;
+  terminology = null;
 }

@@ -68,6 +68,13 @@ health_body="$(served '["cms122"]' '[]' 2)"; new_from=1
 [ "$(grep -c '^health' "$calls")" = 1 ] || fail "a final answer should not be polled again"
 grep -q "2 routing problem" "${tmp_dir}/out" || fail "should report the problem count"
 
+# 4b. The terminology fetch is still running (D17): not final, so keep polling; still refused once the
+# attempts run out, naming the fetch's counts.
+health_body='{"status":"UP","build":{"sha":"'"$SHA"'"},"routing":{"official":["cms122"],"derived":[],"problems":2},"terminology":{"finished":false,"durationMs":0,"required":2,"fetched":0}}'; new_from=1
+[ "$(run "cms122" "")" = 1 ] || fail "an unfinished fetch with problems must not be promoted"
+[ "$(grep -c '^health' "$calls")" = 4 ] || fail "an unfinished fetch should be polled until the attempts run out"
+grep -q 'terminology fetch: {"finished":false' "${tmp_dir}/out" || fail "should name the fetch's counts: $(cat "${tmp_dir}/out")"
+
 # 5. The image routes something other than its build args (a list dropped, or one too many).
 health_body="$(served '["cms122","cms125"]' '[]' 0)"
 [ "$(run "cms122,cms125,cms137" "")" = 1 ] || fail "a missing official id must refuse"
