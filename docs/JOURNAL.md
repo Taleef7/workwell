@@ -7,6 +7,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-19
 
+- **The simulate-route test no longer fails on a machine with a VSAC key in its shell.** `engineForEnv` falls
+  back to `process.env` for the key, and a keyed engine opens the value-set store, which the test's `{}` env
+  cannot. The test now clears the key, as the MADiE end-to-end tests do. Production is unchanged.
 - **The MADiE gate has no exemption, and every cross-engine disagreement has a cause (#846, closes #572).**
   Six CMS122 cases passed as "reference agreement" when our engine answered numerator 1, on the premise that
   MADiE was wrong. That premise came from an old Java image's bug, so a regression on exactly those cases
