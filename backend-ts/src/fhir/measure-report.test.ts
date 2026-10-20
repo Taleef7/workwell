@@ -184,7 +184,8 @@ test("#848: a run scored by an EARLIER vendoring with the same logic keeps the c
   (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =
     "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8";
   const report = buildSummaryMeasureReport(run, "cms125", [earlier], GENERATED_AT);
-  assert.ok(report.measure.includes("madie.cms.gov"), `kept CMS's canonical, got ${report.measure}`);
+  const current = loadOfficialArtifact("cms125")!.manifest;
+  assert.equal(report.measure, `${current.url}|${current.version}`, "kept CMS's versioned canonical");
   assert.ok(JSON.stringify(report).includes("linkId"), "the artifact's ids still describe the counts");
   // cms122's earlier vendoring is not cms125's: another measure's sha never carries an identity across.
   (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =

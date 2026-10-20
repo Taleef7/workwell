@@ -201,7 +201,7 @@ test("the rewrite renames both resource ids and drops the contained Library that
   ]);
   assert.deepEqual(profiles(measure), profiles(cmsMeasure).filter((p) => !p.endsWith("/publishable-measure-cqfm")));
   assert.deepEqual(profiles(main), profiles(cmsMain).filter((p) => !droppedFromMain.has(p)));
-  assert.ok(profiles(main).includes("http://hl7.org/fhir/uv/cql/StructureDefinition/elm-json-library"), "the claim it meets stays");
+  assert.ok(profiles(main).some((p) => p === "http://hl7.org/fhir/uv/cql/StructureDefinition/elm-json-library"), "the claim it meets stays");
 });
 
 test("the rewrite drops what states CMS's publication: the bundle's name, the usage text, the dates, CMS's compile options", () => {

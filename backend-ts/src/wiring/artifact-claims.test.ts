@@ -72,7 +72,7 @@ for (const artifact of artifacts) {
 
   test(`${name}: every Library claiming crmi-publishablelibrary carries the date it requires`, () => {
     for (const library of artifact.resources.filter((r) => r.resourceType === "Library")) {
-      if (!profilesOf(library).includes(PUBLISHABLE_LIBRARY)) continue;
+      if (!profilesOf(library).some((p) => p === PUBLISHABLE_LIBRARY)) continue;
       assert.ok(typeof library["date"] === "string", `${String(library["url"])} claims ${PUBLISHABLE_LIBRARY} and has no date`);
     }
   });
@@ -101,7 +101,7 @@ for (const artifact of artifacts.filter((a) => a.kind === "official")) {
 for (const artifact of artifacts.filter((a) => a.kind === "derived")) {
   test(`derived/${artifact.id}: the Measure does not claim publishable-measure-cqfm, whose identifiers a translation may not carry`, () => {
     const measure = artifact.resources.find((r) => r.resourceType === "Measure")!;
-    assert.ok(!profilesOf(measure).includes(PUBLISHABLE_MEASURE));
+    assert.ok(!profilesOf(measure).some((p) => p === PUBLISHABLE_MEASURE));
   });
 
   test(`derived/${artifact.id}: the improvement notation is the one WorkWell's semantics imply, in the Measure and the manifest`, () => {
