@@ -27,6 +27,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-19
 
+- **The simulate-route test no longer fails on a machine with a VSAC key in its shell.** `engineForEnv` falls
+  back to `process.env` for the key, and a keyed engine opens the value-set store, which the test's `{}` env
+  cannot. The test now clears the key, as the MADiE end-to-end tests do. Production is unchanged.
 - **Terminology is taken at the release by its title, and Advanced Illness is the release's 2,030 codes (#851).**
   The official completion used VSAC's drifting `manifest=` form and only refused an answer short of CMS's
   declared count, so Advanced Illness was pinned at 2,000 codes (33 short of the release, 3 outside it) in
