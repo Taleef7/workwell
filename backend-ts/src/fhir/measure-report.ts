@@ -9,11 +9,31 @@
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
+import { loadDerivedArtifact, loadOfficialArtifact, type OfficialArtifact } from "../wiring/official-artifacts.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 
 const POP_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-population";
 const IMPROVEMENT_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-improvement-notation";
+const SCORING_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-scoring";
+
+/**
+ * DEQM 1.0.0 (UV) is the guide these reports are shaped to (owner decision on #849, 2026-10-19). Its
+ * scoring extension differs from Da Vinci DEQM STU5's (`…/us/davinci-deqm/…/extension-measureScoring`), so
+ * a report meets `deqm-3` under one guide only. Scoring is stated on the ROOT: on the groups, `deqm-4`
+ * would also require a group improvement notation, and the artifact's (`cqfm-improvementNotation`) is the
+ * value the semantics table overrides for cms122.
+ */
+const DEQM_MEASURE_SCORING = "http://hl7.org/fhir/uv/deqm/StructureDefinition/deqm-measureScoring";
+/** R5's `linkId` on each MeasureReport element, as DEQM 1.0.0 requires it on R4 (a cross-version extension). */
+const linkIdUrl = (element: string) => `http://hl7.org/fhir/5.0/StructureDefinition/extension-MeasureReport.${element}.linkId`;
+
+export interface Extension {
+  url: string;
+  valueString?: string;
+  valueCodeableConcept?: { coding: Array<{ system: string; code: string }> };
+}
+
+const linkId = (element: string, id: string): Extension[] => [{ url: linkIdUrl(element), valueString: id }];
 
 /**
  * One stratifier of one group, in the shape the steward's own MADiE MeasureReports use: keyed by the
@@ -22,6 +42,7 @@ const IMPROVEMENT_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-improv
  */
 export interface Stratifier {
   id: string;
+  extension?: Extension[];
   stratum: Array<{ value: { text: "true" | "false" }; population: Population[]; measureScore?: { value: number } }>;
 }
 
@@ -33,12 +54,14 @@ export interface StratumCounts {
 }
 
 export interface Population {
+  extension?: Extension[];
   code: { coding: Array<{ system: string; code: string }> };
   count: number;
 }
 export interface MeasureReport {
   resourceType: "MeasureReport";
   id: string;
+  extension?: Extension[];
   status: "complete";
   type: "summary" | "individual";
   measure: string;
@@ -48,8 +71,11 @@ export interface MeasureReport {
   reporter: { reference: string };
   period: { start: string; end: string };
   improvementNotation?: { coding: Array<{ system: string; code: string }> };
-  /** `id` is present only on a MULTI-RATE report, mirroring the artifact's own Group_1/Group_2. */
-  group: Array<{ id?: string; population: Population[]; measureScore?: { value: number }; stratifier?: Stratifier[] }>;
+  /**
+   * `id` is present only on a MULTI-RATE report, mirroring the artifact's own Group_1/Group_2. `extension`
+   * carries the artifact's group id as a `linkId` when the report knows the artifact (#849).
+   */
+  group: Array<{ id?: string; extension?: Extension[]; population: Population[]; measureScore?: { value: number }; stratifier?: Stratifier[] }>;
 }
 /** A `collection` Bundle: entry[0] is the summary report; the rest are per-subject individuals. */
 export interface MeasureReportBundle {
@@ -336,7 +362,7 @@ const addMembership = (counts: PopulationCounts, m: PopulationMembership): void 
 
 /**
  * Per-subject stratum membership, per rate, off `evidence.official.strata` — `null` when the measure
- * declares no stratifier (every measure but cms137 today) or the outcome predates their persistence.
+ * declares no stratifier (cms125, cms130 and cms137 declare them) or the outcome predates their persistence.
  */
 export function strataRatesFor(outcome: Pick<OutcomeRecord, "evidence">): Array<Array<{ id: string; result: boolean }>> | null {
   const strata = (outcome.evidence as { official?: { strata?: unknown } } | null | undefined)?.official?.strata;
@@ -445,17 +471,24 @@ export function createRateAggregator(measureId: string): { add(outcome: Pick<Out
   };
 }
 
-/** The FHIR `stratifier` element for one group, in the steward's own true/false-stratum shape. */
-export function stratifierElements(strata: StratumCounts[]): Stratifier[] {
+/**
+ * The FHIR `stratifier` element for one group, in the steward's own true/false-stratum shape. With the
+ * artifact's group, each stratifier the group declares and each stratum population carry their `linkId`.
+ */
+export function stratifierElements(strata: StratumCounts[], group: ArtifactGroup | null = null): Stratifier[] {
   const stratum = (text: "true" | "false", counts: PopulationCounts) => {
     const effective = counts.denom - counts.denex - counts.denexcep;
     return {
       value: { text },
-      population: populations(counts),
+      population: populations(counts, group, "group.stratifier.stratum.population"),
       ...(effective > 0 ? { measureScore: { value: counts.numer / effective } } : {}),
     };
   };
-  return strata.map((s) => ({ id: s.id, stratum: [stratum("true", s.inStratum), stratum("false", s.notInStratum)] }));
+  return strata.map((s) => ({
+    id: s.id,
+    ...(group?.stratifierIds.has(s.id) ? { extension: linkId("group.stratifier", s.id) } : {}),
+    stratum: [stratum("true", s.inStratum), stratum("false", s.notInStratum)],
+  }));
 }
 
 export function countPopulations(outcomes: OutcomeRecord[], measureId: string): PopulationCounts {
@@ -560,6 +593,24 @@ export function reportingPeriod(
 }
 
 /**
+ * The artifact that scored this outcome, when it is still the one vendored: its sha matches the evidence's
+ * (or the evidence predates recording one), and a translation's url matches too. A re-vendor between the run
+ * and the export changes the sha, and the current artifact's canonical or ids would then describe logic the
+ * counts were not produced by.
+ */
+const reportArtifact = (measureId: string, official: OfficialReportIdentity | null): OfficialArtifact | null => {
+  if (!official) return null;
+  const artifact = official.kind === "derived" ? loadDerivedArtifact(measureId) : loadOfficialArtifact(measureId);
+  if (!artifact) return null;
+  if (official.artifactSha256 && artifact.manifest.sha256 !== official.artifactSha256) return null;
+  if (official.kind === "derived" && official.url && artifact.manifest.url !== official.url) return null;
+  return artifact;
+};
+
+/** `url|version` (`deqm-0`: the canonical SHALL carry the version), or the bare url when none is known. */
+const versioned = (url: string, version: string | undefined): string => (version ? `${url}|${version}` : url);
+
+/**
  * THE TRIO (ADR-046, discharging the PR-7 obligation this file has carried since PR-3).
  *
  * The prohibition used to read: WorkWell's numerator is compliance-oriented (including inverted CMS122
@@ -584,16 +635,63 @@ const measureCanonical = (measureId: string, official: OfficialReportIdentity | 
   // A WorkWell translation reports under its OWN canonical, checked before anything else: the branch
   // below would hand it CMS's canonical whenever its sha is missing, and the fallback after that would
   // call it `:official:`. Either one labels a translation's counts as CMS's measure (LOCKED §4.3).
-  if (official.kind === "derived") return official.url ?? `urn:workwell:measure:${measureId}:translation`;
-  const artifact = loadOfficialArtifact(measureId);
-  // Only claim CMS's canonical for the artifact that ACTUALLY produced this outcome. A re-vendor between
-  // the run and the export changes the sha; labelling the old report with the new canonical would assert
-  // a provenance that never existed. Falling back to a version-qualified urn is less pretty and true.
-  if (artifact && (!official.artifactSha256 || artifact.manifest.sha256 === official.artifactSha256)) {
-    return artifact.manifest.url;
+  if (official.kind === "derived") {
+    return official.url ? versioned(official.url, official.version) : `urn:workwell:measure:${measureId}:translation`;
   }
+  const artifact = reportArtifact(measureId, official);
+  // Only claim CMS's canonical for the artifact that ACTUALLY produced this outcome (`reportArtifact`).
+  // Falling back to a version-qualified urn is less pretty and true. The version is the evidence's, which
+  // names what ran even when an outcome predates the recorded sha.
+  if (artifact) return versioned(artifact.manifest.url, official.version ?? artifact.manifest.version);
   return `urn:workwell:measure:${measureId}:official:${official.version ?? "unknown"}`;
 };
+
+/** One `Measure.group` of the artifact: its id, its population ids by population code, its stratifier ids. */
+export interface ArtifactGroup {
+  id: string | undefined;
+  populationIds: Map<string, string>;
+  stratifierIds: Set<string>;
+}
+
+/**
+ * The artifact's groups, index-aligned with the report's rates, so every element can carry the `linkId` of
+ * the Measure element it reports (DEQM 1.0.0 requires one on each group, population, stratifier and stratum
+ * population). `null` when the report knows no artifact (an authored measure, the status-bucket path) or
+ * when the group count differs from the rates reported, since ids aligned by position would then mislabel.
+ */
+const artifactGroups = (artifact: OfficialArtifact | null, rateCount: number): ArtifactGroup[] | null => {
+  if (!artifact) return null;
+  const entries = (artifact.bundle as { entry?: Array<{ resource?: Record<string, unknown> }> }).entry ?? [];
+  const measure = entries.map((e) => e.resource).find((r) => r?.["resourceType"] === "Measure");
+  const groups = (measure?.["group"] as Array<Record<string, unknown>> | undefined) ?? [];
+  if (groups.length !== rateCount) return null;
+  return groups.map((g) => {
+    const populationIds = new Map<string, string>();
+    for (const p of (g["population"] as Array<{ id?: unknown; code?: { coding?: Array<{ code?: unknown }> } }> | undefined) ?? []) {
+      const code = p.code?.coding?.[0]?.code;
+      if (typeof code === "string" && typeof p.id === "string") populationIds.set(code, p.id);
+    }
+    const stratifierIds = new Set(
+      ((g["stratifier"] as Array<{ id?: unknown }> | undefined) ?? []).map((s) => s.id).filter((id): id is string => typeof id === "string"),
+    );
+    return { id: typeof g["id"] === "string" ? g["id"] : undefined, populationIds, stratifierIds };
+  });
+};
+
+/**
+ * Every report states its scoring on the root (`deqm-3`; see DEQM_MEASURE_SCORING). This builder computes a
+ * proportion score for every measure, and every vendored artifact declares `proportion` on every group
+ * (`measure-report.test.ts` holds that), so the extension states what was computed.
+ */
+const scoringExtension = (): Extension[] => [
+  { url: DEQM_MEASURE_SCORING, valueCodeableConcept: { coding: [{ system: SCORING_SYSTEM, code: "proportion" }] } },
+];
+
+/** A group's own fields: its `id` on a multi-rate report, its `linkId` when the artifact is known. */
+const groupShell = (index: number, rateCount: number, group: ArtifactGroup | null): { id?: string; extension?: Extension[] } => ({
+  ...(rateCount > 1 ? { id: `Group_${index + 1}` } : {}),
+  ...(group?.id ? { extension: linkId("group", group.id) } : {}),
+});
 
 const improvementNotation = (
   measureId: string,
@@ -621,17 +719,37 @@ const reportMetadata = (generatedAt: string) => ({
   reporter: { reference: `#${REPORTER_ID}` },
 });
 
-const pop = (code: string, count: number): Population => ({ code: { coding: [{ system: POP_SYSTEM, code }] }, count });
+const pop = (code: string, count: number, linkIds?: Extension[]): Population => ({
+  ...(linkIds ? { extension: linkIds } : {}),
+  code: { coding: [{ system: POP_SYSTEM, code }] },
+  count,
+});
 
-const populations = (c: PopulationCounts): Population[] => [
-  pop("initial-population", c.ipp),
-  pop("numerator", c.numer),
-  pop("denominator", c.denom),
-  pop("denominator-exclusion", c.denex),
-  // Emitted only when the measure actually has exceptions, so every authored measure's report is
-  // byte-identical to before this change.
-  ...(c.denexcep > 0 ? [pop("denominator-exception", c.denexcep)] : []),
-];
+/**
+ * A group's (or a stratum's) populations. Without an artifact: the four proportion populations, plus the
+ * exception only when there is one, so every authored report is byte-identical to before. With the
+ * artifact's group: every population the measure declares (#849), each with its `linkId`, so CMS2's and
+ * CMS68's declared exception is reported at 0 rather than omitted. A population the measure does not
+ * declare (CMS68 has no exclusion) is left out at 0. It is kept, with no `linkId` to give it, when its count
+ * is not 0: that happens only when an outcome's official evidence was unreadable and membership fell back to
+ * the status rule, and hiding the count would hide that.
+ */
+const populations = (c: PopulationCounts, group: ArtifactGroup | null = null, element = "group.population"): Population[] => {
+  const all: Array<[string, number]> = [
+    ["initial-population", c.ipp],
+    ["numerator", c.numer],
+    ["denominator", c.denom],
+    ["denominator-exclusion", c.denex],
+    ["denominator-exception", c.denexcep],
+  ];
+  if (!group) return all.filter(([code, count]) => code !== "denominator-exception" || count > 0).map(([code, count]) => pop(code, count));
+  return all
+    .filter(([code, count]) => group.populationIds.has(code) || count > 0)
+    .map(([code, count]) => {
+      const id = group.populationIds.get(code);
+      return pop(code, count, id ? linkId(element, id) : undefined);
+    });
+};
 
 export function buildSummaryMeasureReport(
   run: RunRecord,
@@ -669,14 +787,14 @@ export function buildSummaryMeasureReportFromCounts(
   strata: StratumCounts[][] = [],
 ): MeasureReport {
   const rates = Array.isArray(c) ? c : [c];
+  const artifact = artifactGroups(reportArtifact(measureId, official), rates.length);
   const groups = rates.map((counts, index) => {
     // A multi-rate report gets group IDS, matching the steward's own `Group_1`/`Group_2` convention
     // (the artifact's Measure.group carries the same). Without them a consumer can only tell Initiation
     // from Engagement by array order, and nothing in the document asserts that order. Single-rate
-    // reports keep no id, so the eight existing measures are byte-identical.
-    const group: MeasureReport["group"][number] = rates.length > 1
-      ? { id: `Group_${index + 1}`, population: populations(counts) }
-      : { population: populations(counts) };
+    // reports keep no id. With the artifact, each group also carries its `linkId` (#849).
+    const ids = artifact?.[index] ?? null;
+    const group: MeasureReport["group"][number] = { ...groupShell(index, rates.length, ids), population: populations(counts, ids) };
     // eCQM proportion score: exceptions are removed from the denominator alongside exclusions.
     // `denexcep` is 0 for every authored measure, so this is arithmetically unchanged for them.
     const effectiveDenominator = counts.denom - counts.denex - counts.denexcep;
@@ -684,12 +802,13 @@ export function buildSummaryMeasureReportFromCounts(
     // Strata, in the steward's own true/false-stratum shape, only where the group declares them — every
     // unstratified report is byte-identical.
     const groupStrata = strata[index] ?? [];
-    if (groupStrata.length > 0) group.stratifier = stratifierElements(groupStrata);
+    if (groupStrata.length > 0) group.stratifier = stratifierElements(groupStrata, ids);
     return group;
   });
   return {
     resourceType: "MeasureReport",
     ...reportMetadata(generatedAt),
+    extension: scoringExtension(),
     status: "complete",
     type: "summary",
     measure: measureCanonical(measureId, official),
@@ -724,9 +843,11 @@ export function buildIndividualMeasureReport(
   const perRate = memberships.map(asCounts);
   const strata = strataRatesFor(outcome);
   const official = officialReportIdentity(outcome.evidence);
+  const artifact = artifactGroups(reportArtifact(measureId, official), perRate.length);
   return {
     resourceType: "MeasureReport",
     ...reportMetadata(generatedAt),
+    extension: scoringExtension(),
     status: "complete",
     type: "individual",
     measure: measureCanonical(measureId, official),
@@ -735,15 +856,15 @@ export function buildIndividualMeasureReport(
     period: reportingPeriod(run, official),
     improvementNotation: { coding: [{ system: IMPROVEMENT_SYSTEM, code: improvementNotation(measureId, official) }] },
     group: perRate.map((counts, index) => {
-      const group: MeasureReport["group"][number] = perRate.length > 1
-        ? { id: `Group_${index + 1}`, population: populations(counts) }
-        : { population: populations(counts) };
+      const ids = artifact?.[index] ?? null;
+      const group: MeasureReport["group"][number] = { ...groupShell(index, perRate.length, ids), population: populations(counts, ids) };
       // The subject's OWN stratum membership, as the steward's individual reports carry it: the counts
       // land in the `true` stratum when the subject is in it and in the `false` one when not.
       const own = strata?.[index] ?? [];
       if (own.length > 0) {
         group.stratifier = stratifierElements(
           own.map((s) => ({ id: s.id, inStratum: s.result ? counts : zeroCounts(), notInStratum: s.result ? zeroCounts() : counts })),
+          ids,
         );
       }
       return group;

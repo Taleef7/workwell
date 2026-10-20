@@ -703,7 +703,7 @@ test("a run scored by a WorkWell translation: QRDA refuses it (no CMS identity t
   const mr = (await get(`/api/runs/${runId}/measure-report`))!;
   assert.equal(mr.status, 200);
   const report = (await mr.json()) as { measure: string };
-  assert.equal(report.measure, "urn:workwell:measure:cms137:translation-2027", "reported under the translation's own canonical, not a fallback");
+  assert.equal(report.measure, "urn:workwell:measure:cms137:translation-2027|ww-2027.1", "reported under the translation's own canonical and version (deqm-0), not a fallback");
   assert.equal((await get(`/api/runs/${runId}/measure-report?type=bundle`))!.status, 200, "a bundle of one logic is still exported");
   assert.doesNotMatch(JSON.stringify(report), /madie\.cms\.gov|:official:|137FHIR/, "and nothing in it claims CMS's measure");
   // The reconciliation ladder says which logic its rates came from.

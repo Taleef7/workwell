@@ -46,7 +46,7 @@ function run(numer: number, status: "expected-agreement" | "mismatch" = "expecte
     cases: [
       { uuid: "u1", name: "n", title: "t", series: "s", description: "d", patientId: "p1", actualRates: [counts(ipp, numer)], agreement: { pass: status !== "mismatch", status, differences: [] } },
     ],
-    summary: { total: 1, expectedAgreements: status === "mismatch" ? 0 : 1, referenceAgreements: 0, unexpectedMismatches: status === "mismatch" ? 1 : 0, errors: 0 },
+    summary: { total: 1, expectedAgreements: status === "mismatch" ? 0 : 1, unexpectedMismatches: status === "mismatch" ? 1 : 0, errors: 0 },
   };
 }
 

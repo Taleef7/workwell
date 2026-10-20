@@ -7,6 +7,25 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-19
 
+- **The MADiE gate has no exemption, and every cross-engine disagreement has a cause (#846, closes #572).**
+  Six CMS122 cases passed as "reference agreement" when our engine answered numerator 1, on the premise that
+  MADiE was wrong. That premise came from an old Java image's bug, so a regression on exactly those cases
+  would have passed; the gate now compares every case and is 455/455.
+  - The Java image is pinned by digest (v8.12.0-2), and a Java exception is counted as an engine error, not
+    a disagreement. All nine measures swept on it: 397 of 455 agree with the period sent. The other
+    57 are Java's second-precision period (none remain with the measure's default period), plus one Java
+    exception.
+  - `docs/evidence/CROSS_ENGINE_2026-10-19.md` supersedes the August and September causes: the medication
+    disagreements were the old image's `convert … to days` bug, and CMS165's was the second-precision
+    period, not a harness difference.
+  - Five stale conformance statements corrected (the QM IG 2.0.0 citation, the score's exception term, the
+    formula test's ruler, `Exp`/`Ln`, the `$cql` addendum).
+- **MeasureReports meet DEQM 1.0.0 on CMS's and the translations' reports (#849).** Owner decisions: DEQM
+  1.0.0 (UV) is the target, and no stratifier code yet. The canonical carries `|version`, scoring is stated
+  on the root, and every element carries the artifact's `linkId`. Measured with the HL7 validator: 0 DEQM
+  1.0.0 errors on an unstratified report scored by CMS's artifact or a translation (12 each before); a stratified
+  one (cms125, cms130, cms137) keeps one `deqm-7` per stratifier, an authored one its 11; STU5 stays at 3 per report; base R4 stays at 0.
+  A report now states exactly the populations its measure declares.
 - **Every process evaluates in UTC, and an engine upgrade cannot silently make a resolved diagnosis current
   (#845).** A date-only FHIR value took the host's offset while fqm evaluates at 0, so a non-UTC host could
   change a result. Measured: a CMS165 onset entered the population under Tokyo time and not under UTC.

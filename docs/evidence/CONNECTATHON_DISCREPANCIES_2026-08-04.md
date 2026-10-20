@@ -1,5 +1,7 @@
 # Alternate-engine verification report — CMS7-FQR (FHIR Quality Reporting with DEQM)
 
+> **Superseded 2026-10-19 (#846): read `CROSS_ENGINE_2026-10-19.md`.** Finding 1's mechanism was cqf-fhir-cr 8.10.0's `convert … to days` returning null (cqframework/clinical_quality_language#1682, fixed in CQL 5.2.0), which left `medicationRequestPeriod` with no days supply. It is not an ambiguity in `medicationRequestPeriod`: on v8.12.0-2 the same cases agree.
+
 Date: 2026-08-04. Prepared for the **CMS7-FQR** track's standing ask to participants: *verify results on an
 alternate engine, help diagnose the remaining discrepancies, and classify each into (A) spec clarification,
 (B) tooling fix, (C) content fix, (D) pattern/profile change.*

@@ -1,6 +1,6 @@
 # Official MADiE eCQM Test-Case Report — July 2026
 
-**Generated:** 2026-09-06
+**Generated:** 2026-10-19
 **Content:** `cqframework/dqm-content-qicore-2025` master (2025 AU / 2026 performance period)
 **Content revision:** `ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab`
 **Engine:** `fqm-execution` 1.8.5 over pre-compiled ELM; offline, no server, DB, VSAC key, or request path
@@ -22,19 +22,19 @@ The fetch script sparse-checks out only the gated measures' bundles and test-cas
 
 ## Summary
 
-| Measure | Cases | Raw expected agreement | Known-bad expecteds matching reference | Reference-adjusted pass | Unexpected mismatches | Errors |
-|---|---:|---:|---:|---:|---:|---:|
-| CMS122 | 55 | 55 (100.0%) | 0 | 55 (100.0%) | 0 | 0 |
-| CMS125 | 66 | 66 (100.0%) | 0 | 66 (100.0%) | 0 | 0 |
-| CMS2 | 36 | 36 (100.0%) | 0 | 36 (100.0%) | 0 | 0 |
-| CMS68 | 19 | 19 (100.0%) | 0 | 19 (100.0%) | 0 | 0 |
-| CMS951 | 55 | 55 (100.0%) | 0 | 55 (100.0%) | 0 | 0 |
-| CMS138 | 47 | 47 (100.0%) | 0 | 47 (100.0%) | 0 | 0 |
-| CMS130 | 64 | 64 (100.0%) | 0 | 64 (100.0%) | 0 | 0 |
-| CMS165 | 68 | 68 (100.0%) | 0 | 68 (100.0%) | 0 | 0 |
-| CMS137 | 45 | 45 (100.0%) | 0 | 45 (100.0%) | 0 | 0 |
+| Measure | Cases | Agreement with expected | Mismatches | Errors |
+|---|---:|---:|---:|---:|
+| CMS122 | 55 | 55 (100.0%) | 0 | 0 |
+| CMS125 | 66 | 66 (100.0%) | 0 | 0 |
+| CMS2 | 36 | 36 (100.0%) | 0 | 0 |
+| CMS68 | 19 | 19 (100.0%) | 0 | 0 |
+| CMS951 | 55 | 55 (100.0%) | 0 | 0 |
+| CMS138 | 47 | 47 (100.0%) | 0 | 0 |
+| CMS130 | 64 | 64 (100.0%) | 0 | 0 |
+| CMS165 | 68 | 68 (100.0%) | 0 | 0 |
+| CMS137 | 45 | 45 (100.0%) | 0 | 0 |
 
-† CMS122 reference agreement means the actual vector differs from the committed MADiE expected only at numerator `0→1` for one of the six UUIDs already reported by the source repo. It is an adjusted pass, not an engine defect.
+Every case is compared with MADiE's expected counts as committed; no case is exempt.
 
 ## Execution and terminology controls
 
@@ -58,13 +58,9 @@ The fetch script sparse-checks out only the gated measures' bundles and test-cas
   - Cap candidate: `http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113883.3.464.1003.110.12.1082` — 1000/1997 codes present. A mismatch involving a missing code from this set must be classified as a value-set-cap candidate, not automatically as an engine bug.
 - **CMS137:** trustMetaProfile=false (first pass; no retry); 28/28 Bundle ValueSets carry expansions; 0 expansion(s) report more total codes than are present; fqm warnings=0.
 
-## Investigated findings
-
-- **CMS122 source calibration:** 6/6 known-bad-expected UUIDs matched the committed numerator=0 value; 0/6 reproduced the source comparison's numerator=1 result. This is reported separately from adjusted pass/fail.
-
 ## CMS122 — CMS122FHIRDiabetesAssessGT9Pct
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; reference-adjusted pass 55/55.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 55/55.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -136,7 +132,7 @@ Artifact proven: `sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e7
 
 ## CMS125 — CMS125FHIRBreastCancerScreen
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 66/66; reference-adjusted pass 66/66.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 66/66.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -219,7 +215,7 @@ Artifact proven: `sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38
 
 ## CMS2 — CMS2FHIRPCSDepScreenAndFollowUp
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 36/36; reference-adjusted pass 36/36.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 36/36.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -272,7 +268,7 @@ Artifact proven: `sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae
 
 ## CMS68 — CMS68FHIRDocumentationCurrentMeds
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 19/19; reference-adjusted pass 19/19.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 19/19.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -308,7 +304,7 @@ Artifact proven: `sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6
 
 ## CMS951 — CMS951FHIRKidneyHealthEval
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 55/55; reference-adjusted pass 55/55.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 55/55.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -380,7 +376,7 @@ Artifact proven: `sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81
 
 ## CMS138 — CMS138FHIRTobaccoScrnCessation
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 47/47; reference-adjusted pass 47/47.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 47/47.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -444,7 +440,7 @@ Artifact proven: `sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aa
 
 ## CMS130 — CMS130FHIRColorectalCancerScrn
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 64/64; reference-adjusted pass 64/64.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 64/64.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -525,7 +521,7 @@ Artifact proven: `sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301
 
 ## CMS165 — CMS165FHIRControllingHighBP
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 68/68; reference-adjusted pass 68/68.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 68/68.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -610,7 +606,7 @@ Artifact proven: `sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fe
 
 ## CMS137 — CMS137FHIRSUDTxInitEngagement
 
-Measurement period: 2026-01-01 → 2026-12-31. Raw expected agreement 45/45; reference-adjusted pass 45/45.
+Measurement period: 2026-01-01 → 2026-12-31. Agreement with expected 45/45.
 
 | Case | UUID | IPP E/A | DENOM E/A | DENEX E/A | NUMER E/A | DENEXCEP E/A | Result |
 |---|---|---:|---:|---:|---:|---:|---|
@@ -673,7 +669,6 @@ Artifact proven: `sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520c
 ## Interpretation rules
 
 - `PASS` = exact agreement with the committed MADiE expected population counts.
-- `PASS†` = exact agreement with the source repository's reference-engine discrepancy for one of the six known-bad CMS122 numerator expecteds.
 - `FAIL` = unexpected population mismatch requiring case-level investigation.
 - `ERROR` = loader or calculation failure; it is not counted as an agreement or an engine mismatch.
 - Expansion caps are reported independently. They are only assigned as a cause when a mismatched case actually depends on a code absent from the capped expansion.

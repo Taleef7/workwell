@@ -29,6 +29,12 @@ on:
         type: choice
         default: cms130
         options: [cms130, cms165, cms2, cms122, cms125, cms137, cms68, cms138, cms951]
+      period:
+        description: "sent = the deck's measurement period as parameters; library-default = none sent (#846: cqf-fhir-cr builds a sent period at second precision)."
+        required: true
+        type: choice
+        default: sent
+        options: [sent, library-default]
 
 concurrency:
   # One at a time: each run boots a container on a fixed port and the sweeps are long. Never cancel a
@@ -113,21 +119,26 @@ jobs:
       # before the Clinical Reasoning module registers, and pushing terminology after the first
       # evaluation instead of before it.
       # A DISAGREEMENT IS THE POINT, NOT A FAILURE. `cross-engine-check.ts` exits 1 when any case
-      # disagrees, which is right for a gate and wrong here: CMS2's baseline is 29/36 and CMS137's is
-      # 44/45, so every historically interesting sweep would report this job red while producing exactly
-      # the evidence it was dispatched for. So the exit code is captured, and the step fails only when
-      # the sweep produced no parseable result at all — a container that never came up, a bundle that
-      # would not load, a degenerate all-zero refusal. The disagreement count is surfaced as a notice.
+      # disagrees, which is right for a gate and wrong here: on the pinned image CMS165 agrees on 13/68 with
+      # the period sent (the second-precision cases, #846), so every historically interesting sweep would
+      # report this job red while producing exactly the evidence it was dispatched for. So the exit code is
+      # captured, and the step fails only when the sweep produced no parseable result at all — a container
+      # that never came up, a bundle that would not load, a degenerate all-zero refusal. The disagreement
+      # count is surfaced as a notice.
       #
       # The script writes its progress to stderr, so stdout is the JSON alone and the artifact is
       # parseable.
       - name: Sweep
+        env:
+          PERIOD: ${{ inputs.period }}
         run: |
+          CHECK_ARGS=(--json)
+          [ "$PERIOD" = "library-default" ] && CHECK_ARGS+=(--library-period)
+          RESULT="cross-engine-${{ inputs.measure }}-${PERIOD}.json"
           set +e
-          bash scripts/cross-engine-sweep.sh "${{ inputs.measure }}" -- --json > "cross-engine-${{ inputs.measure }}.json"
+          bash scripts/cross-engine-sweep.sh "${{ inputs.measure }}" -- "${CHECK_ARGS[@]}" > "$RESULT"
           SWEEP_EXIT=$?
           set -e
-          RESULT="cross-engine-${{ inputs.measure }}.json"
           if ! jq -e '.results | length > 0' "$RESULT" >/dev/null 2>&1; then
             echo "::error::the sweep produced no result set (exit ${SWEEP_EXIT}) — this is a harness failure, not a disagreement"
             exit 1
@@ -138,20 +149,25 @@ jobs:
           # sweep where HAPI errored on nine subjects would upload a result set that reads as nine extra
           # disagreements — the plausible-but-invalid evidence this whole workflow exists to refuse
           # (Codex P1). Genuine population disagreements pass; unevaluated cases do not.
-          BROKEN=$(jq '[.results[] | select(.error != null or .java == null)] | length' "$RESULT")
+          # An ENGINE error is neither (#846): the engine evaluated the case and reported its own exception in
+          # the MeasureReport. It is recorded as `engineError` and counted on its own, so it neither reads as a
+          # disagreement nor voids the sweep.
+          BROKEN=$(jq '[.results[] | select(.engineError == null and (.error != null or .java == null))] | length' "$RESULT")
           if [ "$BROKEN" != "0" ]; then
             echo "::error::${BROKEN} case(s) never evaluated (a request failed), so this sweep is PARTIAL and is not evidence. Disagreements are expected; unevaluated cases are a harness failure."
-            jq -r '.results[] | select(.error != null or .java == null) | "  \(.case): \(.error // "no report returned")"' "$RESULT"
+            jq -r '.results[] | select(.engineError == null and (.error != null or .java == null)) | "  \(.case): \(.error // "no report returned")"' "$RESULT"
             exit 1
           fi
           TOTAL=$(jq '.results | length' "$RESULT")
           AGREE=$(jq '[.results[] | select(.agrees)] | length' "$RESULT")
-          echo "::notice::${{ inputs.measure }}: ${AGREE}/${TOTAL} cases agree with the measure developer's expected reports, ${TOTAL} evaluated cleanly (sweep exit ${SWEEP_EXIT})."
+          ENGINE_ERRORS=$(jq '[.results[] | select(.engineError != null)] | length' "$RESULT")
+          echo "::notice::${{ inputs.measure }} (period ${PERIOD}): ${AGREE}/${TOTAL} cases agree with the measure developer's expected reports; ${ENGINE_ERRORS} engine error(s) (sweep exit ${SWEEP_EXIT})."
+          jq -r '.results[] | select(.engineError != null) | "  engine error, \(.case): \(.engineError)"' "$RESULT"
 
       - name: Upload the result
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cross-engine-${{ inputs.measure }}
-          path: backend-ts/cross-engine-${{ inputs.measure }}.json
+          name: cross-engine-${{ inputs.measure }}-${{ inputs.period }}
+          path: backend-ts/cross-engine-${{ inputs.measure }}-${{ inputs.period }}.json
           if-no-files-found: warn
