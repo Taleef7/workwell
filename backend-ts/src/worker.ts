@@ -31,6 +31,7 @@ import { handleTenants } from "./routes/tenants.ts";
 import { handleProviders } from "./routes/providers.ts";
 import { handlePanels } from "./routes/panels.ts";
 import { handleSubjectLists } from "./routes/subject-lists.ts";
+import { handleScorecard } from "./routes/scorecard.ts";
 import { handlePayers } from "./routes/payers.ts";
 import { handleWorklist } from "./routes/worklist.ts";
 import { handleQuality } from "./routes/quality.ts";
@@ -378,6 +379,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // another system asserted. Import is refused outright on a live-directory deployment.
   const subjectListsResponse = await handleSubjectLists(req, env, actor);
   if (subjectListsResponse) return subjectListsResponse;
+
+  // The provider × measure scorecard (#852): CM/ADMIN, aggregates only, counted as the list report counts.
+  const scorecardResponse = await handleScorecard(req, env, actor);
+  if (scorecardResponse) return scorecardResponse;
 
   // Payers — the insurance list the panel filters are populated from (MM-2). Profile-scoped and
   // empty on a deployment whose roster records no payer.

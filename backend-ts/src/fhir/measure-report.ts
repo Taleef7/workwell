@@ -341,6 +341,15 @@ export function membershipRatesFor(
 }
 
 /**
+ * How many rates a non-errored row carries, which is `membershipRatesFor(...).length` without parsing
+ * any membership: a reader that only needs the run's declared rate count (#852) reads it off every row.
+ */
+export function rateCountOf(evidence: unknown): number {
+  const rates = (evidence as { official?: { rates?: unknown } } | null | undefined)?.official?.rates;
+  return Array.isArray(rates) && rates.length > 1 ? rates.length : 1;
+}
+
+/**
  * Proportion counts PER RATE, aggregated across subjects — one entry per group the measure declares.
  *
  * CMS137 has two (Initiation and Engagement) and they genuinely differ: a patient can start treatment
@@ -414,27 +423,50 @@ export interface RateAggregate {
   evaluationErrors: number;
 }
 
+/** One row's rate inputs, read once off its evidence so a paged reader can drop the blob (#852). */
+export interface ParsedRateRow {
+  errored: boolean;
+  memberships: PopulationMembership[];
+  strata: Array<Array<{ id: string; result: boolean }>> | null;
+}
+
+export function parseRateRow(outcome: Pick<OutcomeRecord, "status" | "evidence">, measureId: string): ParsedRateRow {
+  if (isEvaluationErrorEvidence(outcome.evidence)) return { errored: true, memberships: [], strata: null };
+  return { errored: false, memberships: membershipRatesFor(outcome, measureId), strata: strataRatesFor(outcome) };
+}
+
 /**
  * The same aggregation, fed one outcome at a time — so a 20,000-subject run can be summed from PAGED
  * reads instead of one `listOutcomes(runId)` that materialises 120,000 evidence blobs. Only the
  * per-subject memberships and stratum flags are retained until `finish()`, because the "counted in no
  * rate" rule needs the widest rate count any subject carries, which is not known until the last row.
  */
-export function createRateAggregator(measureId: string): { add(outcome: Pick<OutcomeRecord, "status" | "evidence">): void; finish(): RateAggregate } {
+export function createRateAggregator(
+  measureId: string,
+  /**
+   * `declaredRates` seeds the rate count with one read off the WHOLE run (#852), for a caller that counts
+   * a subset of it: a provider whose patients all errored still gets CMS137's two zero rates, and a
+   * subject with fewer rates than the run declares is unmeasured in every subset, as it is in the run.
+   */
+  options: { declaredRates?: number } = {},
+): { add(outcome: Pick<OutcomeRecord, "status" | "evidence">): void; addParsed(row: ParsedRateRow): void; finish(): RateAggregate } {
   const retained: Array<{ memberships: PopulationMembership[]; strata: Array<Array<{ id: string; result: boolean }>> | null }> = [];
-  let declaredRates = 0;
+  let declaredRates = options.declaredRates ?? 0;
   let evaluationErrors = 0;
+  const addParsed = (row: ParsedRateRow): void => {
+    // No engine spoke for this subject: counted, never folded into a rate (ADR-077 d6).
+    if (row.errored) {
+      evaluationErrors += 1;
+      return;
+    }
+    declaredRates = Math.max(declaredRates, row.memberships.length);
+    retained.push({ memberships: row.memberships, strata: row.strata });
+  };
   return {
     add(outcome) {
-      // No engine spoke for this subject: counted, never folded into a rate (ADR-077 d6).
-      if (isEvaluationErrorEvidence(outcome.evidence)) {
-        evaluationErrors += 1;
-        return;
-      }
-      const memberships = membershipRatesFor(outcome, measureId);
-      declaredRates = Math.max(declaredRates, memberships.length);
-      retained.push({ memberships, strata: strataRatesFor(outcome) });
+      addParsed(parseRateRow(outcome, measureId));
     },
+    addParsed,
     finish() {
       const perRate: PopulationCounts[] = [];
       const perRateStrata: Array<Map<string, StratumCounts>> = [];
@@ -460,7 +492,8 @@ export function createRateAggregator(measureId: string): { add(outcome: Pick<Out
           }
         }
       }
-      const rates = perRate.length > 0 ? perRate : [zeroCounts()];
+      // Never fewer than one rate, and never fewer than the run declares: a seeded count pads with zeros.
+      const rates = Array.from({ length: Math.max(perRate.length, declaredRates, 1) }, (_, index) => perRate[index] ?? zeroCounts());
       return {
         rates,
         strata: rates.map((_, index) => [...(perRateStrata[index]?.values() ?? [])]),

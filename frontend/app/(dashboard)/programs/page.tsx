@@ -26,7 +26,7 @@ import {
 } from "recharts";
 import { ChartDataTable } from "@/components/chart-data-table";
 import { formatMixedLogics, singleScoringLogic, useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
-import { displayRate, formatRate, isSmallNumbers, type NotationSource } from "@/lib/measure-rate";
+import { displayRate, isSmallNumbers, type NotationSource } from "@/lib/measure-rate";
 import { chartablePoints, trendMeta, type TrendPoint } from "./trend-meta";
 import { yearLineFor } from "./year-line";
 import { RunFreshnessBanner } from "./run-freshness-banner";
@@ -212,14 +212,9 @@ export default function ProgramsPage() {
     }
   }
 
-  const totalCompliant = programs.reduce((sum, p) => sum + p.compliant, 0);
-  const totalDenominator = programs.reduce(
-    (sum, p) => sum + (p.denominator ?? (p.totalEvaluated - p.excluded)),
-    0
-  );
-  // Nobody counted yet is no rate, not 0% (#637).
-  const overallComplianceRate =
-    totalDenominator === 0 ? null : Math.round((totalCompliant * 1000) / totalDenominator) / 10;
+  // No pooled "overall compliance" (#852): summing six measures' numerators over their denominators is not
+  // how CMS computes any rate, and CMS122's numerator counts failures. Each card states its own measure's
+  // rate; the scorecard states them per provider.
   const openCases = programs.reduce((sum, p) => sum + p.openCaseCount, 0);
   const lastRunTimestamp = programs
     .map((p) => p.latestRunAt)
@@ -263,6 +258,15 @@ export default function ProgramsPage() {
               View hierarchy
             </Link>
           ) : null}
+          {mayWorkGaps && isPatientTerm ? (
+            <Link
+              href="/scorecard"
+              data-testid="programs-scorecard-link"
+              className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-400"
+            >
+              Rates by provider
+            </Link>
+          ) : null}
           {mayRun ? (
             runActive ? (
               <span role="status" className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
@@ -280,20 +284,14 @@ export default function ProgramsPage() {
 
       <RunFreshnessBanner />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        <KpiCard
-          label="Overall compliance"
-          value={initialLoad ? "—" : formatRate(overallComplianceRate)}
-          describedBy={showsRateEstimateNote() ? "rate-estimate-note" : undefined}
-        />
+      <div className="grid grid-cols-2 gap-3">
         <KpiCard label="Open cases" value={initialLoad ? "—" : fmtCount(openCases)} />
         <KpiCard
           label="Last run"
           value={initialLoad ? "—" : lastRunTimestamp ? new Date(lastRunTimestamp).toLocaleString() : "-"}
-          className="col-span-2 md:col-span-1"
         />
       </div>
-      {/* One note for every rate on the page: the overall KPI and each card's rate point at it. */}
+      {/* One note for every rate on the page: each card's rate points at it. */}
       <RateEstimateNote id="rate-estimate-note" />
 
       {tenant === "mhn" ? (
@@ -444,6 +442,7 @@ export default function ProgramsPage() {
                   loading={detailsLoading}
                   caption={`${program.measureName} trend (${programRate.label.toLowerCase()})`}
                   identity={notation}
+                  latestIsThin={thin}
                 />
               </div>
 
@@ -550,11 +549,17 @@ function TrendChart({
   loading,
   caption,
   identity,
+  latestIsThin = false,
 }: {
   data: TrendPoint[];
   loading?: boolean;
   caption: string;
   identity?: NotationSource | null;
+  /**
+   * The latest run's data was too thin to trust (#853). Its point is not on the trend (the server drops
+   * it), so the newest two points are older runs and "from last run" would describe the wrong pair.
+   */
+  latestIsThin?: boolean;
 }) {
   const { theme } = useTheme();
   // This year's points with a rate, oldest first (#637) — never a line from last year's final run
@@ -582,12 +587,14 @@ function TrendChart({
 
   return (
     <div className="space-y-1 text-primary-600 dark:text-primary-400">
-      <div className="flex items-center gap-1">
-        <span className={`text-xs font-medium ${isGood ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-          {delta >= 0 ? "↑" : "↓"} {Math.abs(Math.round(delta * 10) / 10)}% {deltaLabel}
-          <span className="sr-only"> ({isDecrease ? "lower is better" : "higher is better"})</span>
-        </span>
-      </div>
+      {latestIsThin ? null : (
+        <div className="flex items-center gap-1">
+          <span className={`text-xs font-medium ${isGood ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+            {delta >= 0 ? "↑" : "↓"} {Math.abs(Math.round(delta * 10) / 10)}% {deltaLabel}
+            <span className="sr-only"> ({isDecrease ? "lower is better" : "higher is better"})</span>
+          </span>
+        </div>
+      )}
       {/* The sr-only ChartDataTable below is the accessible alternative, so the chart is
           aria-hidden. Disable Recharts' built-in accessibilityLayer (default true in v3 —
           it puts tabIndex=0/role="application" on the <svg>), else a keyboard user would tab

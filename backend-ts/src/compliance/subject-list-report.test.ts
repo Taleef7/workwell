@@ -14,6 +14,7 @@ import { subjectListReportCsv, reportCsvHeaders } from "./subject-list-report-cs
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { SubjectList, SubjectListMember } from "../stores/subject-list-store.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { subjectMembershipsVia } from "../test-support/memberships.ts";
 
 const LIST: SubjectList = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -53,7 +54,7 @@ interface FakeOptions {
   rows?: OutcomeRecord[];
   runs?: { runId: string; startedAt: string; year: number; status?: string; scopeType?: string; measureId?: string }[];
   compactionCutoffs?: string[];
-  /** Appends a compaction intent the FIRST time a page is read — the mid-report race. */
+  /** Appends a compaction intent the first time the measure's rows are READ (not probed) — the mid-report race. */
   intentOnFirstPage?: string;
   measureIds?: string[];
 }
@@ -66,6 +67,13 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
   const runs = options.runs ?? [{ runId: "run-2027", startedAt: "2027-12-31T00:00:00.000Z", year: 2027 }];
   const cutoffs = [...(options.compactionCutoffs ?? [])];
   let pagesRead = 0;
+  const listOutcomes = async (runId: string, opts?: { measureId?: string; limit?: number; offset?: number }) => {
+    const all = (options.rows ?? []).filter(
+      (r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId),
+    );
+    const offset = opts?.offset ?? 0;
+    return all.slice(offset, offset + (opts?.limit ?? all.length));
+  };
 
   const deps: SubjectListReportDeps = {
     lists: {
@@ -91,14 +99,13 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
       },
     },
     outcomes: {
-      listOutcomes: async (runId: string, opts?: { measureId?: string; limit?: number; offset?: number }) => {
+      listOutcomes,
+      // The rows the report counts come from this read, so the race lands here: after the before-read
+      // compaction check, before the after-read one.
+      listOutcomeSubjectMembershipsForRun: async (runId: string, measureId: string) => {
         pagesRead += 1;
         if (options.intentOnFirstPage && pagesRead === 1) cutoffs.push(options.intentOnFirstPage);
-        const all = (options.rows ?? []).filter(
-          (r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId),
-        );
-        const offset = opts?.offset ?? 0;
-        return all.slice(offset, offset + (opts?.limit ?? all.length));
+        return subjectMembershipsVia(listOutcomes)(runId, measureId);
       },
       listLatestPopulationRuns: async (measureIds: readonly string[]) =>
         runs

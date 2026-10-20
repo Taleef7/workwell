@@ -63,6 +63,21 @@ describe("ProgramsPage — a thin run shows no rate (#853)", () => {
     expect(screen.queryByText("Compliance 20.0%")).not.toBeInTheDocument();
   });
 
+  it("states no change from the last run when the latest run was thin: the trend's newest points are older runs", async () => {
+    const pt = (runId: string, startedAt: string, compliant: number) => ({
+      runId, startedAt, complianceRate: compliant * 2, totalEvaluated: 50, denominator: 50, compliant, dueSoon: 0, overdue: 50 - compliant, missingData: 0, excluded: 0,
+    });
+    const trend = [pt("run-a", "2026-08-01T00:00:00Z", 10), pt("run-b", "2026-08-15T00:00:00Z", 12)];
+    serve(card({ dataInsufficient: ["encounterTypeCoded"], trend }));
+    render(<ProgramsPage />);
+    await screen.findByTestId("card-thin-cms122");
+    expect(screen.queryByText(/from last run/)).toBeNull();
+
+    serve(card({ dataInsufficient: null, trend }));
+    render(<ProgramsPage />);
+    expect(await screen.findByText(/from last run/)).toBeInTheDocument();
+  });
+
   it("shows the rate as before when the data met its floors", async () => {
     serve(card({ dataInsufficient: null }));
     render(<ProgramsPage />);

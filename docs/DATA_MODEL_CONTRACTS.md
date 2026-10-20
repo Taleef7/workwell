@@ -29,9 +29,13 @@ run (`compliance/live-cell.ts`).
 `closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA from a completed evaluation opens one.
 - **A data-insufficient measure closes nothing as out of population (#853, D12).** When a live run's ingested
 data falls below a floor (coded `Encounter.type` ≥95%, final blood pressure ≥95% for CMS165, failed record
-fetches <1%; `run/data-sufficiency.ts`), the measure's out-of-population rows skip the upsert (neither close
+fetches <1%; `run/data-sufficiency.ts`; the first two counted over the measurement period the measures read,
+the evaluation date's calendar year, and judged only once at least 100 are in it), the measure's
+out-of-population rows skip the upsert (neither close
 nor open); its other rows behave as usual, and its rows still count as answered for the cycle rollover. The
-run is PARTIAL_FAILURE. Judged once, before the first chunk; the corpus never fires it.
+run is PARTIAL_FAILURE. Judged once, before the first chunk; the corpus never fires it. The blood-pressure
+floor counts only panels CMS165 can read (`isBloodPressure`): data sending separate systolic and diastolic
+readings, or no LOINC system, counts 0 of 0 and passes it while CMS165 reads no blood pressure at all.
 - **A failed evaluation never changes a case.** An engine or batch error, or a subject whose WebChart record
 could not be read (never evaluated, T3), persists MISSING_DATA with `evaluationError` and marks the run
 PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
@@ -139,7 +143,10 @@ artifact, a translation, authored CQL) or period is refused by QRDA I/III and ev
 (422 `mixed_logic`); an errored row counts as no logic. `dataInsufficient: { checks }` (#853) is set on every
 outcome of a data-insufficient measure, errored rows included, and removed from every other (so a
 copied-forward row never keeps it); a measure with any such row is refused by QRDA I/III and every MeasureReport
-type (409 `data_insufficient`), and has no rate on the programs card or the run reconciliation.
+type (409 `data_insufficient`). No surface states its rate: the programs card and measure page (headline and
+change), the run reconciliation and run page, the trend (a thin run is no point on it), the quality-over-time
+snapshot (the month keeps its earlier one), the scorecard, MCP `list_runs`/`get_run_summary` (`null` plus
+`data_insufficient`), and its CDS cards are withheld (`CDS_HOOKS.md`).
 - **Evaluation failure** replaces the evidence with `{ "evaluationError": "<cause>", "message": "<error
 text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`. Readers test the
 key, never the cause: `"engine failure"` in the run pipeline, `"source fetch failed"` (with WebChart's error)
@@ -253,7 +260,15 @@ evaluatedAt, rate, initialPopulation, denominator, denominatorExclusion, denomin
 numerator, status, outOfPopulation, evaluationError, providerId, payer, executedLogic`
 
 - `measurementYear` is REQUIRED. Per measure: the newest reportable population run whose own measurement
-period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date.
+period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date. A seeded run
+(`seed:scale`, `seed:trend-history`) or one created for QRDA I imports (`requestedScope.importDriven`) is
+never selected (#852).
+- The rate count is the widest the list members' newest evaluated rows carry; a list none of whose rows was
+evaluated takes the run's (every subject's newest row), so it still reports every rate (CMS137's two). A
+superseded duplicate never sets it. The provider scorecard (`GET /api/scorecard`, CM/ADMIN) selects, reads
+and counts through the same code (`compliance/measure-year-rates.ts`, one unordered narrowed read), so a
+provider's cell is this report's rate for a list of exactly that provider's patients. Rows are served in
+(`evaluatedAt`, id) order.
 - `rowStatus`: `EVALUATED`, one row per (measure, rate); `MISSING_FROM_RUN`, a matched member the run never
 evaluated, one row per measure, patient/provider/payer filled, population/status/rate columns empty
 (never `0`/`false`); `NOT_MATCHED` (NOT_FOUND/AMBIGUOUS), exactly ONE row per unmatched member (never

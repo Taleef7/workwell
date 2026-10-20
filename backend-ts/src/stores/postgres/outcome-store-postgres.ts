@@ -231,6 +231,40 @@ export class PgOutcomeStore implements OutcomeStore {
     return rows.map((r) => ({ status: r.status, evidence: r.evidence }));
   }
 
+  async listOutcomeSubjectMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>> {
+    if (!isUuid(runId)) return [];
+    // The membership projection's narrowing, verbatim, plus four plain columns. No ORDER BY: the caller
+    // keeps the newest row per subject by comparing, and orders what it serves itself.
+    const { rows } = await this.pool.query<{
+      id: string;
+      subject_id: string;
+      evaluated_at: Date | string;
+      out_of_population: boolean | null;
+      status: string;
+      evidence: unknown;
+    }>(
+      `SELECT id, subject_id, evaluated_at, out_of_population, status,
+              jsonb_strip_nulls(jsonb_build_object(
+                'official', evidence_json -> 'official',
+                'evaluationError', evidence_json -> 'evaluationError',
+                'dataInsufficient', evidence_json -> 'dataInsufficient'
+              )) AS evidence
+         FROM ${T} WHERE run_id = $1 AND measure_id = $2`,
+      [runId, measureId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      subjectId: r.subject_id,
+      evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
+      outOfPopulation: flagOf(r.out_of_population),
+      status: r.status,
+      evidence: r.evidence,
+    }));
+  }
+
   async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {
     if (!isUuid(runId)) return [];
     const { rows } = await this.pool.query<{ measure_id: string }>(

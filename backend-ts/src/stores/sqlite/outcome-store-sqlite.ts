@@ -70,6 +70,20 @@ const flagBind = (v: boolean | undefined): number | null => (v === undefined ? n
 /** SQLite has no boolean: 1/0 on the way back, and NULL for a row whose run did not record it. */
 const boolOrUndefined = (v: number | null | undefined): boolean | undefined => (v === null || v === undefined ? undefined : v !== 0);
 
+/**
+ * The membership projection's narrowing, in JS because the floor stores `evidence_json` as TEXT and would
+ * parse it either way. The SHAPE is what the contract pins, and it is Postgres's: `official` kept whole,
+ * `evaluationError` and `dataInsufficient` (#853) present only when the stored evidence had them.
+ */
+function narrowedEvidence(evidenceJson: string): Record<string, unknown> {
+  const full = JSON.parse(evidenceJson) as Record<string, unknown>;
+  const evidence: Record<string, unknown> = {};
+  if (full?.official !== undefined && full.official !== null) evidence.official = full.official;
+  if (full && "evaluationError" in full && full.evaluationError !== null) evidence.evaluationError = full.evaluationError;
+  if (full && "dataInsufficient" in full && full.dataInsufficient !== null) evidence.dataInsufficient = full.dataInsufficient;
+  return evidence;
+}
+
 const toRecord = (r: OutcomeRow): OutcomeRecord => ({
   id: r.id,
   runId: r.run_id,
@@ -248,14 +262,25 @@ export class SqliteOutcomeStore implements OutcomeStore {
       .prepare(`SELECT status, evidence_json FROM outcomes WHERE run_id = ? AND measure_id = ?`)
       .bind(runId, measureId)
       .all<{ status: string; evidence_json: string }>();
-    return (results ?? []).map((r) => {
-      const full = JSON.parse(r.evidence_json) as Record<string, unknown>;
-      const evidence: Record<string, unknown> = {};
-      if (full?.official !== undefined && full.official !== null) evidence.official = full.official;
-      if (full && "evaluationError" in full && full.evaluationError !== null) evidence.evaluationError = full.evaluationError;
-      if (full && "dataInsufficient" in full && full.dataInsufficient !== null) evidence.dataInsufficient = full.dataInsufficient;
-      return { status: r.status, evidence };
-    });
+    return (results ?? []).map((r) => ({ status: r.status, evidence: narrowedEvidence(r.evidence_json) }));
+  }
+
+  async listOutcomeSubjectMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>> {
+    const { results } = await this.db
+      .prepare(`SELECT id, subject_id, evaluated_at, out_of_population, status, evidence_json FROM outcomes WHERE run_id = ? AND measure_id = ?`)
+      .bind(runId, measureId)
+      .all<{ id: string; subject_id: string; evaluated_at: string; out_of_population: number | null; status: string; evidence_json: string }>();
+    return (results ?? []).map((r) => ({
+      id: r.id,
+      subjectId: r.subject_id,
+      evaluatedAt: r.evaluated_at,
+      outOfPopulation: boolOrUndefined(r.out_of_population),
+      status: r.status,
+      evidence: narrowedEvidence(r.evidence_json),
+    }));
   }
 
   async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {

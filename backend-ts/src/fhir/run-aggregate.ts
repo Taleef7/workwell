@@ -120,7 +120,7 @@ export function scoringIdentityKey(identity: OfficialReportIdentity | null): str
  * source). Two rows with the same memo key are named by the same logic. Plain concatenation, not
  * `JSON.stringify`: it runs once per row, and the fields are trimmed strings that never hold a NUL.
  */
-function namingMemoKey(identityKey: string, identity: OfficialReportIdentity | null): string {
+export function namingMemoKey(identityKey: string, identity: OfficialReportIdentity | null): string {
   if (!identity) return identityKey;
   return `${identityKey}\u0000${identity.ecqmId ?? ""}\u0000${identity.version ?? ""}\u0000${identity.label ?? ""}\u0000${identity.url ?? ""}\u0000${identity.derivedFrom ?? ""}`;
 }

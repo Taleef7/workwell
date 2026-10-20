@@ -116,7 +116,9 @@ describe("ProgramsPage inverse measure rendering", () => {
     expect(await screen.findByText("Poor control 15.6%")).toBeInTheDocument();
   });
 
-  it("computes Overall compliance KPI using denominator fallback (compliant 38 / excluded 3 / totalEvaluated 48 -> 84.4%)", async () => {
+  // #852: there is no pooled "overall compliance". Summing measures' numerators is how CMS computes no
+  // rate, and CMS122's numerator counts failures, so this fixture once showed 84.4% beside "Poor control".
+  it("states no pooled overall rate across measures", async () => {
     const singleProg = {
       ...cms122Program,
       denominator: undefined, // test fallback to totalEvaluated - excluded
@@ -134,7 +136,8 @@ describe("ProgramsPage inverse measure rendering", () => {
 
     render(<ProgramsPage />);
     expect(await screen.findByText("Poor control 15.6%")).toBeInTheDocument();
-    expect(screen.getByText("84.4%")).toBeInTheDocument();
+    expect(screen.queryByText("Overall compliance")).toBeNull();
+    expect(screen.queryByText("84.4%")).toBeNull();
   });
 
   it("inverts TrendChart delta tone for decrease measure when rate fell and rose", async () => {
