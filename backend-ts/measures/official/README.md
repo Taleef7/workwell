@@ -18,7 +18,10 @@ licence (`pnpm resolve-valuesets` → the `value_sets` table → `buildValueSetC
 **Test-case patients.** The MADiE decks are fetched separately and gitignored
 (`scripts/fetch-official-cases.ps1`); shipping them in the deploy image would be dead weight.
 
-**CQL source, ELM XML, narratives.** Only `application/elm+json` is executed.
+**CQL source, ELM XML, narratives.** Only `application/elm+json` is executed. Each Library's
+`cql-library` and `elm-xml-library` claims go with the content they assert (#848); every other claim, the
+Measure's included, stays as CMS shipped it. The manifest's `logicSha256` hashes the ELM and the Measure's
+groups apart from such metadata, so a metadata-only re-vendor keeps CMS's identity on older runs.
 
 **ELM `annotation`/`locator`/`localId`** (`--strip-elm-annotations`). ~16 MB raw → ~2.4 MB vendored,
 **86% smaller**, which matters because eight measures at the unstripped setting is ~80 MB of deploy image

@@ -24,6 +24,7 @@
 import { createHash } from "node:crypto";
 import type { DerivedChangedLibrary, DerivedManifestBlock, OfficialArtifact, OfficialManifest } from "../wiring/official-artifacts.ts";
 import { improvementNotationFor, OFFICIAL_MEASURE_SEMANTICS } from "../wiring/official-measure-semantics.ts";
+import { logicSha256Of } from "../../scripts/artifact-logic.mjs";
 import { changedLibraryIdentity, rewriteChangedLibrary } from "./derived-changed-library.ts";
 import { recomputeDataRequirements } from "./derived-data-requirements.ts";
 import { DERIVED_CANONICAL_PREFIX, DERIVED_LABEL_PREFIX, libraryElmSha256, rewriteDerivedIdentity, type DerivedIdentity } from "./derived-identity.ts";
@@ -392,6 +393,9 @@ export function derivedManifestFor(input: DerivedManifestInput): { manifest: Off
     },
     terminology: terminologyBlock,
     sha256: sha,
+    // Keyed like CMS's manifest (#848). A translation's runs still match only its own bytes: the lineage
+    // that lets an earlier vendoring keep its identity holds CMS's artifacts alone.
+    logicSha256: logicSha256Of(JSON.parse(bundleJson)),
     derived: {
       label: identity.title,
       derivedFrom: { ecqm: identity.derivedFrom, packageSha256 },

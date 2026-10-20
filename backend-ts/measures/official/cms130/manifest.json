@@ -36,12 +36,12 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 17067945,
-    "vendoredBytes": 2459143
+    "vendoredBytes": 2457883
   },
   "terminology": {
     "file": "terminology.json",
     "valueSets": 31,
-    "codes": 3172,
+    "codes": 3202,
     "truncated": [],
     "completion": {
       "source": "vsac",
@@ -50,14 +50,15 @@
         {
           "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
           "had": 1000,
-          "now": 2000,
+          "now": 2030,
           "declaredTotal": 1997
         }
       ]
     },
-    "sha256": "sha256:8c32b213e18c1a9e42042b0d4a6e40dc2f40f68988409565457792ba72a81108"
+    "sha256": "sha256:a4d669013895cb9932fbc88b6ef6ce33ffdf2e031f5efcf6153479a43fec5575"
   },
-  "sha256": "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629",
+  "sha256": "sha256:62917e957b3ceebfbc1c904b435f618c3547d36f4122db1748772d9ec5ec8f04",
+  "logicSha256": "sha256:816e944190763d813cf9136ae2701a7a907f4bc87a87d1a9caef7406224a7eab",
   "tests": {
     "count": 267,
     "sourcePath": "input/tests/measure/CMS130FHIRColorectalCancerScrn",

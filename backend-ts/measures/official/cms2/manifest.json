@@ -37,7 +37,7 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 15707621,
-    "vendoredBytes": 2322659
+    "vendoredBytes": 2322029
   },
   "terminology": {
     "file": "terminology.json",
@@ -46,7 +46,8 @@
     "truncated": [],
     "sha256": "sha256:0355252109aed497a7a72c3fe97f850c796891f11207fb3a61bd592a5a7d02d8"
   },
-  "sha256": "sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec",
+  "sha256": "sha256:15e7985c67f72c0ee15c3ef8ddf2a4ee182b53514f65f06b9cc11c12e63daffb",
+  "logicSha256": "sha256:5d5964366110a3592ddc8cc47a1aa4d97d0b1fabe807ea196104a4ded46892ce",
   "tests": {
     "count": 256,
     "sourcePath": "input/tests/measure/CMS2FHIRPCSDepScreenAndFollowUp",

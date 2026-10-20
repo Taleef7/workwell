@@ -36,7 +36,7 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 13043728,
-    "vendoredBytes": 1958220
+    "vendoredBytes": 1957338
   },
   "terminology": {
     "file": "terminology.json",
@@ -45,7 +45,8 @@
     "truncated": [],
     "sha256": "sha256:8879fee0b88622566994b5b80e81d275afa61911a32cd5765841c73aab55337d"
   },
-  "sha256": "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae",
+  "sha256": "sha256:c0c8c634c8bee33fa659dd5f65866312a55c72add352ff5cdc8d9eea232af69e",
+  "logicSha256": "sha256:9c4050b44378d20d2ba5d0624c03d527ec6b158ca6c47a22406ac72798912099",
   "tests": {
     "count": 299,
     "sourcePath": "input/tests/measure/CMS951FHIRKidneyHealthEval",
