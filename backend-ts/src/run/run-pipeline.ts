@@ -1759,6 +1759,11 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   // actually evaluated, so a SITE/EMPLOYEE run never touches out-of-scope cases. Best-effort + audited
   // (system closure, closed_by NULL — a rolled-over cycle, not a human decision); a failure only logs a
   // ledger-gap WARN and never aborts the run.
+  //
+  // Counted and timed (#854): on 1 January this closes every open case of the year before, one write and
+  // one audit at a time, and the run log and `RUN_COMPLETED` are the only record of how many and how long.
+  const rollover = { closed: 0, failed: 0, auditGaps: 0, unreadMeasures: [] as string[], ms: 0 };
+  const rolloverStartedMs = Date.now();
   if (deps.caseStore && deps.events) {
     const nowIso = new Date().toISOString();
     for (const measureId of measureIds) {
@@ -1773,7 +1778,8 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       try {
         openCases = await deps.caseStore.listCases({ measureId, statuses: [...ACTIVE_CASE_STATUSES], limit: 100000 });
       } catch {
-        continue; // a read failure here must never abort an otherwise-complete run
+        rollover.unreadMeasures.push(measureId); // a read failure here must never abort an otherwise-complete run
+        continue;
       }
       const currentPeriodMs = Date.parse(currentPeriod);
       for (const c of openCases) {
@@ -1787,7 +1793,11 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         const closed = await deps.caseStore
           .patchCase(c.id, { status: "RESOLVED", closedAt: nowIso, closedReason: "CYCLE_ROLLED_OVER", closedBy: null })
           .catch(() => null);
-        if (!closed) continue;
+        if (!closed) {
+          rollover.failed++;
+          continue;
+        }
+        rollover.closed++;
         await deps.events
           .appendAudit({
             eventType: "CASE_RESOLVED",
@@ -1807,12 +1817,30 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             },
           })
           .catch((err) => {
+            rollover.auditGaps++;
             void deps.runStore
               .appendLog(runId, "WARN", `Rollover close audit (CASE_RESOLVED ${c.id}) failed — ledger gap: ${String((err as Error)?.message ?? err)}`)
               .catch(() => {});
           });
       }
     }
+  }
+  rollover.ms = Date.now() - rolloverStartedMs;
+  const rolledOver = rollover.closed + rollover.failed + rollover.unreadMeasures.length > 0;
+  if (rolledOver) {
+    await deps.runStore
+      .appendLog(
+        runId,
+        rollover.failed > 0 || rollover.auditGaps > 0 || rollover.unreadMeasures.length > 0 ? "WARN" : "INFO",
+        `Closed ${rollover.closed} case(s) from an earlier cycle as rolled over in ${(rollover.ms / 1000).toFixed(1)} s` +
+          (rollover.failed > 0 ? `; ${rollover.failed} could not be closed and stay open` : "") +
+          (rollover.auditGaps > 0 ? `; ${rollover.auditGaps} closure(s) have no audit event` : "") +
+          (rollover.unreadMeasures.length > 0
+            ? `; the open cases of ${rollover.unreadMeasures.join(", ")} could not be read, so none of them was rolled over`
+            : "") +
+          ".",
+      )
+      .catch(() => {});
   }
 
   // #853: a measure scored on data too thin to trust is a partial failure, with no new status (D12).
@@ -1851,6 +1879,8 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           ...(incremental ? { evaluated: items.length - skipped, skippedUnchanged: skipped } : {}),
           measuresExecuted: measureIds,
           ...(liveTenant ? { liveTenant } : {}),
+          // #854: present only on a run that closed, failed to close or could not read an earlier cycle's cases.
+          ...(rolledOver ? { rollover } : {}),
           // #853: what was measured on a live run, and which measures fell short and why. The run detail
           // page reads it; the reports refuse from the rows, so a lost write here cannot let a rate out.
           ...(liveSufficiency
