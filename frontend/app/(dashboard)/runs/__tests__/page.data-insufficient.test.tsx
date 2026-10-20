@@ -67,6 +67,15 @@ describe("RunsPage data sufficiency", () => {
     expect(screen.queryByTestId("run-pass-rate")).not.toBeInTheDocument();
   });
 
+  it("still names a thin measure, rate and exports withheld, when the run's record of the shortfall is gone", async () => {
+    fixtures([{ measureId: "cms165", shortfalls: [] }]);
+    render(<RunsPage />);
+    const banner = await screen.findByTestId("run-data-insufficient");
+    expect(banner).toHaveTextContent("cms165: the record of which check fell short was not kept");
+    expect(screen.queryByTestId("run-pass-rate")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "MeasureReport (FHIR)" })).not.toBeInTheDocument();
+  });
+
   it("shows no banner and keeps the exports for a run whose data met its floors", async () => {
     render(<RunsPage />);
     expect(await screen.findByRole("button", { name: "MeasureReport (FHIR)" })).toBeInTheDocument();

@@ -656,7 +656,7 @@ test("GET /api/runs/:id/qrda → well-formed QRDA III XML; 404 unknown run", asy
 });
 
 /** A COMPLETED single-measure run whose rows carry the given official evidence, one per subject. */
-async function runWithEvidence(evidence: unknown[]): Promise<string> {
+async function runWithEvidence(evidence: unknown[], status: "COMPLETED" | "PARTIAL_FAILURE" = "COMPLETED"): Promise<string> {
   await get("/api/runs");
   const runStore = new SqliteRunStore(env.DB as never);
   const outcomeStore = new SqliteOutcomeStore(env.DB as never);
@@ -667,7 +667,7 @@ async function runWithEvidence(evidence: unknown[]): Promise<string> {
     requestedScope: { measureId: "cms137" },
     measurementPeriodStart: "2027-01-01T00:00:00.000Z",
     measurementPeriodEnd: "2027-12-31T23:59:59.999Z",
-    status: "COMPLETED",
+    status,
     startedAt: "2027-03-01T00:00:00.000Z",
     completedAt: "2027-03-01T00:10:00.000Z",
   });
@@ -837,6 +837,21 @@ test("#853: a measure whose data was too thin to trust is refused by every expor
   const sound = await runWithEvidence([officialEvidence(period), officialEvidence(period)]);
   assert.equal((await get(`/api/runs/${sound}/qrda?format=xml`))!.status, 200);
   assert.equal((await get(`/api/runs/${sound}/measure-report`))!.status, 200);
+});
+
+test("#853: the reconciliation names a thin measure from its rows even when the run's completion record is gone (Codex on #859)", async () => {
+  // A thin run whose best-effort RUN_COMPLETED record was never written (or has aged out of the lookup):
+  // the run page must not offer the rate or the exports the server refuses from these same rows.
+  const period = { start: "2027-01-01", end: "2027-12-31" };
+  const thin = { ...officialEvidence(period), dataInsufficient: { checks: ["encounterTypeCoded"] } };
+  const runId = await runWithEvidence([thin, thin], "PARTIAL_FAILURE");
+  const recon = (await (await get(`/api/runs/${runId}/reconciliation`))!.json()) as {
+    dataInsufficient?: Array<{ measureId: string; shortfalls: unknown[] }>;
+  };
+  assert.deepEqual(recon.dataInsufficient, [{ measureId: "cms137", shortfalls: [] }], "named from the rows, the detail not kept");
+  const sound = await runWithEvidence([officialEvidence(period)], "PARTIAL_FAILURE");
+  const soundRecon = (await (await get(`/api/runs/${sound}/reconciliation`))!.json()) as { dataInsufficient?: unknown };
+  assert.equal(soundRecon.dataInsufficient, undefined, "a partial failure for another reason is not thin");
 });
 
 test("a run whose rows were scored for two different years is refused rather than labelled with the first row", async () => {

@@ -1240,7 +1240,12 @@ export default function RunsPage() {
                   <ul className="mt-1 list-disc pl-4">
                     {reconciliation.dataInsufficient.map((entry) => (
                       <li key={entry.measureId}>
-                        {entry.measureId}: {entry.shortfalls.map(describeShortfall).join("; ")}
+                        {entry.measureId}:{" "}
+                        {/* The rows say the measure was thin; how short it fell lived only in the run's
+                            completion record, which can be lost or aged out. */}
+                        {entry.shortfalls.length > 0
+                          ? entry.shortfalls.map(describeShortfall).join("; ")
+                          : "the record of which check fell short was not kept"}
                       </li>
                     ))}
                   </ul>

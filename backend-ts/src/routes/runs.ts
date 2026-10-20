@@ -64,7 +64,7 @@ import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
 import { isVsacConfigured } from "@work-well/measure-engine";
 import { rerunToVerify, UnsupportedCaseRerunError, CaseRerunFailedError } from "../case/case-rerun.ts";
 import type { PopulationCounts, StratumCounts } from "../fhir/measure-report.ts";
-import { dataInsufficientChecks, type SufficiencyCheck } from "../run/data-sufficiency.ts";
+import { dataInsufficientChecks, thinMeasuresOfRun, type SufficiencyCheck } from "../run/data-sufficiency.ts";
 import {
   buildMeasureReportBundle,
   buildSummaryMeasureReportFromCounts,
@@ -1574,11 +1574,16 @@ export async function handleRuns(
     // `official` above stays null because it describes one measure's rate. Read from the rows' own
     // evidence by one identity-only DISTINCT, never from today's routing (#769). Memoized per finished run.
     const scoringLogic = await scoringLogicByMeasure(stores.outcomes, reconId, run.status);
-    // #853: which measures' data fell below a floor, and by how much, as the pipeline measured it. From the
-    // ledger, because only the pipeline saw the bundles; the exports refuse from the rows themselves.
-    const dataInsufficient = Array.isArray(completedEvent?.payload?.dataInsufficient)
-      ? (completedEvent.payload.dataInsufficient as unknown[])
-      : null;
+    // #853: WHICH measures were thin comes from the rows, as the exports refuse from them, so a lost or
+    // aged-out RUN_COMPLETED record can never make this page offer a rate or an export the server refuses.
+    // HOW short each fell is the pipeline's own measure of the bundles, kept only in that record: an entry
+    // whose record is gone carries no shortfalls, and the page says the detail was not kept.
+    const ledgerThin = Array.isArray(completedEvent?.payload?.dataInsufficient)
+      ? (completedEvent.payload.dataInsufficient as Array<{ measureId?: unknown; shortfalls?: unknown }>)
+      : [];
+    const dataInsufficient = (await thinMeasuresOfRun(stores.outcomes, run)).map(
+      (measureId) => ledgerThin.find((entry) => entry?.measureId === measureId) ?? { measureId, shortfalls: [] },
+    );
     return json({
       runId: reconId,
       status: run.status,

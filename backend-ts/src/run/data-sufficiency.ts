@@ -26,6 +26,7 @@
  * The floors are starting guesses (D12): they hold until a real-data baseline replaces them.
  */
 import { isBloodPressure } from "../wiring/qicore-preparation.ts";
+import type { OutcomeStore } from "../stores/outcome-store.ts";
 
 export const DATA_SUFFICIENCY_FLOORS = {
   /** The share of encounters whose `type` is coded (a coding with a system and a code). At least this. */
@@ -258,4 +259,23 @@ export function dataInsufficientChecks(evidence: unknown): SufficiencyCheck[] | 
   if (!isObject(evidence) || !isObject(evidence.dataInsufficient)) return null;
   const checks = evidence.dataInsufficient.checks;
   return Array.isArray(checks) ? checks.filter((c): c is SufficiencyCheck => typeof c === "string") : [];
+}
+
+/**
+ * The measures of a run whose data was too thin to trust, read off the persisted rows, as every export
+ * refuses them, so a lost or aged-out audit record never makes a reader state the rate. Only a
+ * PARTIAL_FAILURE run can hold one (the gate ends such a run PARTIAL_FAILURE), so any other run costs no
+ * read. One measure at a time, one row each: the flag is on every row of a thin measure.
+ */
+export async function thinMeasuresOfRun(
+  outcomes: Pick<OutcomeStore, "distinctMeasuresForRun" | "listOutcomes">,
+  run: { id: string; status: string },
+): Promise<string[]> {
+  if (run.status !== "PARTIAL_FAILURE") return [];
+  const thin: string[] = [];
+  for (const measureId of await outcomes.distinctMeasuresForRun(run.id, 50)) {
+    const [row] = await outcomes.listOutcomes(run.id, { measureId, limit: 1, offset: 0, order: "none" });
+    if (row && dataInsufficientChecks(row.evidence) !== null) thin.push(measureId);
+  }
+  return thin.sort();
 }
