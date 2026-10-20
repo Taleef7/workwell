@@ -259,3 +259,12 @@ test("subject lists: EVERY method is CM/ADMIN, metadata included — the reads a
     }
   }
 });
+
+test("scorecard: CM/ADMIN only — per-provider rates are not the VIEWER seat's to browse (#852)", () => {
+  const path = "/api/scorecard";
+  assert.equal(authorize("GET", path, cm).ok, true, "cm");
+  assert.equal(authorize("GET", path, admin).ok, true, "admin");
+  assert.deepEqual(authorize("GET", path, viewer), { ok: false, status: 403 }, "viewer");
+  assert.deepEqual(authorize("GET", path, author), { ok: false, status: 403 }, "author");
+  assert.deepEqual(authorize("GET", path, null), { ok: false, status: 401 }, "anonymous");
+});

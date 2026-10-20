@@ -19,6 +19,7 @@ import { DIRECTORY } from "../config/deployment-profile.ts";
 import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
 import { isCompletedRun, isPopulationRun } from "../program/rollup-shared.ts";
+import { dataInsufficientChecks } from "../run/data-sufficiency.ts";
 
 export const QUALITY_SNAPSHOT_MATERIALIZED_EVENT = "QUALITY_SNAPSHOT_MATERIALIZED";
 
@@ -74,7 +75,15 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
     return { tenantId: emp.tenantId, site: location, providerId: emp.providerId };
   };
   const liveByMeasure = new Map<string, { subjectId: string; status: string; outOfPopulation?: boolean }[]>();
+  // #853: a measure whose rows say its data was too thin to trust gets no snapshot from this run.
+  // Snapshots are last-write-wins per month and scope, so writing one would replace the month's trusted
+  // figure with the thin one; skipping it keeps the earlier snapshot.
+  const thinMeasures = new Set<string>();
   for (const o of live) {
+    if (dataInsufficientChecks(o.evidence)) thinMeasures.add(o.measureId);
+  }
+  for (const o of live) {
+    if (thinMeasures.has(o.measureId)) continue;
     let arr = liveByMeasure.get(o.measureId);
     if (!arr) {
       arr = [];
@@ -94,6 +103,7 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
     if (!prev || r.startedAt > prev.startedAt) latestScaleRunByMeasure.set(r.scopeId, { runId: r.id, startedAt: r.startedAt });
   }
 
+  if (liveByMeasure.size === 0) return skip("every measure's data was too thin to trust (#853)");
   const rows: QualitySnapshotInput[] = [];
   for (const [measureId, liveOutcomes] of liveByMeasure) {
     let scale: { tenantId: string; groups: ScaleGroup[] } | undefined;
@@ -120,7 +130,7 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
     refRunId: runId,
     refCaseId: null,
     refMeasureVersionId: null,
-    payload: { period, measureCount: liveByMeasure.size, rowCount: rows.length },
+    payload: { period, measureCount: liveByMeasure.size, rowCount: rows.length, withheldAsThin: [...thinMeasures].sort() },
   });
   await deps.qualitySnapshots.upsertSnapshots(rows);
 

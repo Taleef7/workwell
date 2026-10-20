@@ -319,11 +319,25 @@ export interface OutcomeStore {
    * **`evaluationError` must be ABSENT, not null, when the row is not an error** — `isEvaluationErrorEvidence`
    * tests key PRESENCE (`"evaluationError" in evidence`), so a projection that always carried the key
    * would make every row read as an evaluation failure and every rate read as zero.
+   *
+   * **`dataInsufficient` is carried too (#853), and absent when the row has none**, so a report built on
+   * this read refuses a measure whose data was too thin to trust (D12) without a second read.
    */
   listOutcomeMembershipsForRun(
     runId: string,
     measureId: string,
   ): Promise<Array<Pick<OutcomeRecord, "status" | "evidence">>>;
+  /**
+   * The same narrowed projection, with each row's identity columns (#852): which subject, which row, when,
+   * and the persisted out-of-population flag. For the readers that count PER SUBJECT (the attributed-list
+   * report and the provider scorecard): one unordered statement, never paged, where `listOutcomes`' page
+   * window re-sorted the measure's whole evidence per page (1.4 s for 20,000 rows on Postgres, against
+   * 0.14 s for this). The evidence is narrowed exactly as {@link listOutcomeMembershipsForRun}'s is.
+   */
+  listOutcomeSubjectMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
    * Delete outcome rows older than `cutoff`, KEEPING four things (ADR-073, amended by ADR-077 d3):

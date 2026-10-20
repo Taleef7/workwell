@@ -5,6 +5,26 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-20
+
+- **A run says when its data is too thin to trust (#853).** Three floors on live WebChart data, the owner's
+  call: coded encounter types ≥95% for CMS-scored measures, final blood pressures ≥95% for CMS165, failed
+  record fetches <1%. A measure below one ends the run `PARTIAL_FAILURE` with `data_insufficient:<measure>`,
+  its outcomes carry the flag, its out-of-population rows close no case, and QRDA I/III, the MeasureReports,
+  the Programs card and the attributed-list report refuse it. No DDL. The corpus never trips it. The coding
+  floors count only the measurement period's encounters and blood pressures, the data the measures read, and
+  wait for 100 of them; old uncoded history no longer fails a practice that codes well now. A review
+  found four more places still stating the rate: the measure page, the trend, the quality snapshots and MCP.
+  All four are fixed. The owner decided a thin measure's CDS cards are withheld.
+- **The provider scorecard (#852).** `/scorecard` (CM/ADMIN, Maui) gives each measure's rate per provider,
+  location subtotals and the practice total, with the counts behind each rate, small numbers (<20) dimmed, and
+  open gaps linked to the work list. It counts through the list report's own code, so a cell equals that
+  report's rate for the provider's patients (asserted through both routes). Both now read one unordered,
+  narrowed statement: 0.29 s for 20,000 rows on Postgres, down from 1.4 s for the paged full read. The list
+  report never selects a seeded or import run, and a list of errors still reports every rate. Review caught
+  open gaps stopping at the case store's default page of 50. The pooled "Overall compliance" is gone from
+  Programs. No benchmarks yet (OPEN_QUESTIONS §2.2).
+
 ## 2026-10-19
 
 - **The simulate-route test no longer fails on a machine with a VSAC key in its shell.** `engineForEnv` falls

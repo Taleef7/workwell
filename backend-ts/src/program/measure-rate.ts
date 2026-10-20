@@ -10,6 +10,7 @@ import type { OutcomeStore } from "../stores/outcome-store.ts";
 import { aggregateOfficialRun } from "../fhir/run-aggregate.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import type { SufficiencyCheck } from "../run/data-sufficiency.ts";
 
 export interface MeasureRateGroup {
   /** The reviewed rate label (`OFFICIAL_MEASURE_SEMANTICS[id].rateLabels`); null for a single-rate measure. */
@@ -92,6 +93,11 @@ export interface MeasureRateResult {
   scoringLogics: ScoringLogic[];
   /** The rows were scored by more than one logic or measurement period (authored rows count as one). */
   conflict: boolean;
+  /**
+   * The checks this measure's data failed on the run (#853, D12), or null. A flagged measure has no rate:
+   * a rate over uncoded encounters reads low because the data is missing, not because the care is.
+   */
+  dataInsufficient: SufficiencyCheck[] | null;
 }
 
 const memo = new Map<string, MeasureRateResult>();
@@ -140,7 +146,10 @@ export async function officialMeasureRateResult(
   // agrees (rows recorded before the digest was), so that "more than one logic listed" and "no rate"
   // always say the same thing.
   const conflict = aggregate.identityConflict || scoringLogics.length > 1;
-  if (!aggregate.producedOfficialEvidence || conflict) return remember({ rate: null, scoringLogics, conflict });
+  const dataInsufficient = aggregate.dataInsufficient;
+  if (!aggregate.producedOfficialEvidence || conflict || dataInsufficient) {
+    return remember({ rate: null, scoringLogics, conflict, dataInsufficient });
+  }
   const labels = officialMeasureSemantics(measureId)?.rateLabels;
   const derived = aggregate.official?.kind === "derived";
   const rate: MeasureRate = {
@@ -174,5 +183,5 @@ export async function officialMeasureRateResult(
     unmeasured: aggregate.unmeasured,
     evaluationErrors: aggregate.evaluationErrors,
   };
-  return remember({ rate, scoringLogics, conflict: false });
+  return remember({ rate, scoringLogics, conflict: false, dataInsufficient: null });
 }

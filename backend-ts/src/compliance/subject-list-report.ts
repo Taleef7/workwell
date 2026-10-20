@@ -47,26 +47,13 @@ import type { OutcomeStore, OutcomeRecord } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { SubjectListStore, SubjectList } from "../stores/subject-list-store.ts";
-import { createRateAggregator, membershipRatesFor, officialReportIdentity, reportingPeriod, type OfficialReportIdentity } from "../fhir/measure-report.ts";
-import { isEvaluationErrorEvidence } from "../fhir/measure-report.ts";
-import { scoringOfRows } from "../fhir/run-aggregate.ts";
+import { createRateAggregator, reportingPeriod, type OfficialReportIdentity, type RateAggregate } from "../fhir/measure-report.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
-import { isPopulationRun } from "../program/rollup-shared.ts";
-import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
 import { ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
-
-/** One page of outcome rows per read. Matches `fhir/run-aggregate.ts`'s page so the two agree. */
-const PAGE = 2000;
-/**
- * How many runs OF THE MEASUREMENT YEAR are examined for one that holds this measure's rows.
- *
- * Fifty is generous because the read is already period-scoped: these are the year's own runs,
- * newest-first, and an ALL_PROGRAMS run holds every routed measure, so the first is almost always the
- * answer. The count matters only for a measure routed partway through a year.
- */
-const RUN_CANDIDATES = 50;
+import type { SufficiencyCheck } from "../run/data-sufficiency.ts";
+import { PAGE, foldGroups, rateGroupsOf, readMeasureYearRows, selectRunForYear, type Buckets } from "./measure-year-rates.ts";
 
 export interface SubjectListReportDeps {
   lists: SubjectListStore;
@@ -118,8 +105,11 @@ export interface MeasureReportEntry {
   runId: string | null;
   runStartedAt: string | null;
   measurementPeriod: { start: string; end: string } | null;
-  /** "complete" | "compacted" | "no_run" — why a measure has no numbers, when it has none. */
-  compactionStatus: "complete" | "compacted" | "no_run";
+  /**
+   * "complete" | "compacted" | "no_run" | "data_insufficient" — why a measure has no numbers, when it has
+   * none. `data_insufficient` (#853): the run's data for the measure was too thin to trust (D12).
+   */
+  compactionStatus: "complete" | "compacted" | "no_run" | "data_insufficient";
   reason?: string;
   matchedSubjects: number;
   distinctSubjectsSeen: number;
@@ -140,6 +130,8 @@ export interface SubjectListReport {
   compaction: { cutoff: string | null };
   /** Measures whose selected run is compaction-exposed; their entries carry no rates and no rows. */
   compactedMeasures: string[];
+  /** Measures whose selected run's data was too thin to trust (#853); their entries carry no rates and no rows. */
+  dataInsufficientMeasures: string[];
   measures: MeasureReportEntry[];
   rows: ReportRow[];
 }
@@ -178,6 +170,7 @@ export async function subjectListReport(
   const entries: MeasureReportEntry[] = [];
   const rows: ReportRow[] = [];
   const compactedMeasures: string[] = [];
+  const dataInsufficientMeasures: string[] = [];
   let furthestCutoff: string | null = null;
   let measuresWithARun = 0;
 
@@ -258,6 +251,13 @@ export async function subjectListReport(
       entries.push(emptyEntry(measureId, matchedIds.size, "compacted", "run_compacted"));
       continue;
     }
+    // #853: the run's data for this measure was too thin to trust, so its rates would describe missing
+    // data. Refused like a compacted measure, by measure, never by withholding the others.
+    if (read.dataInsufficient) {
+      dataInsufficientMeasures.push(measureId);
+      entries.push(emptyEntry(measureId, matchedIds.size, "data_insufficient", `data_insufficient:${read.dataInsufficient.join(",")}`));
+      continue;
+    }
 
     entries.push({
       measureId,
@@ -282,7 +282,7 @@ export async function subjectListReport(
       evaluationErrors: read.buckets.evaluationErrors,
       outOfPopulation: read.buckets.outOfPopulation,
       duplicateRowsCollapsed: read.duplicateRowsCollapsed,
-      rates: toRateGroups(read.aggregate, measureId),
+      rates: rateGroupsOf(read.aggregate, measureId),
     });
     rows.push(...read.rows);
     // One row per (measure) for a matched member the run never evaluated — filled patient columns,
@@ -302,20 +302,30 @@ export async function subjectListReport(
     }
   }
 
-  // The whole request is refused only when EVERY measure that had a run is compacted. Withholding five
-  // complete measures because the sixth's run aged out would be a second wrong answer.
-  if (measuresWithARun > 0 && compactedMeasures.length === measuresWithARun) {
+  // The whole request is refused only when EVERY measure that had a run is refused, compacted or too thin
+  // to trust. Withholding five complete measures because the sixth's run aged out would be a second wrong
+  // answer.
+  if (measuresWithARun > 0 && compactedMeasures.length + dataInsufficientMeasures.length === measuresWithARun) {
+    const allCompacted = dataInsufficientMeasures.length === 0;
     return {
       ok: false,
       status: 409,
-      body: {
-        error: "run_compacted",
-        measurementYear,
-        compactedMeasures,
-        cutoff: furthestCutoff,
-        message:
-          "every measure's run for this year predates a compaction cutoff; a score computed over a keep set is a different number wearing the run's identity",
-      },
+      body: allCompacted
+        ? {
+            error: "run_compacted",
+            measurementYear,
+            compactedMeasures,
+            cutoff: furthestCutoff,
+            message:
+              "every measure's run for this year predates a compaction cutoff; a score computed over a keep set is a different number wearing the run's identity",
+          }
+        : {
+            error: "data_insufficient",
+            measurementYear,
+            dataInsufficientMeasures,
+            compactedMeasures,
+            message: "every measure's run for this year was refused: its data was too thin to trust, or it was compacted",
+          },
     };
   }
 
@@ -338,6 +348,7 @@ export async function subjectListReport(
       },
       compaction: { cutoff: furthestCutoff },
       compactedMeasures,
+      dataInsufficientMeasures,
       measures: entries,
       rows,
     },
@@ -383,8 +394,9 @@ const emptyEntry = (
   // A COMPACTED measure claims NOTHING per subject. ADR-077 refuses numbers built over rows that may
   // be incomplete, and "how many of your patients did this measure miss?" is such a number; emitting
   // `missingFromRun = N` with no rows would assert a per-subject fact from evidence we have just said
-  // we cannot read. DATA_MODEL_CONTRACTS §6.6 scopes the identity accordingly.
-  missingFromRun: compactionStatus === "compacted" ? 0 : matchedSubjects,
+  // we cannot read. DATA_MODEL_CONTRACTS §6.6 scopes the identity accordingly. A DATA-INSUFFICIENT
+  // measure (#853) claims nothing for the same reason: its rows exist, and none of them is trusted.
+  missingFromRun: compactionStatus === "no_run" ? matchedSubjects : 0,
   scoredSubjects: 0,
   unmeasured: 0,
   evaluationErrors: 0,
@@ -393,68 +405,27 @@ const emptyEntry = (
   rates: [],
 });
 
-/**
- * The newest reportable whole-population run for this measure whose own measurement period is the
- * asked-for calendar year.
- *
- * Walks the recent population runs (the winners' own lean probe) and reads each candidate's row for
- * its period. In January 2028 the newest run is a PY2028 one, so "the latest" would answer a PY2027
- * question with next year's partial data; this walks past it.
- */
-async function selectRunForYear(
-  deps: SubjectListReportDeps,
-  measureId: string,
-  measurementYear: number,
-): Promise<{ runId: string; startedAt: string; measurementPeriodStart: string; measurementPeriodEnd: string } | null> {
-  // Selected by the run's own MEASUREMENT PERIOD, never by when it started. A manual run takes an
-  // arbitrary `evaluationDate` (`run/run-pipeline.ts`), so a run STARTED in 2028 can legitimately
-  // score PY2027 — a rerun-to-verify of a closed year is exactly that — and a start-date window drops
-  // it while the report answers "no run for this year" with that run sitting in the table.
-  //
-  // The earlier attempt filtered `listLatestPopulationRuns` by start date because that call caps its
-  // walk at 25 runs whatever candidate count it is given. A period-scoped read has no such cap and is
-  // the simpler thing as well as the correct one.
-  const candidates = await deps.runs.listPopulationRunsForPeriod(
-    `${measurementYear}-01-01T00:00:00.000Z`,
-    `${measurementYear + 1}-01-01T00:00:00.000Z`,
-    RUN_CANDIDATES,
-  );
-  for (const run of candidates) {
-    // The store already filtered status and scope; re-asserted here because this function's contract
-    // is "a reportable whole-population run" and a second reader should not have to trust a join.
-    if (!isReportableRunStatus(run.status)) continue;
-    if (!isPopulationRun(run.scopeType)) continue;
-    // Newest-first, so the FIRST run that holds this measure's rows is the answer. An ALL_PROGRAMS run
-    // holds every routed measure, so this is one probe in the common case; a measure routed later than
-    // the newest run is found further down rather than reported as absent.
-    const probe = await deps.outcomes.listOutcomes(run.id, { measureId, limit: 1, offset: 0 });
-    if (probe.length === 0) continue;
-    return {
-      runId: run.id,
-      startedAt: run.startedAt,
-      measurementPeriodStart: run.measurementPeriodStart,
-      measurementPeriodEnd: run.measurementPeriodEnd,
-    };
-  }
-  return null;
-}
-
 interface MeasureRead {
-  aggregate: ReturnType<ReturnType<typeof createRateAggregator>["finish"]>;
-  identity: ReturnType<typeof officialReportIdentity>;
+  aggregate: RateAggregate;
+  identity: OfficialReportIdentity | null;
   seen: Set<string>;
   rows: ReportRow[];
-  /** The four DISJOINT buckets every seen subject falls into, classified per row in a stated order. */
-  buckets: { scored: number; unmeasured: number; evaluationErrors: number; outOfPopulation: number };
+  /** The four DISJOINT buckets every seen subject falls into (`bucketOf`), classified per row in a stated order. */
+  buckets: Buckets;
   duplicateRowsCollapsed: number;
   periodMismatch: boolean;
   /** The counted rows were scored by more than one logic (`scoringOfRows`), e.g. CMS's draft and a translation. */
   mixedLogic: boolean;
   /** The one logic the non-errored counted rows were scored by; null when mixed, authored, or none named. */
   logic: ScoringLogic | null;
+  /** The checks the counted rows say their measure's data failed (#853), or null when they carry none. */
+  dataInsufficient: SufficiencyCheck[] | null;
 }
 
-/** Page a run's outcomes for one measure, keeping only the list's members. */
+/**
+ * Read a run's outcomes for one measure, keeping only the list's members, and count them as ONE group
+ * through the scorecard's own counting (`measure-year-rates.ts`, #852), so the two cannot disagree.
+ */
 async function readMeasure(
   deps: SubjectListReportDeps,
   runId: string,
@@ -471,125 +442,41 @@ async function readMeasure(
    */
   rawIdentifierOf: (subjectId: string) => string,
 ): Promise<MeasureRead> {
-  // Newest (evaluatedAt, id) per subject wins, deterministically — a run can hold more than one row
-  // for a subject, and "whichever came back first" would make the report depend on page ordering.
-  const newest = new Map<string, OutcomeRecord>();
-  let duplicateRowsCollapsed = 0;
-  let periodMismatch = false;
-  for (let offset = 0; ; offset += PAGE) {
-    const page = await deps.outcomes.listOutcomes(runId, { measureId, limit: PAGE, offset });
-    if (page.length === 0) break;
-    for (const row of page) {
-      if (!matchedIds.has(row.subjectId)) continue;
-      const identity = officialReportIdentity(row.evidence);
-      const period = identity?.measurementPeriod;
-      if (period && new Date(period.start).getUTCFullYear() !== measurementYear) periodMismatch = true;
-      const held = newest.get(row.subjectId);
-      if (!held) {
-        newest.set(row.subjectId, row);
-        continue;
-      }
-      duplicateRowsCollapsed += 1;
-      // Compared as INSTANTS, not as strings. `2027-01-01T10:00:00+02:00` is earlier than
-      // `2027-01-01T09:30:00Z` and sorts after it lexically, so a string compare could pick the older
-      // clinical evaluation. The id breaks a genuine tie, and is compared as a string because that is
-      // all it is.
-      const ms = (r: OutcomeRecord) => Date.parse(r.evaluatedAt);
-      const a = ms(row);
-      const b = ms(held);
-      const newer = Number.isFinite(a) && Number.isFinite(b) ? (a === b ? row.id > held.id : a > b) : row.id > held.id;
-      if (newer) newest.set(row.subjectId, row);
-    }
-    if (page.length < PAGE) break;
-  }
-
-  const aggregator = createRateAggregator(measureId);
-  const kept: { row: OutcomeRecord; errored: boolean; memberships: ReturnType<typeof membershipRatesFor> }[] = [];
-  let identity: ReturnType<typeof officialReportIdentity> = null;
-  // Every counted row's logic, compared: an import-driven run evaluated before and after a routing change
-  // for the SAME year can hold CMS's draft and a translation, and one `executedLogic` cannot name both.
-  // Compared by the rule the run detail and the programs card use (`scoringOfRows`): kind, digest and
-  // period, AND the eCQM id, version and label, so legacy rows without a digest that name different
-  // versions are a mix too. Errored rows name no logic and are skipped there.
-  const evidences: unknown[] = [];
-  for (const row of newest.values()) {
-    aggregator.add(row);
-    const errored = isEvaluationErrorEvidence(row.evidence);
-    // An errored row scored nothing, so it never names the report's artifact, even if it kept a block.
-    if (!errored) identity ??= officialReportIdentity(row.evidence);
-    evidences.push(row.evidence);
-    // Memberships are read ONCE per row and reused for the row's flags and its bucket. The first cut
-    // built a whole `createRateAggregator` per row for the flags alone — 300,000 stateful aggregators
-    // at the 50,000-member cap across six measures, each re-parsing the evidence.
-    kept.push({ row, errored, memberships: errored ? [] : membershipRatesFor(row, measureId) });
-  }
-  const aggregate = aggregator.finish();
-  const scoring = scoringOfRows(evidences);
-  // How many rates this run DECLARES, which is what makes a row with fewer of them unmeasured. Read
-  // off the finished aggregate so a single row cannot decide it — the rule is about the run.
-  const declaredRates = aggregate.rates.length;
+  const read = await readMeasureYearRows(deps.outcomes, runId, measureId, measurementYear, (subjectId) => matchedIds.has(subjectId));
+  // The run's declared rate count, not the list's: a list whose rows all errored still reports every
+  // rate the run declares (two zero rates for CMS137), and a member with fewer rates is unmeasured here
+  // exactly as it is in the run's own MeasureReport.
+  const counted = foldGroups(read.rows, measureId, read.declaredRates, () => "list").get("list");
   const labels = officialMeasureSemantics(measureId)?.rateLabels;
-
-  const rows: ReportRow[] = [];
-  const buckets = { scored: 0, unmeasured: 0, evaluationErrors: 0, outOfPopulation: 0 };
-  for (const { row, errored, memberships } of kept) {
-    // ONE bucket per subject, in this order. The order is the contract: an errored row is an error
-    // first (no engine spoke for it, so nothing else about it is known), an out-of-population row is
-    // out of population before it is "in no rate", and only what survives both is scored. Classifying
-    // by subtraction instead — the first cut — double-counted errors and could go negative.
-    if (errored) buckets.evaluationErrors += 1;
-    else if (row.outOfPopulation) buckets.outOfPopulation += 1;
-    else if (declaredRates > 1 && memberships.length !== declaredRates) buckets.unmeasured += 1;
-    else buckets.scored += 1;
-    rows.push({
-      rawIdentifier: rawIdentifierOf(row.subjectId),
-      subjectId: row.subjectId,
-      resolution: "MATCHED",
-      rowStatus: "EVALUATED",
-      measureId,
-      outcome: { status: row.status, evaluatedAt: row.evaluatedAt, outOfPopulation: row.outOfPopulation },
-      rates: memberships.map((m, index) => ({
-        label: labels?.[index] ?? null,
-        ipp: m.ipp,
-        denom: m.denom,
-        denex: m.denex,
-        denexcep: m.denexcep,
-        numer: m.numer,
-      })),
-      evaluationError: errored,
-    });
-  }
-  return {
-    aggregate,
-    identity,
-    seen: new Set(newest.keys()),
-    rows,
-    buckets,
-    duplicateRowsCollapsed,
-    periodMismatch,
-    mixedLogic: scoring.conflict,
-    logic: scoring.conflict ? null : (scoring.logics[0] ?? null),
-  };
-}
-
-function toRateGroups(
-  aggregate: ReturnType<ReturnType<typeof createRateAggregator>["finish"]>,
-  measureId: string,
-): MeasureRateGroup[] {
-  const labels = officialMeasureSemantics(measureId)?.rateLabels;
-  return aggregate.rates.map((c, index) => {
-    const effectiveDenominator = c.denom - c.denex - c.denexcep;
-    return {
+  const rows: ReportRow[] = read.rows.map((row) => ({
+    rawIdentifier: rawIdentifierOf(row.subjectId),
+    subjectId: row.subjectId,
+    resolution: "MATCHED",
+    rowStatus: "EVALUATED",
+    measureId,
+    outcome: { status: row.status, evaluatedAt: row.evaluatedAt, outOfPopulation: row.outOfPopulation },
+    rates: row.memberships.map((m, index) => ({
       label: labels?.[index] ?? null,
-      ipp: c.ipp,
-      denom: c.denom,
-      denex: c.denex,
-      denexcep: c.denexcep,
-      numer: c.numer,
-      effectiveDenominator,
-      score: effectiveDenominator > 0 ? c.numer / effectiveDenominator : null,
-    };
-  });
+      ipp: m.ipp,
+      denom: m.denom,
+      denex: m.denex,
+      denexcep: m.denexcep,
+      numer: m.numer,
+    })),
+    evaluationError: row.errored,
+  }));
+  return {
+    aggregate: counted?.aggregate ?? createRateAggregator(measureId, { declaredRates: read.declaredRates }).finish(),
+    identity: read.identity,
+    seen: new Set(read.rows.map((row) => row.subjectId)),
+    rows,
+    buckets: counted?.buckets ?? { scored: 0, unmeasured: 0, evaluationErrors: 0, outOfPopulation: 0 },
+    duplicateRowsCollapsed: read.duplicateRowsCollapsed,
+    periodMismatch: read.periodMismatch,
+    mixedLogic: read.mixedLogic,
+    logic: read.logic,
+    dataInsufficient: read.dataInsufficient,
+  };
 }
 
 /** subject id -> the raw identifier the ACO's file carried, for the MATCHED members. */

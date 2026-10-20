@@ -274,3 +274,24 @@ test("#676 rebuildSnapshotHistory: a newer PARTIAL_FAILURE full run covers only 
     .map((r) => [r.measureId, r.sourceRunId]).sort();
   assert.deepEqual(all, [["audiogram", partial.id], ["hazwoper", full.id]]);
 });
+
+test("materializeRun: a thin run leaves the month's earlier snapshot standing (#853)", async () => {
+  const s = await freshStores();
+  const trusted = await popRun(s);
+  await seedLive(s, trusted.id);
+  await materializeRun(trusted.id, s);
+  const before = (await s.qualitySnapshots.querySnapshots({ measureId: "audiogram" })).find((r) => r.scopeLevel === "all")!;
+  assert.equal(before.sourceRunId, trusted.id);
+
+  // A later run in the same month, every row flagged: last-write-wins would otherwise replace the figure.
+  const thin = await popRun(s, { status: "PARTIAL_FAILURE", startedAt: "2026-06-20T10:00:00.000Z" });
+  const flag = { dataInsufficient: { checks: ["encounterTypeCoded"] } };
+  await s.outcomeStore.recordOutcomes(
+    twh.map((e) => ({ runId: thin.id, subjectId: e.externalId, measureId: "audiogram", status: "OVERDUE", evidence: flag })),
+  );
+  const res = await materializeRun(thin.id, s);
+  assert.equal(res.materialized, false);
+  const after = (await s.qualitySnapshots.querySnapshots({ measureId: "audiogram" })).find((r) => r.scopeLevel === "all")!;
+  assert.equal(after.sourceRunId, trusted.id, "the trusted snapshot still stands");
+  assert.equal(after.compliant, before.compliant);
+});

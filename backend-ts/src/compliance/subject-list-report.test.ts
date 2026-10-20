@@ -14,6 +14,7 @@ import { subjectListReportCsv, reportCsvHeaders } from "./subject-list-report-cs
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { SubjectList, SubjectListMember } from "../stores/subject-list-store.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { subjectMembershipsVia } from "../test-support/memberships.ts";
 
 const LIST: SubjectList = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -53,7 +54,7 @@ interface FakeOptions {
   rows?: OutcomeRecord[];
   runs?: { runId: string; startedAt: string; year: number; status?: string; scopeType?: string; measureId?: string }[];
   compactionCutoffs?: string[];
-  /** Appends a compaction intent the FIRST time a page is read — the mid-report race. */
+  /** Appends a compaction intent the first time the measure's rows are READ (not probed) — the mid-report race. */
   intentOnFirstPage?: string;
   measureIds?: string[];
 }
@@ -66,6 +67,13 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
   const runs = options.runs ?? [{ runId: "run-2027", startedAt: "2027-12-31T00:00:00.000Z", year: 2027 }];
   const cutoffs = [...(options.compactionCutoffs ?? [])];
   let pagesRead = 0;
+  const listOutcomes = async (runId: string, opts?: { measureId?: string; limit?: number; offset?: number }) => {
+    const all = (options.rows ?? []).filter(
+      (r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId),
+    );
+    const offset = opts?.offset ?? 0;
+    return all.slice(offset, offset + (opts?.limit ?? all.length));
+  };
 
   const deps: SubjectListReportDeps = {
     lists: {
@@ -91,14 +99,13 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
       },
     },
     outcomes: {
-      listOutcomes: async (runId: string, opts?: { measureId?: string; limit?: number; offset?: number }) => {
+      listOutcomes,
+      // The rows the report counts come from this read, so the race lands here: after the before-read
+      // compaction check, before the after-read one.
+      listOutcomeSubjectMembershipsForRun: async (runId: string, measureId: string) => {
         pagesRead += 1;
         if (options.intentOnFirstPage && pagesRead === 1) cutoffs.push(options.intentOnFirstPage);
-        const all = (options.rows ?? []).filter(
-          (r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId),
-        );
-        const offset = opts?.offset ?? 0;
-        return all.slice(offset, offset + (opts?.limit ?? all.length));
+        return subjectMembershipsVia(listOutcomes)(runId, measureId);
       },
       listLatestPopulationRuns: async (measureIds: readonly string[]) =>
         runs
@@ -274,6 +281,35 @@ test("compaction is per MEASURE: one exposed run does not withhold the other mea
   assert.equal(all.ok, false);
   assert.equal((all as { status: number }).status, 409);
   assert.equal((all as unknown as { body: { error: string } }).body.error, "run_compacted");
+});
+
+test("#853: a measure whose data was too thin to trust is refused per MEASURE, claiming nothing per subject", async () => {
+  const thin = { ...official({ ipp: true, denom: true, numer: false, denex: false, denexcep: false }), dataInsufficient: { checks: ["encounterTypeCoded"] } };
+  const pass = await runReport({
+    measureIds: ["cms122", "cms125"],
+    runs: [{ runId: "run-2027", startedAt: "2027-12-31T00:00:00.000Z", year: 2027 }],
+    rows: [
+      row("pat-001", thin),
+      row("pat-002", thin),
+      row("pat-001", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }), { measureId: "cms125" }),
+    ],
+  });
+  assert.equal(pass.ok, true, "the other measure's numbers are not withheld");
+  const report = (pass as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  assert.deepEqual(report.dataInsufficientMeasures, ["cms122"]);
+  const refused = report.measures.find((m) => m.measureId === "cms122")!;
+  assert.equal(refused.compactionStatus, "data_insufficient");
+  assert.equal(refused.reason, "data_insufficient:encounterTypeCoded");
+  assert.deepEqual(refused.rates, []);
+  assert.equal(refused.missingFromRun, 0, "no per-subject claim: its rows exist and none is trusted");
+  assert.equal(report.rows.some((r) => r.measureId === "cms122"), false, "and no rows");
+  assert.equal(report.measures.find((m) => m.measureId === "cms125")!.rates[0]!.numer, 1);
+
+  // Every measure refused ⇒ the whole request is refused, naming why.
+  const all = await runReport({ rows: [row("pat-001", thin)] });
+  assert.equal(all.ok, false);
+  assert.equal((all as { status: number }).status, 409);
+  assert.equal((all as unknown as { body: { error: string } }).body.error, "data_insufficient");
 });
 
 test("a compaction intent landing MID-REPORT refuses, rather than serving a truncated 200", async () => {

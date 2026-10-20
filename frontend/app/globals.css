@@ -192,3 +192,33 @@ body {
     scroll-behavior: auto !important;
   }
 }
+/* The quality scorecard's Print (#852): a title, the note and the whole table, nothing of the app shell,
+   so the page prints or pastes into a document as one table. Scoped with :has() to the page that holds it. */
+.print-only {
+  display: none;
+}
+@media print {
+  .print-only {
+    display: block;
+  }
+  body:has(.scorecard) * {
+    visibility: hidden;
+  }
+  body:has(.scorecard) .scorecard,
+  body:has(.scorecard) .scorecard * {
+    visibility: visible;
+  }
+  body:has(.scorecard) .scorecard {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+  }
+  .scorecard .scroll-cue,
+  .scorecard [class*="overflow-"] {
+    overflow: visible !important;
+    background: none !important;
+  }
+  .scorecard .sticky {
+    position: static !important;
+  }
+}

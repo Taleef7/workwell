@@ -28,6 +28,7 @@ import { orderForMeasure } from "../order/order-catalog.ts";
 import type { StandingOrderProvider } from "../order/standing-order-provider.ts";
 import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 import type { CdsCard, CdsSuggestion } from "./types.ts";
+import { dataInsufficientChecks } from "../run/data-sufficiency.ts";
 
 /** The spec caps `summary` at 140 characters; a long measure name must not silently break conformance. */
 const SUMMARY_MAX = 140;
@@ -258,7 +259,14 @@ export async function buildComplianceCards(
   // rate's initial population, the same reading the pipeline's `inInitialPopulation` takes on a
   // multi-rate measure (own review): official evidence present, and no rate admits the subject.
   const outsidePopulation = (r: CardInput): boolean => outsideEveryRate(r, r.measureId);
-  const open = rows.filter((r) => dispositionFor(r.status) === "OPEN" && !isDeprecated(r.measureId) && !outsidePopulation(r));
+  // A measure whose latest run's data was too thin to trust (#853) gets NO card, its evaluation-failure
+  // card included (owner decision, 2026-10-20). With every blood pressure `unknown`, CMS165 reads "not
+  // controlled" for everyone, and a card would put that into a clinician's encounter as a finding. The
+  // flag is read off the row cards already select, and a later sufficient run clears it on every row, so
+  // the card comes back on its own.
+  const open = rows.filter(
+    (r) => dispositionFor(r.status) === "OPEN" && !isDeprecated(r.measureId) && !outsidePopulation(r) && dataInsufficientChecks(r.evidence) === null,
+  );
   if (open.length === 0) return [];
 
   // ONE `proposeOrders` call for the whole subject, so its in-batch dedupe applies: two measures mapping

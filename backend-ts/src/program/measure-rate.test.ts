@@ -223,7 +223,7 @@ test("a rate names the ONE logic behind it, from the rows' evidence: CMS's artif
   assert.doesNotMatch(JSON.stringify(tr), /CMS137FHIR|137FHIR/, "nowhere in the answer");
   // Authored rows: no logic to name, no rate, and no conflict.
   const authored = await officialMeasureRateResult(membershipStore([rec("COMPLIANT", { expressionResults: [] }, "audiogram")]), "run-logic-a", "audiogram");
-  assert.deepEqual(authored, { rate: null, scoringLogics: [], conflict: false });
+  assert.deepEqual(authored, { rate: null, scoringLogics: [], conflict: false, dataInsufficient: null });
 });
 
 test("CMS's row and a translated row for ONE measure: two logics listed and no rate — and the conflict is memoized as itself, not as 'authored'", async () => {
