@@ -21,6 +21,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   checks that). Each official manifest records `logicSha256` (ELM + Measure groups), the lineage keeps every
   vendoring's sha, and the four export gates ask whether a run was scored by the current logic, so this
   re-vendor (identical logic, two claims fewer) keeps CMS's identity on every older run's exports.
+  Terminology is outside the logic hash, as it was outside the old bytes check: a run scored with the
+  2,000-code Advanced Illness list keeps CMS's identity too.
 - **The MADiE gate has no exemption, and every cross-engine disagreement has a cause (#846, closes #572).**
   Six CMS122 cases passed as "reference agreement" when our engine answered numerator 1, on the premise that
   MADiE was wrong. That premise came from an old Java image's bug, so a regression on exactly those cases

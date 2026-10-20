@@ -218,7 +218,13 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, vsacExpansio
     if (typeof body.expansion.total === "number") total = body.expansion.total;
     if (echoedUrl === undefined && typeof body.url === "string") echoedUrl = body.url;
     if (echoedVersion === undefined && typeof body.version === "string") echoedVersion = body.version;
-    if (echoedRelease === undefined) echoedRelease = releaseEchoOf(body.expansion);
+    // Every page of an `expansion=` answer must name the release page 1 did: Advanced Illness is three
+    // pages, and a guard read off page 1 alone would accept pages 2 and 3 from anywhere.
+    const echo = releaseEchoOf(body.expansion);
+    if (page === 0) echoedRelease = echo;
+    else if (vsacExpansion && echo !== echoedRelease) {
+      throw new Error(`VSAC answered page ${page + 1} of ${oid} for ${echo ?? "no release"}, not ${echoedRelease ?? "no release"} as page 1 did`);
+    }
     codes.push(...flattenExpansion(contains));
     offset += contains.length;
     if (contains.length === 0 || (total > 0 && codes.length >= total)) break;

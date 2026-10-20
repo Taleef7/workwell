@@ -246,6 +246,15 @@ test("QRDA I: a RE-VENDORED artifact does not relabel an old outcome (Codex, #36
   assert.equal(xmlProblem(xml), null);
 });
 
+test("QRDA I: an outcome scored by an EARLIER vendoring with the same logic keeps CMS's identity (#848)", () => {
+  // cms125's first vendoring, retired by a metadata-only re-vendor: same logicSha256 as today's artifact.
+  const earlier = outcome("COMPLIANT", { ...officialEvidence(true), artifactSha256: "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8" });
+  const xml = buildQrda1Document(run, "cms125", earlier, bundle);
+  assert.ok(xml.includes("2.16.840.1.113883.4.738"), "the published identity carries over");
+  assert.ok(!xml.includes('root="urn:workwell:measure"'));
+  assert.equal(xmlProblem(xml), null);
+});
+
 test("QRDA I: a MISSING artifact degrades instead of crashing (Codex, #360)", () => {
   const orphan = { ...outcome("COMPLIANT", officialEvidence(true)), measureId: "cms999" } as OutcomeRecord;
   const xml = buildQrda1Document(run, "cms999", orphan, bundle);

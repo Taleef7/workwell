@@ -182,6 +182,27 @@ describe("expandFromVsac", () => {
     assert.equal(expanded.release, ARGS.vsacManifest);
   });
 
+  it("refuses an expansion= answer whose later page names another release than page 1 (#851)", async () => {
+    const page = (codes, release) => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          resourceType: "ValueSet",
+          expansion: { total: 4, parameter: [{ name: "manifest", valueString: release }], contains: codes.map((code) => ({ system: "s", code })) },
+        }),
+    });
+    globalThis.fetch = async (url) =>
+      new URL(String(url)).searchParams.get("offset") === "0"
+        ? page(["a", "b"], ARGS.vsacManifest)
+        : page(["c", "d"], "http://cts.nlm.nih.gov/fhir/Library/ecqm-update-2026-05-14");
+
+    await assert.rejects(
+      () => expandFromVsac(OID, { ...ARGS, vsacExpansion: RELEASE_TITLE, apiKey: "test-key" }),
+      /answered page 2 of .* for http:\/\/cts\.nlm\.nih\.gov\/fhir\/Library\/ecqm-update-2026-05-14, not .*ecqm-fhir-update-2025 as page 1 did/,
+    );
+  });
+
   it("refuses a response that carries no expansion rather than reading it as zero codes", async () => {
     globalThis.fetch = async () => ({
       ok: true,

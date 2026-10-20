@@ -120,9 +120,13 @@ const CMS_ARTIFACT_LINEAGE: Readonly<Record<string, CmsArtifactLineage>> = {
  * True when the artifact a run recorded (`artifactSha256`) computed the same logic as `manifest`, the one
  * vendored now (#848): the same bytes; or an earlier vendoring of the same measure, pinned above, whose
  * `logicSha256` equals the current manifest's. A sha nobody pinned is never assumed equal, and a manifest
- * with no `logicSha256` (a translation) matches only its own bytes. The four export gates (QRDA I/III ids
- * and criteria, the MeasureReport canonical, the vintage note) ask this instead of "are the bytes equal",
- * so a metadata-only re-vendor no longer strips CMS's identity from every older run.
+ * with no `logicSha256` matches only its own bytes. A translation's runs match only its own bytes too: the
+ * table holds CMS's artifacts alone. The four export gates (QRDA I/III ids and criteria, the MeasureReport
+ * canonical, the vintage note) ask this instead of "are the bytes equal", so a metadata-only re-vendor no
+ * longer strips CMS's identity from every older run.
+ *
+ * Terminology is not part of it, as it never was of the bytes check: a run scored before a sidecar moved
+ * (Advanced Illness 2,000 → 2,030 codes, #851) keeps CMS's identity, because the artifact's logic is CMS's.
  */
 export function scoredByCurrentLogic(
   manifest: Pick<OfficialManifest, "catalogId" | "sha256" | "logicSha256">,

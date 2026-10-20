@@ -177,6 +177,21 @@ test("ADR-046: a re-vendored artifact does NOT get the current canonical retroac
   assert.ok(!JSON.stringify(report).includes("linkId"), "no linkId from an artifact this run did not use");
 });
 
+test("#848: a run scored by an EARLIER vendoring with the same logic keeps the canonical and the linkIds", () => {
+  // cms125's first vendoring (retired by #848's metadata-only re-vendor; still pinned in the lineage
+  // with the same logicSha256 as today's). Byte equality would drop the canonical; the logic is CMS's.
+  const earlier = routedOc("cms125", true);
+  (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =
+    "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8";
+  const report = buildSummaryMeasureReport(run, "cms125", [earlier], GENERATED_AT);
+  assert.ok(report.measure.includes("madie.cms.gov"), `kept CMS's canonical, got ${report.measure}`);
+  assert.ok(JSON.stringify(report).includes("linkId"), "the artifact's ids still describe the counts");
+  // cms122's earlier vendoring is not cms125's: another measure's sha never carries an identity across.
+  (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =
+    "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552";
+  assert.equal(buildSummaryMeasureReport(run, "cms125", [earlier], GENERATED_AT).measure, "urn:workwell:measure:cms125:official:1.0.000");
+});
+
 test("ADR-046: the INDIVIDUAL report derives the trio from its own outcome", () => {
   const official = buildIndividualMeasureReport(routedOc("cms122", true), run, "cms122", GENERATED_AT);
   assert.equal(official.improvementNotation?.coding[0]?.code, "decrease");

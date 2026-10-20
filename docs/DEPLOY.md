@@ -129,6 +129,9 @@ content names (old name `--complete-capped-expansions` still accepted).
   (routing refuses). An ABSENT one cannot (fqm refuses the whole measure over a missing declared set), so
   it is sourced as VSAC serves it, warned about, and recorded `inRelease: false`: cms138's
   `…3.526.3.1278`, not in eCQM FHIR Update 2025.
+- **A changed official pin needs VSAC once per stack.** The buckets hold only the sidecars earlier deploys
+  stored, so the first CI run and each stack's first deploy after a pin moves (cms122/125/130/165 at #851)
+  re-expand from VSAC; `--fallback-dir` has no copy of the new pin to restore. That deploy then stores it.
 - `_VENDOR` (build time) and `WORKWELL_VSAC_API_KEY_TWH` (runtime resolver, ADR-023) are separate
   secrets on purpose (ADR-036), even though they hold the same UMLS key.
 - **Landing order — secrets before manifests.** Add or change the secret in the **same change** that

@@ -255,7 +255,7 @@ test("scoredByCurrentLogic: an earlier vendoring with the same logic is the curr
   assert.equal(
     scoredByCurrentLogic({ catalogId: "cms125", sha256: "sha256:re-vendored" }, earlier),
     false,
-    "a manifest with no logic hash (a translation) matches only its own bytes",
+    "a manifest with no logic hash matches only its own bytes",
   );
 });
 
@@ -278,7 +278,8 @@ test("scoringLogicOf names CMS's artifact from the row's own evidence, with its 
     status: "draft",
     statusNote: "posted for public comment Jan–Feb 2026",
   });
-  // A row written before artifactSha256 was recorded falls back to the one artifact with that id and version.
+  // A row written before artifactSha256 was recorded falls back to the one LINEAGE with that id and version:
+  // cms125 has two vendorings (#848), which agree on it, so this also fails if they were read as ambiguous.
   assert.equal(scoringLogicOf({ official: { ecqmId: "125FHIR", version: "1.0.000" } })?.derivedFrom, "CMS125v14");
   // An artifact this table does not pin is named, but no lineage or release state is invented for it.
   const unknown = scoringLogicOf(cmsRow({ artifactSha256: "sha256:not-vendored", version: "2.0.000" }));
