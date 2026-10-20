@@ -94,7 +94,8 @@ interface CmsArtifactLineage {
  */
 const DQM_2025 = "cqframework/dqm-content-qicore-2025";
 const CMS_ARTIFACT_LINEAGE: Readonly<Record<string, CmsArtifactLineage>> = {
-  // First vendoring (2026-07/08), retired by #848's re-vendor: only two Library profile claims changed.
+  // As main shipped them from 6f4b8ea5 (2026-09-05; cms137 from ebe2dc24, 09-06), retired by #848's
+  // re-vendor: only two Library profile claims changed.
   "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552": { measureId: "cms122", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14", contentRepo: DQM_2025, logicSha256: "sha256:6e4498b1815130957eb58f4ca2d74734e488bdc4a5a474df6d42ce9d0c072efb" },
   "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8": { measureId: "cms125", ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14", contentRepo: DQM_2025, logicSha256: "sha256:67a0240f5e409b699512d9241611a8cebd1fa9fa4b85bc0841c92ee8c83e54ac" },
   "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629": { measureId: "cms130", ecqmId: "CMS130FHIR", version: "1.0.000", derivedFrom: "CMS130v14", contentRepo: DQM_2025, logicSha256: "sha256:816e944190763d813cf9136ae2701a7a907f4bc87a87d1a9caef7406224a7eab" },
@@ -123,14 +124,17 @@ const CMS_ARTIFACT_LINEAGE: Readonly<Record<string, CmsArtifactLineage>> = {
  * an earlier, logic-identical build keep the artifact's ids (a MeasureReport's `linkId`s).
  */
 const TRANSLATION_LOGIC_LINEAGE: Readonly<Record<string, { measureId: string; logicSha256: string }>> = {
-  // ww-2027.1 as first built (2026-10-05 … 10-16); retired by #848's rebuild. cms122's notation moved
-  // (`increase` → `decrease`, inside its groups), so its logic differs; the other five changed metadata only.
-  "sha256:c87f7f943cb3be9a6f8902d723a56f4cc433051b2942f505a394240442ebdb1b": { measureId: "cms122", logicSha256: "sha256:10d6e80305d637b90eac0a1fb7145cea6238c4fc39cd34403895baa8dd77605f" },
-  "sha256:1af7601e212036dcc91ca14c55082c7e8b67f0b9eabc73d8db11283e06866f3d": { measureId: "cms125", logicSha256: "sha256:eaeb6ac27f729cf14f7a43e117f8f5908cdbbb437f8f174b39080148333853e4" },
-  "sha256:b38972b2ff567cdc81206d7a854ea84215c3457714cbab2bf43671f39f6d9a1e": { measureId: "cms130", logicSha256: "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865" },
-  "sha256:617347b02fe9f102decc5698e54f5cecd43cd62ec5cb3297d1201ff5d9d80b51": { measureId: "cms137", logicSha256: "sha256:254a30553d5546d6f16585358e7b56a8c2fc274d7c6ac3af0fdca14c28a56ffc" },
-  "sha256:8ec64426fbca9a278d8c0b2a75cd6fef2a622acc33ac1fec5dc40a23ae53194e": { measureId: "cms165", logicSha256: "sha256:dea8f835147b234289c252a4244cebe3ed38c3066e24d8a254db13cc42393a69" },
-  "sha256:a8744ed7be7b0d4e31c458505d48f19e0c1da187a344b52f1db2a54f9e465559": { measureId: "cms2", logicSha256: "sha256:6aa351307e648fb97ee126726dd5d03824186c008014ad64b956bc7563f32476" },
+  // Every ww-2027.1 build main shipped before #848, keyed by its manifest's `sha256` as committed (the commit
+  // that shipped it is on each line; `git show <commit>:backend-ts/measures/derived/<id>/manifest.json`).
+  // cms122's notation moved in #848 (`increase` → `decrease`, inside its groups), so its logic differs; the
+  // other five changed metadata only. cms130 shipped twice, both builds computing the same logic.
+  "sha256:594ec2b8da5871eb7eadb2aac8ad5eee6447990c58e7867760d5f955cd7f7f51": { measureId: "cms122", logicSha256: "sha256:10d6e80305d637b90eac0a1fb7145cea6238c4fc39cd34403895baa8dd77605f" }, // 36ba2b09
+  "sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b": { measureId: "cms125", logicSha256: "sha256:eaeb6ac27f729cf14f7a43e117f8f5908cdbbb437f8f174b39080148333853e4" }, // ac15fd1f
+  "sha256:e5a6dfcedf91c96478f907dab9fd30b3ba55a396b9500ea42341b235eb553353": { measureId: "cms130", logicSha256: "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865" }, // d737e599
+  "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db": { measureId: "cms130", logicSha256: "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865" }, // ac15fd1f
+  "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb": { measureId: "cms137", logicSha256: "sha256:254a30553d5546d6f16585358e7b56a8c2fc274d7c6ac3af0fdca14c28a56ffc" }, // 0adba077
+  "sha256:b7cd83c69962954016381954a993861d90bf0d69cd6dc8cbb0376b92a924a64a": { measureId: "cms165", logicSha256: "sha256:dea8f835147b234289c252a4244cebe3ed38c3066e24d8a254db13cc42393a69" }, // 73a0a799
+  "sha256:ce329d5a0aa06f13fac490a5f91bc45e4001d06d76da58b15b71ce8c0600c00f": { measureId: "cms2", logicSha256: "sha256:6aa351307e648fb97ee126726dd5d03824186c008014ad64b956bc7563f32476" }, // bc2f5c2e
   // ww-2027.1 rebuilt for #848 (2026-10-19).
   "sha256:ed1d50353f4a72a87853bccdb7997d1336811c8d14826eeaefae3416edec0ead": { measureId: "cms122", logicSha256: "sha256:5fe5e29b7f51dc13247322ab16a958054b2cf55a201a3de9e13c6a56dd31daa5" },
   "sha256:e2fb89840d6a75773cbb15e0eb35679fc35e43091fa8a18dcc4743406a4f6886": { measureId: "cms125", logicSha256: "sha256:eaeb6ac27f729cf14f7a43e117f8f5908cdbbb437f8f174b39080148333853e4" },

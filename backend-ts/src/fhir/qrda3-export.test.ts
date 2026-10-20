@@ -232,7 +232,7 @@ test("QRDA III: a re-vendored artifact must not relabel a historical run's crite
 });
 
 test("QRDA III: a run scored by an EARLIER vendoring with the same logic keeps its criteria and identity (#848)", () => {
-  // cms122's first vendoring, retired by a metadata-only re-vendor: same logicSha256 as today's artifact.
+  // cms122's vendoring as main shipped it, retired by a metadata-only re-vendor: same logicSha256 as today's artifact.
   const earlier = {
     ...officialOutcome("cms122"),
     evidence: {

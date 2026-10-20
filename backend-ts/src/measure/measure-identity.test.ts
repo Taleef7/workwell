@@ -265,17 +265,30 @@ test("every committed translation has a pinned logic lineage, keyed by its own s
 test("scoredByCurrentLogic: a translation's earlier build counts only where its logic is unchanged (#848)", () => {
   const derivedManifest = (id: string) =>
     JSON.parse(readFileSync(new URL(`../../measures/derived/${id}/manifest.json`, import.meta.url), "utf8")) as { catalogId: string; sha256: string; logicSha256: string };
-  // cms125's translation was rebuilt for metadata only (profile claims, no empty identifier): same logic.
-  assert.equal(scoredByCurrentLogic(derivedManifest("cms125"), "sha256:1af7601e212036dcc91ca14c55082c7e8b67f0b9eabc73d8db11283e06866f3d"), true);
+  // The builds main shipped before #848 (their manifests' `sha256`, which runs recorded). cms125's was rebuilt
+  // for metadata only (profile claims, no empty identifier): same logic. So were cms137's, cms165's, cms2's
+  // and both of cms130's.
+  const shipped = {
+    cms125: "sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b",
+    cms130: ["sha256:e5a6dfcedf91c96478f907dab9fd30b3ba55a396b9500ea42341b235eb553353", "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db"],
+    cms137: "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
+    cms165: "sha256:b7cd83c69962954016381954a993861d90bf0d69cd6dc8cbb0376b92a924a64a",
+    cms2: "sha256:ce329d5a0aa06f13fac490a5f91bc45e4001d06d76da58b15b71ce8c0600c00f",
+    cms122: "sha256:594ec2b8da5871eb7eadb2aac8ad5eee6447990c58e7867760d5f955cd7f7f51",
+  };
+  for (const id of ["cms125", "cms137", "cms165", "cms2"] as const) {
+    assert.equal(scoredByCurrentLogic(derivedManifest(id), shipped[id]), true, `${id}: the build main shipped computes today's logic`);
+  }
+  for (const sha of shipped.cms130) assert.equal(scoredByCurrentLogic(derivedManifest("cms130"), sha), true, `cms130 ${sha}`);
   // cms122's rebuild changed its groups' improvement notation, which is inside the logic hash: no continuity.
-  assert.equal(scoredByCurrentLogic(derivedManifest("cms122"), "sha256:c87f7f943cb3be9a6f8902d723a56f4cc433051b2942f505a394240442ebdb1b"), false);
+  assert.equal(scoredByCurrentLogic(derivedManifest("cms122"), shipped.cms122), false);
   // A translation's earlier build never lends its logic to another measure, nor CMS's artifact to a translation.
-  assert.equal(scoredByCurrentLogic(derivedManifest("cms130"), "sha256:1af7601e212036dcc91ca14c55082c7e8b67f0b9eabc73d8db11283e06866f3d"), false);
+  assert.equal(scoredByCurrentLogic(derivedManifest("cms130"), shipped.cms125), false);
   assert.equal(scoredByCurrentLogic(derivedManifest("cms125"), "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8"), false);
 });
 
 test("scoredByCurrentLogic: an earlier vendoring with the same logic is the current artifact; nothing else is (#848)", () => {
-  // cms125's first vendoring, pinned in the lineage, whatever is committed now.
+  // cms125's vendoring as main shipped it, pinned in the lineage, whatever is committed now.
   const earlier = "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8";
   const { logicSha256 } = CMS_ARTIFACT_LINEAGE_FOR_TEST[earlier]!;
   const current = { catalogId: "cms125", sha256: "sha256:re-vendored", logicSha256 };

@@ -178,7 +178,8 @@ test("ADR-046: a re-vendored artifact does NOT get the current canonical retroac
 });
 
 test("#848: a translated run scored by the translation's EARLIER build, same logic, keeps the linkIds", () => {
-  // cms125's translation before #848's metadata-only rebuild (profile claims, no empty identifier).
+  // cms125's translation as main shipped it (ac15fd1f) before #848's metadata-only rebuild (profile claims,
+  // no empty identifier): the manifest sha its runs recorded.
   const translation = loadDerivedArtifact("cms125")!;
   const scoredBy = (artifactSha256: string): OutcomeRecord => ({
     ...routedOc("cms125", true),
@@ -195,7 +196,7 @@ test("#848: a translated run scored by the translation's EARLIER build, same log
       },
     },
   });
-  const earlier = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:1af7601e212036dcc91ca14c55082c7e8b67f0b9eabc73d8db11283e06866f3d")], GENERATED_AT);
+  const earlier = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b")], GENERATED_AT);
   assert.equal(linkOf("group", earlier.group[0]!), "Group_1", "the translation's group ids still describe the counts");
   // A build nobody pinned is not assumed to share the logic.
   const unknown = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:not-a-build-of-this-translation")], GENERATED_AT);
@@ -203,7 +204,7 @@ test("#848: a translated run scored by the translation's EARLIER build, same log
 });
 
 test("#848: a run scored by an EARLIER vendoring with the same logic keeps the canonical and the linkIds", () => {
-  // cms125's first vendoring (retired by #848's metadata-only re-vendor; still pinned in the lineage
+  // cms125's vendoring as main shipped it (retired by #848's metadata-only re-vendor; still pinned in the lineage
   // with the same logicSha256 as today's). Byte equality would drop the canonical; the logic is CMS's.
   const earlier = routedOc("cms125", true);
   (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =
