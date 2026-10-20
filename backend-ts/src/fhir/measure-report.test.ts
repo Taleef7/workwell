@@ -177,6 +177,31 @@ test("ADR-046: a re-vendored artifact does NOT get the current canonical retroac
   assert.ok(!JSON.stringify(report).includes("linkId"), "no linkId from an artifact this run did not use");
 });
 
+test("#848: a translated run scored by the translation's EARLIER build, same logic, keeps the linkIds", () => {
+  // cms125's translation before #848's metadata-only rebuild (profile claims, no empty identifier).
+  const translation = loadDerivedArtifact("cms125")!;
+  const scoredBy = (artifactSha256: string): OutcomeRecord => ({
+    ...routedOc("cms125", true),
+    evidence: {
+      official: {
+        kind: "derived", url: translation.manifest.url, label: translation.manifest.derived!.label, derivedFrom: "CMS125v15",
+        ecqmId: null, version: translation.manifest.version, artifactSha256,
+        populationResults: [
+          { populationType: "initial-population", result: true },
+          { populationType: "denominator", result: true },
+          { populationType: "denominator-exclusion", result: false },
+          { populationType: "numerator", result: true },
+        ],
+      },
+    },
+  });
+  const earlier = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:1af7601e212036dcc91ca14c55082c7e8b67f0b9eabc73d8db11283e06866f3d")], GENERATED_AT);
+  assert.equal(linkOf("group", earlier.group[0]!), "Group_1", "the translation's group ids still describe the counts");
+  // A build nobody pinned is not assumed to share the logic.
+  const unknown = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:not-a-build-of-this-translation")], GENERATED_AT);
+  assert.ok(!JSON.stringify(unknown).includes("linkId"));
+});
+
 test("#848: a run scored by an EARLIER vendoring with the same logic keeps the canonical and the linkIds", () => {
   // cms125's first vendoring (retired by #848's metadata-only re-vendor; still pinned in the lineage
   // with the same logicSha256 as today's). Byte equality would drop the canonical; the logic is CMS's.

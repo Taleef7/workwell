@@ -393,8 +393,8 @@ export function derivedManifestFor(input: DerivedManifestInput): { manifest: Off
     },
     terminology: terminologyBlock,
     sha256: sha,
-    // Keyed like CMS's manifest (#848). A translation's runs still match only its own bytes: the lineage
-    // that lets an earlier vendoring keep its identity holds CMS's artifacts alone.
+    // Keyed like CMS's manifest (#848). With `TRANSLATION_LOGIC_LINEAGE` it lets a run scored by an earlier,
+    // logic-identical build keep the artifact's ids; a rebuild adds its new sha there.
     logicSha256: logicSha256Of(JSON.parse(bundleJson)),
     derived: {
       label: identity.title,

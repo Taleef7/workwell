@@ -106,7 +106,7 @@ export interface OfficialManifest {
    * The artifact's logic, hashed apart from its metadata (`scripts/artifact-logic.mjs`, #848): each
    * Library's ELM and the Measure's groups. For CMS's artifacts it is equal across a re-vendor that changed
    * only metadata, so a run scored by the earlier vendoring still carries CMS's identity
-   * (`scoredByCurrentLogic`). A translation carries it too, but its runs match only its own bytes.
+   * (`scoredByCurrentLogic`). A translation's does the same for its ids across a metadata-only rebuild.
    */
   logicSha256?: string;
   /**

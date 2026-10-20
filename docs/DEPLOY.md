@@ -147,7 +147,8 @@ content names (old name `--complete-capped-expansions` still accepted).
   A new completion changes `officialLogicVersion` (ADR-040) and invalidates that measure's `eval_state`.
   A re-vendor that changes `bundle.json` adds an entry to `CMS_ARTIFACT_LINEAGE`
   (`src/measure/measure-identity.ts`) and keeps the old one: the manifest's `logicSha256` decides whether
-  runs scored by the earlier bytes keep CMS's identity in their exports (#848).
+  runs scored by the earlier bytes keep CMS's identity in their exports (#848). A translation rebuild does
+  the same in `TRANSLATION_LOGIC_LINEAGE`; a test fails until the new sha is there.
 - `pnpm official:terminology-audit [<MADiE name>]` lists value sets the ELM declares but the bundle does
   not ship (CMS138 is the known case). Only VSAC fixes those. The MADiE deck checks such a set only where an
   expression reads it; CMS138's never does.

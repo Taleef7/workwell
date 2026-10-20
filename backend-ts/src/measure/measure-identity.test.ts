@@ -14,6 +14,7 @@ import {
   measureIdentityFor,
   measureIdentityPayloadFor,
   scoredByCurrentLogic,
+  TRANSLATION_LOGIC_LINEAGE_FOR_TEST,
   translationLogicFromManifest,
   translationLogicFor,
 } from "./measure-identity.ts";
@@ -240,6 +241,37 @@ test("every committed CMS artifact has a pinned lineage, keyed by its own sha, r
     assert.ok(vendored.has(entry.measureId), `${sha} names ${entry.measureId}, which is no longer vendored: stale`);
     assert.match(entry.logicSha256, /^sha256:[0-9a-f]{64}$/, `${sha} records no logic`);
   }
+});
+
+test("every committed translation has a pinned logic lineage, keyed by its own sha (#848)", () => {
+  const DERIVED_DIR = new URL("../../measures/derived/", import.meta.url);
+  const translations = readdirSync(DERIVED_DIR, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && !d.name.startsWith("_"))
+    .map((d) => ({ id: d.name, manifest: JSON.parse(readFileSync(new URL(`${d.name}/manifest.json`, DERIVED_DIR), "utf8")) as { sha256: string; logicSha256: string } }));
+  assert.ok(translations.length >= 6, `expected the six translations, found ${translations.length}`);
+  for (const { id, manifest } of translations) {
+    const pinned = TRANSLATION_LOGIC_LINEAGE_FOR_TEST[manifest.sha256];
+    assert.ok(pinned, `${id}: no pinned logic for ${manifest.sha256}; a rebuild must add its sha and keep the old one`);
+    assert.equal(pinned.measureId, id);
+    assert.equal(pinned.logicSha256, manifest.logicSha256);
+  }
+  const committed = new Set(translations.map((t) => t.id));
+  for (const [sha, entry] of Object.entries(TRANSLATION_LOGIC_LINEAGE_FOR_TEST)) {
+    assert.ok(committed.has(entry.measureId), `${sha} names ${entry.measureId}, which is no longer a translation: stale`);
+    assert.match(entry.logicSha256, /^sha256:[0-9a-f]{64}$/);
+  }
+});
+
+test("scoredByCurrentLogic: a translation's earlier build counts only where its logic is unchanged (#848)", () => {
+  const derivedManifest = (id: string) =>
+    JSON.parse(readFileSync(new URL(`../../measures/derived/${id}/manifest.json`, import.meta.url), "utf8")) as { catalogId: string; sha256: string; logicSha256: string };
+  // cms125's translation was rebuilt for metadata only (profile claims, no empty identifier): same logic.
+  assert.equal(scoredByCurrentLogic(derivedManifest("cms125"), "sha256:1af7601e212036dcc91ca14c55082c7e8b67f0b9eabc73d8db11283e06866f3d"), true);
+  // cms122's rebuild changed its groups' improvement notation, which is inside the logic hash: no continuity.
+  assert.equal(scoredByCurrentLogic(derivedManifest("cms122"), "sha256:c87f7f943cb3be9a6f8902d723a56f4cc433051b2942f505a394240442ebdb1b"), false);
+  // A translation's earlier build never lends its logic to another measure, nor CMS's artifact to a translation.
+  assert.equal(scoredByCurrentLogic(derivedManifest("cms130"), "sha256:1af7601e212036dcc91ca14c55082c7e8b67f0b9eabc73d8db11283e06866f3d"), false);
+  assert.equal(scoredByCurrentLogic(derivedManifest("cms125"), "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8"), false);
 });
 
 test("scoredByCurrentLogic: an earlier vendoring with the same logic is the current artifact; nothing else is (#848)", () => {

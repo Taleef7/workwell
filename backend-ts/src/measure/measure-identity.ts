@@ -117,13 +117,41 @@ const CMS_ARTIFACT_LINEAGE: Readonly<Record<string, CmsArtifactLineage>> = {
 };
 
 /**
+ * The same, for WorkWell's translations (#848): each build's bundle sha and the logic it computes. A rebuild
+ * ADDS its sha and keeps the old one, and the test that every committed translation has an entry fails until
+ * it does. Translations carry no CMS identity, so only the logic is recorded; it is what lets a run scored by
+ * an earlier, logic-identical build keep the artifact's ids (a MeasureReport's `linkId`s).
+ */
+const TRANSLATION_LOGIC_LINEAGE: Readonly<Record<string, { measureId: string; logicSha256: string }>> = {
+  // ww-2027.1 as first built (2026-10-05 … 10-16); retired by #848's rebuild. cms122's notation moved
+  // (`increase` → `decrease`, inside its groups), so its logic differs; the other five changed metadata only.
+  "sha256:c87f7f943cb3be9a6f8902d723a56f4cc433051b2942f505a394240442ebdb1b": { measureId: "cms122", logicSha256: "sha256:10d6e80305d637b90eac0a1fb7145cea6238c4fc39cd34403895baa8dd77605f" },
+  "sha256:1af7601e212036dcc91ca14c55082c7e8b67f0b9eabc73d8db11283e06866f3d": { measureId: "cms125", logicSha256: "sha256:eaeb6ac27f729cf14f7a43e117f8f5908cdbbb437f8f174b39080148333853e4" },
+  "sha256:b38972b2ff567cdc81206d7a854ea84215c3457714cbab2bf43671f39f6d9a1e": { measureId: "cms130", logicSha256: "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865" },
+  "sha256:617347b02fe9f102decc5698e54f5cecd43cd62ec5cb3297d1201ff5d9d80b51": { measureId: "cms137", logicSha256: "sha256:254a30553d5546d6f16585358e7b56a8c2fc274d7c6ac3af0fdca14c28a56ffc" },
+  "sha256:8ec64426fbca9a278d8c0b2a75cd6fef2a622acc33ac1fec5dc40a23ae53194e": { measureId: "cms165", logicSha256: "sha256:dea8f835147b234289c252a4244cebe3ed38c3066e24d8a254db13cc42393a69" },
+  "sha256:a8744ed7be7b0d4e31c458505d48f19e0c1da187a344b52f1db2a54f9e465559": { measureId: "cms2", logicSha256: "sha256:6aa351307e648fb97ee126726dd5d03824186c008014ad64b956bc7563f32476" },
+  // ww-2027.1 rebuilt for #848 (2026-10-19).
+  "sha256:ed1d50353f4a72a87853bccdb7997d1336811c8d14826eeaefae3416edec0ead": { measureId: "cms122", logicSha256: "sha256:5fe5e29b7f51dc13247322ab16a958054b2cf55a201a3de9e13c6a56dd31daa5" },
+  "sha256:e2fb89840d6a75773cbb15e0eb35679fc35e43091fa8a18dcc4743406a4f6886": { measureId: "cms125", logicSha256: "sha256:eaeb6ac27f729cf14f7a43e117f8f5908cdbbb437f8f174b39080148333853e4" },
+  "sha256:1e4b933ee02fe512e707b958b9d4ef4aeb437c57f326be50502118720a9eda6f": { measureId: "cms130", logicSha256: "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865" },
+  "sha256:2712b927bf061e3dddbcef1fae00cb8db8be572d1f0e1c2062c3f197af5fa4a9": { measureId: "cms137", logicSha256: "sha256:254a30553d5546d6f16585358e7b56a8c2fc274d7c6ac3af0fdca14c28a56ffc" },
+  "sha256:d43d9639afaa0fc49ddc4c23997c5be7d912bd41ece1efad6a6ece61a5bfb0c6": { measureId: "cms165", logicSha256: "sha256:dea8f835147b234289c252a4244cebe3ed38c3066e24d8a254db13cc42393a69" },
+  "sha256:554a64d9c728f1215d4b13199d30b8f10704731adf3e01f899f7ee35de836aa2": { measureId: "cms2", logicSha256: "sha256:6aa351307e648fb97ee126726dd5d03824186c008014ad64b956bc7563f32476" },
+};
+
+/** For the committed-translation drift test only. */
+export const TRANSLATION_LOGIC_LINEAGE_FOR_TEST = TRANSLATION_LOGIC_LINEAGE;
+
+/**
  * True when the artifact a run recorded (`artifactSha256`) computed the same logic as `manifest`, the one
- * vendored now (#848): the same bytes; or an earlier vendoring of the same measure, pinned above, whose
- * `logicSha256` equals the current manifest's. A sha nobody pinned is never assumed equal, and a manifest
- * with no `logicSha256` matches only its own bytes. A translation's runs match only its own bytes too: the
- * table holds CMS's artifacts alone. The four export gates (QRDA I/III ids and criteria, the MeasureReport
- * canonical, the vintage note) ask this instead of "are the bytes equal", so a metadata-only re-vendor no
- * longer strips CMS's identity from every older run.
+ * vendored or built now (#848): the same bytes; or an earlier vendoring or build of the same measure, pinned
+ * in one of the two tables above, whose `logicSha256` equals the current manifest's. A sha nobody pinned is
+ * never assumed equal, and a manifest with no `logicSha256` matches only its own bytes. CMS's artifacts and
+ * the translations never stand in for each other: their logic hashes differ (the Measure url is part of
+ * it). The four export gates (QRDA I/III ids and criteria, the MeasureReport canonical and ids, the vintage
+ * note) ask this instead of "are the bytes equal", so a metadata-only re-vendor or rebuild no longer strips
+ * an older run of the artifact's identity.
  *
  * Terminology is not part of it, as it never was of the bytes check: a run scored before a sidecar moved
  * (Advanced Illness 2,000 → 2,030 codes, #851) keeps CMS's identity, because the artifact's logic is CMS's.
@@ -133,7 +161,11 @@ export function scoredByCurrentLogic(
   artifactSha256: string,
 ): boolean {
   if (artifactSha256 === manifest.sha256) return true;
-  const earlier = Object.hasOwn(CMS_ARTIFACT_LINEAGE, artifactSha256) ? CMS_ARTIFACT_LINEAGE[artifactSha256] : undefined;
+  const earlier = Object.hasOwn(CMS_ARTIFACT_LINEAGE, artifactSha256)
+    ? CMS_ARTIFACT_LINEAGE[artifactSha256]
+    : Object.hasOwn(TRANSLATION_LOGIC_LINEAGE, artifactSha256)
+      ? TRANSLATION_LOGIC_LINEAGE[artifactSha256]
+      : undefined;
   return !!earlier && !!manifest.logicSha256 && earlier.measureId === manifest.catalogId && earlier.logicSha256 === manifest.logicSha256;
 }
 
