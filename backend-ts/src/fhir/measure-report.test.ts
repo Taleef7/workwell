@@ -177,6 +177,48 @@ test("ADR-046: a re-vendored artifact does NOT get the current canonical retroac
   assert.ok(!JSON.stringify(report).includes("linkId"), "no linkId from an artifact this run did not use");
 });
 
+test("#848: a translated run scored by the translation's EARLIER build, same logic, keeps the linkIds", () => {
+  // cms125's translation as main shipped it (ac15fd1f) before #848's metadata-only rebuild (profile claims,
+  // no empty identifier): the manifest sha its runs recorded.
+  const translation = loadDerivedArtifact("cms125")!;
+  const scoredBy = (artifactSha256: string): OutcomeRecord => ({
+    ...routedOc("cms125", true),
+    evidence: {
+      official: {
+        kind: "derived", url: translation.manifest.url, label: translation.manifest.derived!.label, derivedFrom: "CMS125v15",
+        ecqmId: null, version: translation.manifest.version, artifactSha256,
+        populationResults: [
+          { populationType: "initial-population", result: true },
+          { populationType: "denominator", result: true },
+          { populationType: "denominator-exclusion", result: false },
+          { populationType: "numerator", result: true },
+        ],
+      },
+    },
+  });
+  const earlier = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b")], GENERATED_AT);
+  assert.equal(linkOf("group", earlier.group[0]!), "Group_1", "the translation's group ids still describe the counts");
+  // A build nobody pinned is not assumed to share the logic.
+  const unknown = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:not-a-build-of-this-translation")], GENERATED_AT);
+  assert.ok(!JSON.stringify(unknown).includes("linkId"));
+});
+
+test("#848: a run scored by an EARLIER vendoring with the same logic keeps the canonical and the linkIds", () => {
+  // cms125's vendoring as main shipped it (retired by #848's metadata-only re-vendor; still pinned in the lineage
+  // with the same logicSha256 as today's). Byte equality would drop the canonical; the logic is CMS's.
+  const earlier = routedOc("cms125", true);
+  (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =
+    "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8";
+  const report = buildSummaryMeasureReport(run, "cms125", [earlier], GENERATED_AT);
+  const current = loadOfficialArtifact("cms125")!.manifest;
+  assert.equal(report.measure, `${current.url}|${current.version}`, "kept CMS's versioned canonical");
+  assert.ok(JSON.stringify(report).includes("linkId"), "the artifact's ids still describe the counts");
+  // cms122's earlier vendoring is not cms125's: another measure's sha never carries an identity across.
+  (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =
+    "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552";
+  assert.equal(buildSummaryMeasureReport(run, "cms125", [earlier], GENERATED_AT).measure, "urn:workwell:measure:cms125:official:1.0.000");
+});
+
 test("ADR-046: the INDIVIDUAL report derives the trio from its own outcome", () => {
   const official = buildIndividualMeasureReport(routedOc("cms122", true), run, "cms122", GENERATED_AT);
   assert.equal(official.improvementNotation?.coding[0]?.code, "decrease");

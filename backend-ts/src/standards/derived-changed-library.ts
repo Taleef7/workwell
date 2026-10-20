@@ -9,6 +9,7 @@
  */
 import { createHash } from "node:crypto";
 import { DERIVED_LIBRARY_PREFIX, type DerivedIdentity } from "./derived-identity.ts";
+import { dropUnmetLibraryClaims } from "./library-claims.ts";
 
 interface Resource {
   resourceType?: string;
@@ -153,6 +154,8 @@ export function rewriteChangedLibrary<T extends Bundle>(
   const elm = JSON.parse(JSON.stringify(compiledElm)) as ElmLibrary;
   elm.library.identifier = { id: identity.name, version: identity.version };
   setElm(target, elm);
+  // No longer CMS's publication, and ELM JSON only: drop the claims that makes false (#848).
+  dropUnmetLibraryClaims(target);
 
   // The main library: its ELM include by the bare name (see `includedLibraryName`), and its depends-on by
   // WorkWell's canonical. The include's local identifier is untouched, so no expression reference moves.

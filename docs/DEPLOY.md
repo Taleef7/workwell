@@ -90,22 +90,20 @@ exits 1 unless the bytes hash to the manifest's pin and every declared set is pr
 uncapped, so the deploy fails here instead of shipping an image whose evaluations all 500 while health
 stays 200.
 
-**When VSAC moves (2026-10-15).** (The official artifacts' version is under Step 1a.) VSAC's expansion of a GROUPING value set at a pinned release resolves
-its members at their latest version, so a member republished after the release changes the grouping's
-answer (Advanced Illness 1082 went from the release's 2,025 codes to 2,027 overnight, and every
-translation declaring it failed its pin). Two defences:
-- each pure grouping is also expanded member by member at the release; when that differs from VSAC's
-  grouping answer the members win, which is the release, and the log says `WARNING … differs from its
-  members` with the codes;
+**When VSAC moves (2026-10-15; fixed at the source by #851).** (The official artifacts' version is under Step 1a.)
+VSAC's `manifest=` expansion of a GROUPING value set resolves its members at their latest version, so a
+member republished after the release changed the grouping's answer (Advanced Illness 1082 went from the
+release's 2,025 codes to 2,027 overnight, and every translation declaring it failed its pin). Every set is
+now expanded with `expansion=<the release Library's title>` ("eCQM Update 2026-05-14"), which is the
+release's own answer and does not drift; VSAC's echo of the release is checked, and a declared set the
+release does not list is refused. It reproduced all six translation sidecars byte for byte. The remaining
+defence:
 - `--fallback-dir` restores the stack's stored copy (pulled from its bucket before vendoring; CI pulls
   Maui's in one step that alone holds the bucket key) when VSAC still does not reproduce the pin or
   cannot be reached, and the same pin check judges the copy. Until the old images that carry sidecars are
   deleted, the restore step also seeds copies from the last deployed image. The log says `WARNING … restored
   it from`. A deploy that needed it is fine to ship; a translation whose pin changed has no older copy,
   so it still needs VSAC.
-- `--emit-block` (producing a NEW pin) REFUSES when a grouping and its members disagree: the members are
-  the release at `ecqm-update-2026-05-14` (checked against its published file) but not at every release,
-  so a pin is never produced over a disagreement without checking the published value-set file.
 
 On Maui the registry login runs before the restore step, so its seed from the last image works even if
 the package is made private.
@@ -123,8 +121,17 @@ content names (old name `--complete-capped-expansions` still accepted).
   "$RUNNER_TEMP/terminology"`. When the re-vendored manifest differs from the committed
   one in its `terminology` block ALONE, and the stored copy hashes to the committed pin, the committed
   manifest and that sidecar are put back (`WARNING … restored the committed manifest`). Anything else
-  stands and the gate fails as before. Member-by-member expansion is NOT used here: at
-  `ecqm-fhir-update-2025` a grouping's members disagree with both VSAC's answer and the release.
+  stands and the gate fails as before.
+- **At the release, exactly (#851).** A completion is expanded with `expansion=eCQM FHIR Update 2025` and
+  must equal VSAC's own total, with VSAC confirming the release. The earlier `manifest=` form completed
+  Advanced Illness to 2,000 codes, accepted because it exceeded CMS's declared 1,997, where the release
+  and its published value-set file hold 2,030. A CAPPED set the release does not list stays capped
+  (routing refuses). An ABSENT one cannot (fqm refuses the whole measure over a missing declared set), so
+  it is sourced as VSAC serves it, warned about, and recorded `inRelease: false`: cms138's
+  `…3.526.3.1278`, not in eCQM FHIR Update 2025.
+- **A changed official pin needs VSAC once per stack.** The buckets hold only the sidecars earlier deploys
+  stored, so the first CI run and each stack's first deploy after a pin moves (cms122/125/130/165 at #851)
+  re-expand from VSAC; `--fallback-dir` has no copy of the new pin to restore. That deploy then stores it.
 - `_VENDOR` (build time) and `WORKWELL_VSAC_API_KEY_TWH` (runtime resolver, ADR-023) are separate
   secrets on purpose (ADR-036), even though they hold the same UMLS key.
 - **Landing order — secrets before manifests.** Add or change the secret in the **same change** that
@@ -138,8 +145,13 @@ content names (old name `--complete-capped-expansions` still accepted).
   ```
 
   A new completion changes `officialLogicVersion` (ADR-040) and invalidates that measure's `eval_state`.
-- `pnpm official:terminology-audit [<MADiE name>]` lists value sets the ELM retrieves but the bundle does
-  not ship (CMS138 is the known case). Only VSAC fixes those; the MADiE deck is the real check.
+  A re-vendor that changes `bundle.json` adds an entry to `CMS_ARTIFACT_LINEAGE`
+  (`src/measure/measure-identity.ts`) and keeps the old one: the manifest's `logicSha256` decides whether
+  runs scored by the earlier bytes keep CMS's identity in their exports (#848). A translation rebuild does
+  the same in `TRANSLATION_LOGIC_LINEAGE`; a test fails until the new sha is there.
+- `pnpm official:terminology-audit [<MADiE name>]` lists value sets the ELM declares but the bundle does
+  not ship (CMS138 is the known case). Only VSAC fixes those. The MADiE deck checks such a set only where an
+  expression reads it; CMS138's never does.
 
 ##### Step 1b — vendoring a NEW measure when you cannot read the secret
 

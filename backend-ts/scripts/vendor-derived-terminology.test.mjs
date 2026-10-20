@@ -90,12 +90,13 @@ const baseSidecar = (catalogId = "cms999") => ({
  * `pageSize` splits them, so two runs can see the same set served differently. Per-OID overrides:
  * `total` (undefined = omitted), `echo` (null = no url; default = the right canonical).
  *
- * It also answers the two reads `expandAtRelease` makes (#822 VSAC drift): the release Library, pinning
- * every OID in the table at version "1", and each set's definition at that version, an extensional
- * concept list (no grouping), so the expansion stays VSAC's answer. `calls` records every request;
+ * It also answers the release read `expandAtRelease` makes (#851): the release Library, titled with its
+ * own id (`Library/release-emit` is titled "release-emit") and listing every OID in the table, or only
+ * `listed` when given. An `$expand` by `expansion=<title>` echoes the release back as the `manifest`
+ * parameter (`http://example.test/Library/<title>`), as live VSAC does. `calls` records every request;
  * `expansions` only the `$expand` ones.
  */
-function vsacStub(table, { pageSize = 1000, order = (list) => list } = {}) {
+function vsacStub(table, { pageSize = 1000, order = (list) => list, listed = Object.keys(table) } = {}) {
   const calls = [];
   const json = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
   const fetch = async (url, init) => {
@@ -104,17 +105,8 @@ function vsacStub(table, { pageSize = 1000, order = (list) => list } = {}) {
     if (parsed.pathname.includes("/Library/")) {
       return json({
         resourceType: "Library",
-        relatedArtifact: Object.keys(table).map((oid) => ({ type: "depends-on", resource: `${CANON}${oid}|1` })),
-      });
-    }
-    if (parsed.pathname.endsWith("/ValueSet")) {
-      const oid = decodeURIComponent(parsed.searchParams.get("url") ?? "").split("/ValueSet/")[1];
-      const entry = table[oid];
-      return json({
-        resourceType: "Bundle",
-        entry: entry
-          ? [{ resource: { resourceType: "ValueSet", version: parsed.searchParams.get("version"), compose: { include: [{ system: "http://example.test/cs-a", concept: [{ code: "x" }] }] } } }]
-          : [],
+        title: decodeURIComponent(parsed.pathname.split("/Library/")[1]),
+        relatedArtifact: listed.map((oid) => ({ type: "depends-on", resource: `${CANON}${oid}|1` })),
       });
     }
     const oid = decodeURIComponent(parsed.pathname.split("/ValueSet/")[1].split("/")[0]);
@@ -124,10 +116,15 @@ function vsacStub(table, { pageSize = 1000, order = (list) => list } = {}) {
     const page = order(entry.codes).slice(offset, offset + pageSize);
     const total = "total" in entry ? entry.total : entry.codes.length;
     const echo = entry.echo === undefined ? `${CANON}${oid}` : entry.echo;
+    const title = parsed.searchParams.get("expansion");
     const body = {
       resourceType: "ValueSet",
       ...(echo === null ? {} : { url: echo }),
-      expansion: { ...(total === undefined ? {} : { total }), contains: page },
+      expansion: {
+        ...(total === undefined ? {} : { total }),
+        ...(title ? { parameter: [{ name: "manifest", valueString: `http://example.test/Library/${title}` }] } : {}),
+        contains: page,
+      },
     };
     return { ok: true, status: 200, text: async () => JSON.stringify(body) };
   };
@@ -334,10 +331,11 @@ describe("refusals before any request", () => {
 });
 
 describe("expansion: no partial sidecar, no fallback", () => {
+  // The release lists every declared set, so each refusal below is VSAC's answer, not a missing listing.
   const refused = async (table, pattern) => {
     const dir = await translationDir({ base: baseSidecar() });
 
-    const result = await run(emitArgs(dir), { fetch: vsacStub(table).fetch });
+    const result = await run(emitArgs(dir), { fetch: vsacStub(table, { listed: ["9.9.1", "9.9.10", "9.9.2"] }).fetch });
 
     assert.equal(result.code, 1, `the run must refuse (exit 1), got exit ${result.code}; stderr: ${result.stderr}`);
     assert.match(result.stderr, pattern);
@@ -447,9 +445,12 @@ describe("the sidecar and the emitted block", () => {
     const requested = stub.expansions.map((c) => decodeURIComponent(c.url.pathname.split("/ValueSet/")[1].split("/")[0]));
     assert.deepEqual(requested, ["9.9.1", "9.9.10", "9.9.2"], "the versioned canonical collapsed onto 9.9.1");
     for (const call of stub.expansions) {
-      assert.equal(call.url.searchParams.get("manifest"), RELEASE_EMIT);
-      assert.notEqual(call.url.searchParams.get("manifest"), DEFAULT_VSAC_MANIFEST);
+      // By the release's TITLE (#851): the stub titles Library/release-emit "release-emit".
+      assert.equal(call.url.searchParams.get("expansion"), "release-emit");
+      assert.equal(call.url.searchParams.has("manifest"), false, "manifest= is the form that drifts");
     }
+    assert.equal(stub.calls.filter((c) => c.url.pathname.includes("/Library/")).length, 1, "the release is read once");
+    assert.ok(!stub.calls.some((c) => String(c.url).includes(encodeURIComponent(DEFAULT_VSAC_MANIFEST))), "never the 2025 default");
   });
 });
 
@@ -466,9 +467,13 @@ describe("verify mode and --verify-pin (the deploy step)", () => {
     assert.match(result.stdout, /does NOT match the manifest pin/);
     assert.equal(stub.expansions.length, 3);
     for (const call of stub.expansions) {
-      assert.equal(call.url.searchParams.get("manifest"), RELEASE_COMMITTED);
-      assert.notEqual(call.url.searchParams.get("manifest"), DEFAULT_VSAC_MANIFEST);
+      assert.equal(call.url.searchParams.get("expansion"), "release-committed");
+      assert.equal(call.url.searchParams.has("manifest"), false);
     }
+    assert.ok(
+      stub.calls.some((c) => c.url.pathname.endsWith("/Library/release-committed")),
+      "the release read is the one manifest.json records",
+    );
   });
 
   it("passes when the regenerated sidecar is the committed one (the positive control)", async () => {
@@ -692,32 +697,17 @@ describe("--fallback-dir (D17: images no longer carry sidecars)", () => {
   });
 });
 
-describe("emit mode refuses to pin over a grouping disagreement", () => {
-  it("writes nothing and names the set when VSAC's grouping and its members disagree at the release", async () => {
+describe("a declared set the release does not list (#851)", () => {
+  it("writes nothing and names the set: the release has no expansion of it to pin", async () => {
     const dir = await translationDir({ base: baseSidecar() });
-    const stub = vsacStub(vsacTable());
-    // 9.9.2 is a grouping of 9.9.1 and 9.9.10 whose VSAC answer (5 codes) is not their union (7).
-    const fetch = async (url, init) => {
-      const parsed = new URL(String(url));
-      if (parsed.pathname.endsWith("/ValueSet") && (parsed.searchParams.get("url") ?? "").endsWith("/9.9.2")) {
-        return {
-          ok: true,
-          status: 200,
-          text: async () =>
-            JSON.stringify({
-              resourceType: "Bundle",
-              entry: [{ resource: { resourceType: "ValueSet", version: "1", compose: { include: [{ valueSet: [`${CANON}9.9.1`] }, { valueSet: [`${CANON}9.9.10`] }] } } }],
-            }),
-        };
-      }
-      return stub.fetch(url, init);
-    };
+    const stub = vsacStub(vsacTable(), { listed: ["9.9.1", "9.9.10"] });
 
-    const result = await run(emitArgs(dir), { fetch });
+    const result = await run(emitArgs(dir), { fetch: stub.fetch });
 
     assert.equal(result.code, 1, result.stderr);
-    assert.match(result.stderr, /grouping expansion of 9\.9\.2 .* disagree, so no pin is produced/);
+    assert.match(result.stderr, /could not expand 9\.9\.2 .*does not list 9\.9\.2.*Nothing was written/);
     assert.equal(existsSync(join(dir, "terminology.json")), false, "no sidecar, and so no pin");
     assert.equal(result.stdout, "");
+    assert.ok(!stub.expansions.some((c) => c.url.pathname.includes("/9.9.2/")), "a set outside the release is never expanded");
   });
 });

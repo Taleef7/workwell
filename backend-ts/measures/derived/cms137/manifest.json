@@ -36,7 +36,7 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 16934970,
-    "vendoredBytes": 2411884
+    "vendoredBytes": 2410830
   },
   "terminology": {
     "file": "terminology.json",
@@ -247,7 +247,8 @@
     },
     "sha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
   },
-  "sha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
+  "sha256": "sha256:2712b927bf061e3dddbcef1fae00cb8db8be572d1f0e1c2062c3f197af5fa4a9",
+  "logicSha256": "sha256:254a30553d5546d6f16585358e7b56a8c2fc274d7c6ac3af0fdca14c28a56ffc",
   "derived": {
     "label": "WorkWell translation of CMS137v15",
     "derivedFrom": {
@@ -256,7 +257,7 @@
     },
     "base": {
       "catalogId": "cms137",
-      "manifestSha256": "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24"
+      "manifestSha256": "sha256:abd7c6bd4403c86e19506995748f2fbfc3401bfce98f0ae9bb7481c73e04ed0e"
     },
     "build": {
       "translator": "@cqframework/cql@4.0.0-beta.1",
@@ -308,7 +309,7 @@
         "total": 36,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
+          "artifactSha256": "sha256:2712b927bf061e3dddbcef1fae00cb8db8be572d1f0e1c2062c3f197af5fa4a9",
           "terminologySha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
         }
       },
@@ -323,7 +324,7 @@
         "total": 28,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb",
+          "artifactSha256": "sha256:2712b927bf061e3dddbcef1fae00cb8db8be572d1f0e1c2062c3f197af5fa4a9",
           "terminologySha256": "sha256:5a864b5a28cdd25384a073e3cc508faab4c680754a69bb48a3d7411c85adc732"
         }
       }

@@ -36,12 +36,12 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 16786509,
-    "vendoredBytes": 2418357
+    "vendoredBytes": 2417223
   },
   "terminology": {
     "file": "terminology.json",
     "valueSets": 26,
-    "codes": 3748,
+    "codes": 3778,
     "truncated": [],
     "completion": {
       "source": "vsac",
@@ -50,14 +50,15 @@
         {
           "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
           "had": 1000,
-          "now": 2000,
+          "now": 2030,
           "declaredTotal": 1997
         }
       ]
     },
-    "sha256": "sha256:2c37329e15cc1a154e6d854ae14968887a44621bba3ecb531a2f274f2e7342ae"
+    "sha256": "sha256:fffb9805602914f1694d2c5ab96ed152afc4946cc1b312c9aec213b2a10c7a77"
   },
-  "sha256": "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552",
+  "sha256": "sha256:6f3f25f64a1ca13351082ffba87170bfa3ae8035b71efc56dcc542740a89c948",
+  "logicSha256": "sha256:6e4498b1815130957eb58f4ca2d74734e488bdc4a5a474df6d42ce9d0c072efb",
   "tests": {
     "count": 273,
     "sourcePath": "input/tests/measure/CMS122FHIRDiabetesAssessGT9Pct",
