@@ -36,7 +36,7 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 15842294,
-    "vendoredBytes": 2343564
+    "vendoredBytes": 2342682
   },
   "terminology": {
     "file": "terminology.json",
@@ -50,6 +50,7 @@
         {
           "oid": "2.16.840.1.113883.3.526.3.1278",
           "reason": "absent-upstream",
+          "inRelease": false,
           "had": 0,
           "now": 4,
           "declaredTotal": null
@@ -58,7 +59,8 @@
     },
     "sha256": "sha256:e2f8b334c9b352f419eeaec736ce9b914b384bf7a34f1453d50db458aea417d8"
   },
-  "sha256": "sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aab25280eb4",
+  "sha256": "sha256:99dbece35fa7d27d4a75e5dd99f052812fe4e05a54c748f61f493a2fbcafaad8",
+  "logicSha256": "sha256:bb0385c3095e8481db2b6ddfb3a7342ed97ad9b0158f468aca48813f8df2fb4a",
   "tests": {
     "count": 239,
     "sourcePath": "input/tests/measure/CMS138FHIRTobaccoScrnCessation",

@@ -730,8 +730,8 @@ test("reconciliation names every measure's scoring logics on an ALL_PROGRAMS run
     status: "COMPLETED", scopeType: "ALL_PROGRAMS", triggeredBy: "test", requestedScope: {},
     measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z",
   });
-  // The committed cms122 artifact's digest, so the lineage comes off the evidence; the id is the BARE
-  // manifest value the evidence really stores.
+  // The digest of cms122's vendoring as main shipped it (retired by #848's re-vendor, still pinned in the lineage), so the
+  // lineage comes off the evidence; the id is the BARE manifest value the evidence really stores.
   const cms122 = { expressionResults: [], official: { ecqmId: "122FHIR", version: "1.0.000", engine: "fqm-execution", artifactSha256: "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552", populationResults: populations, measurementPeriod: { start: "2026-01-01", end: "2026-12-31" } } };
   const row = (subjectId: string, measureId: string, evidence: unknown) => ({ runId: run.id, subjectId, measureId, evaluationPeriod: "2026", status: "OVERDUE", evidence });
   await outcomeStore.recordOutcomes([

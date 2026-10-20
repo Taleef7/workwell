@@ -97,6 +97,14 @@ test("the run's evidence decides which artifact scored it: today's manifest spea
   // nothing about it. The digest has to travel from the evidence for this to be caught.
   const other = await overviewFor("run-vintage-other-artifact", 2027, true, { ecqmId: "122FHIR", version: "1.0.000", artifactSha256: "sha256:another" });
   assert.equal(other.logicVintage, null);
+  // An EARLIER vendoring with the same logic (#848: cms122's first, retired by a metadata-only re-vendor)
+  // is the same artifact as far as the logic it ran goes, so today's manifest still speaks for it.
+  const earlier = await overviewFor("run-vintage-earlier-vendoring", 2027, true, {
+    ecqmId: "122FHIR",
+    version: "1.0.000",
+    artifactSha256: "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552",
+  });
+  assert.equal(earlier.logicVintage?.note, "Scored with the 2026 FHIR logic; 2027 logic not yet available");
 });
 
 test("a total that folds in the authored scale tenant's counts carries no note about the artifact's year", async () => {

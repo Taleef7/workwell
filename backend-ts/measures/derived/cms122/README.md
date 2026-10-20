@@ -10,7 +10,9 @@ without NCQA's approval and requires that approval for any other use, so any use
 (`docs/OPEN_QUESTIONS.md` §4.12).
 
 CMS122 is an inverse measure: its numerator is **poor control** (a result above 9 %, an assessment with no
-result, or no assessment at all).
+result, or no assessment at all). So this translation's group declares `cqfm-improvementNotation`
+**`decrease`** (#848), where CMS's CMS122FHIR artifact declares `increase`; that is reported upstream
+(cqframework/dqm-content-qicore-2025#61) and left as CMS shipped it in the vendored official artifact.
 
 ## The edits (`edits.json`, three, each hash-anchored to CMS's text)
 

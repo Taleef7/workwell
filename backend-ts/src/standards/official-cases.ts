@@ -639,8 +639,9 @@ export interface OfficialMeasureRun {
    * `measure-bundle+sourced-supplement` — all of that, EXCEPT for the OIDs in `supplementedOids`,
    * which upstream's bundle does not ship at all and which came from our vendored sidecar instead
    * (ADR-053). A weaker claim, and it must never be blended into the headline number: for those value
-   * sets the CODES are ours. What stays upstream's is the answer key — the expected population vectors
-   * — which is why a green deck is still real evidence that the sourced codes are right.
+   * sets the CODES are ours. What stays upstream's is the answer key — the expected population vectors —
+   * so a green deck is evidence about the sourced codes ONLY where an expression reads them. CMS138's
+   * `…3.526.3.1278`, the one supplement today, is read by none, and is not in the release (#851).
    */
   valueSetMode: OfficialValueSetMode;
   /** Bare OIDs taken from the sidecar because the bundle ships no ValueSet for them. Usually empty. */
@@ -1143,10 +1144,10 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
           `WorkWell's vendored sidecar because the upstream bundle ships no ValueSet resource for them — ` +
           run.supplementedOids.map((oid) => `\`${oid}\``).join(", ") +
           `. Everything else is upstream's own terminology. **This is a weaker claim than the other ` +
-          `measures carry:** for these value sets the CODES are ours (sourced from VSAC at the pinned ` +
-          `release). What remains upstream's is the ANSWER KEY — the expected population vectors — which ` +
-          `is why agreement here is still real evidence that the sourced codes are right, and is not ` +
-          `evidence about upstream's terminology.`,
+          `measures carry:** for these value sets the CODES are ours (sourced from VSAC; a set the pinned ` +
+          `release does not list is recorded \`inRelease: false\` in the manifest). What remains upstream's ` +
+          `is the ANSWER KEY — the expected population vectors — so agreement is evidence about the ` +
+          `sourced codes only where an expression reads them, and never about upstream's terminology.`,
       );
     }
     for (const truncated of run.valueSets.truncated) {

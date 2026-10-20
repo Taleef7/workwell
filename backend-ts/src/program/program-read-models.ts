@@ -17,7 +17,7 @@ import { liveAnswerForCase, liveCellsFor } from "../compliance/live-cell.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { measureIdentityFor, type ScoringLogic } from "../measure/measure-identity.ts";
+import { measureIdentityFor, scoredByCurrentLogic, type ScoringLogic } from "../measure/measure-identity.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { STAFF_CLOSED_STATUSES } from "../case/worklist-read-model.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
@@ -604,7 +604,9 @@ export function logicVintageOf(
   measureId: string,
   rate: Pick<MeasureRate, "official"> | null,
   measurementYear: number | null,
-  manifestOf: (measureId: string) => (Parameters<typeof officialLogicVintage>[0] & { sha256?: string; version?: string }) | null = loadOfficialManifest,
+  manifestOf: (measureId: string) =>
+    | (Parameters<typeof officialLogicVintage>[0] & { sha256?: string; logicSha256?: string; version?: string })
+    | null = loadOfficialManifest,
   /** The translation this deployment would score the year with, if any (`routedTranslationFor`). */
   translationFor: (measureId: string, year: number) => { derived?: { label: string } } | null = routedTranslationFor,
 ): OfficialLogicVintage | null {
@@ -615,7 +617,11 @@ export function logicVintageOf(
   if (ran?.kind === "derived") return null;
   const manifest = manifestOf(measureId);
   if (!manifest) return null;
-  if (ran?.artifactSha256 ? ran.artifactSha256 !== manifest.sha256 : ran?.version && ran.version !== manifest.version) return null;
+  // The vintage describes the logic now vendored, so it applies only to a run scored by that logic
+  // (`scoredByCurrentLogic`, #848: an earlier vendoring with the same logic counts).
+  const sameLogic = (sha: string) =>
+    !!manifest.sha256 && scoredByCurrentLogic({ catalogId: measureId, sha256: manifest.sha256, logicSha256: manifest.logicSha256 }, sha);
+  if (ran?.artifactSha256 ? !sameLogic(ran.artifactSha256) : ran?.version && ran.version !== manifest.version) return null;
   const vintage = officialLogicVintage(manifest, measurementYear);
   if (!vintage) return null;
   // CMS's draft scored a year a routed translation covers (a run from before the translation was turned

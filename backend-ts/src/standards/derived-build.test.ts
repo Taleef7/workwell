@@ -54,8 +54,12 @@ test("a translation is named for its measure, its year and its revision, never l
     title: "WorkWell translation of CMS137v15",
     derivedFrom: "CMS137v15",
     effectivePeriod: { start: "2027-01-01", end: "2027-12-31" },
+    improvementNotation: "increase",
   });
   assert.ok(DERIVED_VERSION.test(IDENTITY.version));
+  // WorkWell's reading, not CMS's declared value: CMS122's artifact says `increase` for an inverse measure (#848).
+  assert.equal(translationIdentity("cms122", 2027, "CMS122v15").improvementNotation, "decrease");
+  assert.throws(() => translationIdentity("cms999", 2027, "CMS999v1"), /no entry in OFFICIAL_MEASURE_SEMANTICS/);
   assert.equal(translationIdentity("cms2", 2028, "CMS2v16", 3).version, "ww-2028.3");
   assert.equal(translationIdentity("cms2", 2028, "CMS2v16").name, "WorkWellCMS2Translation2028");
   assert.throws(() => translationIdentity("CMS137", 2027, "CMS137v15"), /lower-case/);

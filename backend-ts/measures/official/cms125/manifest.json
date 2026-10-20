@@ -36,12 +36,12 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 17085208,
-    "vendoredBytes": 2468662
+    "vendoredBytes": 2467402
   },
   "terminology": {
     "file": "terminology.json",
     "valueSets": 32,
-    "codes": 3043,
+    "codes": 3073,
     "truncated": [],
     "completion": {
       "source": "vsac",
@@ -50,14 +50,15 @@
         {
           "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
           "had": 1000,
-          "now": 2000,
+          "now": 2030,
           "declaredTotal": 1997
         }
       ]
     },
-    "sha256": "sha256:3cc553d302907592805c48d199742b69888f257ceca28c15ca7892e8373635b3"
+    "sha256": "sha256:22a5f82836b736a2082a61733db5ef32be87f0ca10c0519f863eb47946e710cb"
   },
-  "sha256": "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8",
+  "sha256": "sha256:bbda505db2343b678d26988d6ef7fc49fdc802e39d6ebbc34272325f91502683",
+  "logicSha256": "sha256:67a0240f5e409b699512d9241611a8cebd1fa9fa4b85bc0841c92ee8c83e54ac",
   "tests": {
     "count": 275,
     "sourcePath": "input/tests/measure/CMS125FHIRBreastCancerScreen",

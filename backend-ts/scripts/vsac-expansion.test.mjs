@@ -72,6 +72,39 @@ function expansionPage(codes, total) {
   };
 }
 
+/** The `title` of `ARGS.vsacManifest`'s Library, which `expansion=` names (measured on VSAC, 2026-10-19). */
+const RELEASE_TITLE = "eCQM FHIR Update 2025";
+const ABSENT_OID = "2.16.840.1.113883.3.526.3.1278";
+
+/**
+ * Wraps an `$expand` handler as VSAC answers: the release Library itself (its `title` and the value sets its
+ * `relatedArtifact` lists), and, on an `expansion=` answer, the release echoed back as the `manifest`
+ * parameter, as live VSAC does. `listed` defaults to both OIDs these tests expand; `echoed` replaces the
+ * echo (null drops it).
+ */
+function asVsac(expand, { title = RELEASE_TITLE, listed = [OID, ABSENT_OID], echoed = ARGS.vsacManifest } = {}) {
+  const json = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+  return async (url, init) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname.includes("/Library/")) {
+      calls.push({ url: String(url), library: true });
+      return json({
+        resourceType: "Library",
+        ...(title ? { title } : {}),
+        relatedArtifact: listed.map((oid) => ({ type: "depends-on", resource: `http://cts.nlm.nih.gov/fhir/ValueSet/${oid}|20250101` })),
+      });
+    }
+    const response = await expand(url, init);
+    if (!response.ok || !parsed.searchParams.has("expansion") || echoed === null) return response;
+    const body = JSON.parse(await response.text());
+    if (body.expansion) body.expansion.parameter = [...(body.expansion.parameter ?? []), { name: "manifest", valueString: echoed }];
+    return json(body);
+  };
+}
+
+/** The `$expand` requests a test made, without the one read of the release Library. */
+const expandCalls = () => calls.filter((c) => !c.library);
+
 let calls;
 let realFetch;
 let warnings;
@@ -122,6 +155,51 @@ describe("expandFromVsac", () => {
     assert.equal(
       calls[0].init.headers.Authorization,
       `Basic ${Buffer.from("apikey:test-key").toString("base64")}`,
+    );
+  });
+
+  it("names the release by TITLE with expansion=, and sends no manifest=, when given one (#851)", async () => {
+    // `manifest=` resolves a grouping's members at their LATEST version (VSAC drift, 2026-10-15);
+    // `expansion=<release title>` is the release's own answer. The two must never be sent together.
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), init });
+      return expansionPage(["a"], 1);
+    };
+
+    await expandFromVsac(OID, { ...ARGS, vsacExpansion: RELEASE_TITLE, apiKey: "test-key" });
+
+    const params = new URL(calls[0].url).searchParams;
+    assert.equal(params.get("expansion"), RELEASE_TITLE);
+    assert.equal(params.has("manifest"), false, "expansion= replaces manifest=, it does not add to it");
+    assert.match(calls[0].url, /expansion=eCQM%20FHIR%20Update%202025/, "the title is URL-encoded");
+  });
+
+  it("returns the release VSAC echoes as the `manifest` parameter, so a caller can check it", async () => {
+    globalThis.fetch = asVsac(async () => expansionPage(["a"], 1));
+
+    const expanded = await expandFromVsac(OID, { ...ARGS, vsacExpansion: RELEASE_TITLE, apiKey: "test-key" });
+
+    assert.equal(expanded.release, ARGS.vsacManifest);
+  });
+
+  it("refuses an expansion= answer whose later page names another release than page 1 (#851)", async () => {
+    const page = (codes, release) => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          resourceType: "ValueSet",
+          expansion: { total: 4, parameter: [{ name: "manifest", valueString: release }], contains: codes.map((code) => ({ system: "s", code })) },
+        }),
+    });
+    globalThis.fetch = async (url) =>
+      new URL(String(url)).searchParams.get("offset") === "0"
+        ? page(["a", "b"], ARGS.vsacManifest)
+        : page(["c", "d"], "http://cts.nlm.nih.gov/fhir/Library/ecqm-update-2026-05-14");
+
+    await assert.rejects(
+      () => expandFromVsac(OID, { ...ARGS, vsacExpansion: RELEASE_TITLE, apiKey: "test-key" }),
+      /answered page 2 of .* for http:\/\/cts\.nlm\.nih\.gov\/fhir\/Library\/ecqm-update-2026-05-14, not .*ecqm-fhir-update-2025 as page 1 did/,
     );
   });
 
@@ -186,11 +264,11 @@ describe("expandFromVsac", () => {
 
 describe("completeTerminology — capped sets (ADR-041)", () => {
   it("replaces a capped set with the full expansion and reports it", async () => {
-    globalThis.fetch = async (url) => {
+    globalThis.fetch = asVsac(async (url) => {
       calls.push({ url: String(url) });
       // A real full expansion is a SUPERSET of the truncated sample upstream shipped.
       return expansionPage(["c", "upstream-2", "a", "b", "upstream-1"], 5);
-    };
+    });
     const terminology = cappedTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -203,12 +281,14 @@ describe("completeTerminology — capped sets (ADR-041)", () => {
     // block at all. `reason` is reserved for the weaker `absent-upstream` provenance.
     assert.deepEqual(completed, [{ oid: OID, had: 2, now: 5, declaredTotal: 5 }]);
     assert.equal(terminology.valueSets[0].codes.length, 5);
-    assert.equal(calls.length, 1, "only the capped set is re-expanded");
+    assert.equal(expandCalls().length, 1, "only the capped set is re-expanded");
+    assert.equal(new URL(expandCalls()[0].url).searchParams.get("expansion"), RELEASE_TITLE, "at the release, by its title (#851)");
+    assert.equal(calls.filter((c) => c.library).length, 1, "the release is read once");
   });
 
   it("writes codes sorted by system|code and deduped, because the sidecar is pinned by hash", async () => {
-    globalThis.fetch = async () =>
-      expansionPage(["c", "upstream-2", "a", "upstream-1", "b", "a"], 5);
+    // Five distinct codes, one repeated: VSAC's total counts distinct codes, so this answer is exact.
+    globalThis.fetch = asVsac(async () => expansionPage(["c", "upstream-2", "a", "upstream-1", "b", "a"], 5));
     const terminology = cappedTerminology();
 
     await completeTerminology(terminology, ARGS, KEYED);
@@ -221,7 +301,7 @@ describe("completeTerminology — capped sets (ADR-041)", () => {
   });
 
   it("REJECTS a short expansion rather than swapping in a differently-incomplete set", async () => {
-    globalThis.fetch = async () => expansionPage(["a", "b", "c"], 3);
+    globalThis.fetch = asVsac(async () => expansionPage(["a", "b", "c"], 3));
     const terminology = cappedTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -238,8 +318,7 @@ describe("completeTerminology — capped sets (ADR-041)", () => {
   it("REJECTS an expansion padded with duplicates to the declared total", async () => {
     // Raw length clears the bar; distinct length does not. Comparing before dedupe would write a set
     // that is short after all — the exact outcome the short-expansion guard exists to prevent.
-    globalThis.fetch = async () =>
-      expansionPage(["upstream-1", "upstream-2", "a", "b", "a"], 5);
+    globalThis.fetch = asVsac(async () => expansionPage(["upstream-1", "upstream-2", "a", "b", "a"], 5));
     const terminology = cappedTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -250,13 +329,69 @@ describe("completeTerminology — capped sets (ADR-041)", () => {
       ["upstream-1", "upstream-2"],
       "upstream's codes survive, so `truncated` survives, so routing still refuses",
     );
-    assert.match(warnings.join("\n"), /4 distinct codes .* short of the 5/);
+    assert.match(warnings.join("\n"), /claimed 5 codes .* returned 4 distinct/);
+  });
+
+  it("REJECTS an answer that clears the declared count but is not VSAC's own total (#851)", async () => {
+    // The hole #851 found: the capped path only refused an answer SHORT of upstream's declared count, so
+    // 2,000 codes were accepted against a declared 1,997 while the release held 2,030. Here VSAC counts 6
+    // and serves 5 that contain upstream's sample and match the declared 5: a short read all the same.
+    let page = 0;
+    globalThis.fetch = asVsac(async () =>
+      page++ === 0 ? expansionPage(["upstream-1", "upstream-2", "a", "b", "c"], 6) : expansionPage([], 6),
+    );
+    const terminology = cappedTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, [], "a set VSAC itself counts as larger is not complete");
+    assert.deepEqual(terminology.valueSets[0].codes.map((c) => c.code), ["upstream-1", "upstream-2"]);
+    assert.match(warnings.join("\n"), /could not complete .* claimed 6 codes .* returned 5 distinct/);
+  });
+
+  it("REJECTS a capped set the release does not list, and never expands it (#851)", async () => {
+    globalThis.fetch = asVsac(async (url) => {
+      calls.push({ url: String(url) });
+      return expansionPage(["upstream-1", "upstream-2", "a", "b", "c"], 5);
+    }, { listed: [ABSENT_OID] });
+    const terminology = cappedTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, []);
+    assert.deepEqual(terminology.valueSets[0].codes.map((c) => c.code), ["upstream-1", "upstream-2"]);
+    assert.deepEqual(expandCalls(), [], "a set outside the release has no answer at the release");
+    assert.match(warnings.join("\n"), /not in the release/);
+  });
+
+  it("REJECTS an answer VSAC gives for a DIFFERENT release than the pin (#851)", async () => {
+    globalThis.fetch = asVsac(async () => expansionPage(["upstream-1", "upstream-2", "a", "b", "c"], 5), {
+      echoed: "http://cts.nlm.nih.gov/fhir/Library/ecqm-update-2026-05-14",
+    });
+    const terminology = cappedTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, []);
+    assert.deepEqual(terminology.valueSets[0].codes.map((c) => c.code), ["upstream-1", "upstream-2"]);
+    assert.match(warnings.join("\n"), /ecqm-update-2026-05-14/);
+  });
+
+  it("leaves everything as shipped when the release itself cannot be read (#851)", async () => {
+    globalThis.fetch = asVsac(async () => assert.fail("nothing is expanded without the release"), { title: null });
+    const terminology = cappedTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, []);
+    assert.equal(terminology.valueSets[0].codes.length, 2);
+    assert.match(warnings.join("\n"), /could not read the VSAC release .*Routing will refuse/s);
   });
 
   it("REJECTS an expansion of the right size that does not contain upstream's codes", async () => {
     // A count cannot distinguish "the full version of this set" from "a different set that happens to
     // be bigger" — which is what a wrong release pin looks like from here.
-    globalThis.fetch = async () => expansionPage(["a", "b", "c", "d", "e"], 5);
+    globalThis.fetch = asVsac(async () => expansionPage(["a", "b", "c", "d", "e"], 5));
     const terminology = cappedTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -297,7 +432,7 @@ describe("completeTerminology — capped sets (ADR-041)", () => {
   });
 
   it("keeps upstream's codes when VSAC fails outright", async () => {
-    globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => "" });
+    globalThis.fetch = asVsac(async () => ({ ok: false, status: 404, text: async () => "" }));
     const terminology = cappedTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -316,7 +451,6 @@ describe("completeTerminology — capped sets (ADR-041)", () => {
  * short", because an empty value set matches nothing and fqm then reports the whole roster
  * out-of-population (ADR-043), which reads downstream exactly like a genuinely ineligible cohort.
  */
-const ABSENT_OID = "2.16.840.1.113883.3.526.3.1278";
 
 /** Terminology as `collectTerminology` produces it for a bundle with one retrieved-but-unshipped set. */
 function absentTerminology() {
@@ -341,7 +475,10 @@ function absentTerminology() {
 
 describe("completeTerminology — absent sets (ADR-053)", () => {
   it("sources an absent value set whole and records it under a DISTINCT reason", async () => {
-    globalThis.fetch = async () => expansionPage(["b", "a", "c"], 3);
+    globalThis.fetch = asVsac(async (url) => {
+      calls.push({ url: String(url) });
+      return expansionPage(["b", "a", "c"], 3);
+    });
     const terminology = absentTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -352,6 +489,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
     assert.deepEqual(completed, [
       { oid: ABSENT_OID, reason: "absent-upstream", had: 0, now: 3, declaredTotal: null },
     ]);
+    assert.equal(new URL(expandCalls()[0].url).searchParams.get("expansion"), RELEASE_TITLE, "a set the release lists is expanded at it");
     assert.deepEqual(terminology.absent, [], "nothing is left absent once it is sourced");
     const sourced = terminology.valueSets.find((v) => v.oid === ABSENT_OID);
     assert.deepEqual(sourced.codes.map((c) => c.code), ["a", "b", "c"], "sorted, because the sidecar is hashed");
@@ -361,7 +499,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
   });
 
   it("declaredTotal is null in the RECORD and VSAC's total in the value set — two different questions", async () => {
-    globalThis.fetch = async () => expansionPage(["a", "b"], 2);
+    globalThis.fetch = asVsac(async () => expansionPage(["a", "b"], 2));
     const terminology = absentTerminology();
 
     const [record] = await completeTerminology(terminology, ARGS, KEYED);
@@ -371,7 +509,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
   });
 
   it("REFUSES an empty expansion — an empty set is the ADR-043 silence, not a completion", async () => {
-    globalThis.fetch = async () => expansionPage([], 0);
+    globalThis.fetch = asVsac(async () => expansionPage([], 0));
     const terminology = absentTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -387,7 +525,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
     // therefore terminates cleanly with 2 codes, and without this check they would be written as though
     // they were the whole set.
     let page = 0;
-    globalThis.fetch = async () => (page++ === 0 ? expansionPage(["a", "b"], 9) : expansionPage([], 9));
+    globalThis.fetch = asVsac(async () => (page++ === 0 ? expansionPage(["a", "b"], 9) : expansionPage([], 9)));
     const terminology = absentTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -404,8 +542,9 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
     // `declaredTotal` equal to whatever arrived, `truncated` empty, no warning, routing not refusing.
     // A set that looks complete and is not, inside the guard added to stop exactly that.
     let page = 0;
-    globalThis.fetch = async () =>
-      page++ === 0 ? expansionPage(["a", "b"], undefined) : expansionPage([], undefined);
+    globalThis.fetch = asVsac(async () =>
+      page++ === 0 ? expansionPage(["a", "b"], undefined) : expansionPage([], undefined),
+    );
     const terminology = absentTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -419,7 +558,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
   it("REFUSES an expansion of a DIFFERENT value set, when VSAC echoes its identity", async () => {
     // A wrong-OID echo would otherwise file someone else's codes under the OID we asked for — and the
     // size checks cannot see it, because a different set of the right size passes every one of them.
-    globalThis.fetch = async () => ({
+    globalThis.fetch = asVsac(async () => ({
       ok: true,
       status: 200,
       text: async () =>
@@ -428,7 +567,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
           url: "http://cts.nlm.nih.gov/fhir/ValueSet/9.9.9.9",
           expansion: { total: 2, contains: [{ system: "s", code: "a" }, { system: "s", code: "b" }] },
         }),
-    });
+    }));
     const terminology = absentTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -441,7 +580,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
   it("accepts a matching echo, including a VERSIONED one — same value set, different canonical", async () => {
     // The other half: the identity check must not refuse a correct answer that happens to carry
     // `|version`, which is why it compares normalized OIDs rather than raw strings.
-    globalThis.fetch = async () => ({
+    globalThis.fetch = asVsac(async () => ({
       ok: true,
       status: 200,
       text: async () =>
@@ -450,7 +589,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
           url: `http://cts.nlm.nih.gov/fhir/ValueSet/${ABSENT_OID}|20250101`,
           expansion: { total: 2, contains: [{ system: "s", code: "a" }, { system: "s", code: "b" }] },
         }),
-    });
+    }));
     const terminology = absentTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -460,7 +599,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
   });
 
   it("keeps it absent when VSAC fails outright", async () => {
-    globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => "" });
+    globalThis.fetch = asVsac(async () => ({ ok: false, status: 404, text: async () => "" }));
     const terminology = absentTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -474,7 +613,7 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
     // Before ADR-053 this function short-circuited on `capped.length === 0`. A measure whose only
     // problem is an absent value set would have returned immediately and silently, with the flag passed
     // and the key present.
-    globalThis.fetch = async () => expansionPage(["a"], 1);
+    globalThis.fetch = asVsac(async () => expansionPage(["a"], 1));
     const terminology = absentTerminology();
     assert.equal(
       terminology.valueSets.filter((v) => v.declaredTotal > v.codes.length).length,
@@ -485,6 +624,39 @@ describe("completeTerminology — absent sets (ADR-053)", () => {
     const completed = await completeTerminology(terminology, ARGS, KEYED);
 
     assert.equal(completed.length, 1);
+  });
+
+  it("sources a set the release does NOT list as VSAC serves it, and records inRelease: false (#851)", async () => {
+    // cms138's …3.526.3.1278 (measured 2026-10-19): the release Library does not list it, `expansion=`
+    // answers not-found, and `manifest=` silently serves VSAC's only version. fqm throws on a declared
+    // set missing from its cache, so leaving it absent would fail cms138 outright; it is sourced, said so
+    // at vendor time, and marked so nobody reads the release as vouching for it.
+    globalThis.fetch = asVsac(async (url) => {
+      calls.push({ url: String(url) });
+      return expansionPage(["b", "a", "c"], 3);
+    }, { listed: [OID] });
+    const terminology = absentTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, [
+      { oid: ABSENT_OID, reason: "absent-upstream", inRelease: false, had: 0, now: 3, declaredTotal: null },
+    ]);
+    const params = new URL(expandCalls()[0].url).searchParams;
+    assert.equal(params.has("expansion"), false, "the release has no answer for a set it does not list");
+    assert.equal(params.get("manifest"), ARGS.vsacManifest);
+    assert.match(warnings.join("\n"), /2\.16\.840\.1\.113883\.3\.526\.3\.1278 is not in the release eCQM FHIR Update 2025/);
+  });
+
+  it("holds a set the release does not list to the same guards (an empty answer is refused)", async () => {
+    globalThis.fetch = asVsac(async () => expansionPage([], 0), { listed: [OID] });
+    const terminology = absentTerminology();
+
+    const completed = await completeTerminology(terminology, ARGS, KEYED);
+
+    assert.deepEqual(completed, []);
+    assert.deepEqual(terminology.absent.map((v) => v.oid), [ABSENT_OID]);
+    assert.match(warnings.join("\n"), /returned no codes for absent value set/);
   });
 
   it("does not dial VSAC without the key, and says so naming BOTH counts", async () => {
@@ -528,7 +700,7 @@ describe("completion record shape vs the committed manifests", () => {
     // and must say so rather than pass. That is the shape it exists to catch.
     assert.ok(committed.length > 0, "no committed completion record found — this test would assert nothing");
 
-    globalThis.fetch = async () => expansionPage(["c", "upstream-2", "a", "b", "upstream-1"], 5);
+    globalThis.fetch = asVsac(async () => expansionPage(["c", "upstream-2", "a", "b", "upstream-1"], 5));
     const [produced] = await completeTerminology(cappedTerminology(), ARGS, KEYED);
 
     for (const { id, keys } of committed) {
@@ -539,6 +711,20 @@ describe("completion record shape vs the committed manifests", () => {
           `credentialed re-vendor changes manifest.json and CI's reproducibility gate fails`,
       );
     }
+  });
+
+  it("produces, for a set the release does not list, exactly the record cms138's manifest commits (#851)", async () => {
+    const { readFileSync, existsSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const path = fileURLToPath(new URL("../measures/official/cms138/manifest.json", import.meta.url));
+    assert.ok(existsSync(path), "cms138's manifest is committed; without it this test asserts nothing");
+    const committed = JSON.parse(readFileSync(path, "utf8")).terminology.completion.valueSets.find((v) => v.oid === ABSENT_OID);
+
+    globalThis.fetch = asVsac(async () => expansionPage(["a", "b", "c", "d"], 4), { listed: [OID] });
+    const [produced] = await completeTerminology(absentTerminology(), ARGS, KEYED);
+
+    assert.deepEqual(Object.keys(produced), Object.keys(committed), "same keys, same order: the manifest's bytes are pinned");
+    assert.equal(produced.inRelease, false);
   });
 });
 
@@ -813,6 +999,47 @@ describe("expandComplete", () => {
     assert.equal((await expandComplete(OID, PINNED)).total, 2);
   });
 
+  describe("at a release named by title (expansion=, #851)", () => {
+    const RELEASED = { ...PINNED, vsacExpansion: RELEASE_TITLE };
+    /** An exact answer, echoing `echoed` as the `manifest` parameter when given. */
+    const released = (echoed) => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          resourceType: "ValueSet",
+          expansion: {
+            total: 2,
+            ...(echoed ? { parameter: [{ name: "manifest", valueString: echoed }] } : {}),
+            contains: [{ system: "http://snomed.info/sct", code: "a" }, { system: "http://snomed.info/sct", code: "b" }],
+          },
+        }),
+    });
+    const refusedAtRelease = async (pattern) => {
+      const err = await expandComplete(OID, RELEASED).then(
+        () => assert.fail("expected a release refusal"),
+        (caught) => caught,
+      );
+      assert.equal(err.kind, "release");
+      assert.match(err.message, pattern);
+    };
+
+    it("accepts the answer when VSAC confirms the pinned release", async () => {
+      globalThis.fetch = async () => released(ARGS.vsacManifest);
+      assert.equal((await expandComplete(OID, RELEASED)).total, 2);
+    });
+
+    it("REFUSES an answer for a different release: the title named another one", async () => {
+      globalThis.fetch = async () => released("http://cts.nlm.nih.gov/fhir/Library/ecqm-update-2026-05-14");
+      await refusedAtRelease(/answered for http:\/\/cts\.nlm\.nih\.gov\/fhir\/Library\/ecqm-update-2026-05-14/);
+    });
+
+    it("REFUSES an answer that names no release at all: nothing says the title was applied", async () => {
+      globalThis.fetch = async () => released(undefined);
+      await refusedAtRelease(/did not say which release it expanded/);
+    });
+  });
+
   it("lets a transport failure through as itself, not as a refusal of VSAC's answer", async () => {
     globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => "" });
 
@@ -842,7 +1069,7 @@ describe("expandComplete", () => {
 
 describe("completeTerminology — absent sets refused by expandComplete", () => {
   it("leaves an absent set absent when VSAC serves more distinct codes than it counts", async () => {
-    globalThis.fetch = async () => expansionPage(["a", "b", "c"], 2);
+    globalThis.fetch = asVsac(async () => expansionPage(["a", "b", "c"], 2));
     const terminology = absentTerminology();
 
     const completed = await completeTerminology(terminology, ARGS, KEYED);
@@ -853,170 +1080,91 @@ describe("completeTerminology — absent sets refused by expandComplete", () => 
   });
 });
 
-describe("expandAtRelease (VSAC grouping drift, 2026-10-15)", () => {
+describe("expandAtRelease (#851: one expansion= call at the release, replacing the member union)", () => {
   const CANON = "http://cts.nlm.nih.gov/fhir/ValueSet/";
   const RELEASE = "http://cts.nlm.nih.gov/fhir/Library/ecqm-update-2026-05-14";
+  const TITLE = "eCQM Update 2026-05-14";
   const OPTS = { vsacBase: "https://cts.nlm.nih.gov/fhir", vsacManifest: RELEASE, apiKey: "test-key" };
   const sct = (...codes) => codes.map((code) => ({ system: "http://snomed.info/sct", code }));
 
   /**
-   * A VSAC stand-in. `sets[oid]` = { codes (what $expand at the release answers), version (echoed),
-   * members (a pure grouping's member OIDs) }; a set without members is a concept list. `pins` = the
-   * release Library's pinned versions. Every request is recorded.
+   * A VSAC stand-in for one release. `sets[oid]` is what `$expand` answers at it: an array of codes, or
+   * `{ codes, total }` to state a total that disagrees. `listed` is what the release Library lists
+   * (default: every set served); `title` and `echo` override its title and the release VSAC echoes back
+   * as the `manifest` parameter. Every request is recorded.
    */
-  const serve = (sets, pins) => {
+  const serve = (sets, { listed = Object.keys(sets), title = TITLE, echo = RELEASE } = {}) => {
     const json = (body) => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
     globalThis.fetch = async (url) => {
       const parsed = new URL(String(url));
       calls.push(parsed);
       if (parsed.pathname.includes("/Library/")) {
-        return json({ resourceType: "Library", relatedArtifact: Object.entries(pins).map(([oid, v]) => ({ type: "depends-on", resource: `${CANON}${oid}|${v}` })) });
-      }
-      if (parsed.pathname.endsWith("/ValueSet")) {
-        const oid = parsed.searchParams.get("url").split("/ValueSet/")[1];
-        const set = sets[oid];
-        if (!set || set.version !== parsed.searchParams.get("version")) return json({ resourceType: "Bundle", entry: [] });
-        const compose = set.members
-          ? { include: set.members.map((m) => ({ valueSet: [`${CANON}${m}`] })) }
-          : { include: [{ system: "http://snomed.info/sct", concept: set.codes.map((c) => ({ code: c.code })) }] };
-        return json({ resourceType: "Bundle", entry: [{ resource: { resourceType: "ValueSet", version: set.version, compose } }] });
+        return json({
+          resourceType: "Library",
+          ...(title ? { title } : {}),
+          relatedArtifact: listed.map((oid) => ({ type: "depends-on", resource: `${CANON}${oid}|1` })),
+        });
       }
       const oid = decodeURIComponent(parsed.pathname.split("/ValueSet/")[1].split("/")[0]);
       const set = sets[oid];
       if (!set) return { ok: false, status: 404, text: async () => "" };
+      const codes = Array.isArray(set) ? set : set.codes;
       const offset = Number(parsed.searchParams.get("offset"));
       return json({
         resourceType: "ValueSet",
         url: `${CANON}${oid}`,
-        ...(set.version ? { version: set.version } : {}),
-        expansion: { total: set.codes.length, contains: set.codes.slice(offset, offset + 1000) },
+        expansion: {
+          total: Array.isArray(set) ? set.length : set.total,
+          parameter: [{ name: "manifest", valueString: echo }],
+          contains: codes.slice(offset, offset + 1000),
+        },
       });
     };
   };
-  const expansionsOf = (oid) => calls.filter((u) => u.pathname.endsWith(`/ValueSet/${oid}/$expand`)).length;
+  const expansions = () => calls.filter((u) => u.pathname.endsWith("/$expand"));
 
-  it("returns VSAC's grouping expansion unchanged when it equals its members at the release", async () => {
-    serve(
-      { G: { codes: sct("a", "b", "c"), version: "g1", members: ["M1", "M2"] }, M1: { codes: sct("a", "b"), version: "m1" }, M2: { codes: sct("c"), version: "m2" } },
-      { G: "g1" },
-    );
+  it("expands a set the release lists with expansion=<its title>, in one call", async () => {
+    serve({ G: sct("c", "a", "b") });
     const result = await expandAtRelease("G", OPTS);
     assert.deepEqual(result.codes, canonicalize(sct("a", "b", "c")));
     assert.equal(result.total, 3);
-    assert.equal(result.drift, undefined);
+    assert.equal(expansions().length, 1, "no member is expanded: the release answers for the grouping itself");
+    assert.equal(expansions()[0].searchParams.get("expansion"), TITLE);
+    assert.equal(expansions()[0].searchParams.has("manifest"), false, "manifest= is the drifting form");
   });
 
-  it("returns the MEMBERS at the release, and says so, when VSAC's grouping answer drifts (1082 on 2026-10-15)", async () => {
-    // VSAC's grouping expansion carries two codes from a member version newer than the release.
-    serve(
-      { G: { codes: sct("a", "b", "c", "x", "y"), version: "20190315", members: ["M1", "M2"] }, M1: { codes: sct("a", "b"), version: "20260116" }, M2: { codes: sct("c"), version: "20260116" } },
-      { G: "20190315" },
-    );
-    const result = await expandAtRelease("G", OPTS);
-    assert.deepEqual(result.codes, canonicalize(sct("a", "b", "c")), "the release's codes, not VSAC's drifted grouping");
-    assert.equal(result.total, 3);
-    assert.equal(result.drift.vsacTotal, 5);
-    assert.equal(result.drift.releaseTotal, 3);
-    assert.deepEqual(result.drift.vsacOnly.map((c) => c.code), ["x", "y"]);
-    assert.deepEqual(result.drift.releaseOnly, []);
+  it("REFUSES a set the release does not list, before asking VSAC to expand it", async () => {
+    serve({ G: sct("a") }, { listed: ["OTHER"] });
+    await assert.rejects(expandAtRelease("G", OPTS), /does not list G/);
+    assert.equal(expansions().length, 0);
   });
 
-  it("leaves a set that is not a pure grouping as VSAC expanded it, and expands nothing else", async () => {
-    serve({ E: { codes: sct("a", "b"), version: "e1" } }, { E: "e1" });
-    const result = await expandAtRelease("E", OPTS);
-    assert.deepEqual(result.codes, canonicalize(sct("a", "b")));
-    assert.equal(result.drift, undefined);
-    assert.equal(calls.filter((u) => u.pathname.endsWith("/$expand")).length, 1);
+  it("REFUSES a release Library with no title: expansion= would have nothing to name", async () => {
+    serve({ G: sct("a") }, { title: null });
+    await assert.rejects(expandAtRelease("G", OPTS), /has no title/);
   });
 
-  it("resolves a member that is itself a grouping at ITS echoed version", async () => {
-    serve(
-      {
-        G: { codes: sct("a", "b", "z"), version: "g1", members: ["N"] },
-        N: { codes: sct("a", "b", "z"), version: "n1", members: ["M"] }, // the nested grouping drifted too
-        M: { codes: sct("a", "b"), version: "m1" },
-      },
-      { G: "g1" },
-    );
-    const result = await expandAtRelease("G", OPTS);
-    assert.deepEqual(result.codes, canonicalize(sct("a", "b")));
-    assert.deepEqual(result.drift.vsacOnly.map((c) => c.code), ["z"]);
+  it("REFUSES a release Library that lists no value sets", async () => {
+    serve({ G: sct("a") }, { listed: [] });
+    await assert.rejects(expandAtRelease("G", OPTS), /lists no value sets/);
   });
 
-  it("expands a member shared by two groupings once per run (one cache)", async () => {
-    serve(
-      {
-        G1: { codes: sct("a", "b"), version: "1", members: ["S", "A"] },
-        G2: { codes: sct("a", "c"), version: "1", members: ["S", "C"] },
-        S: { codes: sct("a"), version: "s" },
-        A: { codes: sct("b"), version: "a" },
-        C: { codes: sct("c"), version: "c" },
-      },
-      { G1: "1", G2: "1" },
-    );
+  it("REFUSES an answer VSAC gives for a different release", async () => {
+    serve({ G: sct("a") }, { echo: "http://cts.nlm.nih.gov/fhir/Library/ecqm-fhir-update-2025" });
+    await assert.rejects(expandAtRelease("G", OPTS), (err) => err instanceof IncompleteExpansionError && err.kind === "release");
+  });
+
+  it("holds the answer to expandComplete's guards (a short read is refused)", async () => {
+    serve({ G: { codes: sct("a", "b"), total: 3 } });
+    await assert.rejects(expandAtRelease("G", OPTS), (err) => err instanceof IncompleteExpansionError && err.kind === "short");
+  });
+
+  it("reads the release once per run, whatever the number of sets (one cache)", async () => {
+    serve({ G1: sct("a"), G2: sct("b") });
     const cache = new Map();
     await Promise.all([expandAtRelease("G1", { ...OPTS, cache }), expandAtRelease("G2", { ...OPTS, cache })]);
-    assert.equal(expansionsOf("S"), 1);
-    assert.equal(calls.filter((u) => u.pathname.includes("/Library/")).length, 1, "the release is read once");
-  });
-
-  it("REFUSES when VSAC holds no definition at the pinned version, never falling back to the drifted answer", async () => {
-    serve({ G: { codes: sct("a"), version: "other" } }, { G: "g1" });
-    await assert.rejects(expandAtRelease("G", OPTS), /holds no definition of G\|g1/);
-  });
-
-  it("REFUSES when neither the release nor VSAC names a version", async () => {
-    serve({ G: { codes: sct("a") } }, { OTHER: "1" });
-    await assert.rejects(expandAtRelease("G", OPTS), /neither the release .* nor VSAC's expansion names a version of G/);
-  });
-
-  it("REFUSES groupings that nest deeper than any VSAC publishes (a cycle)", async () => {
-    const chain = {};
-    const names = ["A", "B", "C", "D", "E", "F", "G", "H"];
-    names.forEach((name, i) => {
-      chain[name] = { codes: sct("a"), version: `v${i}`, ...(i < names.length - 1 ? { members: [names[i + 1]] } : {}) };
-    });
-    serve(chain, { A: "v0" });
-    await assert.rejects(expandAtRelease("A", OPTS), /nest deeper than 5 levels/);
-  });
-
-  /** Settles or fails within `ms`: a cycle must REFUSE, and a hang would otherwise pass as a slow test. */
-  const settles = (promise, ms = 3000) =>
-    Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("hung: the promise never settled")), ms))]);
-
-  it("REFUSES a cycle (A includes B, B includes A) instead of waiting on itself (review of #825)", async () => {
-    serve({ A: { codes: sct("a"), version: "a", members: ["B"] }, B: { codes: sct("a"), version: "b", members: ["A"] } }, { A: "a" });
-    await assert.rejects(settles(expandAtRelease("A", OPTS)), /form a cycle \(A -> B -> A\)/);
-  });
-
-  it("REFUSES a cycle entered from two groupings at once, sharing one cache (X -> Y and Y -> X)", async () => {
-    serve(
-      {
-        G1: { codes: sct("a"), version: "1", members: ["X"] },
-        G2: { codes: sct("a"), version: "1", members: ["Y"] },
-        X: { codes: sct("a"), version: "x", members: ["Y"] },
-        Y: { codes: sct("a"), version: "y", members: ["X"] },
-      },
-      { G1: "1", G2: "1" },
-    );
-    const cache = new Map();
-    const both = Promise.allSettled([expandAtRelease("G1", { ...OPTS, cache }), expandAtRelease("G2", { ...OPTS, cache })]);
-    const [one, two] = await settles(both);
-    assert.equal(one.status, "rejected");
-    assert.equal(two.status, "rejected");
-    assert.match(String(one.reason), /form a cycle/);
-    assert.match(String(two.reason), /form a cycle/);
-  });
-
-  it("leaves a grouping that names a member at an explicit VERSION to VSAC (a release expansion cannot honour it)", async () => {
-    serve(
-      { G: { codes: sct("a", "b", "x"), version: "g1", members: ["M|v9"] }, M: { codes: sct("a", "b"), version: "m-latest" } },
-      { G: "g1" },
-    );
-    const result = await expandAtRelease("G", OPTS);
-    assert.deepEqual(result.codes, canonicalize(sct("a", "b", "x")), "VSAC's grouping answer, unchanged");
-    assert.equal(result.drift, undefined);
-    assert.equal(expansionsOf("M"), 0, "the member is never expanded at an unchosen version");
+    assert.equal(calls.filter((u) => u.pathname.includes("/Library/")).length, 1);
+    assert.equal(expansions().length, 2);
   });
 
   it("limitConcurrency never runs more than `limit` requests at once", async () => {

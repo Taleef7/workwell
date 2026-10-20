@@ -63,6 +63,17 @@ export interface OfficialMeasureSemantics {
 /** The US Core blood-pressure profile, the one cms165 retrieves with no code filter. */
 export const US_CORE_BLOOD_PRESSURE = "http://hl7.org/fhir/us/core/StructureDefinition/us-core-blood-pressure";
 
+/**
+ * The improvement direction this table implies (`cqfm-improvementNotation`'s code): a numerator that is
+ * the good outcome improves upward, an inverse measure's downward. The one source for the notation a
+ * WorkWell translation publishes and a MeasureReport states (#848). CMS's own artifacts keep what they
+ * declare (CMS122 says `increase`), recorded verbatim by vendoring and reported upstream rather than
+ * corrected there.
+ */
+export function improvementNotationFor(semantics: OfficialMeasureSemantics): "increase" | "decrease" {
+  return semantics.numeratorMeansCompliant ? "increase" : "decrease";
+}
+
 /** The profile trust to hand the executor for a measure: by type, except the measure's trusted profiles. */
 export function trustedProfilesOf(semantics: OfficialMeasureSemantics | undefined): readonly string[] {
   return semantics?.trustedProfiles ?? [];
