@@ -36,6 +36,7 @@ import type { DerivedChangedLibrary, DerivedManifestBlock, OfficialManifest } fr
 // the other's bindings at load time. One rule for the builder that writes an include and the check that
 // resolves it, so the two cannot disagree about what the engine will find.
 import { includedLibraryName } from "./derived-changed-library.ts";
+import { dropUnmetLibraryClaims } from "./library-claims.ts";
 
 export const DERIVED_CANONICAL_PREFIX = "urn:workwell:measure:";
 export const DERIVED_LIBRARY_PREFIX = "urn:workwell:library:";
@@ -286,7 +287,16 @@ export interface DerivedIdentity {
   /** The CMS measure it is derived from, as display text only, e.g. `CMS137v15`. */
   derivedFrom: string;
   effectivePeriod: { start: string; end: string };
+  /**
+   * The improvement direction the translation publishes on every group (#848): what WorkWell's semantics
+   * table implies (`improvementNotationFor`), never CMS's declared value, which is wrong for CMS122.
+   */
+  improvementNotation: "increase" | "decrease";
 }
+
+const PUBLISHABLE_MEASURE = "http://hl7.org/fhir/us/cqfmeasures/StructureDefinition/publishable-measure-cqfm";
+const IMPROVEMENT_NOTATION = "http://hl7.org/fhir/us/cqfmeasures/StructureDefinition/cqfm-improvementNotation";
+const NOTATION_DISPLAY = { increase: "Increased score indicates improvement", decrease: "Decreased score indicates improvement" } as const;
 
 /** The library `Measure.library` names (by url, or by `url|version`). */
 function mainLibraryOf(bundle: Bundle, measure: Resource): Resource | undefined {
@@ -314,7 +324,14 @@ function mainLibraryOf(bundle: Bundle, measure: Resource): Resource | undefined 
  * that points at it — those record CMS's compile (translator 3.27.0, annotations and locators on), while
  * the ELM here is WorkWell's compile with both stripped; the translation's own compile is recorded in
  * the manifest's `derived.build`. The builder still checks CMS's recorded options, on CMS's UPSTREAM
- * library, before it compiles (`assertCmsTranslatorOptions`). Kept: `meta.profile` on both resources.
+ * library, before it compiles (`assertCmsTranslatorOptions`).
+ *
+ * `meta.profile` keeps CMS's claims except the ones this rewrite makes false (#848): on the main library,
+ * any the rewritten library no longer meets (`dropUnmetLibraryClaims`); on the Measure,
+ * `publishable-measure-cqfm`, whose version-specific, version-independent and short-name identifiers a
+ * translation may not carry (`FORBIDDEN_IDENTIFIER_TYPES`) and whose `date` is CMS's. The Measure carries
+ * no `identifier` at all, never an empty one. Every group's `cqfm-improvementNotation` is the identity's
+ * (WorkWell's semantics), not CMS's.
  */
 export function rewriteDerivedIdentity<T extends Bundle>(bundle: T, identity: DerivedIdentity): T {
   const copy = JSON.parse(JSON.stringify(bundle)) as T;
@@ -356,6 +373,7 @@ export function rewriteDerivedIdentity<T extends Bundle>(bundle: T, identity: De
   const elm = JSON.parse(Buffer.from(content.data, "base64").toString("utf8")) as { library: { identifier: Record<string, unknown> } };
   elm.library.identifier = { id: identity.name, version: identity.version };
   content.data = Buffer.from(JSON.stringify(elm), "utf8").toString("base64");
+  dropUnmetLibraryClaims(main);
 
   measure["id"] = identity.name;
   measure["url"] = identity.url;
@@ -367,7 +385,23 @@ export function rewriteDerivedIdentity<T extends Bundle>(bundle: T, identity: De
   delete measure["date"];
   delete measure["usage"];
   measure["effectivePeriod"] = identity.effectivePeriod;
-  measure["identifier"] = [];
+  delete measure["identifier"];
+  const measureMeta = measure["meta"] as { profile?: string[] } | undefined;
+  if (measureMeta?.profile) measureMeta.profile = measureMeta.profile.filter((p) => p !== PUBLISHABLE_MEASURE);
+  for (const group of (measure["group"] as Array<{ extension?: Array<Record<string, unknown>> }> | undefined) ?? []) {
+    for (const extension of group.extension ?? []) {
+      if (extension["url"] !== IMPROVEMENT_NOTATION) continue;
+      extension["valueCodeableConcept"] = {
+        coding: [
+          {
+            system: "http://terminology.hl7.org/CodeSystem/measure-improvement-notation",
+            code: identity.improvementNotation,
+            display: NOTATION_DISPLAY[identity.improvementNotation],
+          },
+        ],
+      };
+    }
+  }
   measure["library"] = [libraryUrl];
   const contained = (measure["contained"] as Resource[] | undefined) ?? [];
   const kept = contained.filter((r) => !(r.resourceType === "Library" && r["id"] === EFFECTIVE_DATA_REQUIREMENTS));

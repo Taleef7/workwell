@@ -89,6 +89,11 @@ export interface OfficialManifest {
          * written into an official manifest, so the key-set pin on cms122/cms125 is unaffected.
          */
         reason?: "capped" | "absent-upstream" | "release";
+        /**
+         * `false` only on an absent-upstream set the named release does not list (#851: cms138's
+         * …3.526.3.1278), sourced as VSAC serves it. Absent everywhere else, where the release vouches.
+         */
+        inRelease?: false;
         had: number;
         now: number;
         declaredTotal: number | null;
@@ -97,6 +102,12 @@ export interface OfficialManifest {
     sha256: string;
   };
   sha256: string;
+  /**
+   * An OFFICIAL artifact's logic, hashed apart from its metadata (`scripts/artifact-logic.mjs`, #848):
+   * each Library's ELM and the Measure's groups. Equal across a re-vendor that changed only metadata, so
+   * a run scored by the earlier vendoring still carries CMS's identity (`scoredByCurrentLogic`).
+   */
+  logicSha256?: string;
   /**
    * Present ONLY on a WorkWell translation under `measures/derived/` (decision 3, 2026-10-02): the block
    * is what makes the artifact a translation, and each loader refuses the other kind's manifest.

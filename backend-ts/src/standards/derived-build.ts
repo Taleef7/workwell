@@ -23,6 +23,7 @@
  */
 import { createHash } from "node:crypto";
 import type { DerivedChangedLibrary, DerivedManifestBlock, OfficialArtifact, OfficialManifest } from "../wiring/official-artifacts.ts";
+import { improvementNotationFor, OFFICIAL_MEASURE_SEMANTICS } from "../wiring/official-measure-semantics.ts";
 import { changedLibraryIdentity, rewriteChangedLibrary } from "./derived-changed-library.ts";
 import { recomputeDataRequirements } from "./derived-data-requirements.ts";
 import { DERIVED_CANONICAL_PREFIX, DERIVED_LABEL_PREFIX, libraryElmSha256, rewriteDerivedIdentity, type DerivedIdentity } from "./derived-identity.ts";
@@ -43,6 +44,9 @@ export function translationIdentity(catalogId: string, year: number, derivedFrom
   if (!derivedFrom.trim()) throw new Error("derivedFrom must name the CMS measure (e.g. CMS137v15)");
   // The same prefix the router requires of the label (`derivedIdentityProblems`): one source for both.
   const title = `${DERIVED_LABEL_PREFIX}${derivedFrom}`;
+  // Fail-closed, as routing is: a measure WorkWell has not read has no direction to publish (#848).
+  const semantics = OFFICIAL_MEASURE_SEMANTICS[catalogId];
+  if (!semantics) throw new Error(`${catalogId} has no entry in OFFICIAL_MEASURE_SEMANTICS, so its improvement notation is unknown`);
   return {
     url: `${DERIVED_CANONICAL_PREFIX}${catalogId}:translation`,
     version: `ww-${year}.${revision}`,
@@ -50,6 +54,7 @@ export function translationIdentity(catalogId: string, year: number, derivedFrom
     title,
     derivedFrom,
     effectivePeriod: { start: `${year}-01-01`, end: `${year}-12-31` },
+    improvementNotation: improvementNotationFor(semantics),
   };
 }
 
@@ -371,7 +376,8 @@ export function derivedManifestFor(input: DerivedManifestInput): { manifest: Off
     effectivePeriod: identity.effectivePeriod,
     scoring: b.scoring,
     populationBasis: b.populationBasis,
-    improvementNotation: b.improvementNotation,
+    // The direction the translation's Measure publishes (#848), not CMS's declared one (wrong for CMS122).
+    improvementNotation: identity.improvementNotation,
     populations: b.populations,
     // CMS's upstream bundle the CQL was read from: the same pinned file the official artifact records.
     source: b.source,

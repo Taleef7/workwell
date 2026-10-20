@@ -54,7 +54,7 @@ test("the rewritten committed CMS137 bundle is a valid translation identity", ()
   const measure = measureIn(clone());
   assert.equal(measure["url"], FIXTURE_URL);
   assert.equal(measure["status"], "draft");
-  assert.deepEqual(measure["identifier"], []);
+  assert.equal(measure["identifier"], undefined, "no identifier at all: a present FHIR array is never empty (#848)");
   assert.ok((measure["relatedArtifact"] as Array<Record<string, unknown>>).some((r) => r["type"] === "derived-from" && r["display"] === "CMS137v15"));
 });
 
@@ -190,9 +190,18 @@ test("the rewrite renames both resource ids and drops the contained Library that
   assert.ok(!(measure["contained"] as Res[] | undefined)?.some((r) => r["id"] === "effective-data-requirements"));
   assert.ok(!JSON.stringify(measure["extension"] ?? []).includes("#effective-data-requirements"), "no extension may point at the removed Library");
   assert.equal((measure["extension"] as unknown[]).length, (cmsMeasure["extension"] as unknown[]).length - 1, "only the extension that pointed at it is removed");
-  // Kept: the profiles a reader validates against.
-  assert.deepEqual(measure["meta"], cmsMeasure["meta"]);
-  assert.deepEqual(main["meta"], cmsMain["meta"]);
+  // Kept: CMS's profile claims, except exactly the ones this rewrite makes false (#848). The Measure cannot
+  // carry the identifiers or CMS's date `publishable-measure-cqfm` needs; the main library carries ELM JSON
+  // only and no `date`, so it meets neither the CQL/ELM-XML content profiles nor `crmi-publishablelibrary`.
+  const profiles = (r: Res) => (r["meta"] as { profile: string[] }).profile;
+  const droppedFromMain = new Set([
+    "http://hl7.org/fhir/uv/cql/StructureDefinition/cql-library",
+    "http://hl7.org/fhir/uv/cql/StructureDefinition/elm-xml-library",
+    "http://hl7.org/fhir/uv/crmi/StructureDefinition/crmi-publishablelibrary",
+  ]);
+  assert.deepEqual(profiles(measure), profiles(cmsMeasure).filter((p) => !p.endsWith("/publishable-measure-cqfm")));
+  assert.deepEqual(profiles(main), profiles(cmsMain).filter((p) => !droppedFromMain.has(p)));
+  assert.ok(profiles(main).includes("http://hl7.org/fhir/uv/cql/StructureDefinition/elm-json-library"), "the claim it meets stays");
 });
 
 test("the rewrite drops what states CMS's publication: the bundle's name, the usage text, the dates, CMS's compile options", () => {
@@ -706,6 +715,7 @@ test("the rewrite is idempotent over the fixture's own identity", () => {
     title: "WorkWell translation of CMS137v15",
     derivedFrom: "CMS137v15",
     effectivePeriod: { start: "2027-01-01", end: "2027-12-31" },
+    improvementNotation: "increase",
   });
   assert.deepEqual(twice, fixture.bundle);
 });

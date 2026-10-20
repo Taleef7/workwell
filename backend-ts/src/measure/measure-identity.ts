@@ -74,6 +74,8 @@ interface CmsArtifactLineage {
   /** The QDM measure, with its version, the FHIR artifact was derived from. */
   derivedFrom: string;
   contentRepo: string;
+  /** What the artifact computes, apart from its metadata (`scripts/artifact-logic.mjs`, #848). */
+  logicSha256: string;
 }
 
 /**
@@ -82,21 +84,44 @@ interface CmsArtifactLineage {
  *
  * Neither the bundles nor the catalog can answer this for an old row: the bundles do not carry it, and
  * the catalog's `policyRef` moves when the catalog moves to a new year, which would relabel every 2026
- * row as derived from the 2027 measure. A re-vendor changes the sha, and the test that every committed
- * manifest has an entry fails until this table names it. Versions are the 2026 performance-period eCQMs
- * on the eCQI Resource Center (the catalog's own ids), which is what `dqm-content-qicore-2025` drafted.
+ * row as derived from the 2027 measure. Versions are the 2026 performance-period eCQMs on the eCQI
+ * Resource Center (the catalog's own ids), which is what `dqm-content-qicore-2025` drafted.
+ *
+ * A re-vendor ADDS an entry and never removes one (#848): the test that every committed manifest has an
+ * entry fails until this table names the new sha, and an earlier sha stays so a row it scored keeps its
+ * lineage. Each entry records its `logicSha256`, which is how `scoredByCurrentLogic` tells a metadata-only
+ * re-vendor (same logic, CMS's identity carries over) from a change of logic (it does not).
  */
+const DQM_2025 = "cqframework/dqm-content-qicore-2025";
 const CMS_ARTIFACT_LINEAGE: Readonly<Record<string, CmsArtifactLineage>> = {
-  "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552": { measureId: "cms122", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8": { measureId: "cms125", ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629": { measureId: "cms130", ecqmId: "CMS130FHIR", version: "1.0.000", derivedFrom: "CMS130v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24": { measureId: "cms137", ecqmId: "CMS137FHIR", version: "1.0.000", derivedFrom: "CMS137v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aab25280eb4": { measureId: "cms138", ecqmId: "CMS138FHIR", version: "1.0.000", derivedFrom: "CMS138v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e": { measureId: "cms165", ecqmId: "CMS165FHIR", version: "1.0.000", derivedFrom: "CMS165v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec": { measureId: "cms2", ecqmId: "CMS2FHIR", version: "1.0.000", derivedFrom: "CMS2v15", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970": { measureId: "cms68", ecqmId: "CMS68FHIR", version: "1.0.000", derivedFrom: "CMS68v15", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae": { measureId: "cms951", ecqmId: "CMS951FHIR", version: "1.0.000", derivedFrom: "CMS951v4", contentRepo: "cqframework/dqm-content-qicore-2025" },
+  // First vendoring (2026-07/08), retired by #848's re-vendor: only two Library profile claims changed.
+  "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552": { measureId: "cms122", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14", contentRepo: DQM_2025, logicSha256: "sha256:6e4498b1815130957eb58f4ca2d74734e488bdc4a5a474df6d42ce9d0c072efb" },
+  "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8": { measureId: "cms125", ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14", contentRepo: DQM_2025, logicSha256: "sha256:67a0240f5e409b699512d9241611a8cebd1fa9fa4b85bc0841c92ee8c83e54ac" },
+  "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629": { measureId: "cms130", ecqmId: "CMS130FHIR", version: "1.0.000", derivedFrom: "CMS130v14", contentRepo: DQM_2025, logicSha256: "sha256:816e944190763d813cf9136ae2701a7a907f4bc87a87d1a9caef7406224a7eab" },
+  "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24": { measureId: "cms137", ecqmId: "CMS137FHIR", version: "1.0.000", derivedFrom: "CMS137v14", contentRepo: DQM_2025, logicSha256: "sha256:ed270232aa281109b7bca0d855b7ab9a4cc1b137a37209d47fa5812d888ac2f4" },
+  "sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aab25280eb4": { measureId: "cms138", ecqmId: "CMS138FHIR", version: "1.0.000", derivedFrom: "CMS138v14", contentRepo: DQM_2025, logicSha256: "sha256:bb0385c3095e8481db2b6ddfb3a7342ed97ad9b0158f468aca48813f8df2fb4a" },
+  "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e": { measureId: "cms165", ecqmId: "CMS165FHIR", version: "1.0.000", derivedFrom: "CMS165v14", contentRepo: DQM_2025, logicSha256: "sha256:1528701778cecfbf3451725a41486a19e0a887239d347db26cf0c08e0f183b7f" },
+  "sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec": { measureId: "cms2", ecqmId: "CMS2FHIR", version: "1.0.000", derivedFrom: "CMS2v15", contentRepo: DQM_2025, logicSha256: "sha256:5d5964366110a3592ddc8cc47a1aa4d97d0b1fabe807ea196104a4ded46892ce" },
+  "sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970": { measureId: "cms68", ecqmId: "CMS68FHIR", version: "1.0.000", derivedFrom: "CMS68v15", contentRepo: DQM_2025, logicSha256: "sha256:25beef950e0422d294f58ea3214035fc4ebc93b972481421d0a5fe090ed6dede" },
+  "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae": { measureId: "cms951", ecqmId: "CMS951FHIR", version: "1.0.000", derivedFrom: "CMS951v4", contentRepo: DQM_2025, logicSha256: "sha256:9c4050b44378d20d2ba5d0624c03d527ec6b158ca6c47a22406ac72798912099" },
 };
+
+/**
+ * True when the artifact a run recorded (`artifactSha256`) computed the same logic as `manifest`, the one
+ * vendored now (#848): the same bytes; or an earlier vendoring of the same measure, pinned above, whose
+ * `logicSha256` equals the current manifest's. A sha nobody pinned is never assumed equal, and a manifest
+ * with no `logicSha256` (a translation) matches only its own bytes. The four export gates (QRDA I/III ids
+ * and criteria, the MeasureReport canonical, the vintage note) ask this instead of "are the bytes equal",
+ * so a metadata-only re-vendor no longer strips CMS's identity from every older run.
+ */
+export function scoredByCurrentLogic(
+  manifest: Pick<OfficialManifest, "catalogId" | "sha256" | "logicSha256">,
+  artifactSha256: string,
+): boolean {
+  if (artifactSha256 === manifest.sha256) return true;
+  const earlier = Object.hasOwn(CMS_ARTIFACT_LINEAGE, artifactSha256) ? CMS_ARTIFACT_LINEAGE[artifactSha256] : undefined;
+  return !!earlier && !!manifest.logicSha256 && earlier.measureId === manifest.catalogId && earlier.logicSha256 === manifest.logicSha256;
+}
 
 /** For the committed-manifest drift test only. */
 export const CMS_ARTIFACT_LINEAGE_FOR_TEST = CMS_ARTIFACT_LINEAGE;
@@ -116,7 +141,10 @@ function cmsArtifactLineage(
     if (ref.artifactSha256 || !ref.ecqmId || !ref.version) return undefined;
     const ecqmId = ecqmIdOf(ref.ecqmId);
     const matches = Object.values(CMS_ARTIFACT_LINEAGE).filter((l) => l.ecqmId === ecqmId && l.version === ref.version);
-    return matches.length === 1 ? matches[0] : undefined;
+    // Two vendorings of one artifact (#848) are one lineage, not an ambiguity: they agree on everything
+    // the lineage says. Ambiguous only when the matches name different lineages.
+    const lineages = new Set(matches.map((l) => `${l.measureId}|${l.derivedFrom}|${l.contentRepo}`));
+    return lineages.size === 1 ? matches[0] : undefined;
   })();
   if (!found) return null;
   return measureId === undefined || found.measureId === measureId ? found : null;

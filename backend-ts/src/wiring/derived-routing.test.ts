@@ -157,7 +157,8 @@ test("D1–D8: each unfit translation is refused with its own sentence", () => {
   expect(problemsWith(withManifest({ terminology: { ...derived.manifest.terminology!, completion: undefined } })), /does not name the VSAC release/);
   expect(problemsWith(withManifest({ scoring: "cohort" })), /scoring 'cohort' differs/);
   expect(problemsWith(withManifest({ populations: ["initial-population"] })), /declares populations/);
-  expect(problemsWith(withManifest({ improvementNotation: "decrease" })), /improvementNotation 'decrease' differs/);
+  // The notation is WorkWell's reading (#848): cms137's semantics imply `increase`.
+  expect(problemsWith(withManifest({ improvementNotation: "decrease" })), /improvementNotation 'decrease' is not the 'increase' its semantics imply/);
   expect(problemsWith(withManifest({ populationBasis: "Encounter" })), /populationBasis 'Encounter' differs/);
   const regrouped = structuredClone(derived);
   const groups = ((regrouped.bundle as { entry: Array<{ resource?: Record<string, unknown> }> }).entry.find((e) => e.resource?.["resourceType"] === "Measure")!.resource!["group"]) as Array<{ id?: string }>;
