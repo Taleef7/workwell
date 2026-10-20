@@ -67,6 +67,8 @@ import { isOfficialCalculationError } from "../wiring/official-calculation-error
 import { IncrementalCache } from "./incremental/incremental-eval.ts";
 import {
   countSufficiency,
+  sufficiencyWindowFor,
+  type SufficiencyWindow,
   describeShortfall,
   judgeSufficiency,
   withSufficiency,
@@ -587,6 +589,8 @@ function enrollmentRosterFor(ids: readonly string[], explicitJson: string | unde
 async function prepareLivePopulation(
   deps: RunPipelineDeps,
   planned: PlannedRun,
+  /** The window the sufficiency floors judge: the measurement period CMS's measures read (#853). */
+  sufficiencyWindow: SufficiencyWindow,
 ): Promise<{ items: WorkItem[]; roster: EnrollmentRoster; metadata: LiveTenantMetadata; sufficiency: SufficiencyMetrics }> {
   const descriptor = planned.livePopulation!;
   const started = Date.now();
@@ -648,7 +652,7 @@ async function prepareLivePopulation(
       // #853: measured here because this is the one place every live bundle passes exactly once, and it
       // is before the first chunk writes a case. The synthetic items a live run also carries are not
       // counted: the corpus always codes its encounters and finalises its blood pressures.
-      sufficiency: countSufficiency(bundles, (bundle) => fetchFailureOf(bundle) !== undefined),
+      sufficiency: countSufficiency(bundles, (bundle) => fetchFailureOf(bundle) !== undefined, sufficiencyWindow),
     };
   } catch (error) {
     throw new LivePopulationPreparationError(
@@ -695,7 +699,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   let sufficiencyVerdicts: MeasureSufficiency[] = [];
   const insufficient = new Map<string, SufficiencyCheck[]>();
   if (planned.livePopulation) {
-    const prepared = await prepareLivePopulation(deps, planned);
+    const prepared = await prepareLivePopulation(deps, planned, sufficiencyWindowFor(evalDate));
     items = [...items, ...prepared.items];
     liveRoster = prepared.roster;
     liveTenant = prepared.metadata;

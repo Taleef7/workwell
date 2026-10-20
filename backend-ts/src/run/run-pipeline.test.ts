@@ -477,16 +477,21 @@ test("T3: a subject WebChart could not read is an evaluation error, never 'out o
 });
 
 test("#853: thin live data marks the measure data_insufficient, and an out-of-population row closes nothing; coded data closes as before", async () => {
+  // Fifty 2026 visits each, so the two patients reach the minimum the floor needs before it judges.
   const withEncounter = (id: string, coded: boolean): unknown => {
     const bundle = patientOnly(id) as { entry: unknown[] };
-    bundle.entry.push({
-      resource: {
-        resourceType: "Encounter",
-        id: `${id}-enc`,
-        status: "finished",
-        type: coded ? [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213" }] }] : [{ text: "Office visit" }],
-      },
-    });
+    for (let i = 0; i < 50; i += 1) {
+      const at = `2026-05-${String((i % 28) + 1).padStart(2, "0")}T14:00:00Z`;
+      bundle.entry.push({
+        resource: {
+          resourceType: "Encounter",
+          id: `${id}-enc-${i}`,
+          status: "finished",
+          period: { start: at, end: at },
+          type: coded ? [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213" }] }] : [{ text: "Office visit" }],
+        },
+      });
+    }
     return bundle;
   };
   // CMS's logic finds every subject outside the initial population, as uncoded visit types make it do.
@@ -539,10 +544,10 @@ test("#853: thin live data marks the measure data_insufficient, and an out-of-po
     assert.deepEqual(
       (completed.payload.dataInsufficient as Array<{ measureId: string; shortfalls: Array<{ check: string; count: number; of: number }> }>)
         .map((v) => ({ measureId: v.measureId, shortfalls: v.shortfalls.map((s) => [s.check, s.count, s.of]) })),
-      [{ measureId: "audiogram", shortfalls: [["encounterTypeCoded", 0, 2]] }],
+      [{ measureId: "audiogram", shortfalls: [["encounterTypeCoded", 0, 100]] }],
     );
     const logs = await thin.runStore.listLogs(thin.result.runId, 100);
-    assert.ok(logs.some((l) => l.message.startsWith("data_insufficient:audiogram — encounter types coded: 0 of 2")), "the run log names the measure and the shortfall");
+    assert.ok(logs.some((l) => l.message.startsWith("data_insufficient:audiogram — encounter types coded: 0 of 100")), "the run log names the measure and the shortfall");
     assert.deepEqual(runtimeHealth().lastPopulationRun, { runId: thin.result.runId, status: "PARTIAL_FAILURE", dataInsufficient: ["audiogram"] });
   } finally {
     try { rmSync(thin.p, { force: true }); } catch { /* best effort */ }

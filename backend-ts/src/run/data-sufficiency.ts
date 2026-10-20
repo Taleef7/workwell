@@ -8,12 +8,20 @@
  * of population, and the reports refuse it.
  *
  * What it measures, and what it never measures:
- * - **The share of what was ingested that is usable**, over the whole ingested history. Never "how many
- *   patients have something in the period": on 1 January that is legitimately near zero.
+ * - **The share of what the measures READ that is usable**: the encounters and blood pressures inside the
+ *   measurement period, the window every CMS measure's logic reads them in (owner decision, 2026-10-20). A
+ *   2019 visit typed as text affects no 2026 rate, so it never counts against the floor; judging the whole
+ *   ingested history would flag a practice that codes well today for its legacy records, indefinitely.
+ *   Data quality is judged for its use (Kahn's harmonized framework), and PCORnet windows its checks the
+ *   same way.
+ * - **Not before there is enough to judge.** A share floor is judged only once at least
+ *   {@link DATA_SUFFICIENCY_MINIMUM} items are in the window: two uncoded of twenty visits on 3 January is
+ *   noise, not a broken feed. So 1 January cannot trip it, and a feed that breaks in January is caught once
+ *   the year's visits accumulate (at the pilot's size, within the first working day).
  * - **Nothing about a previous run.** A comparison across a change of measurement year would fire on every
  *   reset.
- * - **A metric with nothing to measure never fires.** No encounters means no encounter floor, so an empty
- *   tenant is judged by the other checks (and by the run's own refusal of an unreadable roster).
+ * - **A metric with nothing to measure never fires**, so an empty tenant is judged by the other checks (and
+ *   by the run's own refusal of an unreadable roster).
  *
  * The floors are starting guesses (D12): they hold until a real-data baseline replaces them.
  */
@@ -27,6 +35,21 @@ export const DATA_SUFFICIENCY_FLOORS = {
   /** The share of subjects whose record could not be read. Below this. */
   failedFetches: 0.01,
 } as const;
+
+/** Below this many items in the window, a share floor is not judged (owner decision, 2026-10-20). */
+export const DATA_SUFFICIENCY_MINIMUM = 100;
+
+/** The window the measures read: an official measure's measurement period, the evaluation date's calendar year. */
+export interface SufficiencyWindow {
+  start: string;
+  end: string;
+}
+
+/** The calendar year containing the evaluation date: the period every CMS-scored measure reads (ADR-072). */
+export function sufficiencyWindowFor(evaluationDate: string): SufficiencyWindow {
+  const year = evaluationDate.slice(0, 4);
+  return { start: `${year}-01-01T00:00:00.000Z`, end: `${year}-12-31T23:59:59.999Z` };
+}
 
 /** The blood-pressure statuses CMS's `Status.isObservationBP` admits. `unknown` is not one. */
 const FINAL_BP_STATUSES: ReadonlySet<string> = new Set(["final", "amended", "corrected"]);
@@ -83,11 +106,44 @@ function hasCodedType(encounter: Record<string, unknown>): boolean {
   );
 }
 
+const instantOf = (value: unknown): number | null => {
+  if (typeof value !== "string") return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+};
+
 /**
- * Count, over the bundles a run ingested, what the floors judge. `fetchFailed` names a bundle that stands
- * in for a record that could not be read; its resources are not counted, since there are none of its own.
+ * Whether an encounter lies inside the window, as `period during day of "Measurement Period"` reads it: both
+ * ends inside (an open end takes the other). An encounter with no usable period is never read by that logic,
+ * so it is not counted.
  */
-export function countSufficiency(bundles: readonly unknown[], fetchFailed: (bundle: unknown) => boolean): SufficiencyMetrics {
+function encounterInWindow(encounter: Record<string, unknown>, start: number, end: number): boolean {
+  const period = isObject(encounter.period) ? encounter.period : null;
+  const from = instantOf(period?.start) ?? instantOf(period?.end);
+  const to = instantOf(period?.end) ?? from;
+  return from !== null && to !== null && from >= start && to <= end;
+}
+
+/** Whether a reading lies inside the window, as CMS165 reads it: `effective.latest() during day of` the period. */
+function readingInWindow(observation: Record<string, unknown>, start: number, end: number): boolean {
+  const period = isObject(observation.effectivePeriod) ? observation.effectivePeriod : null;
+  const at =
+    instantOf(observation.effectiveDateTime) ?? instantOf(period?.end) ?? instantOf(period?.start) ?? instantOf(observation.effectiveInstant);
+  return at !== null && at >= start && at <= end;
+}
+
+/**
+ * Count, over the bundles a run ingested, what the floors judge: the encounters and blood pressures inside
+ * `window`. `fetchFailed` names a bundle that stands in for a record that could not be read; its resources
+ * are not counted, since there are none of its own.
+ */
+export function countSufficiency(
+  bundles: readonly unknown[],
+  fetchFailed: (bundle: unknown) => boolean,
+  window: SufficiencyWindow,
+): SufficiencyMetrics {
+  const start = Date.parse(window.start);
+  const end = Date.parse(window.end);
   const metrics: SufficiencyMetrics = {
     subjects: 0,
     failedFetches: 0,
@@ -104,9 +160,11 @@ export function countSufficiency(bundles: readonly unknown[], fetchFailed: (bund
     }
     for (const resource of resourcesOf(bundle)) {
       if (resource.resourceType === "Encounter") {
+        if (!encounterInWindow(resource, start, end)) continue;
         metrics.encounters += 1;
         if (hasCodedType(resource)) metrics.encountersWithCodedType += 1;
       } else if (resource.resourceType === "Observation" && isBloodPressure(resource)) {
+        if (!readingInWindow(resource, start, end)) continue;
         metrics.bloodPressures += 1;
         if (typeof resource.status === "string" && FINAL_BP_STATUSES.has(resource.status)) metrics.bloodPressuresFinal += 1;
       }
@@ -139,7 +197,7 @@ export function judgeSufficiency(
       : null;
   const encounterShare = share(metrics.encountersWithCodedType, metrics.encounters);
   const uncodedEncounters: SufficiencyShortfall | null =
-    metrics.encounters > 0 && encounterShare < DATA_SUFFICIENCY_FLOORS.encounterTypeCoded
+    metrics.encounters >= DATA_SUFFICIENCY_MINIMUM && encounterShare < DATA_SUFFICIENCY_FLOORS.encounterTypeCoded
       ? {
           check: "encounterTypeCoded",
           observed: encounterShare,
@@ -150,7 +208,7 @@ export function judgeSufficiency(
       : null;
   const bpShare = share(metrics.bloodPressuresFinal, metrics.bloodPressures);
   const unfinalBloodPressures: SufficiencyShortfall | null =
-    metrics.bloodPressures > 0 && bpShare < DATA_SUFFICIENCY_FLOORS.bloodPressureFinal
+    metrics.bloodPressures >= DATA_SUFFICIENCY_MINIMUM && bpShare < DATA_SUFFICIENCY_FLOORS.bloodPressureFinal
       ? {
           check: "bloodPressureFinal",
           observed: bpShare,

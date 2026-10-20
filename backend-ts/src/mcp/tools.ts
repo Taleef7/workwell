@@ -33,6 +33,7 @@ import { toMeasure, toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
+import { dataInsufficientChecks } from "../run/data-sufficiency.ts";
 import { AGE_BANDS, hasActiveSubjectFilters, isAgeBand, isSex, matchesSubjectFilters, payerCodesOf } from "../compliance/subject-filters.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { JsonRecord } from "./tool-audit.ts";
@@ -294,6 +295,22 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
   return { results, returned: results.length, filters: { status, measureId: measure?.measureId ?? "" } };
 }
 
+/**
+ * The measures of a run whose data was too thin to trust (#853), read off the rows, as every export
+ * refuses them, so a lost audit write cannot make this answer a rate. Only a PARTIAL_FAILURE run can hold
+ * one (the gate ends such a run PARTIAL_FAILURE), so any other run costs no read. One measure at a time,
+ * one row each: the flag is on every row of a thin measure.
+ */
+async function thinMeasuresOf(outcomes: OutcomeStore, run: { id: string; status: string }): Promise<string[]> {
+  if (run.status !== "PARTIAL_FAILURE") return [];
+  const thin: string[] = [];
+  for (const measureId of await outcomes.distinctMeasuresForRun(run.id, 50)) {
+    const [row] = await outcomes.listOutcomes(run.id, { measureId, limit: 1, offset: 0, order: "none" });
+    if (row && dataInsufficientChecks(row.evidence) !== null) thin.push(measureId);
+  }
+  return thin.sort();
+}
+
 async function getRunSummary(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const rawRunId = args.runId != null && String(args.runId).trim() ? String(args.runId).trim() : null;
   if (rawRunId && !UUID_RE.test(rawRunId)) return safeError("INVALID_ARGUMENT", "runId must be a valid UUID");
@@ -302,13 +319,17 @@ async function getRunSummary(args: JsonRecord, deps: McpToolDeps): Promise<unkno
   const totalCases = await deps.caseStore.countByLastRun(run.id);
   // Counts-based (bounded GROUP BY) — never materialize a seed:scale run's 120k rows for the summary.
   const s = toRunSummaryFromCounts(run, await deps.outcomeStore.countOutcomesByStatus(run.id), totalCases);
+  // #853: a rate over a measure whose data was too thin to trust is the dashboard's refused number, so
+  // the run states none, and says which measures were thin.
+  const dataInsufficient = await thinMeasuresOf(deps.outcomeStore, run);
   return {
     run_id: s.runId,
     scope: s.scopeType,
     total_cases: s.totalCases,
     compliant_count: s.compliantCount,
     non_compliant_count: s.nonCompliantCount,
-    pass_rate: s.passRate,
+    pass_rate: dataInsufficient.length > 0 ? null : s.passRate,
+    data_insufficient: dataInsufficient,
     duration: s.durationMs,
     outcome_counts: s.outcomeCounts,
     started_at: s.startedAt,
@@ -400,7 +421,8 @@ async function listRuns(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
       const notInPopulation = statusCounts
         .filter((c) => c.status === "MISSING_DATA" && c.outOfPopulation === true)
         .reduce((sum, c) => sum + c.count, 0);
-      const complianceRate = complianceRateOf({
+      const dataInsufficient = await thinMeasuresOf(deps.outcomeStore, run);
+      const complianceRate = dataInsufficient.length > 0 ? null : complianceRateOf({
         compliant: counts.COMPLIANT ?? 0,
         dueSoon: counts.DUE_SOON ?? 0,
         overdue: counts.OVERDUE ?? 0,
@@ -422,6 +444,7 @@ async function listRuns(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
         duration_ms: item.durationMs,
         total_evaluated: item.totalEvaluated,
         compliance_rate: complianceRate,
+        data_insufficient: dataInsufficient,
         outcome_counts: counts,
       };
     }),

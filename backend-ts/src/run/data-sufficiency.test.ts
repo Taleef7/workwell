@@ -6,7 +6,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DATA_SUFFICIENCY_FLOORS,
+  DATA_SUFFICIENCY_MINIMUM,
   countSufficiency,
+  sufficiencyWindowFor,
   dataInsufficientChecks,
   describeShortfall,
   judgeSufficiency,
@@ -15,15 +17,19 @@ import {
 } from "./data-sufficiency.ts";
 
 const LOINC = "http://loinc.org";
-const encounter = (coded: boolean) => ({
+/** A 2026 run: the window is the 2026 calendar year. */
+const WINDOW = sufficiencyWindowFor("2026-06-01");
+const encounter = (coded: boolean, at = "2026-05-04T14:00:00Z") => ({
   resourceType: "Encounter",
+  period: { start: at, end: at },
   type: coded
     ? [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213" }], text: "Office visit" }]
     : [{ text: "Office visit" }],
 });
-const bloodPressure = (status: string) => ({
+const bloodPressure = (status: string, at = "2026-05-04T14:10:00Z") => ({
   resourceType: "Observation",
   status,
+  effectiveDateTime: at,
   code: { coding: [{ system: LOINC, code: "85354-9" }] },
   component: [
     { code: { coding: [{ system: LOINC, code: "8480-6" }] }, valueQuantity: { value: 128, unit: "mm[Hg]" } },
@@ -57,6 +63,7 @@ test("counts what the floors judge, and nothing of a record that could not be re
       degraded,
     ],
     (b) => b === degraded,
+    WINDOW,
   );
   assert.deepEqual(m, {
     subjects: 3,
@@ -70,14 +77,14 @@ test("counts what the floors judge, and nothing of a record that could not be re
 
 test("a coding without a system, or a code, is not a coded type", () => {
   const halfCoded = { resourceType: "Encounter", type: [{ coding: [{ code: "99213" }] }, { coding: [{ system: "x", code: "" }] }] };
-  const m = countSufficiency([bundle(halfCoded)], () => false);
+  const m = countSufficiency([bundle({ ...halfCoded, period: { start: "2026-03-01" } })], () => false, WINDOW);
   assert.equal(m.encounters, 1);
   assert.equal(m.encountersWithCodedType, 0);
 });
 
 test("a blood pressure CMS165 cannot read (components not in LOINC's system) is not counted at all", () => {
   const unreadable = { ...bloodPressure("unknown"), component: [{ code: { coding: [{ system: "http://loinc.org/", code: "8480-6" }] } }] };
-  assert.equal(countSufficiency([bundle(unreadable)], () => false).bloodPressures, 0);
+  assert.equal(countSufficiency([bundle(unreadable)], () => false, WINDOW).bloodPressures, 0);
 });
 
 test("encounter floor: 94.9% coded fires for every CMS-scored measure, 95% does not", () => {
@@ -112,16 +119,47 @@ test("a metric with nothing to measure never fires: no encounters is not 0% code
   assert.deepEqual(flagged(metrics({ subjects: 0, failedFetches: 0 })), {});
 });
 
+test("only what the measures read counts: years of uncoded history do not fail a practice that codes this year", () => {
+  // The owner's case for the window: a 2019 visit typed as text affects no 2026 rate.
+  const legacy = Array.from({ length: 500 }, () => encounter(false, "2019-03-01T10:00:00Z"));
+  const thisYear = Array.from({ length: 200 }, () => encounter(true));
+  const m = countSufficiency([bundle(...legacy, ...thisYear)], () => false, WINDOW);
+  assert.equal(m.encounters, 200);
+  assert.equal(m.encountersWithCodedType, 200);
+  assert.deepEqual(flagged(m), {});
+
+  // Each end of an encounter must lie inside, and one without a usable period is never read by the logic.
+  const straddlesStart = { ...encounter(false), period: { start: "2025-12-31T20:00:00Z", end: "2026-01-01T02:00:00Z" } };
+  const straddlesEnd = { ...encounter(false), period: { start: "2026-12-31T22:00:00Z", end: "2027-01-01T03:00:00Z" } };
+  const undated = { resourceType: "Encounter", type: [{ text: "Office visit" }] };
+  assert.equal(countSufficiency([bundle(straddlesStart, straddlesEnd, undated)], () => false, WINDOW).encounters, 0);
+
+  // A blood pressure counts by when it was taken.
+  const bp = countSufficiency([bundle(bloodPressure("unknown", "2025-11-02T09:00:00Z"), bloodPressure("final"))], () => false, WINDOW);
+  assert.deepEqual([bp.bloodPressures, bp.bloodPressuresFinal], [1, 1]);
+});
+
+test("a share floor is judged only once enough is in the window: 99 uncoded visits do not fire, 100 do", () => {
+  assert.equal(DATA_SUFFICIENCY_MINIMUM, 100);
+  const uncoded = (n: number) => countSufficiency([bundle(...Array.from({ length: n }, () => encounter(false)))], () => false, WINDOW);
+  assert.deepEqual(flagged(uncoded(99)), {});
+  assert.deepEqual(flagged(uncoded(100)).cms122, ["encounterTypeCoded"]);
+  const unfinal = (n: number) =>
+    countSufficiency([bundle(...Array.from({ length: n }, () => bloodPressure("unknown")))], () => false, WINDOW);
+  assert.deepEqual(flagged(unfinal(99)), {});
+  assert.deepEqual(flagged(unfinal(100)).cms165, ["bloodPressureFinal"]);
+});
+
 test("the WebChart trial's shape is insufficient: every visit type as text, every panel status unknown", () => {
-  const trial = Array.from({ length: 10 }, () => bundle(encounter(false), bloodPressure("unknown")));
-  const verdict = flagged(countSufficiency(trial, () => false));
+  const trial = Array.from({ length: DATA_SUFFICIENCY_MINIMUM }, () => bundle(encounter(false), bloodPressure("unknown")));
+  const verdict = flagged(countSufficiency(trial, () => false, WINDOW));
   assert.deepEqual(verdict.cms165, ["encounterTypeCoded", "bloodPressureFinal"]);
   assert.deepEqual(verdict.cms122, ["encounterTypeCoded"]);
 });
 
 test("the shortfall reads plainly for a run log", () => {
-  const [verdict] = judgeSufficiency(metrics({ encounters: 89, encountersWithCodedType: 11 }), [{ measureId: "cms122", fqmScored: true }]);
-  assert.equal(describeShortfall(verdict!.shortfalls[0]!), "encounter types coded: 11 of 89 (12.4%), floor 95.0%");
+  const [verdict] = judgeSufficiency(metrics({ encounters: 189, encountersWithCodedType: 111 }), [{ measureId: "cms122", fqmScored: true }]);
+  assert.equal(describeShortfall(verdict!.shortfalls[0]!), "encounter types coded: 111 of 189 (58.7%), floor 95.0%");
 });
 
 test("the evidence flag is set, replaced or removed on every row, never kept from an earlier run", () => {

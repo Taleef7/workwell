@@ -1251,10 +1251,14 @@ export default function RunsPage() {
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Cases last updated by this run: {selectedRun.totalCases}</p>
               {/* Of every row the run wrote, out-of-population patients included. The CMS measure rate,
                   over the measure's own population, is in the reconciliation below (#668). */}
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">
-                Compliant: {selectedRun.passRate.toFixed(1)}% of everyone evaluated ({selectedRun.compliantCount.toLocaleString()} of{" "}
-                {selectedRun.totalEvaluated.toLocaleString()})
-              </p>
+              {/* #853: not under the thin-data banner. On a single-measure run this line IS that measure's
+                  rate, and on a wider one it pools the thin measure's rows in. */}
+              {reconciliation?.dataInsufficient?.length ? null : (
+                <p data-testid="run-pass-rate" className="text-xs text-neutral-600 dark:text-neutral-400">
+                  Compliant: {selectedRun.passRate.toFixed(1)}% of everyone evaluated ({selectedRun.compliantCount.toLocaleString()} of{" "}
+                  {selectedRun.totalEvaluated.toLocaleString()})
+                </p>
+              )}
               {/* Covers this rate and the CMS measure rate in the reconciliation below. This page lists
                   runs from before and after the routing flip, so it names CMS's FHIR logic only for a
                   run whose reconciliation shows official evidence. */}

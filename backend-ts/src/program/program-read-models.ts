@@ -23,7 +23,7 @@ import { STAFF_CLOSED_STATUSES } from "../case/worklist-read-model.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
 import { officialMeasureRateResult, type MeasureRate } from "./measure-rate.ts";
-import type { SufficiencyCheck } from "../run/data-sufficiency.ts";
+import { dataInsufficientChecks, type SufficiencyCheck } from "../run/data-sufficiency.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -879,7 +879,7 @@ export async function programTrend(
     while (trendPointsIn(runs, opts?.tz).length < 10 && runsFound >= window && window < TREND_RUN_WINDOW_MAX) {
       window = Math.min(window * 2, TREND_RUN_WINDOW_MAX);
       const read = await runsWithOutcomes(deps, measureId, filters, window);
-      runs = runPointsOf(read.groups);
+      runs = await trustedRunPoints(deps.outcomeStore, measureId, read.groups);
       runsFound = read.runsFound;
     }
     const stamped = await withMeasurementYears(deps.runStore, runs);
@@ -952,7 +952,29 @@ export async function programTrend(
   // NOTE: Java unions a `run_based` branch for aggregate-only seeded runs; the TS floor `runs`
   // table has no compliant/total columns, so every TS run with data has outcomes — the
   // outcome-based branch is complete here.
-  return widenAndServe({ runs: runPointsOf(first.groups), runsFound: first.runsFound, window: TREND_RUN_WINDOW });
+  return widenAndServe({ runs: await trustedRunPoints(deps.outcomeStore, measureId, first.groups), runsFound: first.runsFound, window: TREND_RUN_WINDOW });
+}
+
+/**
+ * The per-run trend points, without a run whose data for this measure was too thin to trust (#853): its
+ * rate is low because the data is missing, so it is no point on the measure's history, and the newest
+ * trusted run stays the newest point. The flag is on EVERY row of a thin measure (errored ones included,
+ * and cleared on every row of a sufficient one), so one row per run decides it, read unsorted. Runs only on
+ * a trend-memo miss: the computed points are what the memo keeps.
+ */
+async function trustedRunPoints(
+  outcomes: Pick<OutcomeStore, "listOutcomes">,
+  measureId: string,
+  groups: RunGroup[],
+): Promise<ProgramTrendPoint[]> {
+  const trusted: ProgramTrendPoint[] = [];
+  // One at a time: a window can hold dozens of runs, and fanning the probes out at once is how a request
+  // drains the connection pool.
+  for (const point of runPointsOf(groups)) {
+    const [row] = await outcomes.listOutcomes(point.runId, { measureId, limit: 1, offset: 0, order: "none" });
+    if (row === undefined || dataInsufficientChecks(row.evidence) === null) trusted.push(point);
+  }
+  return trusted;
 }
 
 /**

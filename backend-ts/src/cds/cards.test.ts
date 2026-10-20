@@ -356,3 +356,18 @@ test("#650: a card for an official gap states no compliance window; an authored 
   const [authoredCard] = await buildComplianceCards([row("audiogram", "OVERDUE")], opts());
   assert.match(authoredCard!.detail ?? "", /Compliance window: 365 days/);
 });
+
+test("a measure whose latest run's data was too thin to trust gets no card; another measure's card still renders (#853)", async () => {
+  const thin = { dataInsufficient: { checks: ["bloodPressureFinal"] } };
+  const flagged = row("audiogram", "OVERDUE", { evidence: { ...(row("audiogram", "OVERDUE").evidence as object), ...thin } });
+  const cards = await buildComplianceCards([flagged, row("tb_surveillance", "OVERDUE")], opts());
+  assert.equal(cards.length, 1);
+  assert.doesNotMatch(cards[0]!.summary, /Annual Audiogram Completed/);
+
+  // Its evaluation-failure card too: the measure says nothing in the encounter while its data is thin.
+  const erroredThin = row("audiogram", "MISSING_DATA", { evidence: { evaluationError: "engine failure", message: "boom", ...thin } });
+  assert.deepEqual(await buildComplianceCards([erroredThin], opts()), []);
+
+  // The next sufficient run's row carries no flag, and the card is back.
+  assert.equal((await buildComplianceCards([row("audiogram", "OVERDUE")], opts())).length, 1);
+});

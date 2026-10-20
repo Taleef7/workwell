@@ -747,3 +747,33 @@ test("#769: a run holding a patient's 2026 and 2027 rows — the MCP case tools 
   const explained = (await call("explain_outcome", { caseId: c2027.id })).payload;
   assert.equal((explained.logic as JsonRecord).kind, "workwell-translation", "explain_outcome explains the same row");
 });
+
+test("list_runs and get_run_summary state no rate for a run whose data was too thin to trust (#853)", async () => {
+  const thinRun = await deps.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "hazwoper",
+    triggeredBy: "test",
+    requestedScope: { measureId: "hazwoper" },
+    measurementPeriodStart: "2026-06-14T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-14T00:00:00.000Z",
+  });
+  await deps.outcomeStore.recordOutcomes(
+    ["emp-001", "emp-002"].map((subjectId) => ({
+      runId: thinRun.id, subjectId, measureId: "hazwoper", evaluationPeriod: "2026-06-14", status: "COMPLIANT",
+      evidence: { dataInsufficient: { checks: ["failedFetches"] } },
+    })),
+  );
+  await deps.runStore.finalizeRun(thinRun.id, "PARTIAL_FAILURE");
+
+  const listed = ((await call("list_runs", { measureId: "hazwoper" })).payload.results as JsonRecord[]).find((r) => r.run_id === thinRun.id)!;
+  assert.equal(listed.compliance_rate, null, "all COMPLIANT, yet no rate: the data behind it was too thin");
+  assert.deepEqual(listed.data_insufficient, ["hazwoper"]);
+
+  const summary = (await call("get_run_summary", { runId: thinRun.id })).payload;
+  assert.equal(summary.pass_rate, null);
+  assert.deepEqual(summary.data_insufficient, ["hazwoper"]);
+
+  // A run whose data met its floors states its rate and no thin measure.
+  const trusted = ((await call("list_runs", { measureId: "audiogram" })).payload.results as JsonRecord[])[0]!;
+  assert.deepEqual(trusted.data_insufficient, []);
+});

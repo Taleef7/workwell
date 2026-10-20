@@ -63,11 +63,14 @@ describe("RunsPage data sufficiency", () => {
     expect(banner).toHaveTextContent("cms165: encounter types coded: 0 of 89 (0.0%), floor 95.0%; blood pressures final: 0 of 12 (0.0%), floor 95.0%");
     expect(screen.queryByRole("button", { name: "MeasureReport (FHIR)" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "QRDA III (XML)" })).not.toBeInTheDocument();
+    // On a single-measure run the pooled line IS that measure's rate.
+    expect(screen.queryByTestId("run-pass-rate")).not.toBeInTheDocument();
   });
 
   it("shows no banner and keeps the exports for a run whose data met its floors", async () => {
     render(<RunsPage />);
     expect(await screen.findByRole("button", { name: "MeasureReport (FHIR)" })).toBeInTheDocument();
     expect(screen.queryByTestId("run-data-insufficient")).not.toBeInTheDocument();
+    expect(screen.getByTestId("run-pass-rate")).toHaveTextContent("Compliant: 0.0% of everyone evaluated");
   });
 });
