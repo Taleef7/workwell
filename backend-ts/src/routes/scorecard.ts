@@ -9,7 +9,7 @@
  */
 import { getStores } from "../stores/factory.ts";
 import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
-import { employeeById, providers, isRunnableMeasure, DIRECTORY } from "../config/deployment-profile.ts";
+import { employeeById, providerById, isRunnableMeasure, DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
 import { providerIdsOwnedBy } from "../case/panel-assignment.ts";
@@ -65,7 +65,9 @@ export async function handleScorecard(
       events: stores.events,
       cases: stores.cases,
       subjectOf: employeeLookup,
-      providers: providers(),
+      // The scoped lookup, with the env: on a deployment showing the live WebChart tenant, its patients'
+      // PCP is that tenant's provider, which the static list does not hold.
+      providerOf: (id) => providerById(id, env),
     },
     {
       measurementYear,

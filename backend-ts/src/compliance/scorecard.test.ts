@@ -80,7 +80,7 @@ function deps(f: Fixture): ScorecardDeps {
           .slice(q.offset ?? 0, (q.offset ?? 0) + (q.limit ?? 50)) as CaseRecord[],
     },
     subjectOf: (id) => (f.pcp[id] ? { providerId: f.pcp[id]! } : null),
-    providers: PROVIDERS,
+    providerOf: (id) => PROVIDERS.find((p) => p.id === id) ?? null,
     // Exposed for the compaction test, which flips it after the first read.
     ...({ setCompacted: (v: boolean) => (compacted = v) } as object),
   } as ScorecardDeps;

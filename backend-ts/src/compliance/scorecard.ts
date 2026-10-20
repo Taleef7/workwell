@@ -57,7 +57,12 @@ export interface ScorecardDeps {
   cases: Pick<CaseStore, "listCases">;
   /** The work list's own patient lookup (`/api/cases`), so both count a patient under the same PCP. */
   subjectOf: (subjectId: string) => { providerId: string } | null;
-  providers: readonly { id: string; name: string; location: string }[];
+  /**
+   * The directory's provider for an id, or null when it lists none. The deployment's own scoped lookup
+   * (`providerById(id, env)`), so the live WebChart provider is a row of its own wherever that deployment
+   * shows the live tenant, never folded into "Other".
+   */
+  providerOf: (id: string) => { id: string; name: string; location: string } | null;
 }
 
 export interface ScorecardRequest {
@@ -137,7 +142,12 @@ interface Column {
 }
 
 export async function buildScorecard(deps: ScorecardDeps, request: ScorecardRequest): Promise<Scorecard> {
-  const providerById = new Map(deps.providers.map((p) => [p.id, p]));
+  // Resolved once per id: the lookup is the directory's, and a run names the same few hundred PCPs over and over.
+  const resolved = new Map<string, { id: string; name: string; location: string } | null>();
+  const providerOf = (id: string) => {
+    if (!resolved.has(id)) resolved.set(id, deps.providerOf(id));
+    return resolved.get(id)!;
+  };
   const openGapsShown = request.measurementYear === Number(request.today.slice(0, 4));
 
   // A subject's row key: their PCP, "Other" for a PCP the directory does not list, null when they are no
@@ -145,7 +155,7 @@ export async function buildScorecard(deps: ScorecardDeps, request: ScorecardRequ
   const rowKeyOf = (subjectId: string): string | null => {
     const subject = deps.subjectOf(subjectId);
     if (!subject) return null;
-    const key = providerById.has(subject.providerId) ? subject.providerId : OTHER;
+    const key = providerOf(subject.providerId) ? subject.providerId : OTHER;
     if (request.providerIds && !request.providerIds.has(key)) return null;
     return key;
   };
@@ -175,10 +185,10 @@ export async function buildScorecard(deps: ScorecardDeps, request: ScorecardRequ
   const byLocation = new Map<string, string[]>();
   for (const key of keys) {
     if (key === OTHER) continue;
-    const location = providerById.get(key)!.location;
+    const location = providerOf(key)!.location;
     byLocation.set(location, [...(byLocation.get(location) ?? []), key]);
   }
-  const nameOf = (id: string): string => providerById.get(id)!.name;
+  const nameOf = (id: string): string => providerOf(id)!.name;
   const locations = [...byLocation.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([location, ids]) => {
