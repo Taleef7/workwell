@@ -57,6 +57,10 @@ test("the arguments: a date and the host are both required, and nothing else is 
   });
   assert.throws(() => parseArgs(["--confirm-host", "db.test"]), RehearsalUsageError);
   assert.throws(() => parseArgs(["--evaluation-date", "2027-1-1", "--confirm-host", "db.test"]), RehearsalUsageError);
+  for (const impossible of ["2027-02-29", "2027-02-30", "2027-13-01", "2027-04-31"]) {
+    assert.throws(() => parseArgs(["--evaluation-date", impossible, "--confirm-host", "db.test"]), RehearsalUsageError, impossible);
+  }
+  assert.equal(parseArgs(["--evaluation-date", "2028-02-29", "--confirm-host", "db.test"]).evaluationDate, "2028-02-29", "a leap day is real");
   assert.throws(() => parseArgs(["--evaluation-date", "2027-01-01"]), RehearsalUsageError);
   assert.throws(() => parseArgs(["--evaluation-date", "2027-01-01", "--confirm-host", "db.test", "--force"]), RehearsalUsageError);
 });

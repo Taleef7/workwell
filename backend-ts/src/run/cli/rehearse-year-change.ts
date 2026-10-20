@@ -43,8 +43,10 @@ export function parseArgs(argv: readonly string[]): RehearsalArgs {
     values.set(flag, value);
   }
   const evaluationDate = values.get("--evaluation-date");
-  if (!evaluationDate || !/^\d{4}-\d{2}-\d{2}$/.test(evaluationDate) || Number.isNaN(Date.parse(`${evaluationDate}T00:00:00Z`))) {
-    throw new RehearsalUsageError("--evaluation-date YYYY-MM-DD is required");
+  // Round-tripped, because `Date.parse` rolls an impossible day over (2027-02-30 reads as 2 March).
+  const parsed = new Date(`${evaluationDate}T00:00:00Z`);
+  if (!evaluationDate || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== evaluationDate) {
+    throw new RehearsalUsageError("--evaluation-date YYYY-MM-DD (a real calendar date) is required");
   }
   const confirmHost = values.get("--confirm-host");
   if (!confirmHost) throw new RehearsalUsageError("--confirm-host is required");
