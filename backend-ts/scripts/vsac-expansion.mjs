@@ -29,6 +29,17 @@
  * The two are NOT interchangeable and the code keeps them apart, because the evidence available for
  * each is different (see `completeTerminology`).
  *
+ * ## At the release, named by its title (#851)
+ *
+ * Every expansion here asks VSAC for the release's own answer: `expansion=<the release Library's title>`,
+ * one request per set. The older form, `manifest=<the Library canonical>`, resolves a grouping's members at
+ * their LATEST version, so its answer drifts after the release ships (2026-10-15: Advanced Illness went
+ * 2,025 → 2,027 at the 2026-05-14 release). It also filled the official Advanced Illness sidecars with
+ * 2,000 codes where the 2025 release, and its published value-set file, hold 2,030. VSAC echoes the
+ * release it applied as the `manifest` parameter, and `expandComplete` refuses an answer that does not
+ * name the pinned one. A set the release does not list has no answer at it (`expansion=` returns
+ * not-found); see `completeTerminology` for the one such set an official artifact needs.
+ *
  * ## The one thing to hold onto
  *
  * Every failure path here leaves upstream's terminology exactly as shipped, so the manifest's
@@ -161,15 +172,22 @@ async function fetchVsacJson(url, headers, fetchImpl, attempts = 4) {
  * `offset` advances by the page's own length, never by `count`: a short page must still terminate, and
  * a server that ignores `offset` must not loop forever — hence the page ceiling.
  *
+ * `vsacExpansion`, when given, is the release's title and is sent as `expansion=` in place of `manifest=`
+ * (#851, see the module comment); never both. The release VSAC echoes back is returned as `release`.
+ *
  * `fetch` is optional and defaults to the global one; it is a transport seam, not a behaviour switch.
  */
-export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl }) {
+export async function expandFromVsac(oid, { vsacBase, vsacManifest, vsacExpansion, apiKey, fetch: fetchImpl }) {
   const base = String(vsacBase).replace(/\/+$/, "");
   const headers = {
     Authorization: `Basic ${Buffer.from(`apikey:${apiKey}`).toString("base64")}`,
     Accept: "application/fhir+json",
   };
-  const pin = vsacManifest ? `&manifest=${encodeURIComponent(vsacManifest)}` : "";
+  const pin = vsacExpansion
+    ? `&expansion=${encodeURIComponent(vsacExpansion)}`
+    : vsacManifest
+      ? `&manifest=${encodeURIComponent(vsacManifest)}`
+      : "";
   const codes = [];
   let offset = 0;
   let total = 0;
@@ -181,8 +199,10 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
    * by its own test, which is the only reason it is not in this PR.
    */
   let echoedUrl;
-  /** The value-set version VSAC says it expanded, when it says one (`expandAtRelease` reads it). */
+  /** The value-set version VSAC says it expanded, when it says one. */
   let echoedVersion;
+  /** The release VSAC says it expanded at: the `manifest` parameter it echoes for an `expansion=` request. */
+  let echoedRelease;
 
   for (let page = 0; ; page += 1) {
     if (page >= VSAC_MAX_PAGES) {
@@ -198,6 +218,7 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
     if (typeof body.expansion.total === "number") total = body.expansion.total;
     if (echoedUrl === undefined && typeof body.url === "string") echoedUrl = body.url;
     if (echoedVersion === undefined && typeof body.version === "string") echoedVersion = body.version;
+    if (echoedRelease === undefined) echoedRelease = releaseEchoOf(body.expansion);
     codes.push(...flattenExpansion(contains));
     offset += contains.length;
     if (contains.length === 0 || (total > 0 && codes.length >= total)) break;
@@ -208,7 +229,20 @@ export async function expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetc
   }
   // `total` stays 0 when the server volunteered none. That is NOT "zero codes" and callers must not read
   // it as a count — the absent-set path refuses on it precisely because it is an absence of evidence.
-  return { codes, total, ...(echoedUrl ? { url: echoedUrl } : {}), ...(echoedVersion ? { version: echoedVersion } : {}) };
+  return {
+    codes,
+    total,
+    ...(echoedUrl ? { url: echoedUrl } : {}),
+    ...(echoedVersion ? { version: echoedVersion } : {}),
+    ...(echoedRelease ? { release: echoedRelease } : {}),
+  };
+}
+
+/** The `manifest` parameter of an expansion, which is how VSAC names the release it applied. */
+function releaseEchoOf(expansion) {
+  const parameter = (expansion.parameter ?? []).find((p) => p?.name === "manifest");
+  const value = parameter?.valueString ?? parameter?.valueUri ?? parameter?.valueCanonical;
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 /**
@@ -253,17 +287,20 @@ export class IncompleteExpansionError extends Error {
  *   normalized OIDs so a `|version` echo of the right set is accepted. An answer that echoes NO `url` is
  *   accepted, as the absent-upstream path always has: whether live VSAC always echoes one has not been
  *   measured, that path feeds the committed cms138 artifact, and the request path already names the OID.
+ * - **release** — with `vsacExpansion` (the release's title, #851), the release VSAC echoes back must be
+ *   the pinned `vsacManifest`. A title that named another release, or an answer that names none, is an
+ *   expansion nobody can show was taken at the pin. Live VSAC echoes it (measured 2026-10-19).
  *
  * Returns `{ codes, total }`, codes canonicalized (deduped, sorted) because the sidecars are pinned by hash.
  */
-export async function expandComplete(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl }) {
+export async function expandComplete(oid, { vsacBase, vsacManifest, vsacExpansion, apiKey, fetch: fetchImpl }) {
   if (typeof vsacManifest !== "string" || vsacManifest === "") {
     throw new IncompleteExpansionError(
       "unpinned",
       `refusing to expand ${oid} with no VSAC release pin — VSAC would serve latest-active, which no one can reproduce`,
     );
   }
-  const expanded = await expandFromVsac(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl });
+  const expanded = await expandFromVsac(oid, { vsacBase, vsacManifest, vsacExpansion, apiKey, fetch: fetchImpl });
   const codes = canonicalize(expanded.codes);
   const detail = { total: expanded.total, distinct: codes.length, echoedUrl: expanded.url };
   // Ordered as the absent-upstream branch always checked, so a response failing two guards is reported
@@ -299,12 +336,21 @@ export async function expandComplete(oid, { vsacBase, vsacManifest, apiKey, fetc
       detail,
     );
   }
+  if (vsacExpansion && expanded.release !== vsacManifest) {
+    throw new IncompleteExpansionError(
+      "release",
+      expanded.release
+        ? `VSAC expanded ${oid} at "${vsacExpansion}" but answered for ${expanded.release}, not the pinned ${vsacManifest}`
+        : `VSAC expanded ${oid} at "${vsacExpansion}" but did not say which release it expanded, so nothing shows it was ${vsacManifest}`,
+      { ...detail, echoedRelease: expanded.release },
+    );
+  }
   return { codes, total: expanded.total, ...(expanded.version ? { version: expanded.version } : {}) };
 }
 
 /**
- * A `fetch` that runs at most `limit` requests at once, the rest queued in order. Resolving a release's
- * groupings member by member multiplies requests; this keeps VSAC from seeing them all at once.
+ * A `fetch` that runs at most `limit` requests at once, the rest queued in order. A translation's vendor
+ * step expands every declared set concurrently; this keeps VSAC from seeing them all at once.
  */
 export function limitConcurrency(fetchFn, limit) {
   let active = 0;
@@ -331,135 +377,62 @@ export function limitConcurrency(fetchFn, limit) {
 /** VSAC's ValueSet canonical prefix: `<this><oid>` names a value set, `|<version>` a version of it. */
 const VSAC_VALUESET_PREFIX = "http://cts.nlm.nih.gov/fhir/ValueSet/";
 
-/** Nesting deeper than this is not a grouping VSAC publishes; refusing it bounds a cycle. */
-const MAX_GROUPING_DEPTH = 5;
-
 const vsacHeaders = (apiKey) => ({
   Authorization: `Basic ${Buffer.from(`apikey:${apiKey}`).toString("base64")}`,
   Accept: "application/fhir+json",
 });
 
 /**
- * The value-set versions a release pins: `ValueSet/<oid>|<version>` entries of its manifest Library's
- * `relatedArtifact`. Read once per release per run (`cache`).
+ * The release a pin names, read once per run per `cache`: `{ canonical, title, listed }`.
+ *
+ * `title` is what `expansion=` names (measured 2026-10-19: "eCQM FHIR Update 2025" for
+ * `Library/ecqm-fhir-update-2025`, "eCQM Update 2026-05-14" for `Library/ecqm-update-2026-05-14`).
+ * `listed` holds the OIDs the Library's `relatedArtifact` lists; a set outside it has no answer at the
+ * release (`expansion=` answers not-found). A Library with no title, or listing nothing, is refused: there
+ * would be nothing to name, or nothing to expand.
  */
-function releasePins(vsacManifest, opts) {
-  const key = `pins|${vsacManifest}`;
+export function readRelease(vsacManifest, { vsacBase, apiKey, fetch: fetchImpl, cache = new Map() }) {
+  const key = `release|${vsacManifest}`;
   // The PROMISE is cached, so concurrent callers share one request.
-  if (!opts.cache.has(key)) opts.cache.set(key, readReleasePins(vsacManifest, opts));
-  return opts.cache.get(key);
+  if (!cache.has(key)) cache.set(key, fetchRelease(vsacManifest, { vsacBase, apiKey, fetch: fetchImpl }));
+  return cache.get(key);
 }
 
-async function readReleasePins(vsacManifest, { vsacBase, apiKey, fetch: fetchImpl }) {
+async function fetchRelease(vsacManifest, { vsacBase, apiKey, fetch: fetchImpl }) {
   const id = String(vsacManifest).split("/Library/")[1];
-  if (!id) throw new Error(`the release ${vsacManifest} is not a VSAC Library canonical, so its pinned versions cannot be read`);
+  if (!id) throw new Error(`the release ${vsacManifest} is not a VSAC Library canonical, so it cannot be read`);
   const base = String(vsacBase).replace(/\/+$/, "");
   const library = await fetchVsacJson(`${base}/Library/${encodeURIComponent(id)}`, vsacHeaders(apiKey), fetchImpl);
-  const pins = new Map();
+  const title = typeof library.title === "string" ? library.title.trim() : "";
+  if (title === "") throw new Error(`the release ${vsacManifest} has no title, so expansion= has nothing to name`);
+  const listed = new Set();
   for (const artifact of library.relatedArtifact ?? []) {
     const resource = typeof artifact?.resource === "string" ? artifact.resource : "";
-    if (!resource.startsWith(VSAC_VALUESET_PREFIX)) continue;
-    const [canonical, version] = resource.split("|");
-    if (version) pins.set(oidFromValueSetUrl(canonical), version);
+    if (resource.startsWith(VSAC_VALUESET_PREFIX)) listed.add(oidFromValueSetUrl(resource));
   }
-  if (pins.size === 0) throw new Error(`the release ${vsacManifest} pins no value-set versions, so a grouping cannot be resolved against it`);
-  return pins;
+  if (listed.size === 0) throw new Error(`the release ${vsacManifest} lists no value sets`);
+  return { canonical: vsacManifest, title, listed };
 }
 
 /**
- * The member OIDs of a GROUPING value set at one version, or null when the set is not a pure grouping
- * (any concept list, filter, system include or exclude makes it something only VSAC can expand) or names
- * a member at an explicit version.
- */
-function groupingMembers(oid, version, opts) {
-  const key = `def|${oid}|${version}`;
-  if (!opts.cache.has(key)) opts.cache.set(key, readGroupingMembers(oid, version, opts));
-  return opts.cache.get(key);
-}
-
-async function readGroupingMembers(oid, version, { vsacBase, apiKey, fetch: fetchImpl }) {
-  const base = String(vsacBase).replace(/\/+$/, "");
-  const query = `url=${encodeURIComponent(`${VSAC_VALUESET_PREFIX}${oid}`)}&version=${encodeURIComponent(version)}`;
-  const found = await fetchVsacJson(`${base}/ValueSet?${query}`, vsacHeaders(apiKey), fetchImpl);
-  const definitions = (found.entry ?? []).map((e) => e?.resource).filter((r) => r?.resourceType === "ValueSet");
-  const definition = definitions.find((d) => d.version === version);
-  if (!definition) throw new Error(`VSAC holds no definition of ${oid}|${version} to resolve its members against`);
-  const compose = definition.compose ?? {};
-  const includes = compose.include ?? [];
-  const pure =
-    includes.length > 0 &&
-    (compose.exclude ?? []).length === 0 &&
-    includes.every((inc) => Array.isArray(inc.valueSet) && inc.valueSet.length > 0 && !inc.system && !inc.concept && !inc.filter);
-  // A member named WITH a version (`ValueSet/<oid>|<version>`) is the grouping choosing that version, which
-  // a member expansion at the release cannot reproduce; such a grouping is left to VSAC (review of #825).
-  const versioned = pure && includes.some((inc) => inc.valueSet.some((url) => String(url).includes("|")));
-  return pure && !versioned ? [...new Set(includes.flatMap((inc) => inc.valueSet.map((url) => oidFromValueSetUrl(url))))] : null;
-}
-
-/** `expandComplete`, its promise shared per run: a member several groupings name is fetched once. */
-function sharedExpansion(oid, opts) {
-  const key = `exp|${oid}`;
-  if (!opts.cache.has(key)) opts.cache.set(key, expandComplete(oid, opts));
-  return opts.cache.get(key);
-}
-
-/**
- * One value set at a pinned release, faithful to the RELEASE even where VSAC's own answer for a grouping
- * drifts from it.
+ * One value set at a pinned release, in one request: `expansion=<the release's title>` (#851), held to
+ * every `expandComplete` guard, the release echo included.
  *
- * Measured 2026-10-15: VSAC's `$expand?manifest=` of a grouping value set resolves each member at the
- * member's LATEST version, not the version the release used. Advanced Illness (1082, pinned 20190315)
- * groups 110.11.1151 and 110.11.1150 with no member versions; 1151 gained a version on 2026-10-15, after
- * the eCQM Update 2026-05-14, and the grouping's expansion at that release went from 2,025 codes (the
- * published release file) to 2,027. Expanding 1151 itself at the same release correctly returns its
- * release-time version. So a pure grouping is ALSO expanded member by member at the release, and the
- * union of the members is what the release holds.
+ * This replaced a member-by-member workaround (#825). VSAC's `manifest=` expansion of a GROUPING resolves
+ * each member at the member's LATEST version, so Advanced Illness drifted from 2,025 to 2,027 codes at the
+ * 2026-05-14 release when a member gained a version on 2026-10-15; the workaround expanded the members at
+ * the release and took their union. `expansion=` is the release's own answer for the grouping itself, and
+ * it reproduced all 76 sets of the six translation sidecars byte-identically.
  *
- * When the two agree (the normal case) the answer is VSAC's grouping expansion, unchanged. When they
- * disagree the member union is returned and `drift` says how VSAC's grouping answer differs, so a caller
- * reports it instead of hiding it. Every member goes through `expandAtRelease` itself (a member can be a
- * grouping), so each is held to `expandComplete`'s guards. Any failure throws: there is no path that
- * returns a set this cannot account for.
+ * A set the release does not list is refused before any expansion: there is nothing at the release to ask
+ * for. `cache` shares the one Library read across a run.
  */
-export async function expandAtRelease(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache = new Map() }, path = []) {
-  // Only the network calls are shared (an expansion, a definition, the release), each a fetch that waits
-  // on nothing else. The recursion itself is not: a cached promise for a grouping still resolving would
-  // let a cycle (A includes B, B includes A, or X->Y and Y->X entered from two groupings at once) wait on
-  // itself forever, and the vendor step would hang instead of refusing (review of #825).
-  if (path.includes(oid)) {
-    throw new Error(`grouping value sets form a cycle (${[...path, oid].join(" -> ")}); refusing to resolve it`);
+export async function expandAtRelease(oid, { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache = new Map() }) {
+  const release = await readRelease(vsacManifest, { vsacBase, apiKey, fetch: fetchImpl, cache });
+  if (!release.listed.has(oid)) {
+    throw new Error(`the release ${vsacManifest} ("${release.title}") does not list ${oid}, so VSAC has no expansion of it there`);
   }
-  if (path.length > MAX_GROUPING_DEPTH) {
-    throw new Error(`grouping value sets nest deeper than ${MAX_GROUPING_DEPTH} levels at ${oid}; refusing to resolve them`);
-  }
-  const opts = { vsacBase, vsacManifest, apiKey, fetch: fetchImpl, cache };
-  const grouping = await sharedExpansion(oid, opts);
-  const pins = await releasePins(vsacManifest, opts);
-  // The version the release pins, where it pins one (a top-level declared set); else the version VSAC
-  // says it expanded (a member, which the release does not pin and its parent names without a version).
-  const version = pins.get(oid) ?? grouping.version;
-  if (!version) {
-    throw new Error(`neither the release ${vsacManifest} nor VSAC's expansion names a version of ${oid}, so its definition at that release cannot be read`);
-  }
-  const members = await groupingMembers(oid, version, opts);
-  let result = grouping;
-  if (members) {
-    const expandedMembers = await Promise.all(members.map((member) => expandAtRelease(member, opts, [...path, oid])));
-    const union = canonicalize(expandedMembers.flatMap((m) => m.codes));
-    const key = (c) => `${c.system}|${c.code}`;
-    const inGrouping = new Set(grouping.codes.map(key));
-    const inUnion = new Set(union.map(key));
-    const added = grouping.codes.filter((c) => !inUnion.has(key(c)));
-    const missing = union.filter((c) => !inGrouping.has(key(c)));
-    if (added.length > 0 || missing.length > 0) {
-      result = {
-        codes: union,
-        total: union.length,
-        drift: { oid, vsacTotal: grouping.total, releaseTotal: union.length, vsacOnly: added, releaseOnly: missing },
-      };
-    }
-  }
-  return result;
+  return expandComplete(oid, { vsacBase, vsacManifest, vsacExpansion: release.title, apiKey, fetch: fetchImpl });
 }
 
 /**
@@ -602,10 +575,17 @@ export function sortValueSets(terminology) {
  *   refused rather than trusted. A genuinely weaker check either way, which is why the completion record
  *   carries a distinct `reason` so nobody downstream reads the two as equally evidenced.
  *
- * The real check on an absent set is not here at all: it is the MADiE gate. Upstream's 2026-07-15
- * discrepancy report lists CMS138 under "no discrepancies" across 5826 cases, so its 47 committed
- * expected population vectors are an external oracle for whether the set we sourced is the set the
- * measure was authored against. 0/47 today; a sourced set that is wrong does not go green.
+ * The MADiE gate is NOT an oracle for the one absent set an official artifact holds today (cms138's
+ * …3.526.3.1278): no CMS138 expression reads it (a `valueset` declaration the CQL never uses). The gate
+ * shows only that fqm finds it, which it must, since fqm throws on any declared set missing from its cache.
+ *
+ * ## Both are taken at the release (#851)
+ *
+ * Every set the release lists is expanded at it by title (`expandComplete` with `vsacExpansion`), so a
+ * capped completion is held to VSAC's own exact total and to the release echo, as well as to upstream's
+ * declared count and shipped sample. A CAPPED set the release does not list is left as upstream shipped
+ * it. An ABSENT one cannot be (fqm would refuse the measure), so it is sourced as VSAC serves it, warned
+ * about, and its record says `inRelease: false`: cms138's 1278 is that set (not in eCQM FHIR Update 2025).
  */
 export async function completeTerminology(terminology, args, env = process.env) {
   const capped = terminology.valueSets.filter((v) => v.declaredTotal > v.codes.length);
@@ -622,21 +602,41 @@ export async function completeTerminology(terminology, args, env = process.env) 
     return [];
   }
 
+  let release;
+  try {
+    release = await readRelease(args.vsacManifest, { vsacBase: args.vsacBase, apiKey });
+  } catch (err) {
+    console.warn(
+      `  WARNING could not read the VSAC release ${args.vsacManifest}: ${err.message}. Leaving` +
+        ` ${capped.length} capped and ${absent.length} absent value set(s) as upstream shipped them.` +
+        " Routing will refuse.",
+    );
+    return [];
+  }
+  const atRelease = { ...args, apiKey, vsacExpansion: release.title };
+
   const completed = [];
   for (const valueSet of capped) {
     const had = valueSet.codes.length;
-    let expanded;
-    try {
-      expanded = await expandFromVsac(valueSet.oid, { ...args, apiKey });
-    } catch (err) {
-      console.warn(`  WARNING could not complete ${valueSet.oid} from VSAC: ${err.message}`);
+    if (!release.listed.has(valueSet.oid)) {
+      console.warn(
+        `  WARNING ${valueSet.oid} is not in the release ${release.title}, so it has no expansion there —` +
+          ` keeping upstream's ${had}. Routing will refuse.`,
+      );
       continue;
     }
-    // Canonicalize BEFORE comparing. Comparing the raw page total would let a response carrying
-    // duplicate system|code pairs clear the bar and then dedupe below the declared total — replacing
-    // upstream's codes with a set that is short after all, which is the one outcome this guard exists
-    // to prevent.
-    const canonical = canonicalize(expanded.codes);
+    let expanded;
+    try {
+      // Exact: VSAC's distinct codes must equal its own total, at the pinned release (#851). Answering
+      // "not short of what upstream declared" was the hole: 2,000 accepted against a declared 1,997.
+      expanded = await expandComplete(valueSet.oid, atRelease);
+    } catch (err) {
+      console.warn(`  WARNING could not complete ${valueSet.oid} from VSAC at ${release.title}: ${err.message}`);
+      continue;
+    }
+    // Already canonicalized by `expandComplete`, and compared AFTER dedupe for that reason: a response
+    // padded with duplicate system|code pairs must not clear the bar and then shrink below it.
+    const canonical = expanded.codes;
     if (canonical.length < valueSet.declaredTotal) {
       console.warn(
         `  WARNING VSAC returned ${canonical.length} distinct codes for ${valueSet.oid}, short of the` +
@@ -686,15 +686,22 @@ export async function completeTerminology(terminology, args, env = process.env) 
   // WorkWell translation's sidecar (`vendor-derived-terminology.mjs`), so the two can never apply
   // different standards to a set VSAC alone vouches for. This branch only words the refusal.
   //
-  // Identity is checked here (in `expandComplete`) and not on the capped path above, because the capped
-  // path already proves identity a stronger way — the expansion must CONTAIN the codes upstream shipped
-  // (ADR-041) — and tightening a guard we cannot re-run against live VSAC would risk the reproducibility
-  // of the committed artifacts for no measured gain.
+  // A set the release lists is taken at it, as a capped one is. One it does not list has no answer there
+  // (`expansion=` is not-found), and leaving it absent would make fqm refuse the whole measure, so it is
+  // asked for with `manifest=`, which VSAC ignores for a set outside the release and answers with the
+  // set as it serves it. Every other guard still applies; the release echo cannot, and the record says so.
   const stillAbsent = [];
   for (const want of absent) {
+    const inRelease = release.listed.has(want.oid);
+    if (!inRelease) {
+      console.warn(
+        `  WARNING ${want.oid} is not in the release ${release.title}: VSAC has no expansion of it there, so it` +
+          " is sourced as VSAC serves it and recorded with inRelease: false.",
+      );
+    }
     let expanded;
     try {
-      expanded = await expandComplete(want.oid, { ...args, apiKey });
+      expanded = await expandComplete(want.oid, inRelease ? atRelease : { ...args, apiKey });
     } catch (err) {
       console.warn(absentRefusal(want.oid, err, args.vsacManifest));
       stillAbsent.push(want);
@@ -713,6 +720,8 @@ export async function completeTerminology(terminology, args, env = process.env) 
     completed.push({
       oid: want.oid,
       reason: "absent-upstream",
+      // Only when false: a set the release lists needs no marker, and a committed record's keys are its bytes.
+      ...(inRelease ? {} : { inRelease: false }),
       had: 0,
       now: expanded.codes.length,
       // Null, not VSAC's total: this field means "what the bundle declared", and for an absent set the
