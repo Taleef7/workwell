@@ -346,6 +346,11 @@ export interface SchedulerTickDeps {
   incremental?: boolean;
   /** #263 — whether the value-set resolver is active (feeds logic_version); default false. */
   expansionActive?: boolean;
+  /**
+   * The year-change rehearsal only (#854, `pnpm rehearse:year-change`). The scheduler never sets it, so
+   * the nightly evaluates as of today.
+   */
+  evaluationDate?: string;
 }
 
 /**
@@ -399,6 +404,17 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
       return false;
     }
   }
+  await runNightlyRecompute(deps, nowMs);
+  return true;
+}
+
+/**
+ * The nightly itself, past the cadence check: the audit, the ALL_PROGRAMS run, retention and the warm.
+ * The scheduler tick calls it when the run is due; the year-change rehearsal (#854) calls it directly,
+ * with `deps.evaluationDate`, so it rehearses exactly what the scheduler runs.
+ */
+export async function runNightlyRecompute(deps: SchedulerTickDeps, nowMs = Date.now()): Promise<string> {
+  const minGapMs = DEFAULT_MIN_GAP_MS;
 
   // NOTE: the due cache is deliberately NOT booked here (Codex P1, #322 review). Everything below
   // this line can throw — appendAudit and planManualRun both write to the database, and a transient
@@ -449,6 +465,7 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
   const planned = await planManualRun(runDeps, {
     scopeType: "ALL_PROGRAMS",
     triggeredBy: "scheduler",
+    ...(deps.evaluationDate ? { evaluationDate: deps.evaluationDate } : {}),
   });
 
   // The run row now exists with triggeredBy='scheduler', so the persisted cadence itself would
@@ -494,13 +511,24 @@ async function runTickLocked(deps: SchedulerTickDeps, nowMs: number): Promise<bo
     employees: deps.employees,
     webChartEnv: deps.webChartEnv,
   }, "nightly");
-
-  return true;
+  return planned.run.id;
 }
 
 // ---------------------------------------------------------------------------
 // Production wrapper
 // ---------------------------------------------------------------------------
+
+type NightlyEnv = StoresEnv & WebChartRunEnv & { WORKWELL_INCREMENTAL_EVAL?: string; WORKWELL_VSAC_API_KEY?: string; WORKWELL_VSAC_BASE_URL?: string };
+
+/** The nightly's deps from the deployment's env: the scheduler and the year-change rehearsal (#854) share it. */
+export async function nightlyDepsForEnv(env: NightlyEnv, alertChannels: readonly AlertChannel[]): Promise<SchedulerTickDeps> {
+  await ensureSegmentSeed(env);
+  const stores = await getStores(env);
+  const engine = await routedEngineForEnv(env);
+  const allSegments = await stores.segments.listSegments();
+  const enabledSegments = allSegments.filter((s) => s.enabled);
+  return { stores, engine, segments: enabledSegments, alertChannels, webChartEnv: env, incremental: isIncrementalEnabled(env), expansionActive: isVsacConfigured(env) };
+}
 
 /**
  * Production wrapper: resolve stores + segments + the env-selected engine, then call runTick.
@@ -523,12 +551,7 @@ export async function schedulerTick(
 
   const alertChannels = resolveAlertChannels(env);
   try {
-    await ensureSegmentSeed(env);
-    const stores = await getStores(env);
-    const engine = await routedEngineForEnv(env);
-    const allSegments = await stores.segments.listSegments();
-    const enabledSegments = allSegments.filter((s) => s.enabled);
-    await runTick({ stores, engine, segments: enabledSegments, alertChannels, webChartEnv: env, incremental: isIncrementalEnabled(env), expansionActive: isVsacConfigured(env) });
+    await runTick(await nightlyDepsForEnv(env, alertChannels));
   } catch (err) {
     // Invalidate the due gate so the next tick re-consults the persisted cadence (Codex P1, #322
     // review). runTick already avoids booking the cooldown before its run is durable; this is the

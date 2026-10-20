@@ -1282,6 +1282,75 @@ test("Fable M10: a still-open PRIOR-cycle case is closed (CYCLE_ROLLED_OVER, aud
       (a) => a.eventType === "CASE_RESOLVED" && (a.payload as { reason?: string })?.reason === "CYCLE_ROLLED_OVER",
     );
     assert.equal(rolled.length, 1, "exactly one (the prior-cycle) rollover close is audited");
+    const completed = (await events.auditEventsByRun(res.runId)).find((a) => a.eventType === "RUN_COMPLETED");
+    const rollover = (completed?.payload as { rollover?: { ms: number } }).rollover;
+    assert.deepEqual(rollover && { ...rollover, ms: 0 }, { closed: 1, failed: 0, auditGaps: 0, unreadMeasures: [], ms: 0 }, "#854: the run records what it rolled over");
+    assert.ok(
+      (await runStore.listLogs(res.runId)).some((l) => l.level === "INFO" && /^Closed 1 case\(s\) from an earlier cycle as rolled over in \d+\.\d s\.$/.test(l.message)),
+      "#854: and says so in its log",
+    );
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("#854: a rollover close that fails, and one whose audit fails, are counted and logged as a warning; a run with nothing to roll over records nothing", async () => {
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  try {
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2020-01-01T00:00:00.000Z", measurementPeriodEnd: "2020-12-31T00:00:00.000Z" });
+    const stuck = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2020-01-01", outcomeStatus: "OVERDUE" });
+    await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2020-01-01", outcomeStatus: "OVERDUE" });
+    const failingCases = Object.create(caseStore) as typeof caseStore;
+    failingCases.patchCase = async (id, patch) => (id === stuck!.id ? Promise.reject(new Error("write lost")) : caseStore.patchCase(id, patch));
+    const failingEvents = Object.create(events) as typeof events;
+    failingEvents.appendAudit = async (input) =>
+      input.eventType === "CASE_RESOLVED" ? Promise.reject(new Error("ledger down")) : events.appendAudit(input);
+    const employees = [employeeById("emp-007")!, employeeById("emp-008")!];
+
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore: failingCases, events: failingEvents, engine: overdueEngine, employees, segments: [] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+    const completed = (await events.auditEventsByRun(res.runId)).find((a) => a.eventType === "RUN_COMPLETED");
+    const rollover = (completed?.payload as { rollover?: { ms: number } }).rollover;
+    assert.deepEqual(rollover && { ...rollover, ms: 0 }, { closed: 1, failed: 1, auditGaps: 1, unreadMeasures: [], ms: 0 });
+    assert.ok(
+      (await runStore.listLogs(res.runId)).some(
+        (l) => l.level === "WARN" && /^Closed 1 case\(s\) .*; 1 could not be closed and stay open; 1 closure\(s\) have no audit event\.$/.test(l.message),
+      ),
+    );
+
+    const rolledOverOf = async (runId: string) =>
+      ((await events.auditEventsByRun(runId)).find((a) => a.eventType === "RUN_COMPLETED")?.payload as { rollover?: { ms: number } }).rollover;
+    const retry = await executeManualRun({ ...d, caseStore, events }, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-04" });
+    const retried = await rolledOverOf(retry.runId);
+    assert.deepEqual(retried && { ...retried, ms: 0 }, { closed: 1, failed: 0, auditGaps: 0, unreadMeasures: [], ms: 0 }, "the next run closes the case left open");
+    const quiet = await executeManualRun({ ...d, caseStore, events }, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-05" });
+    assert.equal(await rolledOverOf(quiet.runId), undefined, "with nothing older left open, the payload carries no rollover");
+    assert.ok(!(await runStore.listLogs(quiet.runId)).some((l) => l.message.includes("rolled over")));
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("#854: a measure whose open cases cannot be read is named, so a rollover that skipped it does not read as complete", async () => {
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  try {
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2020-01-01T00:00:00.000Z", measurementPeriodEnd: "2020-12-31T00:00:00.000Z" });
+    const old = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2020-01-01", outcomeStatus: "OVERDUE" });
+    const unreadable = Object.create(caseStore) as typeof caseStore;
+    unreadable.listCases = async (query) =>
+      query.statuses?.includes("IN_PROGRESS") ? Promise.reject(new Error("statement timeout")) : caseStore.listCases(query);
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore: unreadable, events, engine: overdueEngine, employees: [employeeById("emp-007")!], segments: [] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+
+    assert.equal((await caseStore.getCase(old!.id))?.status, "OPEN", "the read failed, so nothing was closed");
+    const completed = (await events.auditEventsByRun(res.runId)).find((a) => a.eventType === "RUN_COMPLETED");
+    const rollover = (completed?.payload as { rollover?: { ms: number } }).rollover;
+    assert.deepEqual(rollover && { ...rollover, ms: 0 }, { closed: 0, failed: 0, auditGaps: 0, unreadMeasures: ["audiogram"], ms: 0 });
+    assert.ok(
+      (await runStore.listLogs(res.runId)).some(
+        (l) => l.level === "WARN" && l.message.endsWith("; the open cases of audiogram could not be read, so none of them was rolled over."),
+      ),
+    );
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
   }

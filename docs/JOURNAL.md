@@ -7,6 +7,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-20
 
+- **1 January rehearsed at small scale (#854).** `pnpm rehearse:year-change` runs the scheduler's own nightly
+  (`runNightlyRecompute`) as of a given date against a Postgres copy, refusing any host but the one named and
+  any WebChart tenant, then checks it. On a 1,000-patient corpus with Maui's routing: 31 December opened 783
+  cases; 1 January scored all six with the 2027 translations, closed all 783 as rolled over with 783 audit
+  events in 1.8 s, and opened 17. The 2027 work list starts nearly empty, because each measure counts only
+  patients with a 2027 visit. A run now logs and records (`RUN_COMPLETED.rollover`) how many it rolled over
+  and how long it took. The 1 January checklist is in `DEPLOY.md`. Next: Maui's own numbers on a copy in
+  December, where the Neon round trip sets the rollover's time.
 - **A run says when its data is too thin to trust (#853).** Three floors on live WebChart data, the owner's
   call: coded encounter types ≥95% for CMS-scored measures, final blood pressures ≥95% for CMS165, failed
   record fetches <1%. A measure below one ends the run `PARTIAL_FAILURE` with `data_insufficient:<measure>`,

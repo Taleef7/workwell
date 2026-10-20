@@ -330,6 +330,36 @@ writes a `WARN` containing `no segment makes them applicable` when this is owed.
 - **Measure performance on a quiet, warm worker** — not during the nightly (12:00 UTC, ~90 min on Maui)
   and not in the first minutes after a deploy.
 
+### 1 January 2027: the year change (#854)
+
+The scheduler runs Monday to Friday, so Thursday 31 December is the last 2026 nightly and **Friday 1 January,
+12:00 UTC (7:00 AM Eastern)**, the first 2027 one. Rehearsed with `pnpm rehearse:year-change` (2026-10-20, a
+1,000-patient corpus on a local Postgres; the December rehearsal on a copy of Maui adds Maui's own numbers).
+What that nightly does:
+- every routed measure is scored by its 2027 translation (`WorkWell translation of CMS… (ww-2027.1)`);
+- every 2026 case still open for a patient it evaluates closes `RESOLVED` / `CYCLE_ROLLED_OVER`, one
+  `CASE_RESOLVED` audit event each: 783 per 1,000 patients rehearsed, about 15,300 on Maui. The closes are
+  sequential, two writes each (1.8 s for 783 locally), so on Neon the time is about 2 × the count × one round
+  trip; the run log states it;
+- **the 2027 work list starts nearly empty and fills as patients are seen.** Each of the six measures counts
+  only patients with a visit in 2027: 17 cases per 1,000 on the corpus (8 in 1,000 have a 1 January visit),
+  none on real data. The rates rest on those few patients (Programs marks a denominator under 20 as small);
+- a measure nobody has entered yet logs `WARN … not one of N subjects entered the official initial
+  population`: expected that day;
+- the data-sufficiency check (#853) waits for 100 encounters in the year, so it stays silent.
+
+**On call, after 13:30 UTC:**
+1. The newest run is `COMPLETED` with no failures, and its log says `Closed N case(s) from an earlier cycle as
+   rolled over in … s.` with nothing after it about cases that could not be closed or have no audit event.
+   N is within ±10% of the work list's open total on 31 December (the cases page, status Open).
+2. Each measure's page names its 2027 translation.
+3. The work list shows only 2027 cases, few of them.
+4. `/health` is UP and its `lastPopulationRun` is that run, with no data-insufficient measure.
+5. Tell MIE the year changed, with N and the run's time.
+
+If the run FAILED, nothing rolled over (the closes come after the last chunk): start one ALL_PROGRAMS run from
+the Runs page (`POST /api/runs/manual`), which rolls over as the nightly does.
+
 ### Which run scopes are SCHEDULED, and which answer in the request (ADR-085, #590)
 
 `ALL_PROGRAMS`, `SITE` and `MEASURE` are scheduled: **201** with `status: RUNNING` and a `runId` — poll
@@ -415,6 +445,7 @@ From `backend-ts/`, with `DATABASE_URL` set. Idempotent and resumable. Undo SQL 
 | `pnpm seed:trend-history --weeks N --as-of <date>` | synthetic weekly runs | refuses under retention | `triggered_by='seed:trend-history'` |
 | `pnpm resolve-valuesets --manifest <canonical> [--official <id>]` | VSAC expansions into `value_sets` (descriptive) | TWH: done | `DELETE FROM value_sets WHERE source='VSAC'` |
 | `pnpm outcomes:compact` | one retention pass | also runs after each Maui nightly | none |
+| `pnpm rehearse:year-change --evaluation-date <date> --confirm-host <host> [--out <file.json>]` | the nightly as of that date: runs, outcomes, cases, audit; as of a new year it closes the old year's cases (#854) | a COPY only: refuses unless `--confirm-host` repeats `DATABASE_URL`'s host, and with WebChart configured | discard the copy |
 
 A crashed `seed:scale` leaves RUNNING runs that are not auto-swept — roll back before resuming.
 
