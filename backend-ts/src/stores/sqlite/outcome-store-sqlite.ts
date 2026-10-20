@@ -242,7 +242,8 @@ export class SqliteOutcomeStore implements OutcomeStore {
   ): Promise<Array<Pick<OutcomeRecord, "status" | "evidence">>> {
     // Narrowed in JS rather than with `json_extract`, because the floor stores `evidence_json` as TEXT
     // and would have to parse it either way. The SHAPE is what the contract pins, and it is identical:
-    // `official` kept whole, `evaluationError` present only when the stored evidence had it.
+    // `official` kept whole, `evaluationError` and `dataInsufficient` (#853) present only when the stored
+    // evidence had them.
     const { results } = await this.db
       .prepare(`SELECT status, evidence_json FROM outcomes WHERE run_id = ? AND measure_id = ?`)
       .bind(runId, measureId)
@@ -252,6 +253,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
       const evidence: Record<string, unknown> = {};
       if (full?.official !== undefined && full.official !== null) evidence.official = full.official;
       if (full && "evaluationError" in full && full.evaluationError !== null) evidence.evaluationError = full.evaluationError;
+      if (full && "dataInsufficient" in full && full.dataInsufficient !== null) evidence.dataInsufficient = full.dataInsufficient;
       return { status: r.status, evidence };
     });
   }

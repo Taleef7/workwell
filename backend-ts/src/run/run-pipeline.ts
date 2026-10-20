@@ -66,6 +66,17 @@ import { materializeRun } from "../quality/materialize-run.ts";
 import { isOfficialCalculationError } from "../wiring/official-calculation-error.ts";
 import { IncrementalCache } from "./incremental/incremental-eval.ts";
 import {
+  countSufficiency,
+  describeShortfall,
+  judgeSufficiency,
+  withSufficiency,
+  type MeasureSufficiency,
+  type SufficiencyCheck,
+  type SufficiencyMetrics,
+} from "./data-sufficiency.ts";
+import { recordRunSufficiency } from "../admin/runtime-health.ts";
+import { isPopulationRun } from "../program/rollup-shared.ts";
+import {
   alertForTerminalRun,
   emitAlert,
   resolveAlertChannels,
@@ -576,7 +587,7 @@ function enrollmentRosterFor(ids: readonly string[], explicitJson: string | unde
 async function prepareLivePopulation(
   deps: RunPipelineDeps,
   planned: PlannedRun,
-): Promise<{ items: WorkItem[]; roster: EnrollmentRoster; metadata: LiveTenantMetadata }> {
+): Promise<{ items: WorkItem[]; roster: EnrollmentRoster; metadata: LiveTenantMetadata; sufficiency: SufficiencyMetrics }> {
   const descriptor = planned.livePopulation!;
   const started = Date.now();
   let fetchedCount = 0;
@@ -634,6 +645,10 @@ async function prepareLivePopulation(
         durationMs: Date.now() - started,
         status: "COMPLETED",
       },
+      // #853: measured here because this is the one place every live bundle passes exactly once, and it
+      // is before the first chunk writes a case. The synthetic items a live run also carries are not
+      // counted: the corpus always codes its encounters and finalises its blood pressures.
+      sufficiency: countSufficiency(bundles, (bundle) => fetchFailureOf(bundle) !== undefined),
     };
   } catch (error) {
     throw new LivePopulationPreparationError(
@@ -671,6 +686,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
   let items = planned.items;
   let liveRoster: EnrollmentRoster | undefined;
   let liveTenant: LiveTenantMetadata | undefined;
+  /**
+   * #853 (D12): the measures whose ingested data fell below a floor, judged once and BEFORE the first chunk,
+   * because cases are written chunk by chunk. A flagged measure's outcomes carry `dataInsufficient`, it closes
+   * no case as out of population, and the run is PARTIAL_FAILURE. Empty for a corpus run.
+   */
+  let liveSufficiency: SufficiencyMetrics | undefined;
+  let sufficiencyVerdicts: MeasureSufficiency[] = [];
+  const insufficient = new Map<string, SufficiencyCheck[]>();
   if (planned.livePopulation) {
     const prepared = await prepareLivePopulation(deps, planned);
     items = [...items, ...prepared.items];
@@ -684,6 +707,25 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           ? `; not supported by this tenant, so no subject carries them: ${liveTenant.unsupportedResourceTypes.join(", ")}`
           : ""),
     );
+    liveSufficiency = prepared.sufficiency;
+    sufficiencyVerdicts = judgeSufficiency(
+      liveSufficiency,
+      [...new Set(measureIds)].map((measureId) => ({
+        measureId,
+        fqmScored: isFqmScored(deps.engine.logicFor?.(measureId, evalDate)),
+      })),
+    );
+    for (const verdict of sufficiencyVerdicts) {
+      insufficient.set(verdict.measureId, verdict.shortfalls.map((s) => s.check));
+      await deps.runStore
+        .appendLog(
+          runId,
+          "WARN",
+          `data_insufficient:${verdict.measureId} — ${verdict.shortfalls.map(describeShortfall).join("; ")}. ` +
+            `Its rates are not reported and it closes no case as out of population.`,
+        )
+        .catch(() => {});
+    }
   }
   // Audit actor = the authenticated user (never the caller-influenced triggeredBy label; Codex P1).
   const auditActor = deps.actor ?? "system";
@@ -1245,6 +1287,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
         }
       }
       if (!evaluationFailed) answeredEvaluations.add(`${item.measureId}\u0000${item.employee.externalId}`);
+      // #853: set or cleared on every row, so a copied-forward row neither keeps an earlier run's flag nor
+      // misses this run's.
+      evidence = withSufficiency(evidence, insufficient.get(item.measureId));
       pending.push({ item, period, status, evidence, plan, evaluatedNow, evaluationFailed, outOfPopulation });
       // Hand the event loop a turn, after the result is recorded (#563, ADR-085 d1).
       //
@@ -1400,7 +1445,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // An evaluation that threw says nothing about the patient: its MISSING_DATA would open a gap that
       // does not exist, reopen a resolved case, or overwrite a real outcome on an open one. The outcome row
       // above still records the failure; the case is left exactly as it was.
-      if (deps.caseStore && !evaluationFailed && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
+      // #853: a measure whose data was too thin to trust closes no case as out of population. "Outside the
+      // population" read off uncoded encounters is the absence of evidence, not a finding, and closing on it
+      // would drop real gaps. Nor does such a row open one (ADR-078). Its other rows are handled as usual, and
+      // it still counts as answered for the cycle rollover (DATA_MODEL_CONTRACTS §4).
+      const withheldAsThin = outOfPopulation === true && insufficient.has(item.measureId);
+      if (deps.caseStore && !evaluationFailed && !withheldAsThin && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
         pendingCaseUpserts.push({
           input: {
             runId: runId,
@@ -1761,8 +1811,12 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     }
   }
 
-  const terminalStatus = failures > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
+  // #853: a measure scored on data too thin to trust is a partial failure, with no new status (D12).
+  const terminalStatus = failures > 0 || insufficient.size > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
   await deps.runStore.finalizeRun(runId, terminalStatus);
+  if (isPopulationRun(scopeType)) {
+    recordRunSufficiency({ runId, status: terminalStatus, dataInsufficient: sufficiencyVerdicts.map((v) => v.measureId) });
+  }
   // A run is the only thing that creates cases, so it is the only thing that can introduce a case
   // subject the directory does not hold — the invariant the work list's SQL page path rests on (#561).
   // Dropping the cached answer here means the next request re-establishes it from the data rather
@@ -1793,6 +1847,14 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           ...(incremental ? { evaluated: items.length - skipped, skippedUnchanged: skipped } : {}),
           measuresExecuted: measureIds,
           ...(liveTenant ? { liveTenant } : {}),
+          // #853: what was measured on a live run, and which measures fell short and why. The run detail
+          // page reads it; the reports refuse from the rows, so a lost write here cannot let a rate out.
+          ...(liveSufficiency
+            ? {
+                dataSufficiency: liveSufficiency,
+                dataInsufficient: sufficiencyVerdicts.map((v) => ({ measureId: v.measureId, shortfalls: v.shortfalls })),
+              }
+            : {}),
         },
       })
       .catch(() => {
@@ -1835,6 +1897,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
     `Evaluated ${items.length} subject(s) across ${measureIds.length} measure(s).` +
     (incremental ? ` ${items.length - skipped} re-evaluated, ${skipped} reused-unchanged (#263).` : "") +
     (failures > 0 ? ` ${failures} evaluation failure(s).` : "") +
+    (sufficiencyVerdicts.length > 0
+      ? ` Data too thin to trust for ${sufficiencyVerdicts.map((v) => v.measureId).join(", ")}: their rates are not reported.`
+      : "") +
     (emptyIppMeasures.length > 0
       ? ` WARNING: nobody entered the official initial population for ${emptyIppMeasures.join(", ")} — ` +
         `either this cohort has nobody eligible, or the data lacks an element the measure reads (ADR-043).`

@@ -26,6 +26,7 @@ export function narrowToMemberships(row: Rowish): MembershipRow {
   const evidence: Record<string, unknown> = {};
   if (full?.official !== undefined && full.official !== null) evidence.official = full.official;
   if (full && "evaluationError" in full) evidence.evaluationError = full.evaluationError;
+  if (full && "dataInsufficient" in full && full.dataInsufficient !== null) evidence.dataInsufficient = full.dataInsufficient;
   return { status: row.status, evidence };
 }
 

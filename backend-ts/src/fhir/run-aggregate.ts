@@ -22,6 +22,7 @@
  */
 import { scoringIdentityOf, type OutcomeStore } from "../stores/outcome-store.ts";
 import { formatScoringLogic, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import { dataInsufficientChecks, type SufficiencyCheck } from "../run/data-sufficiency.ts";
 import {
   createRateAggregator,
   isEvaluationErrorEvidence,
@@ -60,6 +61,12 @@ export interface OfficialRunAggregate extends RateAggregate {
    * `identityConflict` when they sit beside official rows).
    */
   scoringLogics: ScoringLogic[];
+  /**
+   * The checks this measure's data failed on this run (#853, D12), or null when its rows carry none. Read
+   * off the rows themselves, errored ones included, so a report refuses a thin run's rates even when the
+   * run's audit record was never written. Every exporter and the dashboard rate check it before they speak.
+   */
+  dataInsufficient: SufficiencyCheck[] | null;
 }
 
 /**
@@ -189,8 +196,15 @@ export async function aggregateOfficialRun(
   // `scoringLogicKeyOf` once per distinct identity, not once per row: it names the logic and stringifies
   // it, and a cold programs overview walks ~120,000 rows that carry a handful of identities between them.
   const namedByIdentity = new Map<string, ReturnType<typeof scoringLogicKeyOf>>();
+  let dataInsufficient: Set<SufficiencyCheck> | null = null;
   for (const row of await os.listOutcomeMembershipsForRun(runId, measureId)) {
     aggregator.add(row);
+    // Before the error `continue`: the flag is on every row of a thin measure, errored ones included.
+    const checks = dataInsufficientChecks(row.evidence);
+    if (checks) {
+      dataInsufficient ??= new Set();
+      for (const check of checks) dataInsufficient.add(check);
+    }
     if (isEvaluationErrorEvidence(row.evidence)) continue;
     const rowIdentity = officialReportIdentity(row.evidence);
     if (!identity) identity = rowIdentity;
@@ -214,5 +228,6 @@ export async function aggregateOfficialRun(
     producedOfficialEvidence,
     identityConflict,
     scoringLogics: distinctScoringLogics(logicEvidence.values()),
+    dataInsufficient: dataInsufficient ? [...dataInsufficient].sort() : null,
   };
 }

@@ -1176,7 +1176,7 @@ export function outcomeStoreContract(
       },
       {
         runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "MISSING_DATA",
-        evidence: { evaluationError: "engine threw", message: "boom" },
+        evidence: { evaluationError: "engine threw", message: "boom", dataInsufficient: { checks: ["encounterTypeCoded"] } },
       },
       // Another measure of the same run: must not appear.
       { runId: run.id, subjectId: "emp-002", measureId: "hazwoper", status: "OVERDUE", evidence: { official: { populationResults } } },
@@ -1199,6 +1199,10 @@ export function outcomeStoreContract(
     );
     assert.equal((errored.evidence as { evaluationError?: unknown }).evaluationError, "engine threw");
     assert.ok(!("official" in (errored.evidence as object)));
+    // #853: a report refuses a thin run's rates from this read, so the flag must survive the projection,
+    // and be absent (not null) where the row carries none.
+    assert.deepEqual((errored.evidence as { dataInsufficient?: unknown }).dataInsufficient, { checks: ["encounterTypeCoded"] });
+    assert.ok(!("dataInsufficient" in (evaluated.evidence as object)), "absent where the row carries no flag");
 
     // An unknown run and an unknown measure are empty, never everything.
     assert.deepEqual(await outcomeStore.listOutcomeMembershipsForRun(run.id, "never-run"), []);

@@ -601,6 +601,17 @@ export function openApiDocument(): OpenApiDocument {
                 failedMeasures: { type: "integer", description: "Measures with at least one panel that did not warm." },
               },
             },
+            lastPopulationRun: {
+              type: ["object", "null"],
+              description:
+                "The last population run this process finished, and the measures whose ingested data was too thin to trust (#853, `data_insufficient`): ids only. Per process: it resets on restart, so the run detail page is the durable record. Null until one has finished.",
+              required: ["runId", "status", "dataInsufficient"],
+              properties: {
+                runId: { type: "string" },
+                status: { type: "string" },
+                dataInsufficient: { type: "array", items: { type: "string" }, description: "Measure ids, sorted. Empty when every measure's data met its floors." },
+              },
+            },
             terminology: {
               type: ["object", "null"],
               description:

@@ -56,6 +56,7 @@ import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
 import { ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import { dataInsufficientChecks, type SufficiencyCheck } from "../run/data-sufficiency.ts";
 
 /** One page of outcome rows per read. Matches `fhir/run-aggregate.ts`'s page so the two agree. */
 const PAGE = 2000;
@@ -118,8 +119,11 @@ export interface MeasureReportEntry {
   runId: string | null;
   runStartedAt: string | null;
   measurementPeriod: { start: string; end: string } | null;
-  /** "complete" | "compacted" | "no_run" — why a measure has no numbers, when it has none. */
-  compactionStatus: "complete" | "compacted" | "no_run";
+  /**
+   * "complete" | "compacted" | "no_run" | "data_insufficient" — why a measure has no numbers, when it has
+   * none. `data_insufficient` (#853): the run's data for the measure was too thin to trust (D12).
+   */
+  compactionStatus: "complete" | "compacted" | "no_run" | "data_insufficient";
   reason?: string;
   matchedSubjects: number;
   distinctSubjectsSeen: number;
@@ -140,6 +144,8 @@ export interface SubjectListReport {
   compaction: { cutoff: string | null };
   /** Measures whose selected run is compaction-exposed; their entries carry no rates and no rows. */
   compactedMeasures: string[];
+  /** Measures whose selected run's data was too thin to trust (#853); their entries carry no rates and no rows. */
+  dataInsufficientMeasures: string[];
   measures: MeasureReportEntry[];
   rows: ReportRow[];
 }
@@ -178,6 +184,7 @@ export async function subjectListReport(
   const entries: MeasureReportEntry[] = [];
   const rows: ReportRow[] = [];
   const compactedMeasures: string[] = [];
+  const dataInsufficientMeasures: string[] = [];
   let furthestCutoff: string | null = null;
   let measuresWithARun = 0;
 
@@ -258,6 +265,13 @@ export async function subjectListReport(
       entries.push(emptyEntry(measureId, matchedIds.size, "compacted", "run_compacted"));
       continue;
     }
+    // #853: the run's data for this measure was too thin to trust, so its rates would describe missing
+    // data. Refused like a compacted measure, by measure, never by withholding the others.
+    if (read.dataInsufficient) {
+      dataInsufficientMeasures.push(measureId);
+      entries.push(emptyEntry(measureId, matchedIds.size, "data_insufficient", `data_insufficient:${read.dataInsufficient.join(",")}`));
+      continue;
+    }
 
     entries.push({
       measureId,
@@ -302,20 +316,30 @@ export async function subjectListReport(
     }
   }
 
-  // The whole request is refused only when EVERY measure that had a run is compacted. Withholding five
-  // complete measures because the sixth's run aged out would be a second wrong answer.
-  if (measuresWithARun > 0 && compactedMeasures.length === measuresWithARun) {
+  // The whole request is refused only when EVERY measure that had a run is refused, compacted or too thin
+  // to trust. Withholding five complete measures because the sixth's run aged out would be a second wrong
+  // answer.
+  if (measuresWithARun > 0 && compactedMeasures.length + dataInsufficientMeasures.length === measuresWithARun) {
+    const allCompacted = dataInsufficientMeasures.length === 0;
     return {
       ok: false,
       status: 409,
-      body: {
-        error: "run_compacted",
-        measurementYear,
-        compactedMeasures,
-        cutoff: furthestCutoff,
-        message:
-          "every measure's run for this year predates a compaction cutoff; a score computed over a keep set is a different number wearing the run's identity",
-      },
+      body: allCompacted
+        ? {
+            error: "run_compacted",
+            measurementYear,
+            compactedMeasures,
+            cutoff: furthestCutoff,
+            message:
+              "every measure's run for this year predates a compaction cutoff; a score computed over a keep set is a different number wearing the run's identity",
+          }
+        : {
+            error: "data_insufficient",
+            measurementYear,
+            dataInsufficientMeasures,
+            compactedMeasures,
+            message: "every measure's run for this year was refused: its data was too thin to trust, or it was compacted",
+          },
     };
   }
 
@@ -338,6 +362,7 @@ export async function subjectListReport(
       },
       compaction: { cutoff: furthestCutoff },
       compactedMeasures,
+      dataInsufficientMeasures,
       measures: entries,
       rows,
     },
@@ -383,8 +408,9 @@ const emptyEntry = (
   // A COMPACTED measure claims NOTHING per subject. ADR-077 refuses numbers built over rows that may
   // be incomplete, and "how many of your patients did this measure miss?" is such a number; emitting
   // `missingFromRun = N` with no rows would assert a per-subject fact from evidence we have just said
-  // we cannot read. DATA_MODEL_CONTRACTS §6.6 scopes the identity accordingly.
-  missingFromRun: compactionStatus === "compacted" ? 0 : matchedSubjects,
+  // we cannot read. DATA_MODEL_CONTRACTS §6.6 scopes the identity accordingly. A DATA-INSUFFICIENT
+  // measure (#853) claims nothing for the same reason: its rows exist, and none of them is trusted.
+  missingFromRun: compactionStatus === "no_run" ? matchedSubjects : 0,
   scoredSubjects: 0,
   unmeasured: 0,
   evaluationErrors: 0,
@@ -452,6 +478,8 @@ interface MeasureRead {
   mixedLogic: boolean;
   /** The one logic the non-errored counted rows were scored by; null when mixed, authored, or none named. */
   logic: ScoringLogic | null;
+  /** The checks the counted rows say their measure's data failed (#853), or null when they carry none. */
+  dataInsufficient: SufficiencyCheck[] | null;
 }
 
 /** Page a run's outcomes for one measure, keeping only the list's members. */
@@ -512,8 +540,14 @@ async function readMeasure(
   // period, AND the eCQM id, version and label, so legacy rows without a digest that name different
   // versions are a mix too. Errored rows name no logic and are skipped there.
   const evidences: unknown[] = [];
+  let dataInsufficient: Set<SufficiencyCheck> | null = null;
   for (const row of newest.values()) {
     aggregator.add(row);
+    const thin = dataInsufficientChecks(row.evidence);
+    if (thin) {
+      dataInsufficient ??= new Set();
+      for (const check of thin) dataInsufficient.add(check);
+    }
     const errored = isEvaluationErrorEvidence(row.evidence);
     // An errored row scored nothing, so it never names the report's artifact, even if it kept a block.
     if (!errored) identity ??= officialReportIdentity(row.evidence);
@@ -569,6 +603,7 @@ async function readMeasure(
     periodMismatch,
     mixedLogic: scoring.conflict,
     logic: scoring.conflict ? null : (scoring.logics[0] ?? null),
+    dataInsufficient: dataInsufficient ? [...dataInsufficient].sort() : null,
   };
 }
 

@@ -23,6 +23,7 @@ import { STAFF_CLOSED_STATUSES } from "../case/worklist-read-model.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
 import { officialMeasureRateResult, type MeasureRate } from "./measure-rate.ts";
+import type { SufficiencyCheck } from "../run/data-sufficiency.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -99,6 +100,11 @@ export interface ProgramSummary {
    * whenever this is true. False when `includesAuthoredScaleCounts` (no logic is named at all) (#769).
    */
   scoringConflict: boolean;
+  /**
+   * The checks the winning run's data for this measure failed (#853, D12), or null. `measureRate` is null
+   * whenever this is set: the card says the data was too thin to trust instead of showing a low rate.
+   */
+  dataInsufficient: SufficiencyCheck[] | null;
   /**
    * The year the winning run SCORED and the day its numbers describe (#637), read from the run's own
    * record rather than its start date — a rerun started in January that scores the year before is
@@ -549,6 +555,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       measureRate: null,
       scoringLogics: [],
       scoringConflict: false,
+      dataInsufficient: null,
       measurementYear: null,
       asOf: null,
       logicVintage: null,
@@ -581,6 +588,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       // `includesAuthoredScaleCounts`): no logic names it, and there is no one-logic claim to conflict.
       s.scoringLogics = s.includesAuthoredScaleCounts ? [] : result.scoringLogics;
       s.scoringConflict = s.includesAuthoredScaleCounts ? false : result.conflict;
+      s.dataInsufficient = result.dataInsufficient;
     }
     const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
     s.measurementYear = period?.measurementYear ?? null;

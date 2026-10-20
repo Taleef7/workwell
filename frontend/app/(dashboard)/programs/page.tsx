@@ -71,6 +71,11 @@ type ProgramSummary = {
    * numbers, so the card names none, whatever `scoringLogics` says.
    */
   includesAuthoredScaleCounts?: boolean;
+  /**
+   * #853: the checks the latest run's data for this measure failed (D12), or null. The card then shows no
+   * rate: one read off data this thin is low because the data is missing, not because the care is.
+   */
+  dataInsufficient?: string[] | null;
 };
 
 /**
@@ -326,7 +331,10 @@ export default function ProgramsPage() {
           // The summary carries its own improvementNotation, so an inverse measure reads correctly
           // before (or without) /api/measures. When the identity row is present it wins.
           const notation = identities[program.measureId] ?? program;
-          const programRate = displayRate(program, notation);
+          const thin = Array.isArray(program.dataInsufficient) && program.dataInsufficient.length > 0;
+          const shownRate = displayRate(program, notation);
+          // #853: no rate for a measure whose latest run's data was too thin to trust, the headline included.
+          const programRate = thin ? { ...shownRate, value: null } : shownRate;
           const noteId = `lower-note-${program.measureId}`;
           const countedId = `counted-${program.measureId}`;
           const describedBy = [
@@ -374,7 +382,11 @@ export default function ProgramsPage() {
                   {programRate.lowerIsBetter ? (
                     <p id={noteId} className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
                   ) : null}
-                  {programRate.value === null ? (
+                  {thin ? (
+                    <p id={countedId} data-testid={`card-thin-${program.measureId}`} className="text-xs text-amber-800 dark:text-amber-300">
+                      Data too thin to trust on the latest run
+                    </p>
+                  ) : programRate.value === null ? (
                     <p id={countedId} className="text-xs text-neutral-500 dark:text-neutral-400">No {SUBJECT.plural} counted yet</p>
                   ) : program.denominator !== undefined ? (
                     <p className="text-xs text-neutral-500 dark:text-neutral-400">
@@ -385,7 +397,7 @@ export default function ProgramsPage() {
               </div>
               {/* Calendar-year (pilot) deployments only: "so far" and CMS's case minimum mean nothing
                   for a rolling-window occupational measure on a small roster (#637 review). */}
-              {isPatientTerm && isSmallNumbers(programRate) ? (
+              {isPatientTerm && !thin && isSmallNumbers(programRate) ? (
                 <p className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                   Based on {fmtCount(programRate.denominator)} {programRate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
                 </p>
@@ -394,7 +406,7 @@ export default function ProgramsPage() {
                 const rates = multiRates(program);
                 // The rates are the run's whole population and are never site- or tenant-filtered,
                 // while the headline and chips are: under a filter they would describe other people.
-                if (!rates || siteId || tenant) return null;
+                if (!rates || siteId || tenant || thin) return null;
                 return (
                   <div className="mt-2 text-xs text-neutral-600 dark:text-neutral-400" data-testid={`card-rates-${program.measureId}`}>
                     <p className="font-medium text-neutral-800 dark:text-neutral-200">

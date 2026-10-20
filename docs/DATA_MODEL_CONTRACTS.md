@@ -27,6 +27,11 @@ run (`compliance/live-cell.ts`).
 - **Out-of-population never opens a case (ADR-078):** the outcome persists as MISSING_DATA;
 `planCaseUpsert` no-ops, or closes an active case `RESOLVED`, `closed_reason='OUT_OF_POPULATION'`,
 `closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA from a completed evaluation opens one.
+- **A data-insufficient measure closes nothing as out of population (#853, D12).** When a live run's ingested
+data falls below a floor (coded `Encounter.type` ≥95%, final blood pressure ≥95% for CMS165, failed record
+fetches <1%; `run/data-sufficiency.ts`), the measure's out-of-population rows skip the upsert (neither close
+nor open); its other rows behave as usual, and its rows still count as answered for the cycle rollover. The
+run is PARTIAL_FAILURE. Judged once, before the first chunk; the corpus never fires it.
 - **A failed evaluation never changes a case.** An engine or batch error, or a subject whose WebChart record
 could not be read (never evaluated, T3), persists MISSING_DATA with `evaluationError` and marks the run
 PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
@@ -131,7 +136,10 @@ WorkWell translation (decision 3) adds `official.kind: "derived"`, `label`, `url
 `ecqmId` is `null`: read `kind` before falling back to any CMS identity. QRDA I/III refuse such a run
 (422 `derived_logic_not_reportable`); a run whose evaluated rows were scored by more than one logic (CMS's
 artifact, a translation, authored CQL) or period is refused by QRDA I/III and every MeasureReport type
-(422 `mixed_logic`); an errored row counts as no logic.
+(422 `mixed_logic`); an errored row counts as no logic. `dataInsufficient: { checks }` (#853) is set on every
+outcome of a data-insufficient measure, errored rows included, and removed from every other (so a
+copied-forward row never keeps it); a measure with any such row is refused by QRDA I/III and every MeasureReport
+type (409 `data_insufficient`), and has no rate on the programs card or the run reconciliation.
 - **Evaluation failure** replaces the evidence with `{ "evaluationError": "<cause>", "message": "<error
 text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`. Readers test the
 key, never the cause: `"engine failure"` in the run pipeline, `"source fetch failed"` (with WebChart's error)
@@ -259,7 +267,9 @@ disjoint, assigned in order error -> out of population -> no rate -> scored, nev
 stay separate.
 - Compaction refuses per measure: `compactionStatus: "compacted"`, no rows, `missingFromRun: 0`, named in
 the CORS-exposed `X-WorkWell-Compacted-Measures`; **409 `run_compacted`** only when every run is exposed;
-never a truncated 200.
+never a truncated 200. A data-insufficient measure (#853) is refused the same way: `compactionStatus:
+"data_insufficient"`, no rows, `missingFromRun: 0`, named in `X-WorkWell-Data-Insufficient-Measures`; **409
+`data_insufficient`** when every measure is refused (compacted or thin).
 - `rawIdentifier`, subject name and rate label pass through `csvTextCell` (defuses a leading `=`, `+`,
 `-`, `@`, tab, CR).
 - `ecqmId` is CMS-prefixed (`CMS137FHIR`, `ecqmIdOf`) since #769; it was the evidence's bare `137FHIR`.

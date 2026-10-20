@@ -276,6 +276,35 @@ test("compaction is per MEASURE: one exposed run does not withhold the other mea
   assert.equal((all as unknown as { body: { error: string } }).body.error, "run_compacted");
 });
 
+test("#853: a measure whose data was too thin to trust is refused per MEASURE, claiming nothing per subject", async () => {
+  const thin = { ...official({ ipp: true, denom: true, numer: false, denex: false, denexcep: false }), dataInsufficient: { checks: ["encounterTypeCoded"] } };
+  const pass = await runReport({
+    measureIds: ["cms122", "cms125"],
+    runs: [{ runId: "run-2027", startedAt: "2027-12-31T00:00:00.000Z", year: 2027 }],
+    rows: [
+      row("pat-001", thin),
+      row("pat-002", thin),
+      row("pat-001", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }), { measureId: "cms125" }),
+    ],
+  });
+  assert.equal(pass.ok, true, "the other measure's numbers are not withheld");
+  const report = (pass as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  assert.deepEqual(report.dataInsufficientMeasures, ["cms122"]);
+  const refused = report.measures.find((m) => m.measureId === "cms122")!;
+  assert.equal(refused.compactionStatus, "data_insufficient");
+  assert.equal(refused.reason, "data_insufficient:encounterTypeCoded");
+  assert.deepEqual(refused.rates, []);
+  assert.equal(refused.missingFromRun, 0, "no per-subject claim: its rows exist and none is trusted");
+  assert.equal(report.rows.some((r) => r.measureId === "cms122"), false, "and no rows");
+  assert.equal(report.measures.find((m) => m.measureId === "cms125")!.rates[0]!.numer, 1);
+
+  // Every measure refused ⇒ the whole request is refused, naming why.
+  const all = await runReport({ rows: [row("pat-001", thin)] });
+  assert.equal(all.ok, false);
+  assert.equal((all as { status: number }).status, 409);
+  assert.equal((all as unknown as { body: { error: string } }).body.error, "data_insufficient");
+});
+
 test("a compaction intent landing MID-REPORT refuses, rather than serving a truncated 200", async () => {
   // The post-read check. A pass that began while this report was paging would have deleted rows the
   // earlier pages already counted, and a 200 over those counts is a number nobody can reproduce.

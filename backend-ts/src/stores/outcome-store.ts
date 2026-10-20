@@ -319,6 +319,9 @@ export interface OutcomeStore {
    * **`evaluationError` must be ABSENT, not null, when the row is not an error** — `isEvaluationErrorEvidence`
    * tests key PRESENCE (`"evaluationError" in evidence`), so a projection that always carried the key
    * would make every row read as an evaluation failure and every rate read as zero.
+   *
+   * **`dataInsufficient` is carried too (#853), and absent when the row has none**, so a report built on
+   * this read refuses a measure whose data was too thin to trust (D12) without a second read.
    */
   listOutcomeMembershipsForRun(
     runId: string,

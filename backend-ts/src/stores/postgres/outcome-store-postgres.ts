@@ -213,7 +213,8 @@ export class PgOutcomeStore implements OutcomeStore {
     // `jsonb_strip_nulls` is what keeps `evaluationError` ABSENT rather than null on a row that did
     // not error — the aggregator tests key presence, so carrying the key with a null would read every
     // row as a failure. The whole `official` object is kept (populations, rates, strata, ecqmId,
-    // version); `expressionResults` and `qrda1Import` are what this drops, and they are the bulk.
+    // version), and `dataInsufficient` (#853), so a report refuses a thin run's rates from this read;
+    // `expressionResults` and `qrda1Import` are what this drops, and they are the bulk.
     //
     // No ORDER BY: the caller folds. See the interface for why that is safe here and why the page
     // window it replaces was not a saving.
@@ -221,7 +222,8 @@ export class PgOutcomeStore implements OutcomeStore {
       `SELECT status,
               jsonb_strip_nulls(jsonb_build_object(
                 'official', evidence_json -> 'official',
-                'evaluationError', evidence_json -> 'evaluationError'
+                'evaluationError', evidence_json -> 'evaluationError',
+                'dataInsufficient', evidence_json -> 'dataInsufficient'
               )) AS evidence
          FROM ${T} WHERE run_id = $1 AND measure_id = $2`,
       [runId, measureId],

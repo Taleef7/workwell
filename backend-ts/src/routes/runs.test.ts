@@ -811,6 +811,34 @@ test("scoringLogicByMeasure: authored rows beside a named logic are a conflict; 
   resetScoringLogicMemo();
 });
 
+test("#853: a measure whose data was too thin to trust is refused by every export, read from its own rows", async () => {
+  const period = { start: "2026-01-01", end: "2026-12-31" };
+  // ONE flagged row is enough: the pipeline flags every row of a thin measure, so any row carrying it means
+  // the run's numbers for the measure describe missing data.
+  const thin = { ...officialEvidence(period), dataInsufficient: { checks: ["encounterTypeCoded"] } };
+  const runId = await runWithEvidence([officialEvidence(period), thin]);
+  for (const path of [
+    `/api/runs/${runId}/qrda?format=xml`,
+    `/api/runs/${runId}/qrda1`,
+    `/api/runs/${runId}/measure-report`,
+    `/api/runs/${runId}/measure-report?type=bundle`,
+    `/api/runs/${runId}/measure-report?type=individual`,
+  ]) {
+    const res = (await get(path))!;
+    assert.equal(res.status, 409, path);
+    const body = (await res.json()) as { error: string; checks: string[] };
+    assert.equal(body.error, "data_insufficient", path);
+    assert.deepEqual(body.checks, ["encounterTypeCoded"], path);
+  }
+  // No rate either: the reconciliation names none for a thin measure.
+  const recon = (await (await get(`/api/runs/${runId}/reconciliation`))!.json()) as { official: unknown };
+  assert.equal(recon.official, null);
+  // The control: the same rows without the flag export as before.
+  const sound = await runWithEvidence([officialEvidence(period), officialEvidence(period)]);
+  assert.equal((await get(`/api/runs/${sound}/qrda?format=xml`))!.status, 200);
+  assert.equal((await get(`/api/runs/${sound}/measure-report`))!.status, 200);
+});
+
 test("a run whose rows were scored for two different years is refused rather than labelled with the first row", async () => {
   const runId = await runWithEvidence([officialEvidence({ start: "2026-01-01", end: "2026-12-31" }), officialEvidence({ start: "2027-01-01", end: "2027-12-31" })]);
   for (const path of [`/api/runs/${runId}/qrda?format=xml`, `/api/runs/${runId}/qrda1`, `/api/runs/${runId}/measure-report`, `/api/runs/${runId}/measure-report?type=bundle`, `/api/runs/${runId}/measure-report?type=individual`]) {
