@@ -8,6 +8,8 @@
  * Hand-built XML, balanced by construction — no CDA runtime and no new dependency, matching the
  * existing `mat-export.ts` / `qrda3-export.ts` approach.
  */
+import { scoredByCurrentLogic } from "../measure/measure-identity.ts";
+import type { OfficialManifest } from "../wiring/official-artifacts.ts";
 
 /** CDA/HL7 code systems used by both documents. */
 export const LOINC = "2.16.840.1.113883.6.1";
@@ -164,14 +166,14 @@ export const hl7DateAsStated = (date: unknown): string | null => {
  *    `null` artifact and then read `artifact.bundle` off it, so exporting a historical outcome whose
  *    artifact had since been removed turned the endpoint into a 500.
  *  - **A re-vendored artifact must not relabel an old outcome.** The identity is claimed only when the
- *    vendored artifact's `sha256` matches the `artifactSha256` the outcome was scored under — the same
- *    rule ADR-046 decision 3 applies to MeasureReport's canonical, which this path had not carried over.
- *    Otherwise it falls back to a version-qualified local id: less pretty, and true.
+ *    outcome was scored by the vendored artifact's LOGIC (`scoredByCurrentLogic`): its own bytes, or an
+ *    earlier vendoring with the same `logicSha256` (#848) — the rule MeasureReport's canonical applies
+ *    too (ADR-046 decision 3). Otherwise it falls back to a version-qualified local id: less pretty, and true.
  */
 export function qrdaMeasureReference(
   measureId: string,
   official: { kind?: "derived"; version?: string; artifactSha256?: string } | null,
-  artifact: { manifest: { sha256: string }; bundle: unknown } | null,
+  artifact: { manifest: Pick<OfficialManifest, "catalogId" | "sha256" | "logicSha256">; bundle: unknown } | null,
   identifiers: (a: never) => { versionSpecific?: string; versionIndependent?: string },
   indent: string,
 ): string {
@@ -182,8 +184,8 @@ export function qrdaMeasureReference(
     throw new Error(`${measureId}: a WorkWell translation has no QRDA measure identity; refuse the export before reaching here`);
   }
   if (!official) return `<id root="urn:workwell:measure" extension="${esc(measureId)}"/>`;
-  const shaMatches = artifact && (!official.artifactSha256 || artifact.manifest.sha256 === official.artifactSha256);
-  const ids = shaMatches ? identifiers(artifact as never) : {};
+  const sameLogic = artifact && (!official.artifactSha256 || scoredByCurrentLogic(artifact.manifest, official.artifactSha256));
+  const ids = sameLogic ? identifiers(artifact as never) : {};
   if (!ids.versionSpecific) {
     // Version-qualified so the document still names WHICH official run produced it, without asserting a
     // published identity this outcome may not have been scored by.

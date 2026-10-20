@@ -36,7 +36,7 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 17067945,
-    "vendoredBytes": 2412965
+    "vendoredBytes": 2411459
   },
   "terminology": {
     "file": "terminology.json",
@@ -148,7 +148,7 @@
         {
           "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
           "reason": "release",
-          "had": 2000,
+          "had": 2030,
           "now": 2025,
           "declaredTotal": 2025
         },
@@ -268,7 +268,8 @@
     },
     "sha256": "sha256:682d199a8c628e7d0b00d3246d54f2a07f416820a1fd911bbd607d13ff9e64d9"
   },
-  "sha256": "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db",
+  "sha256": "sha256:1e4b933ee02fe512e707b958b9d4ef4aeb437c57f326be50502118720a9eda6f",
+  "logicSha256": "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865",
   "derived": {
     "label": "WorkWell translation of CMS130v15",
     "derivedFrom": {
@@ -277,7 +278,7 @@
     },
     "base": {
       "catalogId": "cms130",
-      "manifestSha256": "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629"
+      "manifestSha256": "sha256:62917e957b3ceebfbc1c904b435f618c3547d36f4122db1748772d9ec5ec8f04"
     },
     "build": {
       "translator": "@cqframework/cql@4.0.0-beta.1",
@@ -351,7 +352,7 @@
         "total": 269,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db",
+          "artifactSha256": "sha256:1e4b933ee02fe512e707b958b9d4ef4aeb437c57f326be50502118720a9eda6f",
           "terminologySha256": "sha256:682d199a8c628e7d0b00d3246d54f2a07f416820a1fd911bbd607d13ff9e64d9"
         }
       },
@@ -366,7 +367,7 @@
         "total": 31,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db",
+          "artifactSha256": "sha256:1e4b933ee02fe512e707b958b9d4ef4aeb437c57f326be50502118720a9eda6f",
           "terminologySha256": "sha256:682d199a8c628e7d0b00d3246d54f2a07f416820a1fd911bbd607d13ff9e64d9"
         }
       }

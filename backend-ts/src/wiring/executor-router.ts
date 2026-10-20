@@ -111,7 +111,7 @@ import {
   ungatedOfficialMeasures,
   type OfficialMeasuresEnv,
 } from "./official-routing.ts";
-import { officialMeasureSemantics } from "./official-measure-semantics.ts";
+import { improvementNotationFor, officialMeasureSemantics } from "./official-measure-semantics.ts";
 import { fqmWorkerCount, fqmWorkerEnabled, sharedFqmWorker, type BatchCalculator } from "./fqm-worker.ts";
 
 /** The extended shape the authored engine accepts — diagnostics pass an explicit library to run. */
@@ -447,8 +447,16 @@ function derivedRoutingProblems(
       problems.push(`${id}: the translation's terminology does not name the VSAC release it was expanded from`);
     }
 
+    // The notation a translation publishes is WorkWell's reading, not a copy of CMS's (#848): CMS122's
+    // artifact declares `increase` for an inverse measure. One source, `improvementNotationFor`, for the
+    // builder that writes it and the check that reads it.
+    const semantics = officialMeasureSemantics(id);
+    const notation = semantics ? improvementNotationFor(semantics) : null;
+    if (manifest.improvementNotation !== notation) {
+      problems.push(`${id}: the translation's improvementNotation '${manifest.improvementNotation}' is not the '${notation ?? "?"}' its semantics imply`);
+    }
     if (base) {
-      for (const field of ["scoring", "populationBasis", "improvementNotation"] as const) {
+      for (const field of ["scoring", "populationBasis"] as const) {
         if (manifest[field] !== base.manifest[field]) {
           problems.push(`${id}: the translation's ${field} '${manifest[field]}' differs from CMS's '${base.manifest[field]}'`);
         }

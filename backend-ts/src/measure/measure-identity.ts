@@ -74,6 +74,8 @@ interface CmsArtifactLineage {
   /** The QDM measure, with its version, the FHIR artifact was derived from. */
   derivedFrom: string;
   contentRepo: string;
+  /** What the artifact computes, apart from its metadata (`scripts/artifact-logic.mjs`, #848). */
+  logicSha256: string;
 }
 
 /**
@@ -82,21 +84,94 @@ interface CmsArtifactLineage {
  *
  * Neither the bundles nor the catalog can answer this for an old row: the bundles do not carry it, and
  * the catalog's `policyRef` moves when the catalog moves to a new year, which would relabel every 2026
- * row as derived from the 2027 measure. A re-vendor changes the sha, and the test that every committed
- * manifest has an entry fails until this table names it. Versions are the 2026 performance-period eCQMs
- * on the eCQI Resource Center (the catalog's own ids), which is what `dqm-content-qicore-2025` drafted.
+ * row as derived from the 2027 measure. Versions are the 2026 performance-period eCQMs on the eCQI
+ * Resource Center (the catalog's own ids), which is what `dqm-content-qicore-2025` drafted.
+ *
+ * A re-vendor ADDS an entry and never removes one (#848): the test that every committed manifest has an
+ * entry fails until this table names the new sha, and an earlier sha stays so a row it scored keeps its
+ * lineage. Each entry records its `logicSha256`, which is how `scoredByCurrentLogic` tells a metadata-only
+ * re-vendor (same logic, CMS's identity carries over) from a change of logic (it does not).
  */
+const DQM_2025 = "cqframework/dqm-content-qicore-2025";
 const CMS_ARTIFACT_LINEAGE: Readonly<Record<string, CmsArtifactLineage>> = {
-  "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552": { measureId: "cms122", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8": { measureId: "cms125", ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629": { measureId: "cms130", ecqmId: "CMS130FHIR", version: "1.0.000", derivedFrom: "CMS130v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24": { measureId: "cms137", ecqmId: "CMS137FHIR", version: "1.0.000", derivedFrom: "CMS137v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aab25280eb4": { measureId: "cms138", ecqmId: "CMS138FHIR", version: "1.0.000", derivedFrom: "CMS138v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e": { measureId: "cms165", ecqmId: "CMS165FHIR", version: "1.0.000", derivedFrom: "CMS165v14", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec": { measureId: "cms2", ecqmId: "CMS2FHIR", version: "1.0.000", derivedFrom: "CMS2v15", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970": { measureId: "cms68", ecqmId: "CMS68FHIR", version: "1.0.000", derivedFrom: "CMS68v15", contentRepo: "cqframework/dqm-content-qicore-2025" },
-  "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae": { measureId: "cms951", ecqmId: "CMS951FHIR", version: "1.0.000", derivedFrom: "CMS951v4", contentRepo: "cqframework/dqm-content-qicore-2025" },
+  // As main shipped them from 6f4b8ea5 (2026-09-05; cms137 from ebe2dc24, 09-06), retired by #848's
+  // re-vendor: only two Library profile claims changed.
+  "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552": { measureId: "cms122", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14", contentRepo: DQM_2025, logicSha256: "sha256:6e4498b1815130957eb58f4ca2d74734e488bdc4a5a474df6d42ce9d0c072efb" },
+  "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8": { measureId: "cms125", ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14", contentRepo: DQM_2025, logicSha256: "sha256:67a0240f5e409b699512d9241611a8cebd1fa9fa4b85bc0841c92ee8c83e54ac" },
+  "sha256:aab26d665b79bc91454640923472f294c77072e36be098f927a4301081d72629": { measureId: "cms130", ecqmId: "CMS130FHIR", version: "1.0.000", derivedFrom: "CMS130v14", contentRepo: DQM_2025, logicSha256: "sha256:816e944190763d813cf9136ae2701a7a907f4bc87a87d1a9caef7406224a7eab" },
+  "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24": { measureId: "cms137", ecqmId: "CMS137FHIR", version: "1.0.000", derivedFrom: "CMS137v14", contentRepo: DQM_2025, logicSha256: "sha256:ed270232aa281109b7bca0d855b7ab9a4cc1b137a37209d47fa5812d888ac2f4" },
+  "sha256:219b52a38363ac6968d47b0d51b6b45656da6b01a9a9d2496bd05aab25280eb4": { measureId: "cms138", ecqmId: "CMS138FHIR", version: "1.0.000", derivedFrom: "CMS138v14", contentRepo: DQM_2025, logicSha256: "sha256:bb0385c3095e8481db2b6ddfb3a7342ed97ad9b0158f468aca48813f8df2fb4a" },
+  "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e": { measureId: "cms165", ecqmId: "CMS165FHIR", version: "1.0.000", derivedFrom: "CMS165v14", contentRepo: DQM_2025, logicSha256: "sha256:1528701778cecfbf3451725a41486a19e0a887239d347db26cf0c08e0f183b7f" },
+  "sha256:4d69acfa4b5bc6d7010ad89279b9d61be77470cc5e37f38f2357bae176e2f1ec": { measureId: "cms2", ecqmId: "CMS2FHIR", version: "1.0.000", derivedFrom: "CMS2v15", contentRepo: DQM_2025, logicSha256: "sha256:5d5964366110a3592ddc8cc47a1aa4d97d0b1fabe807ea196104a4ded46892ce" },
+  "sha256:f114b6edf657db98b6a11b625aa3b5d43e55ab736b0067dda56eeb6f312fb970": { measureId: "cms68", ecqmId: "CMS68FHIR", version: "1.0.000", derivedFrom: "CMS68v15", contentRepo: DQM_2025, logicSha256: "sha256:25beef950e0422d294f58ea3214035fc4ebc93b972481421d0a5fe090ed6dede" },
+  "sha256:a005f4527d70fdd7495b9d75ab03b5ab43f1146fcdad81cbfba7d81b7caf1dae": { measureId: "cms951", ecqmId: "CMS951FHIR", version: "1.0.000", derivedFrom: "CMS951v4", contentRepo: DQM_2025, logicSha256: "sha256:9c4050b44378d20d2ba5d0624c03d527ec6b158ca6c47a22406ac72798912099" },
+  // Re-vendored for #848/#851 (2026-10-19): the same logic as above, two Library claims fewer.
+  "sha256:6f3f25f64a1ca13351082ffba87170bfa3ae8035b71efc56dcc542740a89c948": { measureId: "cms122", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: "CMS122v14", contentRepo: DQM_2025, logicSha256: "sha256:6e4498b1815130957eb58f4ca2d74734e488bdc4a5a474df6d42ce9d0c072efb" },
+  "sha256:bbda505db2343b678d26988d6ef7fc49fdc802e39d6ebbc34272325f91502683": { measureId: "cms125", ecqmId: "CMS125FHIR", version: "1.0.000", derivedFrom: "CMS125v14", contentRepo: DQM_2025, logicSha256: "sha256:67a0240f5e409b699512d9241611a8cebd1fa9fa4b85bc0841c92ee8c83e54ac" },
+  "sha256:62917e957b3ceebfbc1c904b435f618c3547d36f4122db1748772d9ec5ec8f04": { measureId: "cms130", ecqmId: "CMS130FHIR", version: "1.0.000", derivedFrom: "CMS130v14", contentRepo: DQM_2025, logicSha256: "sha256:816e944190763d813cf9136ae2701a7a907f4bc87a87d1a9caef7406224a7eab" },
+  "sha256:abd7c6bd4403c86e19506995748f2fbfc3401bfce98f0ae9bb7481c73e04ed0e": { measureId: "cms137", ecqmId: "CMS137FHIR", version: "1.0.000", derivedFrom: "CMS137v14", contentRepo: DQM_2025, logicSha256: "sha256:ed270232aa281109b7bca0d855b7ab9a4cc1b137a37209d47fa5812d888ac2f4" },
+  "sha256:99dbece35fa7d27d4a75e5dd99f052812fe4e05a54c748f61f493a2fbcafaad8": { measureId: "cms138", ecqmId: "CMS138FHIR", version: "1.0.000", derivedFrom: "CMS138v14", contentRepo: DQM_2025, logicSha256: "sha256:bb0385c3095e8481db2b6ddfb3a7342ed97ad9b0158f468aca48813f8df2fb4a" },
+  "sha256:3dd610fb84b7a593ab44f51d99303bc0d33d31bb99875fee41f20e4002219e1b": { measureId: "cms165", ecqmId: "CMS165FHIR", version: "1.0.000", derivedFrom: "CMS165v14", contentRepo: DQM_2025, logicSha256: "sha256:1528701778cecfbf3451725a41486a19e0a887239d347db26cf0c08e0f183b7f" },
+  "sha256:15e7985c67f72c0ee15c3ef8ddf2a4ee182b53514f65f06b9cc11c12e63daffb": { measureId: "cms2", ecqmId: "CMS2FHIR", version: "1.0.000", derivedFrom: "CMS2v15", contentRepo: DQM_2025, logicSha256: "sha256:5d5964366110a3592ddc8cc47a1aa4d97d0b1fabe807ea196104a4ded46892ce" },
+  "sha256:3f2de5db0bfb3ffe5973af3619daf0a25ef11bacb752a161b291cc40d99fb743": { measureId: "cms68", ecqmId: "CMS68FHIR", version: "1.0.000", derivedFrom: "CMS68v15", contentRepo: DQM_2025, logicSha256: "sha256:25beef950e0422d294f58ea3214035fc4ebc93b972481421d0a5fe090ed6dede" },
+  "sha256:c0c8c634c8bee33fa659dd5f65866312a55c72add352ff5cdc8d9eea232af69e": { measureId: "cms951", ecqmId: "CMS951FHIR", version: "1.0.000", derivedFrom: "CMS951v4", contentRepo: DQM_2025, logicSha256: "sha256:9c4050b44378d20d2ba5d0624c03d527ec6b158ca6c47a22406ac72798912099" },
 };
+
+/**
+ * The same, for WorkWell's translations (#848): each build's bundle sha and the logic it computes. A rebuild
+ * ADDS its sha and keeps the old one, and the test that every committed translation has an entry fails until
+ * it does. Translations carry no CMS identity, so only the logic is recorded; it is what lets a run scored by
+ * an earlier, logic-identical build keep the artifact's ids (a MeasureReport's `linkId`s).
+ */
+const TRANSLATION_LOGIC_LINEAGE: Readonly<Record<string, { measureId: string; logicSha256: string }>> = {
+  // Every ww-2027.1 build main shipped before #848, keyed by its manifest's `sha256` as committed (the commit
+  // that shipped it is on each line; `git show <commit>:backend-ts/measures/derived/<id>/manifest.json`).
+  // cms122's notation moved in #848 (`increase` → `decrease`, inside its groups), so its logic differs; the
+  // other five changed metadata only. cms130 shipped twice, both builds computing the same logic.
+  "sha256:594ec2b8da5871eb7eadb2aac8ad5eee6447990c58e7867760d5f955cd7f7f51": { measureId: "cms122", logicSha256: "sha256:10d6e80305d637b90eac0a1fb7145cea6238c4fc39cd34403895baa8dd77605f" }, // 36ba2b09
+  "sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b": { measureId: "cms125", logicSha256: "sha256:eaeb6ac27f729cf14f7a43e117f8f5908cdbbb437f8f174b39080148333853e4" }, // ac15fd1f
+  "sha256:e5a6dfcedf91c96478f907dab9fd30b3ba55a396b9500ea42341b235eb553353": { measureId: "cms130", logicSha256: "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865" }, // d737e599
+  "sha256:2555fac2cccc3dbaaef65dbb0aa84ea38cfb658dea2679720e7874864e66f4db": { measureId: "cms130", logicSha256: "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865" }, // ac15fd1f
+  "sha256:2fec42cc10315cd46a7d651e24c8eaf60fd9656224bcde174cdd75f7b3d4d0eb": { measureId: "cms137", logicSha256: "sha256:254a30553d5546d6f16585358e7b56a8c2fc274d7c6ac3af0fdca14c28a56ffc" }, // 0adba077
+  "sha256:b7cd83c69962954016381954a993861d90bf0d69cd6dc8cbb0376b92a924a64a": { measureId: "cms165", logicSha256: "sha256:dea8f835147b234289c252a4244cebe3ed38c3066e24d8a254db13cc42393a69" }, // 73a0a799
+  "sha256:ce329d5a0aa06f13fac490a5f91bc45e4001d06d76da58b15b71ce8c0600c00f": { measureId: "cms2", logicSha256: "sha256:6aa351307e648fb97ee126726dd5d03824186c008014ad64b956bc7563f32476" }, // bc2f5c2e
+  // ww-2027.1 rebuilt for #848 (2026-10-19).
+  "sha256:ed1d50353f4a72a87853bccdb7997d1336811c8d14826eeaefae3416edec0ead": { measureId: "cms122", logicSha256: "sha256:5fe5e29b7f51dc13247322ab16a958054b2cf55a201a3de9e13c6a56dd31daa5" },
+  "sha256:e2fb89840d6a75773cbb15e0eb35679fc35e43091fa8a18dcc4743406a4f6886": { measureId: "cms125", logicSha256: "sha256:eaeb6ac27f729cf14f7a43e117f8f5908cdbbb437f8f174b39080148333853e4" },
+  "sha256:1e4b933ee02fe512e707b958b9d4ef4aeb437c57f326be50502118720a9eda6f": { measureId: "cms130", logicSha256: "sha256:781b445b65b149c4207510dba8b0aa11813727a499be84b53b4d32878707e865" },
+  "sha256:2712b927bf061e3dddbcef1fae00cb8db8be572d1f0e1c2062c3f197af5fa4a9": { measureId: "cms137", logicSha256: "sha256:254a30553d5546d6f16585358e7b56a8c2fc274d7c6ac3af0fdca14c28a56ffc" },
+  "sha256:d43d9639afaa0fc49ddc4c23997c5be7d912bd41ece1efad6a6ece61a5bfb0c6": { measureId: "cms165", logicSha256: "sha256:dea8f835147b234289c252a4244cebe3ed38c3066e24d8a254db13cc42393a69" },
+  "sha256:554a64d9c728f1215d4b13199d30b8f10704731adf3e01f899f7ee35de836aa2": { measureId: "cms2", logicSha256: "sha256:6aa351307e648fb97ee126726dd5d03824186c008014ad64b956bc7563f32476" },
+};
+
+/** For the committed-translation drift test only. */
+export const TRANSLATION_LOGIC_LINEAGE_FOR_TEST = TRANSLATION_LOGIC_LINEAGE;
+
+/**
+ * True when the artifact a run recorded (`artifactSha256`) computed the same logic as `manifest`, the one
+ * vendored or built now (#848): the same bytes; or an earlier vendoring or build of the same measure, pinned
+ * in one of the two tables above, whose `logicSha256` equals the current manifest's. A sha nobody pinned is
+ * never assumed equal, and a manifest with no `logicSha256` matches only its own bytes. CMS's artifacts and
+ * the translations never stand in for each other: their logic hashes differ (the Measure url is part of
+ * it). The four export gates (QRDA I/III ids and criteria, the MeasureReport canonical and ids, the vintage
+ * note) ask this instead of "are the bytes equal", so a metadata-only re-vendor or rebuild no longer strips
+ * an older run of the artifact's identity.
+ *
+ * Terminology is not part of it, as it never was of the bytes check: a run scored before a sidecar moved
+ * (Advanced Illness 2,000 → 2,030 codes, #851) keeps CMS's identity, because the artifact's logic is CMS's.
+ */
+export function scoredByCurrentLogic(
+  manifest: Pick<OfficialManifest, "catalogId" | "sha256" | "logicSha256">,
+  artifactSha256: string,
+): boolean {
+  if (artifactSha256 === manifest.sha256) return true;
+  const earlier = Object.hasOwn(CMS_ARTIFACT_LINEAGE, artifactSha256)
+    ? CMS_ARTIFACT_LINEAGE[artifactSha256]
+    : Object.hasOwn(TRANSLATION_LOGIC_LINEAGE, artifactSha256)
+      ? TRANSLATION_LOGIC_LINEAGE[artifactSha256]
+      : undefined;
+  return !!earlier && !!manifest.logicSha256 && earlier.measureId === manifest.catalogId && earlier.logicSha256 === manifest.logicSha256;
+}
 
 /** For the committed-manifest drift test only. */
 export const CMS_ARTIFACT_LINEAGE_FOR_TEST = CMS_ARTIFACT_LINEAGE;
@@ -116,7 +191,10 @@ function cmsArtifactLineage(
     if (ref.artifactSha256 || !ref.ecqmId || !ref.version) return undefined;
     const ecqmId = ecqmIdOf(ref.ecqmId);
     const matches = Object.values(CMS_ARTIFACT_LINEAGE).filter((l) => l.ecqmId === ecqmId && l.version === ref.version);
-    return matches.length === 1 ? matches[0] : undefined;
+    // Two vendorings of one artifact (#848) are one lineage, not an ambiguity: they agree on everything
+    // the lineage says. Ambiguous only when the matches name different lineages.
+    const lineages = new Set(matches.map((l) => `${l.measureId}|${l.derivedFrom}|${l.contentRepo}`));
+    return lineages.size === 1 ? matches[0] : undefined;
   })();
   if (!found) return null;
   return measureId === undefined || found.measureId === measureId ? found : null;

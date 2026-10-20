@@ -36,12 +36,12 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 17115529,
-    "vendoredBytes": 2466272
+    "vendoredBytes": 2465012
   },
   "terminology": {
     "file": "terminology.json",
     "valueSets": 33,
-    "codes": 5024,
+    "codes": 5054,
     "truncated": [],
     "completion": {
       "source": "vsac",
@@ -50,7 +50,7 @@
         {
           "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
           "had": 1000,
-          "now": 2000,
+          "now": 2030,
           "declaredTotal": 1997
         },
         {
@@ -61,9 +61,10 @@
         }
       ]
     },
-    "sha256": "sha256:e8bf24a35340d1a88d352a161b3e574c6088d8c7b09180cf959f8956ca08e740"
+    "sha256": "sha256:9d7205125675fdb64c52983b803efd239849e355ca074ef08097991ee6e3ebd1"
   },
-  "sha256": "sha256:ae317d0db4136e322900ff139982621d547f411d5b0e14fa75ad8fea9a53645e",
+  "sha256": "sha256:3dd610fb84b7a593ab44f51d99303bc0d33d31bb99875fee41f20e4002219e1b",
+  "logicSha256": "sha256:1528701778cecfbf3451725a41486a19e0a887239d347db26cf0c08e0f183b7f",
   "tests": {
     "count": 360,
     "sourcePath": "input/tests/measure/CMS165FHIRControllingHighBP",

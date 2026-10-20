@@ -230,8 +230,9 @@ The steps that need a sentence more than the diagram gives them:
 - **Step 7 exists because upstream ships incomplete lists.** The content repo caps every published
   expansion at 1,000 entries (full ones need an NLM licence). One list that CMS122, CMS125, CMS130 and CMS165 all use is
   1,000 of 1,997 codes, and it feeds an exclusion — a short exclusion list silently scores people
-  who should have been excused. Those lists are re-expanded from VSAC at vendor time, pinned to the
-  release the content repo itself names. If the credential is missing, nothing is written and
+  who should have been excused. Those lists are re-expanded from VSAC at vendor time, at the release
+  the content repo itself names, asked for by that release's title so the answer is the release's own
+  (2,030 codes for that list) and cannot drift after it ships. If the credential is missing, nothing is written and
   routing stays refused: a differently-incomplete list is the one outcome worse than staying
   capped.
 - **Step 9 is the gate.** Every measure ships with test patients and the answers its authors

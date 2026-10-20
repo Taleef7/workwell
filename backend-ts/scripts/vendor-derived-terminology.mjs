@@ -17,13 +17,13 @@
  * sidecar would hash differently from the pin anyway, but "refused at the deploy step, naming the OID" is
  * a far better failure than "refused at boot, naming a hash".
  *
- * ## When VSAC's answer is not the release's (2026-10-15)
+ * ## The release's own answer (#851)
  *
  * VSAC's `$expand?manifest=` of a GROUPING value set resolves its members at their latest version, so a
  * member republished after the release moved Advanced Illness (1082) from the release's 2,025 codes to
- * 2,027 overnight and every translation that declares it failed its pin. `expandAtRelease` expands each
- * pure grouping member by member at the release as well, and uses that union (with a WARNING) when the
- * two disagree, so the sidecar is the release's again.
+ * 2,027 overnight (2026-10-15) and every translation that declares it failed its pin. `expandAtRelease`
+ * asks for `expansion=<the release's title>` instead: the release's answer for the set itself, one request
+ * per set, with VSAC's echo of the release checked. A declared set the release does not list is refused.
  *
  * `--fallback-image <ref>` is the second line: when the expansion still does not reproduce the pin, or
  * VSAC cannot be reached, the sidecar is copied out of that image (the last deployed one) and accepted
@@ -263,9 +263,8 @@ async function run(args, { env, fs, fetchImpl, out, err }) {
   }
 
   const valueSets = [];
-  // One cache per run: a member shared by several groupings, and the release's pins, are read once. The
-  // sets resolve concurrently, at most six requests at a time; the sidecar's order comes from
-  // `sortValueSets`, never from which answer arrived first.
+  // One cache per run, so the release Library is read once. The sets resolve concurrently, at most six
+  // requests at a time; the sidecar's order comes from `sortValueSets`, never from which answer arrived first.
   const cache = new Map();
   const transport = limitConcurrency(fetchImpl ?? ((...request) => globalThis.fetch(...request)), 6);
   const outcomes = await Promise.all(
@@ -281,28 +280,6 @@ async function run(args, { env, fs, fetchImpl, out, err }) {
       // The whole run fails on one set, and nothing is written: a sidecar missing one set is a sidecar
       // the router refuses, and writing it would only move the failure from here to boot.
       throw new Refusal(`could not expand ${oid} at ${release}: ${cause.message}. Nothing was written.`);
-    }
-    if (expanded.drift && args.emitBlock) {
-      // Producing a PIN over a disagreement would pin one of two answers on faith: the members at a release
-      // are the release for ecqm-update-2026-05-14 (verified against its published file), but not at every
-      // release (at ecqm-fhir-update-2025 they disagree with both). Verify against the release's file first.
-      const { vsacTotal, releaseTotal } = expanded.drift;
-      throw new Refusal(
-        `VSAC's grouping expansion of ${oid} at ${release} (${vsacTotal} codes) and its members at that release` +
-          ` (${releaseTotal}) disagree, so no pin is produced. Check the set against the release's published` +
-          " value-set file before pinning. Nothing was written.",
-      );
-    }
-    if (expanded.drift) {
-      // Said loudly, never hidden: the sidecar holds what the release holds, and the operator learns VSAC
-      // disagreed (its grouping answer used a member version newer than the release). The pin judges it.
-      const { vsacTotal, releaseTotal, vsacOnly, releaseOnly } = expanded.drift;
-      err(
-        `  WARNING ${args.catalogId}: VSAC's grouping expansion of ${oid} at ${release} (${vsacTotal} codes) differs from` +
-          ` its members expanded at that release (${releaseTotal}); using the members. VSAC only: ` +
-          `${vsacOnly.map((c) => c.code).join(", ") || "none"}; members only: ${releaseOnly.map((c) => c.code).join(", ") || "none"}
-`,
-      );
     }
     valueSets.push({ url: `${VSAC_VALUESET_CANONICAL}${oid}`, oid, declaredTotal: expanded.total, codes: expanded.codes });
   }

@@ -36,7 +36,7 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 16934970,
-    "vendoredBytes": 2426497
+    "vendoredBytes": 2425615
   },
   "terminology": {
     "file": "terminology.json",
@@ -45,7 +45,8 @@
     "truncated": [],
     "sha256": "sha256:e5949baba2230a18b836cb33eff95c948907b654c63bac8453d7caa048739b20"
   },
-  "sha256": "sha256:01e9499c10b252636ea58805a9f913685dc867eec23bd586429520cc966f0a24",
+  "sha256": "sha256:abd7c6bd4403c86e19506995748f2fbfc3401bfce98f0ae9bb7481c73e04ed0e",
+  "logicSha256": "sha256:ed270232aa281109b7bca0d855b7ab9a4cc1b137a37209d47fa5812d888ac2f4",
   "tests": {
     "count": 227,
     "sourcePath": "input/tests/measure/CMS137FHIRSUDTxInitEngagement",

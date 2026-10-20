@@ -10,7 +10,8 @@ import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { loadDerivedArtifact, loadOfficialArtifact, type OfficialArtifact } from "../wiring/official-artifacts.ts";
-import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
+import { scoredByCurrentLogic } from "../measure/measure-identity.ts";
+import { improvementNotationFor, officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 
 const POP_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-population";
 const IMPROVEMENT_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-improvement-notation";
@@ -626,16 +627,17 @@ export function reportingPeriod(
 }
 
 /**
- * The artifact that scored this outcome, when it is still the one vendored: its sha matches the evidence's
- * (or the evidence predates recording one), and a translation's url matches too. A re-vendor between the run
- * and the export changes the sha, and the current artifact's canonical or ids would then describe logic the
- * counts were not produced by.
+ * The artifact that scored this outcome, when it is still the one vendored: it computed the logic the
+ * evidence's sha names (`scoredByCurrentLogic`: the same bytes, or an earlier vendoring of the same logic,
+ * #848; or the evidence predates recording one), and a translation's url matches too. A re-vendor that
+ * changed the logic between the run and the export ends the match, and the current artifact's canonical or
+ * ids would then describe logic the counts were not produced by.
  */
 const reportArtifact = (measureId: string, official: OfficialReportIdentity | null): OfficialArtifact | null => {
   if (!official) return null;
   const artifact = official.kind === "derived" ? loadDerivedArtifact(measureId) : loadOfficialArtifact(measureId);
   if (!artifact) return null;
-  if (official.artifactSha256 && artifact.manifest.sha256 !== official.artifactSha256) return null;
+  if (official.artifactSha256 && !scoredByCurrentLogic(artifact.manifest, official.artifactSha256)) return null;
   if (official.kind === "derived" && official.url && artifact.manifest.url !== official.url) return null;
   return artifact;
 };
@@ -736,7 +738,7 @@ const improvementNotation = (
     // description of the measure, and `official-measure-semantics.ts` records that decision with its
     // rationale. There is no safe default here: guessing one way reports every failure as compliant.
     const semantics = officialMeasureSemantics(measureId);
-    if (semantics) return semantics.numeratorMeansCompliant ? "increase" : "decrease";
+    if (semantics) return improvementNotationFor(semantics);
     // A routed measure with no recorded semantics cannot be scored honestly. The router refuses this at
     // construction, so reaching it means the refusal was bypassed — say so rather than guess.
     alertUnreadableOfficialEvidence(`no recorded numerator semantics for routed measure '${measureId}'`, null);
