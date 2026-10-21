@@ -235,7 +235,8 @@ export function McpAccessAdmin() {
                 <div className="min-w-0">
                   <p className="truncate font-medium text-neutral-900 dark:text-neutral-100">{t.label || "(no label)"}</p>
                   <p className="text-xs text-neutral-500">
-                    {ROLE_LABEL[t.role] ?? t.role} · {t.subject} · created {day(t.issuedAt)} · {t.status === "expired" ? "expired" : "expires"} {day(t.expiresAt)}
+                    {[ROLE_LABEL[t.role] ?? t.role, t.subject, t.issuedAt ? `created ${day(t.issuedAt)}` : "issued before the listed history"].filter(Boolean).join(" · ")} ·{" "}
+                    {t.status === "expired" ? "expired" : "expires"} {day(t.expiresAt)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

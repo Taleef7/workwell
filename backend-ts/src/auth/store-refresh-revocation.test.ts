@@ -116,6 +116,17 @@ test("consume deletes a family only for its current, unexpired jti, and only onc
   assert.equal(both.filter(Boolean).length, 1, "of two concurrent redemptions exactly one wins");
 });
 
+test("listByPrefix returns the live families with that prefix only, with their expiry (#704)", async () => {
+  const store = new SqliteAuthFamilyStore(await freshDb());
+  const now = "2026-10-20T12:00:00.000Z";
+  await store.rotate("mcp-pat:a", "j", "2026-11-01T00:00:00.000Z", now);
+  await store.rotate("mcp-pat:b", "j", "2026-10-20T11:00:00.000Z", "2026-10-20T10:00:00.000Z"); // lapsed by `now`
+  await store.rotate("mcp-patX", "j", "2026-11-01T00:00:00.000Z", now); // not the prefix (no colon)
+  await store.rotate("login-family", "j", "2026-11-01T00:00:00.000Z", now);
+  await store.rotate("mcp_pat:c", "j", "2026-11-01T00:00:00.000Z", now); // `_` is not a wildcard here
+  assert.deepEqual(await store.listByPrefix("mcp-pat:", now), [{ family: "mcp-pat:a", expiresAt: "2026-11-01T00:00:00.000Z" }]);
+});
+
 test("rotateIf replaces the jti only from the current one, so one of two concurrent rotations wins (#704)", async () => {
   const store = new SqliteAuthFamilyStore(await freshDb());
   const now = "2026-10-20T12:00:00.000Z";

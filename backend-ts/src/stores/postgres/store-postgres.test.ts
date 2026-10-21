@@ -478,6 +478,9 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
       assert.equal(rotated.filter(Boolean).length, 1, "one rotation wins");
       assert.equal(await store.rotateIf(grant, "r1", "r3", "2026-11-19T12:00:00.000Z", now), false, "the old jti never rotates again");
       assert.equal(await store.rotateIf(grant, (await store.currentJti(grant, now))!, "r4", "2026-11-19T12:00:00.000Z", "2026-11-19T12:00:00.000Z"), false, "nor a lapsed family");
+      const listed = await store.listByPrefix("test-grant-", now);
+      assert.deepEqual(listed.map((r) => r.family), [grant], "listByPrefix: the live grant, not the consumed code");
+      assert.equal(listed[0]!.expiresAt, "2026-11-19T12:00:00.000Z");
     } finally {
       await pool.query(`DELETE FROM ${SPIKE_SCHEMA}.auth_refresh_families WHERE family = ANY($1)`, [[code, grant]]);
     }

@@ -33,7 +33,13 @@ const DEFAULT_DAYS = 30;
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
-const unavailable = (reason: string) => json({ error: "mcp_tokens_unavailable", reason }, 503);
+/** A configuration problem: our own message, safe to show. */
+const misconfigured = (reason: string) => json({ error: "mcp_tokens_unavailable", reason }, 503);
+/** A store or ledger failure: logged here, never returned (an error's text can carry internals). */
+const storeDown = (err: unknown) => {
+  console.error(`[workwell] MCP token store unavailable: ${String((err as Error)?.message ?? err)}`);
+  return json({ error: "mcp_tokens_unavailable", reason: "the token store is unavailable; try again" }, 503);
+};
 
 interface IssuedEvent {
   tokenId: string;
@@ -77,7 +83,7 @@ export async function handleAdminMcpTokens(req: Request, env: Env, actor: string
       return json({ error: "invalid_role", message: "role is ROLE_CASE_MANAGER or ROLE_ADMIN, and not above your own" }, 400);
     }
     const pub = publicApiUrl(env, req, true);
-    if (!pub.ok) return unavailable(pub.reason);
+    if (!pub.ok) return misconfigured(pub.reason);
     const mcpUrl = mcpResourceOf(pub.origin);
 
     const pat = issuePat(env.WORKWELL_AUTH_JWT_SECRET ?? "", { subject: user.email, role: role as McpRole, cv: credentialVersion(user), resource: mcpUrl, days });
@@ -96,39 +102,47 @@ export async function handleAdminMcpTokens(req: Request, env: Env, actor: string
       });
       await authFamilies.rotate(pat.family, pat.jti, pat.expiresAt, new Date().toISOString());
     } catch (err) {
-      return unavailable(String((err as Error)?.message ?? err));
+      return storeDown(err);
     }
     return json({ token: pat.token, tokenId: pat.tokenId, label, role, subject: user.email, expiresAt: pat.expiresAt, mcpUrl }, 201);
   }
 
   if (pathname === BASE && req.method === "GET") {
     try {
-      const { events, authFamilies } = await getStores(env);
-      const revoked = new Set(
-        (await events.recentAuditEventsByType("MCP_TOKEN_REVOKED", 500)).map((e) => String((e.payload as { tokenId?: unknown }).tokenId)),
-      );
+      const { authFamilies } = await getStores(env);
       const now = new Date();
-      const tokens = [];
-      for (const t of await issuedTokens(env)) {
-        // Expired first: a lapsed row is purged, so a missing row is "revoked" only before the expiry.
-        const status: McpTokenStatus =
-          Date.parse(t.expiresAt) <= now.getTime() ? "expired"
-          : revoked.has(t.tokenId) || (await authFamilies.currentJti(`${PAT_FAMILY_PREFIX}${t.tokenId}`, now.toISOString())) === null ? "revoked"
-          : "active";
-        tokens.push({ ...t, status });
+      // The row decides: a token is active while its row lives, whatever events say (a revoke whose
+      // delete failed leaves the event and a working token, which must still show as active to be
+      // revoked again). Events add the label and owner, and the history of tokens no longer live.
+      const live = new Map(
+        (await authFamilies.listByPrefix(PAT_FAMILY_PREFIX, now.toISOString())).map((r) => [r.family.slice(PAT_FAMILY_PREFIX.length), r.expiresAt]),
+      );
+      const issued = await issuedTokens(env);
+      const tokens: Array<IssuedEvent & { status: McpTokenStatus }> = issued.map((t) => ({
+        ...t,
+        // Expired first: a lapsed row is purged, so a missing row means "revoked" only before the expiry.
+        status: live.has(t.tokenId) ? "active" : Date.parse(t.expiresAt) <= now.getTime() ? "expired" : "revoked",
+      }));
+      // A live token whose issue event is older than the scan above is still listed, so it can be revoked.
+      const seen = new Set(issued.map((t) => t.tokenId));
+      for (const [tokenId, expiresAt] of live) {
+        if (!seen.has(tokenId)) tokens.push({ tokenId, label: "", role: "", subject: "", expiresAt, issuedAt: "", status: "active" });
       }
       return json({ tokens });
     } catch (err) {
-      return unavailable(String((err as Error)?.message ?? err));
+      return storeDown(err);
     }
   }
 
   const id = pathname.slice(BASE.length + 1);
   if (req.method === "DELETE" && UUID.test(id)) {
     try {
-      const issued = (await issuedTokens(env)).find((t) => t.tokenId === id);
-      if (!issued) return json({ error: "not_found" }, 404);
       const { events, authFamilies } = await getStores(env);
+      // Revocable while its row lives, found by id, so no audit scan limit can hide a working token.
+      if ((await authFamilies.currentJti(`${PAT_FAMILY_PREFIX}${id}`, new Date().toISOString())) === null) {
+        return json({ error: "not_found", message: "no active MCP token with this id" }, 404);
+      }
+      const issued = (await issuedTokens(env)).find((t) => t.tokenId === id);
       // AUDIT BEFORE THE DELETE (#704): the ledger never misses a revocation that happened.
       await events.appendAudit({
         eventType: "MCP_TOKEN_REVOKED",
@@ -138,11 +152,11 @@ export async function handleAdminMcpTokens(req: Request, env: Env, actor: string
         refRunId: null,
         refCaseId: null,
         refMeasureVersionId: null,
-        payload: { tokenId: id, label: issued.label, subject: issued.subject },
+        payload: { tokenId: id, label: issued?.label ?? null, subject: issued?.subject ?? null },
       });
       await authFamilies.revoke(`${PAT_FAMILY_PREFIX}${id}`);
     } catch (err) {
-      return unavailable(String((err as Error)?.message ?? err));
+      return storeDown(err);
     }
     return new Response(null, { status: 204 });
   }

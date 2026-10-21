@@ -39,6 +39,14 @@ export class SqliteAuthFamilyStore implements AuthFamilyStore {
     return (results ?? []).length === 1;
   }
 
+  async listByPrefix(prefix: string, now: string): Promise<Array<{ family: string; expiresAt: string }>> {
+    const { results } = await this.db
+      .prepare(`SELECT family, expires_at FROM auth_refresh_families WHERE substr(family, 1, ?) = ? AND expires_at > ? ORDER BY family`)
+      .bind(prefix.length, prefix, now)
+      .all<{ family: string; expires_at: string }>();
+    return (results ?? []).map((r) => ({ family: r.family, expiresAt: r.expires_at }));
+  }
+
   async rotateIf(family: string, oldJti: string, newJti: string, expiresAt: string, now: string): Promise<boolean> {
     const { results } = await this.db
       .prepare(

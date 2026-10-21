@@ -186,15 +186,38 @@ test("mint and revoke are audited first: a failed store write leaves the event a
   const t = await minted({ label: "revoke-half" });
   const revoke = proto.revoke;
   proto.revoke = async () => {
-    throw new Error("store down");
+    throw new Error("store down: internal detail");
   };
+  let failed: Response;
   try {
-    assert.equal((await call(`/api/admin/mcp-tokens/${t.tokenId}`, { method: "DELETE", headers: bearer(ADMIN) })).status, 503);
+    failed = await call(`/api/admin/mcp-tokens/${t.tokenId}`, { method: "DELETE", headers: bearer(ADMIN) });
   } finally {
     proto.revoke = revoke;
   }
+  assert.equal(failed.status, 503);
+  assert.ok(!(await failed.text()).includes("internal detail"), "an error's own text is logged, never returned");
   const revoked = (await db().prepare("SELECT entity_id AS id FROM audit_events WHERE event_type = 'MCP_TOKEN_REVOKED'").all<{ id: string }>()).results!;
   assert.ok(revoked.some((r) => r.id === t.tokenId), "the revoke event was written before the delete");
+
+  // The delete failed, so the token still works, and the list must say so (the row decides, not the event).
+  assert.equal((await mcp(t.token)).status, 200);
+  const statusOf = async () =>
+    ((await (await call("/api/admin/mcp-tokens", { headers: bearer(ADMIN) })).json()) as { tokens: Array<{ tokenId: string; status: string }> }).tokens.find((x) => x.tokenId === t.tokenId)?.status;
+  assert.equal(await statusOf(), "active", "still listed as active, so it can be revoked again");
+  assert.equal((await call(`/api/admin/mcp-tokens/${t.tokenId}`, { method: "DELETE", headers: bearer(ADMIN) })).status, 204, "the retry revokes it");
+  assert.equal(await statusOf(), "revoked");
+  assert.equal((await mcp(t.token)).status, 401);
+  assert.equal((await call(`/api/admin/mcp-tokens/${t.tokenId}`, { method: "DELETE", headers: bearer(ADMIN) })).status, 404, "nothing live is left to revoke");
+});
+
+test("a live token whose issue event is not among those scanned is still listed and can be revoked", async () => {
+  const families = new SqliteAuthFamilyStore(db() as never);
+  const orphanId = randomUUID();
+  await families.rotate(`mcp-pat:${orphanId}`, randomUUID(), new Date(Date.now() + 86_400_000).toISOString(), new Date().toISOString());
+  const list = (await (await call("/api/admin/mcp-tokens", { headers: bearer(ADMIN) })).json()) as { tokens: Array<{ tokenId: string; status: string }> };
+  assert.equal(list.tokens.find((t) => t.tokenId === orphanId)?.status, "active");
+  assert.equal((await call(`/api/admin/mcp-tokens/${orphanId}`, { method: "DELETE", headers: bearer(ADMIN) })).status, 204);
+  assert.equal(await families.currentJti(`mcp-pat:${orphanId}`, new Date().toISOString()), null);
 });
 
 test("a store that cannot be read fails closed: /mcp answers 503, never 200", async () => {
