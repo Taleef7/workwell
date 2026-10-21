@@ -25,6 +25,8 @@ export interface ResolvedClient {
 export class ClientError extends Error {}
 
 const REGISTRATION_TTL_SECONDS = 365 * 86_400;
+/** The registration travels inside the client id (every authorize URL), so it stays small. */
+const REDIRECT_URIS_MAX_CHARS = 2_048;
 
 /** The client a `client_id` names, or a `ClientError`. */
 export async function resolveClient(secret: string, clientId: string, cimd: CimdDeps = {}): Promise<ResolvedClient> {
@@ -58,6 +60,9 @@ export function registerClient(secret: string, request: unknown): RegistrationRe
   const uris = r.redirect_uris;
   if (!Array.isArray(uris) || uris.length === 0 || uris.length > 10 || !uris.every((u) => typeof u === "string")) {
     return invalid("invalid_redirect_uri", "redirect_uris must list 1 to 10 URIs");
+  }
+  if ((uris as string[]).reduce((n, u) => n + u.length, 0) > REDIRECT_URIS_MAX_CHARS) {
+    return invalid("invalid_redirect_uri", `redirect_uris may be ${REDIRECT_URIS_MAX_CHARS} characters in all`);
   }
   const refused = (uris as string[]).find((u) => redirectProblem(u, "dcr") !== null);
   if (refused) return invalid("invalid_redirect_uri", `${redirectProblem(refused, "dcr")}: ${refused.slice(0, 200)}`);

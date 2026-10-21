@@ -99,6 +99,8 @@ export const OAUTH_FAMILY_PREFIX = "oauth:";
 export const OAUTH_ACCESS_TTL_SECONDS = 900;
 export const OAUTH_REFRESH_TTL_SECONDS = 30 * 86_400;
 export const OAUTH_GRANT_MAX_SECONDS = 90 * 86_400;
+/** A grant's row from consent until its code is redeemed (`routes/oauth.ts`): not yet a connected client. */
+export const OAUTH_PENDING_GRANT = "pending~~0";
 
 /**
  * The account a token speaks for, if it still may: the account exists on this profile (`findDemoUser`

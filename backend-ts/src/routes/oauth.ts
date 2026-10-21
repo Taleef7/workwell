@@ -20,6 +20,9 @@
  *   The user is re-checked at every refresh (exists on this profile, same credential version, MCP role).
  * - **Audited first.** `OAUTH_CONSENT_GRANTED` before the code row, `OAUTH_TOKEN_ISSUED` before the grant
  *   row, `OAUTH_REFRESH_REUSE_DETECTED` before the revoke. A store failure answers 503 and issues nothing.
+ * - **Bounded.** Client metadata is fetched only from accepted publishers (`WORKWELL_OAUTH_CIMD_HOSTS`, default
+ *   `claude.ai`; `auth/oauth/cimd.ts`), and request bodies are capped. There is no per-caller rate limit yet
+ *   (`docs/MCP.md`, known gaps).
  */
 import { randomUUID } from "node:crypto";
 import type { CloudDatabase } from "@mieweb/cloud";
@@ -31,6 +34,7 @@ import {
   OAUTH_ACCESS_TTL_SECONDS,
   OAUTH_FAMILY_PREFIX,
   OAUTH_GRANT_MAX_SECONDS,
+  OAUTH_PENDING_GRANT,
   OAUTH_REFRESH_TTL_SECONDS,
   accountFor,
   isMcpRole,
@@ -39,23 +43,30 @@ import {
 } from "../auth/mcp-token.ts";
 import { nowSeconds } from "../auth/jwt.ts";
 import { ClientError, registerClient, resolveClient, type ResolvedClient } from "../auth/oauth/clients.ts";
-import { redirectMatches, redirectOrigin } from "../auth/oauth/redirect-uris.ts";
+import { isLoopbackRedirect, redirectMatches, redirectOrigin } from "../auth/oauth/redirect-uris.ts";
 import { isS256Challenge, verifierMatches } from "../auth/oauth/pkce.ts";
-import type { CimdDeps } from "../auth/oauth/cimd.ts";
+import { cimdHostsFrom, type CimdDeps } from "../auth/oauth/cimd.ts";
 
 interface Env extends StoresEnv {
   DB: CloudDatabase;
   WORKWELL_AUTH_JWT_SECRET?: string;
   WORKWELL_PUBLIC_API_URL?: string;
   WORKWELL_CORS_ALLOWED_ORIGINS?: string;
+  WORKWELL_OAUTH_CIMD_HOSTS?: string;
 }
 
 const CODE_TTL_SECONDS = 60;
 const CONSENT_TTL_SECONDS = 600;
 const CODE_PREFIX = "oauth-code:";
 const SCOPE = "mcp";
-/** A refresh token presented again this soon after it was rotated away is a lost race, not a replay. */
-const REFRESH_RACE_GRACE_SECONDS = 30;
+/**
+ * A refresh token presented again this soon after it was rotated away is a lost race (a client's parallel
+ * requests all refreshing at once), not a replay. Kept short, and every use of it audited, because a thief
+ * who refreshed first is answered the same way: the window is all that keeps that from revoking the grant.
+ */
+const REFRESH_RACE_GRACE_SECONDS = 5;
+const REGISTER_BODY_MAX_BYTES = 16 * 1024;
+const TOKEN_BODY_MAX_BYTES = 32 * 1024;
 
 /**
  * A grant's row holds `<current refresh jti>~<previous jti>~<rotated at>` in its jti column, so a refresh can
@@ -67,7 +78,7 @@ const packGrant = (current: string, previous = "", rotatedAt = 0): string => `${
  * The grant's row from consent until its code is redeemed. Redemption turns it live only through `rotateIf`
  * from this exact value, so a replayed code that revokes the grant first leaves nothing to turn live.
  */
-const PENDING_GRANT = packGrant("pending");
+const PENDING_GRANT = OAUTH_PENDING_GRANT; // packGrant("pending")
 const unpackGrant = (value: string): { current: string; previous: string; rotatedAt: number } => {
   const [current = "", previous = "", at = "0"] = value.split("~");
   return { current, previous, rotatedAt: Number(at) || 0 };
@@ -105,6 +116,42 @@ function redirectWith(redirectUri: string, params: Record<string, string | undef
   const url = new URL(redirectUri);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") url.searchParams.set(k, v);
   return url.href;
+}
+
+/** The request body as text, or null when it is larger than `limit` bytes (read no further than that). */
+async function readBounded(req: Request, limit: number): Promise<string | null> {
+  if (Number(req.headers.get("content-length") ?? 0) > limit) return null;
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * RFC 8707 resource identifiers compared as URLs: a host's case, a default port and a trailing slash are
+ * spellings of the same resource (RFC 3986 §6.2.3), so `https://API.example:443/mcp/` names `/mcp` too.
+ */
+function sameResource(raw: string | null, resource: string): boolean {
+  if (raw === null) return false;
+  try {
+    const a = new URL(raw);
+    const b = new URL(resource);
+    const path = (u: URL) => u.pathname.replace(/\/+$/, "");
+    return a.origin === b.origin && path(a) === path(b) && !a.search && !a.hash && !a.username && !a.password;
+  } catch {
+    return false;
+  }
 }
 
 /** A short reference to a client for the ledger: a CIMD URL as it is, a registration blob by digest. */
@@ -174,12 +221,21 @@ async function authorize(url: URL, ctx: Ctx): Promise<Response> {
   if (p.get("response_type") !== "code") return back("unsupported_response_type", "only response_type=code is supported");
   const challenge = p.get("code_challenge");
   if (p.get("code_challenge_method") !== "S256" || !isS256Challenge(challenge)) return back("invalid_request", "PKCE with code_challenge_method=S256 is required");
-  if (p.get("resource") !== ctx.resource) return back("invalid_target", `resource must be ${ctx.resource}`);
+  if (!sameResource(p.get("resource"), ctx.resource)) return back("invalid_target", `resource must be ${ctx.resource}`);
 
   const request = signMcpToken(
     ctx.secret,
     "consent-request",
-    { client_id: clientId, redirect_uri: redirectUri, code_challenge: challenge, resource: ctx.resource, scope: SCOPE, ...(state !== undefined ? { state } : {}) },
+    {
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      // Whether the client named it: only then must the token request repeat it (OAuth 2.1 §4.1.3).
+      redirect_sent: requested !== null,
+      code_challenge: challenge,
+      resource: ctx.resource,
+      scope: SCOPE,
+      ...(state !== undefined ? { state } : {}),
+    },
     CONSENT_TTL_SECONDS,
   );
   return Response.redirect(`${ctx.studio}/oauth/consent?request=${encodeURIComponent(request)}`, 302);
@@ -188,6 +244,7 @@ async function authorize(url: URL, ctx: Ctx): Promise<Response> {
 interface ConsentRequest {
   clientId: string;
   redirectUri: string;
+  redirectSent: boolean;
   challenge: string;
   state?: string;
 }
@@ -197,7 +254,13 @@ function readConsentRequest(ctx: Ctx, raw: unknown): ConsentRequest | null {
   const c = readMcpToken(ctx.secret, "consent-request", raw);
   if (!c || typeof c.client_id !== "string" || typeof c.redirect_uri !== "string" || typeof c.code_challenge !== "string") return null;
   if (c.resource !== ctx.resource) return null;
-  return { clientId: c.client_id, redirectUri: c.redirect_uri, challenge: c.code_challenge, ...(typeof c.state === "string" ? { state: c.state } : {}) };
+  return {
+    clientId: c.client_id,
+    redirectUri: c.redirect_uri,
+    redirectSent: c.redirect_sent !== false,
+    challenge: c.code_challenge,
+    ...(typeof c.state === "string" ? { state: c.state } : {}),
+  };
 }
 
 async function consentDetails(req: Request, ctx: Ctx, actor: string, actorRole: string | null): Promise<Response> {
@@ -209,16 +272,22 @@ async function consentDetails(req: Request, ctx: Ctx, actor: string, actorRole: 
   } catch {
     return json({ error: "invalid_client", message: "The client could not be verified." }, 400, NO_STORE);
   }
+  if (!redirectMatches(client.redirectUris, request.redirectUri)) return json({ error: "invalid_request", message: "The client no longer lists this redirect address." }, 400, NO_STORE);
   return json(
     {
       clientName: client.clientName,
       verified: client.trust === "cimd",
       clientHost: client.host ?? null,
       redirectOrigin: redirectOrigin(request.redirectUri),
+      // The code goes to a program on this computer, which no metadata document vouches for: the page warns.
+      loopback: isLoopbackRedirect(request.redirectUri),
       scope: SCOPE,
       resource: ctx.resource,
       user: { email: actor, role: actorRole },
       canApprove: isMcpRole(actorRole),
+      // Declining changes nothing, so it needs no write: the page sends the browser here. A viewer, who may
+      // never POST (the sandbox rule in `auth/authorize.ts`), can still tell the client no.
+      declineRedirect: redirectWith(request.redirectUri, { error: "access_denied", error_description: "the user declined", state: request.state, iss: ctx.issuer }),
     },
     200,
     NO_STORE,
@@ -257,6 +326,7 @@ async function consentDecision(req: Request, ctx: Ctx, actor: string, actorRole:
       client_id: request.clientId,
       client_name: client.clientName,
       redirect_uri: request.redirectUri,
+      redirect_sent: request.redirectSent,
       code_challenge: request.challenge,
       resource: ctx.resource,
       jti: codeJti,
@@ -288,11 +358,13 @@ async function consentDecision(req: Request, ctx: Ctx, actor: string, actorRole:
 }
 
 async function token(req: Request, ctx: Ctx): Promise<Response> {
-  const p = new URLSearchParams(await req.text().catch(() => ""));
+  const text = await readBounded(req, TOKEN_BODY_MAX_BYTES).catch(() => "");
+  if (text === null) return oauthError("invalid_request", "the request body is too large", 413);
+  const p = new URLSearchParams(text);
   const grantType = p.get("grant_type");
   const clientId = p.get("client_id") ?? "";
   const resource = p.get("resource");
-  if (resource !== null && resource !== ctx.resource) return oauthError("invalid_target", `resource must be ${ctx.resource}`);
+  if (resource !== null && !sameResource(resource, ctx.resource)) return oauthError("invalid_target", `resource must be ${ctx.resource}`);
   if (grantType === "authorization_code") return redeemCode(p, clientId, ctx);
   if (grantType === "refresh_token") return refresh(p, clientId, ctx);
   return oauthError("unsupported_grant_type", "grant_type is authorization_code or refresh_token");
@@ -312,7 +384,11 @@ async function redeemCode(p: URLSearchParams, clientId: string, ctx: Ctx): Promi
   const c = readMcpToken(ctx.secret, "code", p.get("code") ?? "");
   if (!c || typeof c.jti !== "string" || typeof c.fam !== "string" || !c.fam.startsWith(OAUTH_FAMILY_PREFIX)) return oauthError("invalid_grant", "the code is not valid");
   if (c.client_id !== clientId) return oauthError("invalid_grant", "the code was issued to another client");
-  if (c.redirect_uri !== p.get("redirect_uri")) return oauthError("invalid_grant", "redirect_uri does not match the authorization request");
+  // Required when the authorization request named it; when it did not, it may be left out (OAuth 2.1 §4.1.3).
+  const redirectUri = p.get("redirect_uri");
+  if ((c.redirect_sent !== false || redirectUri !== null) && redirectUri !== c.redirect_uri) {
+    return oauthError("invalid_grant", "redirect_uri does not match the authorization request");
+  }
   if (c.resource !== ctx.resource) return oauthError("invalid_target", "the code was issued for another resource");
   if (!verifierMatches(p.get("code_verifier") ?? "", String(c.code_challenge))) return oauthError("invalid_grant", "code_verifier does not match");
   const account = accountFor(c.sub, c.cv, c.role);
@@ -398,8 +474,18 @@ async function refresh(p: URLSearchParams, clientId: string, ctx: Ctx): Promise<
       row = unpackGrant(rowValue);
     }
     // This token was just rotated away by a concurrent refresh: refuse it, but the grant stays (the client
-    // holds the winner's tokens).
+    // holds the winner's tokens). Audited, since a thief who refreshed first looks exactly like this.
     if (row.previous === r.jti && nowSeconds() - row.rotatedAt <= REFRESH_RACE_GRACE_SECONDS) {
+      await events.appendAudit({
+        eventType: "OAUTH_REFRESH_RACE_REFUSED",
+        entityType: "oauth_grant",
+        entityId: r.fam.slice(OAUTH_FAMILY_PREFIX.length),
+        actor: account.email,
+        refRunId: null,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: { grantId: r.fam.slice(OAUTH_FAMILY_PREFIX.length), secondsSinceRotation: nowSeconds() - row.rotatedAt },
+      });
       return oauthError("invalid_grant", "this refresh token was just used; use the newest tokens");
     }
     // Otherwise it was used before: a replay, so the grant is revoked (RFC 9700 §4.14), audited first.
@@ -446,7 +532,8 @@ export async function handleOAuth(
   if (!pub.ok) return json({ error: "temporarily_unavailable", error_description: pub.reason }, 503);
   const studio = parseAllowedOrigins(env.WORKWELL_CORS_ALLOWED_ORIGINS)[0];
   if (!studio) return json({ error: "temporarily_unavailable", error_description: "no web app origin is configured" }, 503);
-  const ctx: Ctx = { env, secret: env.WORKWELL_AUTH_JWT_SECRET ?? "", issuer: pub.origin, resource: mcpResourceOf(pub.origin), studio, cimd: opts.cimd ?? {} };
+  const cimd: CimdDeps = { allowedHosts: cimdHostsFrom(env.WORKWELL_OAUTH_CIMD_HOSTS), ...opts.cimd };
+  const ctx: Ctx = { env, secret: env.WORKWELL_AUTH_JWT_SECRET ?? "", issuer: pub.origin, resource: mcpResourceOf(pub.origin), studio, cimd };
 
   const method = req.method;
   switch (url.pathname) {
@@ -457,7 +544,15 @@ export async function handleOAuth(
       return method === "GET" ? authorizationServerMetadata(ctx) : json({ error: "method_not_allowed" }, 405);
     case "/oauth/register": {
       if (method !== "POST") return json({ error: "method_not_allowed" }, 405);
-      const result = registerClient(ctx.secret, await req.json().catch(() => null));
+      const text = await readBounded(req, REGISTER_BODY_MAX_BYTES).catch(() => "");
+      if (text === null) return json({ error: "invalid_client_metadata", error_description: "the registration is too large" }, 413, NO_STORE);
+      let body: unknown = null;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        /* registerClient refuses a missing body */
+      }
+      const result = registerClient(ctx.secret, body);
       return json(result.body, result.status, NO_STORE);
     }
     case "/oauth/authorize":

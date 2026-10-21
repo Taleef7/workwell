@@ -4,7 +4,7 @@
  * The authorization server fetches a URL a stranger chose (the `client_id`), so it must never reach the
  * host's own network: loopback, private ranges, link-local (cloud metadata at 169.254.169.254), carrier NAT,
  * benchmarking, multicast and reserved space, in IPv4 and IPv6, including IPv4 written inside IPv6 (mapped,
- * NAT64, 6to4). The check runs on every address DNS returns, at connect time (`cimd.ts`), so a name that
+ * NAT64, 6to4). In IPv6 only global unicast is allowed at all. The check runs on every address DNS returns, at connect time (`cimd.ts`), so a name that
  * resolves to a public address for a check and a private one for the connection cannot slip through.
  */
 import { isIP } from "node:net";
@@ -66,14 +66,11 @@ const embeddedV4 = (h: number[], from: number): string =>
 function v6Blocked(ip: string): boolean {
   const h = hextets(ip);
   if (!h) return true; // unparseable: never connect
-  if (h.every((x) => x === 0)) return true; // ::
-  if (h.slice(0, 7).every((x) => x === 0) && h[7] === 1) return true; // ::1
-  if ((h[0]! & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
-  if ((h[0]! & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
-  if ((h[0]! & 0xff00) === 0xff00) return true; // ff00::/8 multicast
   if (h.slice(0, 5).every((x) => x === 0) && h[5] === 0xffff) return v4Blocked(embeddedV4(h, 6)); // ::ffff:a.b.c.d
-  if (h.slice(0, 6).every((x) => x === 0)) return true; // ::a.b.c.d (deprecated IPv4-compatible)
-  if (h[0] === 0x64 && h[1] === 0xff9b) return true; // 64:ff9b::/96 NAT64 (reaches IPv4 through a translator)
+  // Only global unicast (2000::/3) is public; everything outside it is refused without listing it: ::, ::1,
+  // IPv4-compatible and -translated forms, NAT64 (64:ff9b::/96), discard (100::/64), unique local (fc00::/7),
+  // link- and site-local (fe80::/10, fec0::/10), multicast (ff00::/8) and whatever is assigned there later.
+  if ((h[0]! & 0xe000) !== 0x2000) return true;
   if (h[0] === 0x2002) return true; // 2002::/16 6to4
   if (h[0] === 0x2001 && h[1] === 0x0db8) return true; // documentation
   if (h[0] === 0x2001 && h[1]! < 0x0200) return true; // 2001::/23 IETF protocol assignments (Teredo etc.)

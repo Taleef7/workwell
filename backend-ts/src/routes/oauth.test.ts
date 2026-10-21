@@ -162,6 +162,9 @@ test("two concurrent refreshes from one token: one wins, the other is refused, a
   const winner = (await ok[0]!.json()) as { access_token: string; refresh_token: string };
   assert.equal((await mcp(winner.access_token)).status, 200, "the grant was not revoked by the loser");
   assert.equal((await call("/oauth/token", form({ grant_type: "refresh_token", refresh_token: winner.refresh_token, client_id: clientId }))).status, 200);
+  // A thief who refreshed first is answered exactly like this loser, so every such refusal is on the ledger.
+  const races = (await db().prepare("SELECT count(*) AS n FROM audit_events WHERE event_type = 'OAUTH_REFRESH_RACE_REFUSED'").all<{ n: number }>()).results!;
+  assert.ok(Number(races[0]!.n) >= 1, "the refused race is audited");
 });
 
 test("a code is single use: a second redemption is refused and kills the grant, whichever finishes first", async () => {
@@ -240,9 +243,16 @@ test("consent: a viewer can read it but not approve; a denial goes back as acces
   assert.equal(details.clientName, "mcp-remote");
   assert.equal(details.verified, false, "a self-registered client is unverified");
   assert.equal(details.redirectOrigin, "http://localhost:4123");
+  assert.equal(details.loopback, true, "the code goes to a program on this computer, so the page warns");
   assert.equal(details.canApprove, false);
   const viewerPost = await call("/api/oauth/consent", { method: "POST", headers: { authorization: `Bearer ${VIEWER}`, "content-type": "application/json" }, body: JSON.stringify({ request, decision: "approve" }) });
   assert.equal(viewerPost.status, 403);
+  // The page offers a viewer Decline, and a viewer may never POST: the details carry the decline redirect.
+  const declined = new URL(String(details.declineRedirect));
+  assert.equal(declined.origin + declined.pathname, CALLBACK);
+  assert.equal(declined.searchParams.get("error"), "access_denied");
+  assert.equal(declined.searchParams.get("state"), "st-1");
+  assert.equal(declined.searchParams.get("iss"), API);
   assert.equal((await call(`/api/oauth/consent?request=${encodeURIComponent(request)}`)).status, 401, "not signed in");
 
   const deny = await call("/api/oauth/consent", { method: "POST", headers: { authorization: `Bearer ${CM}`, "content-type": "application/json" }, body: JSON.stringify({ request, decision: "deny" }) });
@@ -292,4 +302,65 @@ test("an admin can revoke a connected client from the MCP access list", async ()
     await call(`/api/admin/mcp-tokens/${t.tokenId}`, { method: "DELETE", headers: { authorization: `Bearer ${ADMIN}` } });
   }
   assert.equal((await mcp(tokens.access_token)).status, 401);
+});
+
+test("a redirect_uri left out of the authorization request may be left out of the token request, but not one that was sent", async () => {
+  const clientId = await register(["http://localhost/oauth/callback"]);
+  const { verifier, challenge } = pkce();
+  const auth = await call(authorizeUrl(clientId, challenge, { redirect_uri: null }), { redirect: "manual" });
+  assert.equal(auth.status, 302);
+  const request = new URL(auth.headers.get("location")!).searchParams.get("request")!;
+  const decision = await call("/api/oauth/consent", { method: "POST", headers: { authorization: `Bearer ${CM}`, "content-type": "application/json" }, body: JSON.stringify({ request, decision: "approve" }) });
+  const redirect = new URL(((await decision.json()) as { redirect: string }).redirect);
+  assert.equal(redirect.origin + redirect.pathname, "http://localhost/oauth/callback", "the one registered redirect");
+  const code = redirect.searchParams.get("code")!;
+  const omitted = await call("/oauth/token", form({ grant_type: "authorization_code", code, client_id: clientId, code_verifier: verifier }));
+  assert.equal(omitted.status, 200, await omitted.clone().text());
+
+  // Sent at authorize: required at the token endpoint (the existing flow), so leaving it out is refused.
+  const sent = await register();
+  const second = pkce();
+  const { code: sentCode } = await approve(sent, second.challenge);
+  const left = await call("/oauth/token", form({ grant_type: "authorization_code", code: sentCode, client_id: sent, code_verifier: second.verifier }));
+  assert.equal(((await left.json()) as { error: string }).error, "invalid_grant");
+});
+
+test("resource is compared as a URL: host case, the default port and a trailing slash name the same /mcp", async () => {
+  const clientId = await register();
+  const { verifier, challenge } = pkce();
+  for (const resource of ["https://API.workwell.test/mcp", "https://api.workwell.test:443/mcp", `${RESOURCE}/`]) {
+    const res = await call(authorizeUrl(clientId, challenge, { resource }), { redirect: "manual" });
+    assert.match(res.headers.get("location") ?? "", /^https:\/\/app\.workwell\.test\/oauth\/consent\?/, resource);
+  }
+  for (const resource of [`${RESOURCE}x`, `${RESOURCE}?a=1`, "https://api.workwell.test:8443/mcp", "http://api.workwell.test/mcp"]) {
+    const res = await call(authorizeUrl(clientId, challenge, { resource }), { redirect: "manual" });
+    assert.equal(new URL(res.headers.get("location")!).searchParams.get("error"), "invalid_target", resource);
+  }
+  const { code } = await approve(clientId, challenge);
+  assert.equal((await exchange(clientId, code, verifier, { resource: `${RESOURCE}/` })).status, 200);
+});
+
+test("registration is bounded: an oversized body or redirect list is refused", async () => {
+  const big = await call("/oauth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: "x", redirect_uris: [CALLBACK], pad: "x".repeat(20_000) }) });
+  assert.equal(big.status, 413);
+  const longUris = Array.from({ length: 5 }, (_, i) => `http://localhost/${i}/${"a".repeat(500)}`);
+  const long = await call("/oauth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_name: "x", redirect_uris: longUris }) });
+  assert.equal(long.status, 400);
+  assert.equal(((await long.json()) as { error: string }).error, "invalid_redirect_uri");
+  assert.equal((await call("/oauth/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: `grant_type=refresh_token&pad=${"x".repeat(40_000)}` })).status, 413);
+});
+
+test("a grant whose code is not yet redeemed is not listed as a connected client", async () => {
+  const ADMIN = login.issueAccessToken("admin@workwell.dev", "ROLE_ADMIN");
+  const listed = async () =>
+    ((await (await call("/api/admin/mcp-tokens", { headers: { authorization: `Bearer ${ADMIN}` } })).json()) as { tokens: Array<{ kind: string; tokenId: string; status: string }> }).tokens
+      .filter((t) => t.kind === "oauth" && t.status === "active")
+      .map((t) => t.tokenId);
+  const before = await listed();
+  const clientId = await register();
+  const { verifier, challenge } = pkce();
+  const { code } = await approve(clientId, challenge);
+  assert.deepEqual(await listed(), before, "consented, not yet redeemed: nothing new is connected");
+  assert.equal((await exchange(clientId, code, verifier)).status, 200);
+  assert.equal((await listed()).length, before.length + 1, "redeemed: now it is");
 });

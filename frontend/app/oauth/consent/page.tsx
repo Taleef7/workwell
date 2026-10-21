@@ -18,10 +18,14 @@ export interface ConsentDetails {
   verified: boolean;
   clientHost: string | null;
   redirectOrigin: string;
+  /** The code goes to a program on this computer (`http://localhost:…`), which no metadata document vouches for. */
+  loopback: boolean;
   scope: string;
   resource: string;
   user: { email: string; role: string | null };
   canApprove: boolean;
+  /** The client's redirect with `error=access_denied`: declining writes nothing, so anyone signed in can. */
+  declineRedirect: string;
 }
 
 const ROLE_LABEL: Record<string, string> = { ROLE_CASE_MANAGER: "Case Manager", ROLE_ADMIN: "Admin", ROLE_VIEWER: "Viewer" };
@@ -55,12 +59,12 @@ export default function ConsentPage() {
     };
   }, [api, token, request]);
 
-  async function decide(decision: "approve" | "deny") {
+  async function approve() {
     if (!request) return;
     setSending(true);
     setError(null);
     try {
-      const { redirect } = await api.post<{ request: string; decision: string }, { redirect: string }>("/api/oauth/consent", { request, decision });
+      const { redirect } = await api.post<{ request: string; decision: string }, { redirect: string }>("/api/oauth/consent", { request, decision: "approve" });
       leaveTo(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The answer could not be sent.");
@@ -86,10 +90,13 @@ export default function ConsentPage() {
               <div>
                 <dt className="font-medium text-neutral-700 dark:text-neutral-300">Who is asking</dt>
                 <dd className="text-neutral-600 dark:text-neutral-400" data-testid="consent-identity">
-                  {details.verified && details.clientHost ? (
+                  {/* A metadata document proves who published the client, not who receives a loopback redirect. */}
+                  {details.verified && details.clientHost && !details.loopback ? (
                     <>A client published by <strong>{details.clientHost}</strong> (verified from its metadata document).</>
+                  ) : details.verified && details.clientHost ? (
+                    <>A program on your computer that describes itself with <strong>{details.clientHost}</strong>&apos;s client metadata.</>
                   ) : (
-                    <>A self-registered client. Its name is not verified; approve only if you just started this connection yourself.</>
+                    <>A self-registered client. Its name is not verified.</>
                   )}
                 </dd>
               </div>
@@ -97,6 +104,12 @@ export default function ConsentPage() {
                 <dt className="font-medium text-neutral-700 dark:text-neutral-300">Where the approval goes</dt>
                 <dd className="font-mono text-xs text-neutral-800 dark:text-neutral-200" data-testid="consent-redirect">{details.redirectOrigin}</dd>
               </div>
+              {details.loopback ? (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100" data-testid="consent-loopback-warning">
+                  The approval goes to a program running on this computer, and any program on it could be listening there. Approve only if you started this
+                  connection yourself, just now, on this computer.
+                </p>
+              ) : null}
               <div>
                 <dt className="font-medium text-neutral-700 dark:text-neutral-300">What it can do</dt>
                 <dd className="text-neutral-600 dark:text-neutral-400">
@@ -112,11 +125,19 @@ export default function ConsentPage() {
             ) : null}
             <div className="mt-6 flex flex-wrap gap-2">
               {details.canApprove ? (
-                <Button type="button" disabled={sending} onClick={() => void decide("approve")}>
+                <Button type="button" disabled={sending} onClick={() => void approve()}>
                   Approve
                 </Button>
               ) : null}
-              <Button type="button" variant="outline" disabled={sending} onClick={() => void decide("deny")}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={sending}
+                onClick={() => {
+                  setSending(true);
+                  leaveTo(details.declineRedirect);
+                }}
+              >
                 Decline
               </Button>
             </div>

@@ -76,7 +76,8 @@ const RULES: Rule[] = [
   // The MCP authorization server (`routes/oauth.ts`). Discovery, registration, authorize and token are public
   // by design (OAuth 2.1): the token endpoint authenticates the code or refresh token itself, and authorize
   // only sends the browser to the web app's consent page, where the user signs in as usual. The consent API
-  // is not public: reading a request needs any signed-in user, deciding one a Case Manager or Admin.
+  // is not public: reading a request needs any signed-in user (its answer carries the decline redirect, so a
+  // viewer can still send the client `access_denied`), approving one a Case Manager or Admin.
   { pattern: rx("/.well-known/**"), access: "PERMIT" },
   { pattern: rx("/oauth/**"), access: "PERMIT" },
   { method: "GET", pattern: rx("/api/oauth/consent"), access: "AUTHENTICATED" },

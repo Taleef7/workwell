@@ -23,6 +23,8 @@ test("IPv6: loopback, unspecified, unique-local, link-local, multicast, NAT64, 6
     "::", "::1", "fc00::1", "fd12:3456::1", "fe80::1", "fe80::1%eth0", "ff02::1",
     "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:169.254.169.254", "::ffff:7f00:1", "::127.0.0.1",
     "64:ff9b::a00:1", "64:ff9b::8.8.8.8", "2002:a00:1::1", "2001:db8::1", "2001::1",
+    // Outside global unicast (2000::/3): IPv4-translated, site-local, discard, and unassigned space.
+    "::ffff:0:7f00:1", "::ffff:0:8.8.8.8", "fec0::1", "100::1", "4000::1", "e000::1",
   ];
   for (const ip of blocked) assert.equal(isBlockedAddress(ip), true, ip);
   for (const ip of ["2606:4700:4700::1111", "2a00:1450:4009:81f::200e", "::ffff:8.8.8.8"]) {

@@ -82,7 +82,8 @@ added on 2026-10-20 are all in `routes/oauth.ts` (MCP OAuth) and none is a viola
   - the replay `revoke` follows its own `OAUTH_CODE_REUSE_DETECTED`, and the matcher reads past the early
     return;
   - the three in `gone()` are a helper the matcher takes for the enclosing function: reads, plus the
-    success-path rotation, before the replay audit, which precedes its revoke.
+    success-path rotation, before the refused-race audit (`OAUTH_REFRESH_RACE_REFUSED`, which changes
+    nothing) and the replay audit, which precedes its revoke.
 
   The 64th,
 `dispatchOutreach`'s render before its audit, left when the record step became `recordDispatch`; the

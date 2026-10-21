@@ -13,12 +13,26 @@ describe("safeNext", () => {
       expect(safeNext(next as string | null | undefined, ORIGIN)).toBeNull();
     }
   });
+
+  // These stay on this origin when resolved, but their path is `//evil.example`, which the router follows
+  // off-site as a protocol-relative URL.
+  it("refuses a same-origin path that resolves to a protocol-relative one", () => {
+    for (const next of ["/.//evil.example", "/..//evil.example", "/%2e//evil.example", "/oauth/..//evil.example"]) {
+      expect(safeNext(next, ORIGIN)).toBeNull();
+    }
+  });
+
+  it("returns only to the consent page", () => {
+    expect(safeNext("/worklist", ORIGIN)).toBeNull();
+    expect(safeNext("/oauth/consent/../../admin", ORIGIN)).toBeNull();
+  });
 });
 
 describe("loginHref", () => {
-  it("remembers an OAuth page, and nothing else", () => {
+  it("remembers the consent page, and nothing else", () => {
     expect(loginHref("/oauth/consent", "?request=a%2Bb")).toBe(`/login?next=${encodeURIComponent("/oauth/consent?request=a%2Bb")}`);
     expect(loginHref("/worklist", "?x=1")).toBe("/login");
+    expect(loginHref("/oauth/other", "")).toBe("/login");
     expect(loginHref(null, "")).toBe("/login");
   });
 });

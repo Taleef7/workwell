@@ -16,10 +16,18 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
     marked unverified.
   - **Rules:** PKCE S256 and the `/mcp` resource are required.
   - **Codes:** single use, and a replayed code kills the grant.
-  - **Refresh tokens:** they rotate atomically, with a 30-second grace for concurrent refreshes; any other
-    reuse revokes the grant. The user is re-checked on every refresh.
+  - **Refresh tokens:** they rotate atomically, with a 5-second grace (audited) for concurrent refreshes;
+    any other reuse revokes the grant. The user is re-checked on every refresh.
   - **Admin:** connected clients appear in Admin → MCP access and can be disconnected.
   - **Storage:** none new; codes and grants are refresh-family rows.
+  - **Hardened after review:**
+    - metadata documents are fetched only from `claude.ai` (configurable), with global fetch limits and
+      separate caches;
+    - a loopback redirect is never shown as verified, and the page warns;
+    - the login `next` returns only to the consent page (a `/.//host` path escaped the app);
+    - a viewer can decline;
+    - DCR and token bodies are capped; IPv6 fetches go to global unicast only;
+    - `resource` is compared as a URL.
 - **MCP moves to the 2026-07-28 spec, with tokens that last (#704).** `POST /mcp` is served by the official
   TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.1, owner-approved). It answers 2026-07-28 requests and the
   2025-era ones most clients still send, statelessly. The 2024-11-05 `/sse` transport is retired.

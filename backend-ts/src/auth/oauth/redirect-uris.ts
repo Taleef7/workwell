@@ -51,5 +51,15 @@ export function redirectMatches(registered: readonly string[], requested: string
   });
 }
 
+/**
+ * True when the code goes to a program on the user's own computer. No metadata document can vouch for that
+ * receiver (any local process, or another session on a shared server, can listen on the port), so the consent
+ * page warns instead of calling the client verified.
+ */
+export function isLoopbackRedirect(uri: string): boolean {
+  const url = parse(uri);
+  return !!url && isLoopbackHttp(url);
+}
+
 /** The origin a consent page shows for a redirect (scheme, host and port), so the user sees where the code goes. */
 export const redirectOrigin = (uri: string): string => parse(uri)?.origin ?? uri;

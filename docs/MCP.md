@@ -122,35 +122,52 @@ WorkWell is also an OAuth 2.1 authorization server for its MCP endpoint, as MCP 
 **Rules:**
 - **Clients.** A client whose `client_id` is an https URL is described by the metadata document at that URL
   (CIMD; Claude's own clients):
-  - it is fetched over https on port 443 only, with every resolved address checked at connect time (no
-    private, loopback or link-local address), no redirects, 64 KB and 5 s at most, and cached;
-  - its identity is that host, shown on the consent page.
+  - it is fetched only from an accepted publisher, `WORKWELL_OAUTH_CIMD_HOSTS` (default `claude.ai`, which
+    publishes both the connector's and Claude Code's documents); any other host is refused before a request;
+  - over https on port 443 only, with every resolved address checked at connect time (no private, loopback
+    or link-local address), no redirects, 64 KB and 5 s at most;
+  - at most 4 fetches in flight and 20 a minute, one per URL at a time, documents and failures cached apart;
+    the last good document stands in for up to a day while the publisher cannot answer (a timeout, 5xx or
+    429), never when it answers no;
+  - its identity is that host, shown on the consent page, except when the code goes to a loopback address
+    (Claude Code): a document proves who published the client, not which program listens on the port, so
+    the page warns instead of calling it verified.
 
   A self-registered client (DCR, what `mcp-remote` uses) may use loopback redirects only
-  (`http://localhost`, `127.0.0.1` or `[::1]`, any port), and the consent page marks it unverified.
-  Nothing about a client is stored.
+  (`http://localhost`, `127.0.0.1` or `[::1]`, any port; 2,048 characters in all), and the consent page
+  marks it unverified. Nothing about a client is stored.
 - **Authorize.**
-  - PKCE `S256` and `resource` equal to the `/mcp` URL are required; unknown scopes (e.g.
-    `offline_access`) are ignored.
+  - PKCE `S256` and `resource` naming the `/mcp` URL are required (compared as URLs: host case, `:443` and a
+    trailing slash do not matter); unknown scopes (e.g. `offline_access`) are ignored.
+  - `redirect_uri` may be left out when the client registered exactly one; the token request then may leave
+    it out too.
   - An unknown client or redirect gets an error page that never redirects. Later errors go back to the
     client with `error`, `state` and `iss`.
 - **Consent.** The page is in the web app, behind sign-in. Only a Case Manager or Admin may approve, and the
-  grant carries their role and credential version. It may not be framed.
+  grant carries their role and credential version. Anyone signed in may decline: the details the page reads
+  carry the `access_denied` redirect, so declining needs no write (a viewer may never POST). It may not be
+  framed.
 - **Tokens.**
   - The access token lasts 15 minutes; its audience is the `/mcp` URL, and it works there only.
   - The refresh token lasts 30 days, sliding, up to 90 days for the grant, and rotates on every use. A refresh
-    token used again revokes the grant, except within 30 seconds of a concurrent refresh, which is refused
-    without revoking.
+    token used again revokes the grant, except within 5 seconds of a concurrent refresh, which is refused
+    without revoking and audited (`OAUTH_REFRESH_RACE_REFUSED`): a thief who refreshed first looks the same.
   - The user is re-checked on every refresh.
   - The code is single use (60 seconds); a second redemption revokes what the first produced.
 - **Revocation.** An admin disconnects a client in Admin → MCP access, and its access tokens stop at once. A
   password change also ends every grant.
 - **Audited first:** `OAUTH_CONSENT_GRANTED`, `OAUTH_TOKEN_ISSUED`, `OAUTH_REFRESH_REUSE_DETECTED`,
-  `OAUTH_GRANT_REVOKED`. None holds a token.
+  `OAUTH_CODE_REUSE_DETECTED`, `OAUTH_GRANT_REVOKED`; `OAUTH_REFRESH_RACE_REFUSED` records a refused race.
+  None holds a token.
 - **No new table:** codes and grants are `auth_refresh_families` rows (`oauth-code:<id>`, `oauth:<id>`).
 
-**Not yet:** rate limits on the register, token and consent endpoints (`PRODUCTION_READINESS_2026-07.md`
-gap 13), and CORS on the token endpoint for browser-based clients.
+**Not yet:**
+- per-caller rate limits on the authorize, register, token and consent endpoints
+  (`PRODUCTION_READINESS_2026-07.md` gap 13; the CIMD fetch has its own global limits, above);
+- an opaque authorization code: the code is a signed token whose claims (the user's email and role, the
+  client, the PKCE challenge) can be read by anyone who sees the redirect URL, such as browser history. It is
+  single use, lasts 60 seconds and is useless without the PKCE verifier;
+- CORS on the token endpoint for browser-based clients.
 
 ## Tool posture
 

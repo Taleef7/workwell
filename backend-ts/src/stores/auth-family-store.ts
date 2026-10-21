@@ -31,8 +31,8 @@ export interface AuthFamilyStore {
    */
   rotateIf(family: string, oldJti: string, newJti: string, expiresAt: string, now: string): Promise<boolean>;
   /**
-   * The unexpired families whose id starts with `prefix` (`mcp-pat:`), with their expiry. What makes a
-   * credential live is its row, so a list of live credentials is read here, never inferred from events.
+   * The unexpired families whose id starts with `prefix` (`mcp-pat:`), with their current jti and expiry. What
+   * makes a credential live is its row, so a list of live credentials is read here, never inferred from events.
    */
-  listByPrefix(prefix: string, now: string): Promise<Array<{ family: string; expiresAt: string }>>;
+  listByPrefix(prefix: string, now: string): Promise<Array<{ family: string; jti: string; expiresAt: string }>>;
 }
