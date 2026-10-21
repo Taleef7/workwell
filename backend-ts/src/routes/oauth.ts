@@ -397,26 +397,14 @@ async function redeemCode(p: URLSearchParams, clientId: string, ctx: Ctx): Promi
   try {
     const { events, authFamilies } = await getStores(ctx.env);
     const now = new Date();
-    if (!(await authFamilies.consume(`${CODE_PREFIX}${c.jti}`, c.jti, now.toISOString()))) {
-      // A code redeemed twice: the grant it produced is no longer trustworthy (RFC 6749 §4.1.2). Audited first.
-      await events.appendAudit({
-        eventType: "OAUTH_CODE_REUSE_DETECTED",
-        entityType: "oauth_grant",
-        entityId: c.fam.slice(OAUTH_FAMILY_PREFIX.length),
-        actor: account.email,
-        refRunId: null,
-        refCaseId: null,
-        refMeasureVersionId: null,
-        payload: { grantId: c.fam.slice(OAUTH_FAMILY_PREFIX.length) },
-      });
-      await authFamilies.revoke(c.fam);
-      return oauthError("invalid_grant", "the code has already been used or has expired");
-    }
     const grantId = c.fam.slice(OAUTH_FAMILY_PREFIX.length);
     const gexp = nowSeconds() + OAUTH_GRANT_MAX_SECONDS;
     const refreshJti = randomUUID();
     const issued = tokenResponse(ctx, { sub: account.email, role: account.role, cv: String(c.cv), clientId, fam: c.fam, gexp }, refreshJti);
-    // AUDIT BEFORE THE ROW THAT MAKES THE GRANT LIVE.
+    // AUDIT BEFORE THE CODE IS SPENT, and so before the row that makes the grant live: a ledger that cannot be
+    // written answers 503 with the code intact, so the client's retry redeems it instead of being taken for a
+    // replay. A code that turns out spent leaves this event followed by its OAUTH_CODE_REUSE_DETECTED (an
+    // over-claim, never a silent change).
     await events.appendAudit({
       eventType: "OAUTH_TOKEN_ISSUED",
       entityType: "oauth_grant",
@@ -434,6 +422,21 @@ async function redeemCode(p: URLSearchParams, clientId: string, ctx: Ctx): Promi
         expiresAt: new Date(gexp * 1000).toISOString(),
       },
     });
+    if (!(await authFamilies.consume(`${CODE_PREFIX}${c.jti}`, c.jti, now.toISOString()))) {
+      // A code redeemed twice: the grant it produced is no longer trustworthy (RFC 6749 §4.1.2). Audited first.
+      await events.appendAudit({
+        eventType: "OAUTH_CODE_REUSE_DETECTED",
+        entityType: "oauth_grant",
+        entityId: grantId,
+        actor: account.email,
+        refRunId: null,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: { grantId },
+      });
+      await authFamilies.revoke(c.fam);
+      return oauthError("invalid_grant", "the code has already been used or has expired");
+    }
     // Live only from "pending": if a replay of this code revoked the grant meanwhile, nothing is issued.
     if (!(await authFamilies.rotateIf(c.fam, PENDING_GRANT, packGrant(refreshJti), issued.refreshExpiresAt, now.toISOString()))) {
       return oauthError("invalid_grant", "the code has already been used or has expired");

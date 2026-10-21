@@ -75,12 +75,10 @@ on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfil
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
-- **The sweep reports 68 hits across 20 files (2026-10-20); check the count, not the labels.** The five
+- **The sweep reports 67 hits across 20 files (2026-10-20); check the count, not the labels.** The four
 added on 2026-10-20 are all in `routes/oauth.ts` (MCP OAuth) and none is a violation:
-  - `consume` is the one-time code's redemption itself, unaudited like a refresh rotation, and the grant only
-    goes live after its `OAUTH_TOKEN_ISSUED`;
-  - the replay `revoke` follows its own `OAUTH_CODE_REUSE_DETECTED`, and the matcher reads past the early
-    return;
+  - `consume` runs after the code's `OAUTH_TOKEN_ISSUED` (so a ledger outage leaves the code redeemable) and
+    before `OAUTH_CODE_REUSE_DETECTED`, which records that it found the code already spent;
   - the three in `gone()` are a helper the matcher takes for the enclosing function: reads, plus the
     success-path rotation, before the refused-race audit (`OAUTH_REFRESH_RACE_REFUSED`, which changes
     nothing) and the replay audit, which precedes its revoke.

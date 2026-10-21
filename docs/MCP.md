@@ -157,6 +157,8 @@ WorkWell is also an OAuth 2.1 authorization server for its MCP endpoint, as MCP 
     without revoking and audited (`OAUTH_REFRESH_RACE_REFUSED`): a thief who refreshed first looks the same.
   - The user is re-checked on every refresh.
   - The code is single use (60 seconds); a second redemption revokes what the first produced.
+    `OAUTH_TOKEN_ISSUED` is written before the code is spent, so a ledger that cannot be written answers 503
+    and leaves the code for the client's retry.
 - **Revocation.** An admin disconnects a client in Admin → MCP access, and its access tokens stop at once. A
   password change also ends every grant.
 - **Audited first:** `OAUTH_CONSENT_GRANTED`, `OAUTH_TOKEN_ISSUED`, `OAUTH_REFRESH_REUSE_DETECTED`,

@@ -337,6 +337,25 @@ describe("AuthProvider — silent refresh on page load", () => {
     });
   });
 
+  // An expired session on the consent page reaches logout() through the API client's 401 handler, not the
+  // provider's redirect effect, so logout itself must keep the signed request for after sign-in.
+  it("logout on the MCP consent page returns to it after sign-in", async () => {
+    localStorage.setItem(TOKEN_KEY, JSON.stringify(freshToken));
+    localStorage.setItem(USER_KEY, JSON.stringify({ email: "admin@workwell.dev", role: "ADMIN" }));
+    mockPathname.mockReturnValue("/oauth/consent");
+    window.history.pushState({}, "", "/oauth/consent?request=signed.blob");
+    try {
+      let capturedAuth: ReturnType<typeof useAuth> | null = null;
+      renderProvider((auth) => { capturedAuth = auth; });
+      await waitFor(() => expect(capturedAuth?.token).not.toBeNull());
+      mockReplace.mockClear();
+      act(() => { capturedAuth!.logout(); });
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(`/login?next=${encodeURIComponent("/oauth/consent?request=signed.blob")}`));
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("only attempts one refresh per unauthenticated epoch (silentRefreshAttempted guard)", async () => {
     // No token in storage. Default MSW handler returns 401.
     let refreshCallCount = 0;

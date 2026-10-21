@@ -15,6 +15,7 @@ import worker, { type Env } from "../worker.ts";
 import { createJwt } from "../auth/jwt.ts";
 import { s256 } from "../auth/oauth/pkce.ts";
 import { SqliteAuthFamilyStore } from "../stores/sqlite/auth-family-store-sqlite.ts";
+import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 
 const SECRET = "o".repeat(48);
 const API = "https://api.workwell.test";
@@ -363,4 +364,28 @@ test("a grant whose code is not yet redeemed is not listed as a connected client
   assert.deepEqual(await listed(), before, "consented, not yet redeemed: nothing new is connected");
   assert.equal((await exchange(clientId, code, verifier)).status, 200);
   assert.equal((await listed()).length, before.length + 1, "redeemed: now it is");
+});
+
+// The ledger is written before the code is spent: if it cannot be written, the code must survive, or the
+// client's retry is taken for a replay and the grant is revoked with no record of the redemption.
+test("a ledger that cannot be written at redemption answers 503 and leaves the code redeemable", async () => {
+  const clientId = await register();
+  const { verifier, challenge } = pkce();
+  const { code } = await approve(clientId, challenge);
+  const proto = SqliteCaseEventStore.prototype as unknown as { appendAudit: (input: { eventType: string }) => Promise<void> };
+  const appendAudit = proto.appendAudit;
+  proto.appendAudit = async function (this: unknown, input: { eventType: string }) {
+    if (input.eventType === "OAUTH_TOKEN_ISSUED") throw new Error("ledger down");
+    return appendAudit.call(this, input);
+  };
+  let down: Response;
+  try {
+    down = await exchange(clientId, code, verifier);
+  } finally {
+    proto.appendAudit = appendAudit;
+  }
+  assert.equal(down.status, 503);
+  const retry = await exchange(clientId, code, verifier);
+  assert.equal(retry.status, 200, "the retry redeems the code; it is not taken for a replay");
+  assert.equal((await mcp(((await retry.json()) as { access_token: string }).access_token)).status, 200);
 });

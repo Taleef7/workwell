@@ -63,9 +63,14 @@ export type McpTokenStatus = "active" | "revoked" | "expired";
 async function issuedOf(env: Env, kind: AccessKind): Promise<IssuedEvent[]> {
   const { events } = await getStores(env);
   const k = KINDS[kind];
+  // One entry per credential: a grant whose code was redeemed twice has two OAUTH_TOKEN_ISSUED events (the
+  // event is written before the code is spent), and the newest describes it.
+  const seen = new Set<string>();
   return (await events.recentAuditEventsByType(k.issued, 500)).flatMap((e) => {
     const p = e.payload as Record<string, unknown>;
     const id = p[k.id];
+    if (typeof id === "string" && seen.has(id)) return [];
+    if (typeof id === "string") seen.add(id);
     return typeof id === "string" && typeof p.expiresAt === "string"
       ? [{ kind, tokenId: id, label: String(p[k.label] ?? ""), role: String(p.role ?? ""), subject: String(p.subject ?? ""), expiresAt: p.expiresAt, issuedAt: e.occurredAt }]
       : [];
