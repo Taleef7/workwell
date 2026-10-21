@@ -38,7 +38,7 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
              -> in-process CQL engine / fqm-execution for routed measures
              -> evidence bucket (Cloudflare R2, S3 API)
              -> OpenAI (assistive text only)
-             -> MCP endpoints (/sse, /mcp/message)
+             -> MCP endpoint (POST /mcp)
 ```
 
 | Stack | Frontend | API | Deploy workflow | Self-heal |
@@ -311,8 +311,8 @@ are in `backend-ts/src/routes/`; each file's header comment lists its routes.
 - Standards exports (MeasureReport, QRDA I, QRDA III) answer 409 `run_compacted` for a run older than
   the compaction cutoff (ADR-077). What we may claim about them: `docs/STANDARDS_CONFORMANCE.md`.
 
-**MCP** - `GET /sse` and `POST /mcp/message`: read-only tools, role-gated, audited per call. See
-`docs/MCP.md`.
+**MCP** - `POST /mcp` (Streamable HTTP, MCP 2026-07-28 and the 2025 versions, official SDK v2): read-only
+tools, role-gated, audited per call, reached with an admin-minted MCP token. See `docs/MCP.md`.
 
 **WebChart ingest** - FHIR over HTTP with SMART Backend Services auth (`engine/ingress/webchart/`);
 the dev database through `wcdb-fhir-shim/`. See `docs/WEBCHART_FHIR_MAPPING.md` and

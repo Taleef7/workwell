@@ -524,6 +524,7 @@ delivers scheduled runs hours apart; to heal now, run the reconcile workflow by 
 | `WORKWELL_AUTH_ENABLED`, `WORKWELL_AUTH_JWT_SECRET` | B | Auth defaults on; `false` refused in production. |
 | `WORKWELL_AUTH_COOKIE_SAME_SITE` / `_SECURE` | B | **`None` / `true` in production**; defaults `Lax` / `false` locally. |
 | `WORKWELL_CORS_ALLOWED_ORIGINS` | B | Exact origins; production refuses wildcard/blank/`localhost` with **503 `unsafe_configuration`**. First origin = Studio link in CDS cards; add a browser CDS client's origin deliberately (ADR-067). |
+| `WORKWELL_PUBLIC_API_URL` | B | The API's public origin (`https://twh-api-ts.os.mieweb.org`; no path or trailing slash). MCP tokens are minted for `<it>/mcp`. Unset or invalid with auth on: `/mcp` and the MCP token routes answer 503, nothing else is affected. Set in every deploy and reconciler (`public-api-url.workflows.test.ts`). |
 | `WORKWELL_SCHEDULER_ENABLED` | B | `true` enables the nightly scheduler. |
 | corpus / chunk / anchor / retention vars | B | See the Maui table. |
 | `WORKWELL_OFFICIAL_MEASURES` | B | Catalog ids run by the official artifact; `all` refused. A build arg baked into the image, never container env (flip checklist, #768). |
@@ -714,8 +715,8 @@ Set a hard monthly usage limit and store the key only as the `OPENAI_API_KEY` se
 - Frontend: `/` → 200. DB: `psql "<direct url>" -c "SELECT 1"`.
 - All health endpoints are DB-free, so also grep the log for `WORKWELL_ALERT` and the boot warm line.
 - `scripts/smoke-shadow.sh https://<api-host>` runs the post-deploy checklist (health, runs, open cases,
-  the four CSV exports, integrations, MCP sync, outreach delivery) as PASS/FAIL/WARN; WARNs are known
-  limitations (its evidence line predates R2; `/sse` is the ingress caveat below).
+  the four CSV exports, integrations, MCP sync, outreach delivery, and `POST /mcp` refusing an
+  unauthenticated call) as PASS/FAIL/WARN; WARNs are known limitations (its evidence line predates R2).
 
 ## Rollback
 
@@ -750,9 +751,10 @@ near a limit the same day.
 - **`503 statement_timeout`** → a read hit the 30 s role default, often a cold read model after a deploy.
 - **Green container, every evaluation 500s** → grep `OFFICIAL_ROUTING_MISCONFIGURED`.
 - **Evidence fails, health green** → grep `EVIDENCE_BUCKET_UNREACHABLE`.
-- **MCP/SSE drops every ~60 s (504)** → MIE nginx defaults; the fix is an MIE vhost change on the SSE/MCP
-  locations (`proxy_buffering off`, `proxy_read_timeout 3600s`, `proxy_http_version 1.1`, empty
-  `Connection`). MCP is at `/sse` + `/mcp/**` and needs a WorkWell JWT (`docs/MCP.md`).
+- **MCP answers 503 `mcp_unavailable`** → `WORKWELL_PUBLIC_API_URL` is unset or not a bare https origin
+  (only `/mcp` and the token routes are affected), or the token store could not be read (fails closed). **MCP answers 401** → the token is revoked, expired, a
+  login token, or minted before a password change; mint a new one on the Admin page (`docs/MCP.md`).
+  MCP is `POST /mcp` with one answer per request, so MIE nginx's stream timeouts no longer apply.
 - **Deploy fails at the manager API (curl 7/28)** → check TCP 443 to `manager.os.mieweb.org`; don't loop
   state-changing requests by hand; when it recovers, `gh run rerun <run-id> --failed`.
 - **`Container is 'offline', expected running`** after the ~3 min poll → the container did not start:

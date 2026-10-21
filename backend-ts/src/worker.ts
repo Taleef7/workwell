@@ -50,6 +50,7 @@ import { handleExports } from "./routes/exports.ts";
 import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
 import { handleMcp } from "./routes/mcp.ts";
+import { handleAdminMcpTokens } from "./routes/admin-mcp-tokens.ts";
 import { handleAuditor } from "./routes/auditor.ts";
 import { createAuthHandler, type AuthAuditEvent, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
 import { getStores } from "./stores/factory.ts";
@@ -97,6 +98,8 @@ export interface Env {
   SPRING_PROFILES_ACTIVE?: string;
   NODE_ENV?: string;
   WORKWELL_CORS_ALLOWED_ORIGINS?: string;
+  /** The API's public origin; MCP tokens are minted for `<it>/mcp` (#704, `config/public-api-url.ts`). */
+  WORKWELL_PUBLIC_API_URL?: string;
   OPENAI_API_KEY?: string;
   WORKWELL_AI_OPENAI_MODEL?: string;
   WORKWELL_AI_OPENAI_FALLBACK_MODEL?: string;
@@ -299,8 +302,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
     // `?listId=` narrows a read to an ACO's attributed membership, which is the same disclosure the
     // CM/ADMIN gate on /api/subject-lists exists to make — so it carries the same gate, once, here
     // (ADR-082). Without this the gate reads as present and cannot fire for the widest read: a VIEWER
-    // with a list id could take the whole membership out of /api/exports/cases as a CSV.
-    if (new URL(req.url).searchParams.has("listId") && !listFilterAuthorized(principalRole)) {
+    // with a list id could take the whole membership out of /api/exports/cases as a CSV. `/mcp` is not one
+    // of those reads (a tool takes `listId` as an argument, behind its own role gate) and has no login
+    // principal here, so the query parameter means nothing to it.
+    if (pathname !== "/mcp" && new URL(req.url).searchParams.has("listId") && !listFilterAuthorized(principalRole)) {
       return json(
         {
           error: "forbidden",
@@ -450,6 +455,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const auditorResponse = await handleAuditor(req, env, actor);
   if (auditorResponse) return auditorResponse;
 
+  // MCP access tokens (#704): mint, list, revoke. ADMIN via the /api/admin/** rule.
+  const mcpTokensResponse = await handleAdminMcpTokens(req, env, actor, enforceAuth);
+  if (mcpTokensResponse) return mcpTokensResponse;
+
   // Admin — dashboard read surface + simple toggles (#108). Gated to ADMIN by the matrix.
   const adminResponse = await handleAdmin(req, env, actor);
   if (adminResponse) return adminResponse;
@@ -459,9 +468,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const aiResponse = await handleAi(req, env, actor);
   if (aiResponse) return aiResponse;
 
-  // MCP — read-only tools over SSE + JSON-RPC (#108). Transport gate ([ADMIN/CASE_MANAGER/
-  // MCP_CLIENT] on /sse + /mcp/**) is applied above; per-tool role gates run in dispatch.
-  const mcpResponse = await handleMcp(req, env, { actor, role: principalRole, enforce: enforceAuth });
+  // MCP — read-only tools over Streamable HTTP at POST /mcp (#108, #704). The route matrix PERMITs exactly
+  // /mcp: `handleMcp` authenticates it itself, with MCP tokens only (never the login token the gate above
+  // reads), and takes the actor and role from that token. Per-tool role gates run in dispatch.
+  const mcpResponse = await handleMcp(req, env, { enforce: enforceAuth });
   if (mcpResponse) return mcpResponse;
 
   // Unknown route. Be honest (no faked behavior), the same principle as

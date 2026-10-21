@@ -11,6 +11,7 @@ import { SUBJECT } from "@/lib/terminology";
 import NitroGrid, { type NitroGridColumn } from "@/features/datavis/NitroGridClient";
 import type { RowData, TableColumn } from "datavis/src/components/table/types";
 import { SegmentsAdmin } from "@/features/segments/SegmentsAdmin";
+import { McpAccessAdmin } from "@/features/mcp-tokens/McpAccessAdmin";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 import { formatMeasureLabel, type MeasureIdentity } from "@/lib/measure-identity";
 
@@ -129,6 +130,7 @@ const ADMIN_TABS = [
   { id: "governance", label: "Governance" },
   { id: "outreach", label: "Outreach" },
   { id: "groups", label: "Groups" },
+  { id: "mcp", label: "MCP access" },
   { id: "audit", label: "Audit" },
 ] as const;
 type AdminTab = (typeof ADMIN_TABS)[number]["id"];
@@ -1288,6 +1290,12 @@ export default function AdminPage() {
       {activeTab === "groups" && (
       <div role="tabpanel" id="admin-tabpanel-groups" aria-labelledby="admin-tab-groups" tabIndex={0}>
         <SegmentsAdmin />
+      </div>
+      )}
+
+      {activeTab === "mcp" && (
+      <div role="tabpanel" id="admin-tabpanel-mcp" aria-labelledby="admin-tab-mcp" tabIndex={0}>
+        <McpAccessAdmin />
       </div>
       )}
 

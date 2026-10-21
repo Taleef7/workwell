@@ -17,4 +17,22 @@ export interface AuthFamilyStore {
   rotate(family: string, jti: string, expiresAt: string, now: string): Promise<void>;
   /** Revoke the whole family (logout, or a replayed token). */
   revoke(family: string): Promise<void>;
+  /**
+   * Delete the family only while `jti` is its current, unexpired token, in one statement; true when this
+   * call deleted it. The single-use step for a one-time credential (an OAuth code, #704): two concurrent
+   * redemptions cannot both see the row, because only one DELETE can remove it.
+   */
+  consume(family: string, jti: string, now: string): Promise<boolean>;
+  /**
+   * Replace the family's current token only while it is still `oldJti` (unexpired), in one statement;
+   * true when this call rotated it. Of two concurrent rotations from the same token, exactly one wins.
+   * False alone does not say why (a lost race, a replay, a revoked or lapsed family); a caller that must
+   * tell them apart re-reads `currentJti`.
+   */
+  rotateIf(family: string, oldJti: string, newJti: string, expiresAt: string, now: string): Promise<boolean>;
+  /**
+   * The unexpired families whose id starts with `prefix` (`mcp-pat:`), with their expiry. What makes a
+   * credential live is its row, so a list of live credentials is read here, never inferred from events.
+   */
+  listByPrefix(prefix: string, now: string): Promise<Array<{ family: string; expiresAt: string }>>;
 }

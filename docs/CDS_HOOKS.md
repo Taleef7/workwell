@@ -26,8 +26,9 @@ POST /cds-services/workwell-compliance-patient-view/feedback    → 200
 | `fhirServer`, `fhirAuthorization`, `prefetch` | body, optional | **Accepted and not evaluated.** See *Limits, stated*. |
 
 **Authentication:** discovery is public — it returns service metadata and no patient data. Invoke and
-feedback require the standard bearer token with `ROLE_MCP_CLIENT`, `ROLE_CASE_MANAGER` or `ROLE_ADMIN`, the
-same authority as `/sse` and `/mcp/**`. An anonymous invoke is **401**.
+feedback require the standard bearer (login) token with `ROLE_MCP_CLIENT`, `ROLE_CASE_MANAGER` or
+`ROLE_ADMIN`. An MCP token is never accepted here: it is valid only on `/mcp` (`docs/MCP.md`). An anonymous
+invoke is **401**.
 
 > **This is not the CDS Hooks JWT profile, and that is a stated gap.** The specification defines its own
 > scheme — a JWT the *client* signs (RS384/ES384), verified against a JWKS, with `aud` equal to the invoked

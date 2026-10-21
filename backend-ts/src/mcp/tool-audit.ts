@@ -50,6 +50,8 @@ export interface McpAuditInput {
   sensitivityLabel: string;
   occurredAt: string;
   failureMessage?: string | null;
+  /** Which credential made the call (`pat:<tokenId>`, an OAuth client id); never the token itself (#704). */
+  credential?: string | null;
 }
 
 export async function recordMcpAudit(events: Pick<CaseEventStore, "appendAudit">, input: McpAuditInput): Promise<void> {
@@ -63,6 +65,7 @@ export async function recordMcpAudit(events: Pick<CaseEventStore, "appendAudit">
     timestamp: input.occurredAt,
   };
   if (input.failureMessage && input.failureMessage.trim()) payload.failureMessage = input.failureMessage;
+  if (input.credential) payload.credential = input.credential;
   await events.appendAudit({
     eventType: "MCP_TOOL_CALLED",
     entityType: "mcp_tool",
