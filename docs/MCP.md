@@ -161,7 +161,8 @@ WorkWell is also an OAuth 2.1 authorization server for its MCP endpoint, as MCP 
     and leaves the code for the client's retry.
 - **Revocation.** An admin disconnects a client in Admin → MCP access, and its access tokens stop at once. A
   password change also ends every grant.
-- **Audited first:** `OAUTH_CONSENT_GRANTED`, `OAUTH_TOKEN_ISSUED`, `OAUTH_REFRESH_REUSE_DETECTED`,
+- **Audited first:** `OAUTH_CONSENT_GRANTED`, `OAUTH_TOKEN_ISSUED`, `OAUTH_TOKEN_REFRESHED` (every rotation),
+  `OAUTH_REFRESH_REUSE_DETECTED`,
   `OAUTH_CODE_REUSE_DETECTED`, `OAUTH_GRANT_REVOKED`; `OAUTH_REFRESH_RACE_REFUSED` records a refused race.
   None holds a token.
 - **No new table:** a grant is one `auth_refresh_families` row (`oauth:<id>`). Until its code is redeemed the

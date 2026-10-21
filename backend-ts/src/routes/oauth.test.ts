@@ -131,7 +131,7 @@ test("the whole flow: register, authorize, consent, code, /mcp, refresh — and 
   assert.equal((await mcp(next.access_token)).status, 200);
 
   const events = (await db().prepare("SELECT event_type AS t, payload_json AS p FROM audit_events WHERE entity_type = 'oauth_grant' ORDER BY id").all<{ t: string; p: string }>()).results!;
-  assert.deepEqual(events.map((e) => e.t).slice(-2), ["OAUTH_CONSENT_GRANTED", "OAUTH_TOKEN_ISSUED"]);
+  assert.deepEqual(events.map((e) => e.t).slice(-3), ["OAUTH_CONSENT_GRANTED", "OAUTH_TOKEN_ISSUED", "OAUTH_TOKEN_REFRESHED"], "the refresh is on the ledger too");
   assert.ok(events.every((e) => !e.p.includes(tokens.access_token) && !e.p.includes(tokens.refresh_token)), "no token in the ledger");
 });
 
@@ -369,6 +369,12 @@ test("a grant whose code is not yet redeemed is not listed as a connected client
   assert.deepEqual(await listed(), before, "consented, not yet redeemed: nothing new is connected");
   assert.equal((await exchange(clientId, code, verifier)).status, 200);
   assert.equal((await listed()).length, before.length + 1, "redeemed: now it is");
+
+  // It lapses with its row: the 30-day sliding refresh expiry, not the 90-day cap its issue event records.
+  const all = ((await (await call("/api/admin/mcp-tokens", { headers: { authorization: `Bearer ${ADMIN}` } })).json()) as { tokens: Array<{ kind: string; tokenId: string; status: string; expiresAt: string }> }).tokens;
+  const added = all.find((t) => t.kind === "oauth" && t.status === "active" && !before.includes(t.tokenId))!;
+  const days = (Date.parse(added.expiresAt) - Date.now()) / 86_400_000;
+  assert.ok(days > 29 && days <= 30, `expires in ${days.toFixed(1)} days`);
 });
 
 // The ledger is written before the code is spent: if it cannot be written, the code must survive, or the
@@ -393,4 +399,28 @@ test("a ledger that cannot be written at redemption answers 503 and leaves the c
   const retry = await exchange(clientId, code, verifier);
   assert.equal(retry.status, 200, "the retry redeems the code; it is not taken for a replay");
   assert.equal((await mcp(((await retry.json()) as { access_token: string }).access_token)).status, 200);
+});
+
+// A refresh is a state change (new tokens, a later expiry), audited before the rotation: a ledger that cannot
+// be written answers 503 and rotates nothing, so the same refresh token still works.
+test("a refresh whose ledger write fails rotates nothing, and the refresh token still works", async () => {
+  const clientId = await register();
+  const { verifier, challenge } = pkce();
+  const { code } = await approve(clientId, challenge);
+  const tokens = (await (await exchange(clientId, code, verifier)).json()) as { refresh_token: string };
+  const proto = SqliteCaseEventStore.prototype as unknown as { appendAudit: (input: { eventType: string }) => Promise<void> };
+  const appendAudit = proto.appendAudit;
+  proto.appendAudit = async function (this: unknown, input: { eventType: string }) {
+    if (input.eventType === "OAUTH_TOKEN_REFRESHED") throw new Error("ledger down");
+    return appendAudit.call(this, input);
+  };
+  let down: Response;
+  try {
+    down = await call("/oauth/token", form({ grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id: clientId }));
+  } finally {
+    proto.appendAudit = appendAudit;
+  }
+  assert.equal(down.status, 503);
+  const retry = await call("/oauth/token", form({ grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id: clientId }));
+  assert.equal(retry.status, 200, "not rotated, so not taken for a replay");
 });

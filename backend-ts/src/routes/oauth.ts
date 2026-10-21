@@ -19,7 +19,7 @@
  *   at most 90 days for the grant) that rotates on every use; a replayed one revokes the grant (RFC 9700).
  *   The user is re-checked at every refresh (exists on this profile, same credential version, MCP role).
  * - **Audited first.** `OAUTH_CONSENT_GRANTED` before the pending row, `OAUTH_TOKEN_ISSUED` before the code is
- *   redeemed, `OAUTH_REFRESH_REUSE_DETECTED` before the revoke. A store failure answers 503 and issues nothing.
+ *   redeemed, `OAUTH_TOKEN_REFRESHED` before each rotation, `OAUTH_REFRESH_REUSE_DETECTED` before the revoke. A store failure answers 503 and issues nothing.
  * - **Bounded.** Client metadata is fetched only for accepted clients (`WORKWELL_OAUTH_CIMD_CLIENTS`, default
  *   Claude's connector and Claude Code; `auth/oauth/cimd.ts`), and request bodies are capped. There is no per-caller rate limit yet
  *   (`docs/MCP.md`, known gaps).
@@ -463,6 +463,18 @@ async function refresh(p: URLSearchParams, clientId: string, ctx: Ctx): Promise<
     if (row.current === r.jti) {
       const newJti = randomUUID();
       const issued = tokenResponse(ctx, { sub: account.email, role: account.role, cv: String(r.cv), clientId, fam: r.fam, gexp: r.gexp }, newJti);
+      // AUDIT BEFORE THE ROTATION: new tokens and a later expiry are a state change. A refresh that then loses a
+      // race leaves this event followed by its OAUTH_REFRESH_RACE_REFUSED (an over-claim, never a silent change).
+      await events.appendAudit({
+        eventType: "OAUTH_TOKEN_REFRESHED",
+        entityType: "oauth_grant",
+        entityId: r.fam.slice(OAUTH_FAMILY_PREFIX.length),
+        actor: account.email,
+        refRunId: null,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: { grantId: r.fam.slice(OAUTH_FAMILY_PREFIX.length), role: account.role, expiresAt: issued.refreshExpiresAt },
+      });
       // Atomic: of two concurrent refreshes from this token, one rotates and the other reads the result.
       if (await authFamilies.rotateIf(r.fam, rowValue, packGrant(newJti, r.jti, nowSeconds()), issued.refreshExpiresAt, nowIso)) {
         return json(issued.body, 200, NO_STORE);

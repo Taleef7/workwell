@@ -151,7 +151,10 @@ export async function handleAdminMcpTokens(req: Request, env: Env, actor: string
           // 30 days without a refresh, before its 90-day cap, so a grant is "revoked" only with a revoke event.
           const ended: McpTokenStatus =
             Date.parse(t.expiresAt) <= now.getTime() ? "expired" : kind === "token" || revoked.has(t.tokenId) ? "revoked" : "expired";
-          tokens.push({ ...t, status: live.has(t.tokenId) ? "active" : ended });
+          // A live credential lapses when its row does: for a grant that is the sliding refresh expiry, sooner
+          // than the 90-day cap its issue event records, and moved on by every refresh.
+          const liveUntil = live.get(t.tokenId);
+          tokens.push(liveUntil ? { ...t, expiresAt: liveUntil, status: "active" } : { ...t, status: ended });
         }
         // A live credential whose issue event is older than the scan above is still listed, so it can be revoked.
         const seen = new Set(issued.map((t) => t.tokenId));

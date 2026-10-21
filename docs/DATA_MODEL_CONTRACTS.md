@@ -80,9 +80,10 @@ added on 2026-10-20 are all in `routes/oauth.ts` (MCP OAuth) and none is a viola
   - in `redeemCode` (read by the matcher as the `spent()` helper), a read of the grant row precedes
     `OAUTH_CODE_REUSE_DETECTED`; the redemption itself (one `rotateIf`, pending to live) follows the code's
     `OAUTH_TOKEN_ISSUED`, so a ledger outage leaves the code redeemable;
-  - the three in `gone()` are a helper the matcher takes for the enclosing function: reads, plus the
-    success-path rotation, before the refused-race audit (`OAUTH_REFRESH_RACE_REFUSED`, which changes
-    nothing) and the replay audit, which precedes its revoke.
+  - the three in `gone()` are a helper the matcher takes for the enclosing function (`refresh`): the read of
+    the grant row before `OAUTH_TOKEN_REFRESHED`, which precedes its rotation; then a race's lost rotation and
+    re-read before the refused-race audit (`OAUTH_REFRESH_RACE_REFUSED`, which changes nothing) and the
+    replay audit, which precedes its revoke.
 
   The 64th,
 `dispatchOutreach`'s render before its audit, left when the record step became `recordDispatch`; the
