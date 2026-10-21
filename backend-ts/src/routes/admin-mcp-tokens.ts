@@ -17,7 +17,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores, type StoresEnv } from "../stores/factory.ts";
 import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
-import { OAUTH_FAMILY_PREFIX, OAUTH_PENDING_GRANT, PAT_FAMILY_PREFIX, PAT_MAX_DAYS, isMcpRole, issuePat, roleWithin, type McpRole } from "../auth/mcp-token.ts";
+import { OAUTH_FAMILY_PREFIX, PAT_FAMILY_PREFIX, PAT_MAX_DAYS, isMcpRole, isOauthPendingGrant, issuePat, roleWithin, type McpRole } from "../auth/mcp-token.ts";
 import { mcpResourceOf, publicApiUrl } from "../config/public-api-url.ts";
 
 interface Env extends StoresEnv {
@@ -142,7 +142,7 @@ export async function handleAdminMcpTokens(req: Request, env: Env, actor: string
         // whose delete failed leaves the event and a working credential, which must stay revocable). Events
         // add the label and owner, and the history of what no longer works.
         // A grant whose code is not yet redeemed (a minute at most) is no connected client yet.
-        const rows = (await authFamilies.listByPrefix(prefix, now.toISOString())).filter((r) => r.jti !== OAUTH_PENDING_GRANT);
+        const rows = (await authFamilies.listByPrefix(prefix, now.toISOString())).filter((r) => !isOauthPendingGrant(r.jti));
         const live = new Map(rows.map((r) => [r.family.slice(prefix.length), r.expiresAt]));
         const revoked = await revokedIds(env, kind);
         const issued = await issuedOf(env, kind);

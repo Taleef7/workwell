@@ -10,16 +10,16 @@
  *   POST /api/oauth/consent { request, decision }       the user's answer → the client's redirect
  *
  * - **Nothing new is stored.** Clients are fetched (CIMD) or self-describing (a signed registration);
- *   the consent request is a signed blob; codes and grants are `auth_refresh_families` rows
- *   (`oauth-code:<jti>`, single use through `consume`; `oauth:<id>`, rotated through `rotateIf`).
+ *   the consent request is a signed blob; a grant is one `auth_refresh_families` row (`oauth:<id>`), pending
+ *   for its one-time code until redeemed, then live, and moved only through `rotateIf`.
  * - **The login happens in the web app.** The authorize endpoint sends the browser to
  *   `<web app>/oauth/consent`, where the user is signed in as usual and approves with their bearer token.
  *   Only a Case Manager or Admin may approve; the grant carries their role and credential version.
  * - **Tokens.** An access token (15 min, audience = the `/mcp` URL) and a refresh token (30 days, sliding,
  *   at most 90 days for the grant) that rotates on every use; a replayed one revokes the grant (RFC 9700).
  *   The user is re-checked at every refresh (exists on this profile, same credential version, MCP role).
- * - **Audited first.** `OAUTH_CONSENT_GRANTED` before the code row, `OAUTH_TOKEN_ISSUED` before the grant
- *   row, `OAUTH_REFRESH_REUSE_DETECTED` before the revoke. A store failure answers 503 and issues nothing.
+ * - **Audited first.** `OAUTH_CONSENT_GRANTED` before the pending row, `OAUTH_TOKEN_ISSUED` before the code is
+ *   redeemed, `OAUTH_REFRESH_REUSE_DETECTED` before the revoke. A store failure answers 503 and issues nothing.
  * - **Bounded.** Client metadata is fetched only for accepted clients (`WORKWELL_OAUTH_CIMD_CLIENTS`, default
  *   Claude's connector and Claude Code; `auth/oauth/cimd.ts`), and request bodies are capped. There is no per-caller rate limit yet
  *   (`docs/MCP.md`, known gaps).
@@ -34,10 +34,10 @@ import {
   OAUTH_ACCESS_TTL_SECONDS,
   OAUTH_FAMILY_PREFIX,
   OAUTH_GRANT_MAX_SECONDS,
-  OAUTH_PENDING_GRANT,
   OAUTH_REFRESH_TTL_SECONDS,
   accountFor,
   isMcpRole,
+  oauthPendingGrant,
   readMcpToken,
   signMcpToken,
 } from "../auth/mcp-token.ts";
@@ -57,7 +57,6 @@ interface Env extends StoresEnv {
 
 const CODE_TTL_SECONDS = 60;
 const CONSENT_TTL_SECONDS = 600;
-const CODE_PREFIX = "oauth-code:";
 const SCOPE = "mcp";
 /**
  * A refresh token presented again this soon after it was rotated away is a lost race (a client's parallel
@@ -74,11 +73,6 @@ const TOKEN_BODY_MAX_BYTES = 32 * 1024;
  * replay, without a new column. UUIDs never contain `~`.
  */
 const packGrant = (current: string, previous = "", rotatedAt = 0): string => `${current}~${previous}~${rotatedAt}`;
-/**
- * The grant's row from consent until its code is redeemed. Redemption turns it live only through `rotateIf`
- * from this exact value, so a replayed code that revokes the grant first leaves nothing to turn live.
- */
-const PENDING_GRANT = OAUTH_PENDING_GRANT; // packGrant("pending")
 const unpackGrant = (value: string): { current: string; previous: string; rotatedAt: number } => {
   const [current = "", previous = "", at = "0"] = value.split("~");
   return { current, previous, rotatedAt: Number(at) || 0 };
@@ -336,7 +330,7 @@ async function consentDecision(req: Request, ctx: Ctx, actor: string, actorRole:
   );
   try {
     const { events, authFamilies } = await getStores(ctx.env);
-    // AUDIT BEFORE THE ROW THAT MAKES THE CODE REDEEMABLE.
+    // AUDIT BEFORE THE ROW THAT MAKES THE CODE REDEEMABLE: the grant, pending for exactly this code.
     await events.appendAudit({
       eventType: "OAUTH_CONSENT_GRANTED",
       entityType: "oauth_grant",
@@ -349,8 +343,7 @@ async function consentDecision(req: Request, ctx: Ctx, actor: string, actorRole:
     });
     const now = new Date();
     const codeExpires = new Date(now.getTime() + CODE_TTL_SECONDS * 1000).toISOString();
-    await authFamilies.rotate(grant, PENDING_GRANT, codeExpires, now.toISOString());
-    await authFamilies.rotate(`${CODE_PREFIX}${codeJti}`, codeJti, codeExpires, now.toISOString());
+    await authFamilies.rotate(grant, oauthPendingGrant(codeJti), codeExpires, now.toISOString());
   } catch (err) {
     return storeDown(err);
   }
@@ -401,10 +394,9 @@ async function redeemCode(p: URLSearchParams, clientId: string, ctx: Ctx): Promi
     const gexp = nowSeconds() + OAUTH_GRANT_MAX_SECONDS;
     const refreshJti = randomUUID();
     const issued = tokenResponse(ctx, { sub: account.email, role: account.role, cv: String(c.cv), clientId, fam: c.fam, gexp }, refreshJti);
-    // AUDIT BEFORE THE CODE IS SPENT, and so before the row that makes the grant live: a ledger that cannot be
-    // written answers 503 with the code intact, so the client's retry redeems it instead of being taken for a
-    // replay. A code that turns out spent leaves this event followed by its OAUTH_CODE_REUSE_DETECTED (an
-    // over-claim, never a silent change).
+    // AUDIT BEFORE THE CODE IS SPENT: a ledger that cannot be written answers 503 with the code intact, so the
+    // client's retry redeems it instead of being taken for a replay. A code that turns out spent leaves this
+    // event followed by its OAUTH_CODE_REUSE_DETECTED (an over-claim, never a silent change).
     await events.appendAudit({
       eventType: "OAUTH_TOKEN_ISSUED",
       entityType: "oauth_grant",
@@ -422,26 +414,29 @@ async function redeemCode(p: URLSearchParams, clientId: string, ctx: Ctx): Promi
         expiresAt: new Date(gexp * 1000).toISOString(),
       },
     });
-    if (!(await authFamilies.consume(`${CODE_PREFIX}${c.jti}`, c.jti, now.toISOString()))) {
-      // A code redeemed twice: the grant it produced is no longer trustworthy (RFC 6749 §4.1.2). Audited first.
-      await events.appendAudit({
-        eventType: "OAUTH_CODE_REUSE_DETECTED",
-        entityType: "oauth_grant",
-        entityId: grantId,
-        actor: account.email,
-        refRunId: null,
-        refCaseId: null,
-        refMeasureVersionId: null,
-        payload: { grantId },
-      });
-      await authFamilies.revoke(c.fam);
-      return oauthError("invalid_grant", "the code has already been used or has expired");
+    // The code is the grant row's pending state, so spending it and making the grant live are ONE atomic
+    // update: a store failure leaves both undone (503, and the retry redeems the code), and of two concurrent
+    // redemptions exactly one moves the row.
+    if (await authFamilies.rotateIf(c.fam, oauthPendingGrant(c.jti), packGrant(refreshJti), issued.refreshExpiresAt, now.toISOString())) {
+      return json(issued.body, 200, NO_STORE);
     }
-    // Live only from "pending": if a replay of this code revoked the grant meanwhile, nothing is issued.
-    if (!(await authFamilies.rotateIf(c.fam, PENDING_GRANT, packGrant(refreshJti), issued.refreshExpiresAt, now.toISOString()))) {
-      return oauthError("invalid_grant", "the code has already been used or has expired");
-    }
-    return json(issued.body, 200, NO_STORE);
+    const spent = () => oauthError("invalid_grant", "the code has already been used or has expired");
+    // No row: the code lapsed or the grant was revoked; there is nothing to protect.
+    if ((await authFamilies.currentJti(c.fam, now.toISOString())) === null) return spent();
+    // A live row: this code was redeemed before, so the grant it produced is no longer trustworthy
+    // (RFC 6749 §4.1.2). Audited first.
+    await events.appendAudit({
+      eventType: "OAUTH_CODE_REUSE_DETECTED",
+      entityType: "oauth_grant",
+      entityId: grantId,
+      actor: account.email,
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: null,
+      payload: { grantId },
+    });
+    await authFamilies.revoke(c.fam);
+    return spent();
   } catch (err) {
     return storeDown(err);
   }

@@ -164,7 +164,9 @@ WorkWell is also an OAuth 2.1 authorization server for its MCP endpoint, as MCP 
 - **Audited first:** `OAUTH_CONSENT_GRANTED`, `OAUTH_TOKEN_ISSUED`, `OAUTH_REFRESH_REUSE_DETECTED`,
   `OAUTH_CODE_REUSE_DETECTED`, `OAUTH_GRANT_REVOKED`; `OAUTH_REFRESH_RACE_REFUSED` records a refused race.
   None holds a token.
-- **No new table:** codes and grants are `auth_refresh_families` rows (`oauth-code:<id>`, `oauth:<id>`).
+- **No new table:** a grant is one `auth_refresh_families` row (`oauth:<id>`). Until its code is redeemed the
+  row names that code, so redeeming the code and making the grant live are one atomic update: a store failure
+  undoes both, and the client's retry still redeems it.
 
 **Not yet:**
 - per-caller rate limits on the authorize, register, token and consent endpoints

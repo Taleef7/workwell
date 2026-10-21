@@ -265,24 +265,29 @@ test("consent: a viewer can read it but not approve; a denial goes back as acces
   assert.equal(forged.status, 400);
 });
 
-test("an OAuth access token is refused off /mcp, and a store failure at the token endpoint issues nothing", async () => {
+// Redeeming the code and making the grant live are one store update, so a store failure there undoes both:
+// the retry redeems the code rather than being taken for a replay that revokes the grant.
+test("an OAuth access token is refused off /mcp, and a store failure at redemption issues nothing and spends nothing", async () => {
   const clientId = await register();
   const { verifier, challenge } = pkce();
   const { code } = await approve(clientId, challenge);
   const proto = SqliteAuthFamilyStore.prototype as unknown as Record<string, unknown>;
-  const consume = proto.consume;
-  proto.consume = async () => {
+  const rotateIf = proto.rotateIf;
+  proto.rotateIf = async () => {
     throw new Error("store down: secret detail");
   };
   let down: Response;
   try {
     down = await exchange(clientId, code, verifier);
   } finally {
-    proto.consume = consume;
+    proto.rotateIf = rotateIf;
   }
   assert.equal(down.status, 503);
   assert.ok(!(await down.text()).includes("secret detail"));
-  const tokens = (await (await exchange(clientId, code, verifier)).json()) as { access_token: string };
+  const retry = await exchange(clientId, code, verifier);
+  assert.equal(retry.status, 200, "the code survived the failure");
+  const tokens = (await retry.json()) as { access_token: string };
+  assert.equal((await mcp(tokens.access_token)).status, 200, "and the grant it made works");
   for (const path of ["/api/cases", "/api/runs"]) {
     assert.equal((await call(path, { headers: { authorization: `Bearer ${tokens.access_token}` } })).status, 401, path);
   }

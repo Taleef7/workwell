@@ -77,8 +77,9 @@ one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — ac
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
 - **The sweep reports 67 hits across 20 files (2026-10-20); check the count, not the labels.** The four
 added on 2026-10-20 are all in `routes/oauth.ts` (MCP OAuth) and none is a violation:
-  - `consume` runs after the code's `OAUTH_TOKEN_ISSUED` (so a ledger outage leaves the code redeemable) and
-    before `OAUTH_CODE_REUSE_DETECTED`, which records that it found the code already spent;
+  - in `redeemCode` (read by the matcher as the `spent()` helper), a read of the grant row precedes
+    `OAUTH_CODE_REUSE_DETECTED`; the redemption itself (one `rotateIf`, pending to live) follows the code's
+    `OAUTH_TOKEN_ISSUED`, so a ledger outage leaves the code redeemable;
   - the three in `gone()` are a helper the matcher takes for the enclosing function: reads, plus the
     success-path rotation, before the refused-race audit (`OAUTH_REFRESH_RACE_REFUSED`, which changes
     nothing) and the replay audit, which precedes its revoke.
