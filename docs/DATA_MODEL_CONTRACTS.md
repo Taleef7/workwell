@@ -75,17 +75,26 @@ on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfil
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
-- **The sweep reports 63 hits across 19 files (2026-10-17); check the count, not the labels.** The 64th,
+- **The sweep reports 68 hits across 20 files (2026-10-20); check the count, not the labels.** The five
+added on 2026-10-20 are all in `routes/oauth.ts` (MCP OAuth) and none is a violation:
+  - `consume` is the one-time code's redemption itself, unaudited like a refresh rotation, and the grant only
+    goes live after its `OAUTH_TOKEN_ISSUED`;
+  - the replay `revoke` follows its own `OAUTH_CODE_REUSE_DETECTED`, and the matcher reads past the early
+    return;
+  - the three in `gone()` are a helper the matcher takes for the enclosing function: reads, plus the
+    success-path rotation, before the replay audit, which precedes its revoke.
+
+  The 64th,
 `dispatchOutreach`'s render before its audit, left when the record step became `recordDispatch`; the
 mutate-first exception above is unchanged. The six
 added since 2026-10-02 are all in `rerunToVerify`: #763 removed a local `const … = (` the matcher read as
 a function start, so that function's earlier run writes now show against its `CASE_RERUN_FAILED` audit.
 The code is unchanged; the old count was the undercount. The files
-above account for 9; the other 10 are not violations: `panel-assignment` (mapping before consequences),
+above account for 9; the other 11 are not violations: `panel-assignment` (mapping before consequences),
 `segments` and `outcome-compaction` (matcher artifacts / the ADR-073 d4 completion event),
 `subject-lists` (audit in `beforeComplete`), `evidence-service`, `audit-packet`, `materialize-run`,
-`measure-seed` (reads or pure computation), `case-event-store-postgres` (the audit writer itself) and
-`store-contract` (the test that drives them).
+`measure-seed` (reads or pure computation), `case-event-store-postgres` (the audit writer itself),
+`store-contract` (the test that drives them) and `oauth` (above).
 - **Missing primitive:** no cross-store `applyCaseAction({ patch, action, audit })` (`CaseEventStore` +
 `CaseStore`), and no open issue tracks it (#598 was closed by a PR keyword on 2026-09-21; its remainder
 was listed in #614, which was closed on 2026-09-23 as superseded by the milestone, and no milestone issue

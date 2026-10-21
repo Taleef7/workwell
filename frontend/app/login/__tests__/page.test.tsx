@@ -149,4 +149,19 @@ describe("LoginPage", () => {
     expect(screen.queryByText(/Try the public sandbox/i)).toBeNull();
     expect(screen.queryByRole("link", { name: /open public sandbox/i })).toBeNull();
   });
+
+  it("after sign-in, returns to the MCP consent page it came from, and never to another origin", async () => {
+    authState.token = "t";
+    authState.user = { email: "cm@workwell.dev", role: "ROLE_CASE_MANAGER" };
+    window.history.pushState({}, "", `/login?next=${encodeURIComponent("/oauth/consent?request=abc")}`);
+    const { unmount } = render(<LoginPage />);
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/oauth/consent?request=abc"));
+    unmount();
+
+    mockReplace.mockClear();
+    window.history.pushState({}, "", `/login?next=${encodeURIComponent("//evil.example/x")}`);
+    render(<LoginPage />);
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/worklist"));
+    window.history.pushState({}, "", "/login");
+  });
 });

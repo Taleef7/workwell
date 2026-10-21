@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { cancelSessionRefresh, refreshSession } from "@/lib/api/session-refresh";
+import { loginHref } from "@/lib/safe-next";
 
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
@@ -187,7 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Only one refresh attempt per unauthenticated epoch.
     if (silentRefreshAttempted.current) {
-      router.replace("/login");
+      router.replace(loginHref(pathname, window.location.search));
       return;
     }
     silentRefreshAttempted.current = true;
@@ -225,7 +226,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem(USER_KEY, JSON.stringify({ email: result.email, role: result.role }));
           notifySessionChange();
         } else {
-          router.replace("/login");
+          // An MCP consent page is returned to after signing in; every other page signs in to its home.
+          router.replace(loginHref(pathname, window.location.search));
         }
       } finally {
         clearTimeout(slow);

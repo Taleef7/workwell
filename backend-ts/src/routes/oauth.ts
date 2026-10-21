@@ -322,7 +322,17 @@ async function redeemCode(p: URLSearchParams, clientId: string, ctx: Ctx): Promi
     const { events, authFamilies } = await getStores(ctx.env);
     const now = new Date();
     if (!(await authFamilies.consume(`${CODE_PREFIX}${c.jti}`, c.jti, now.toISOString()))) {
-      // A code redeemed twice: the grant it produced is no longer trustworthy (RFC 6749 §4.1.2).
+      // A code redeemed twice: the grant it produced is no longer trustworthy (RFC 6749 §4.1.2). Audited first.
+      await events.appendAudit({
+        eventType: "OAUTH_CODE_REUSE_DETECTED",
+        entityType: "oauth_grant",
+        entityId: c.fam.slice(OAUTH_FAMILY_PREFIX.length),
+        actor: account.email,
+        refRunId: null,
+        refCaseId: null,
+        refMeasureVersionId: null,
+        payload: { grantId: c.fam.slice(OAUTH_FAMILY_PREFIX.length) },
+      });
       await authFamilies.revoke(c.fam);
       return oauthError("invalid_grant", "the code has already been used or has expired");
     }

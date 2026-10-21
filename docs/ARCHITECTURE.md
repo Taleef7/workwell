@@ -312,7 +312,8 @@ are in `backend-ts/src/routes/`; each file's header comment lists its routes.
   the compaction cutoff (ADR-077). What we may claim about them: `docs/STANDARDS_CONFORMANCE.md`.
 
 **MCP** - `POST /mcp` (Streamable HTTP, MCP 2026-07-28 and the 2025 versions, official SDK v2): read-only
-tools, role-gated, audited per call, reached with an admin-minted MCP token. See `docs/MCP.md`.
+tools, role-gated, audited per call, reached with an admin-minted MCP token or through OAuth sign-in (WorkWell
+is the authorization server: `/.well-known/oauth-*`, `/oauth/*`, consent in the web app). See `docs/MCP.md`.
 
 **WebChart ingest** - FHIR over HTTP with SMART Backend Services auth (`engine/ingress/webchart/`);
 the dev database through `wcdb-fhir-shim/`. See `docs/WEBCHART_FHIR_MAPPING.md` and

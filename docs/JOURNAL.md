@@ -7,6 +7,19 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-20
 
+- **MCP clients can sign in with OAuth (MCP 2026-07-28 authorization).** WorkWell is now its own OAuth 2.1
+  authorization server for `/mcp`, so claude.ai connectors, Claude Code and `mcp-remote` connect with the URL
+  alone.
+  - **Flow:** the client opens WorkWell, the user signs in and approves on a consent page, and the tokens
+    refresh themselves.
+  - **Clients:** CIMD documents are fetched behind an SSRF guard, and self-registration is loopback only and
+    marked unverified.
+  - **Rules:** PKCE S256 and the `/mcp` resource are required.
+  - **Codes:** single use, and a replayed code kills the grant.
+  - **Refresh tokens:** they rotate atomically, with a 30-second grace for concurrent refreshes; any other
+    reuse revokes the grant. The user is re-checked on every refresh.
+  - **Admin:** connected clients appear in Admin → MCP access and can be disconnected.
+  - **Storage:** none new; codes and grants are refresh-family rows.
 - **MCP moves to the 2026-07-28 spec, with tokens that last (#704).** `POST /mcp` is served by the official
   TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.1, owner-approved). It answers 2026-07-28 requests and the
   2025-era ones most clients still send, statelessly. The 2024-11-05 `/sse` transport is retired.

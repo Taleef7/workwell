@@ -45,7 +45,7 @@ const storeDown = (err: unknown) => {
 type AccessKind = "token" | "oauth";
 const KINDS: Record<AccessKind, { prefix: string; issued: string; revoked: string[]; entityType: string; id: string; label: string }> = {
   token: { prefix: PAT_FAMILY_PREFIX, issued: "MCP_TOKEN_ISSUED", revoked: ["MCP_TOKEN_REVOKED"], entityType: "mcp_token", id: "tokenId", label: "label" },
-  oauth: { prefix: OAUTH_FAMILY_PREFIX, issued: "OAUTH_TOKEN_ISSUED", revoked: ["OAUTH_GRANT_REVOKED", "OAUTH_REFRESH_REUSE_DETECTED"], entityType: "oauth_grant", id: "grantId", label: "clientName" },
+  oauth: { prefix: OAUTH_FAMILY_PREFIX, issued: "OAUTH_TOKEN_ISSUED", revoked: ["OAUTH_GRANT_REVOKED", "OAUTH_REFRESH_REUSE_DETECTED", "OAUTH_CODE_REUSE_DETECTED"], entityType: "oauth_grant", id: "grantId", label: "clientName" },
 };
 
 interface IssuedEvent {

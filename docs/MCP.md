@@ -85,12 +85,72 @@ claude mcp add --transport http workwell https://twh-api-ts.os.mieweb.org/mcp --
   because Windows can split the argument at the space. On Windows, `"command": "cmd"` with
   `"/c", "npx", …` also works.
 - **Errors:**
-  - a 401 means the token is revoked, expired or no longer valid for the account: mint a new one. Until
-    OAuth ships, a client may then try OAuth discovery, and `/.well-known/oauth-*` answers 404;
+  - a 401 means the token is revoked, expired or no longer valid for the account: mint a new one. The 401
+    names the OAuth metadata, so a client that supports sign-in may offer to sign in instead (below);
   - a 503 `mcp_unavailable` means either the stack's `WORKWELL_PUBLIC_API_URL` is unset or invalid, or the
     token store could not be read (try again).
 - **Status in the list:** "active" means not revoked and not expired. A token minted before its owner's password
   changed lists as active but is refused.
+
+## OAuth sign-in (no token to copy)
+
+WorkWell is also an OAuth 2.1 authorization server for its MCP endpoint, as MCP 2026-07-28 describes
+(`backend-ts/src/routes/oauth.ts`), so a client can connect by signing in rather than with a pasted token.
+
+**Connecting a client:**
+- **claude.ai** (custom connector, also used by Claude Desktop and mobile): add the connector with the URL
+  `https://twh-api-ts.os.mieweb.org/mcp` and nothing else.
+- **Claude Code:** `claude mcp add --transport http workwell https://twh-api-ts.os.mieweb.org/mcp`, with no
+  header.
+- **mcp-remote:** the URL with `--transport http-only` and no header.
+
+**What happens:**
+1. The client reads the metadata the 401 points to and opens WorkWell in the browser.
+2. The user signs in as usual, sees the consent page, and approves.
+3. The client gets tokens that refresh themselves.
+4. The connection appears in Admin → MCP access as a *connected client*, where an admin can disconnect it.
+
+**Endpoints:**
+- `/.well-known/oauth-protected-resource/mcp` (and at the root): `resource` is the `/mcp` URL, and
+  `authorization_servers` is this API.
+- `/.well-known/oauth-authorization-server`: issuer is this API; `S256`; public clients only
+  (`token_endpoint_auth_methods_supported: ["none"]`); `client_id_metadata_document_supported`; `iss` in
+  responses.
+- `/oauth/register` (Dynamic Client Registration), `/oauth/authorize`, `/oauth/token`, and the consent API
+  `/api/oauth/consent`.
+
+**Rules:**
+- **Clients.** A client whose `client_id` is an https URL is described by the metadata document at that URL
+  (CIMD; Claude's own clients):
+  - it is fetched over https on port 443 only, with every resolved address checked at connect time (no
+    private, loopback or link-local address), no redirects, 64 KB and 5 s at most, and cached;
+  - its identity is that host, shown on the consent page.
+
+  A self-registered client (DCR, what `mcp-remote` uses) may use loopback redirects only
+  (`http://localhost`, `127.0.0.1` or `[::1]`, any port), and the consent page marks it unverified.
+  Nothing about a client is stored.
+- **Authorize.**
+  - PKCE `S256` and `resource` equal to the `/mcp` URL are required; unknown scopes (e.g.
+    `offline_access`) are ignored.
+  - An unknown client or redirect gets an error page that never redirects. Later errors go back to the
+    client with `error`, `state` and `iss`.
+- **Consent.** The page is in the web app, behind sign-in. Only a Case Manager or Admin may approve, and the
+  grant carries their role and credential version. It may not be framed.
+- **Tokens.**
+  - The access token lasts 15 minutes; its audience is the `/mcp` URL, and it works there only.
+  - The refresh token lasts 30 days, sliding, up to 90 days for the grant, and rotates on every use. A refresh
+    token used again revokes the grant, except within 30 seconds of a concurrent refresh, which is refused
+    without revoking.
+  - The user is re-checked on every refresh.
+  - The code is single use (60 seconds); a second redemption revokes what the first produced.
+- **Revocation.** An admin disconnects a client in Admin → MCP access, and its access tokens stop at once. A
+  password change also ends every grant.
+- **Audited first:** `OAUTH_CONSENT_GRANTED`, `OAUTH_TOKEN_ISSUED`, `OAUTH_REFRESH_REUSE_DETECTED`,
+  `OAUTH_GRANT_REVOKED`. None holds a token.
+- **No new table:** codes and grants are `auth_refresh_families` rows (`oauth-code:<id>`, `oauth:<id>`).
+
+**Not yet:** rate limits on the register, token and consent endpoints (`PRODUCTION_READINESS_2026-07.md`
+gap 13), and CORS on the token endpoint for browser-based clients.
 
 ## Tool posture
 
