@@ -20,6 +20,11 @@ test("self-registration returns a signed client id that resolves back to the reg
   assert.deepEqual(client, { clientId: reg.body.client_id, clientName: "mcp-remote", redirectUris: ["http://localhost:4123/oauth/callback"], trust: "dcr" });
 });
 
+test("two identical registrations are two different clients", () => {
+  const body = { client_name: "mcp-remote", redirect_uris: ["http://localhost:4123/oauth/callback"] };
+  assert.notEqual(registerClient(SECRET, body).body.client_id, registerClient(SECRET, body).body.client_id);
+});
+
 test("self-registration refuses https redirects, other auth methods, other grants and bad bodies", () => {
   const status = (body: unknown) => registerClient(SECRET, body).status;
   assert.equal(status({ client_name: "Claude", redirect_uris: ["https://attacker.example/cb"] }), 400, "no https for an unverified client");

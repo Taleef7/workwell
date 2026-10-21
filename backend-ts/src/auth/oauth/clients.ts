@@ -8,6 +8,7 @@
  *   nothing is written. Anyone may register, under any name, so a registration may only use loopback
  *   redirects and is shown on the consent page as self-registered and unverified.
  */
+import { randomUUID } from "node:crypto";
 import { CimdError, cleanClientName, fetchClientMetadata, type CimdDeps } from "./cimd.ts";
 import { redirectProblem, type ClientTrust } from "./redirect-uris.ts";
 import { readMcpToken, signMcpToken } from "../mcp-token.ts";
@@ -70,7 +71,9 @@ export function registerClient(secret: string, request: unknown): RegistrationRe
   const responseTypes = r.response_types ?? ["code"];
   if (!Array.isArray(responseTypes) || !responseTypes.every((t) => t === "code")) return invalid("invalid_client_metadata", "response_types may be code only");
   const clientName = cleanClientName(r.client_name) ?? "Unnamed MCP client";
-  const clientId = signMcpToken(secret, "client", { client_name: clientName, redirect_uris: uris }, REGISTRATION_TTL_SECONDS);
+  // The nonce makes every registration its own client: two identical registrations in the same second would
+  // otherwise sign to the same client_id, and one could redeem the other's code.
+  const clientId = signMcpToken(secret, "client", { client_name: clientName, redirect_uris: uris, jti: randomUUID() }, REGISTRATION_TTL_SECONDS);
   const issuedAt = Math.floor(Date.now() / 1000);
   return {
     status: 201,

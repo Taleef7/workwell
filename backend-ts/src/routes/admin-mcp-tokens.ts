@@ -17,7 +17,7 @@
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores, type StoresEnv } from "../stores/factory.ts";
 import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
-import { PAT_FAMILY_PREFIX, PAT_MAX_DAYS, isMcpRole, issuePat, roleWithin, type McpRole } from "../auth/mcp-token.ts";
+import { OAUTH_FAMILY_PREFIX, PAT_FAMILY_PREFIX, PAT_MAX_DAYS, isMcpRole, issuePat, roleWithin, type McpRole } from "../auth/mcp-token.ts";
 import { mcpResourceOf, publicApiUrl } from "../config/public-api-url.ts";
 
 interface Env extends StoresEnv {
@@ -41,7 +41,15 @@ const storeDown = (err: unknown) => {
   return json({ error: "mcp_tokens_unavailable", reason: "the token store is unavailable; try again" }, 503);
 };
 
+/** The two kinds of MCP access an admin sees: personal tokens and OAuth grants (a connected client). */
+type AccessKind = "token" | "oauth";
+const KINDS: Record<AccessKind, { prefix: string; issued: string; revoked: string[]; entityType: string; id: string; label: string }> = {
+  token: { prefix: PAT_FAMILY_PREFIX, issued: "MCP_TOKEN_ISSUED", revoked: ["MCP_TOKEN_REVOKED"], entityType: "mcp_token", id: "tokenId", label: "label" },
+  oauth: { prefix: OAUTH_FAMILY_PREFIX, issued: "OAUTH_TOKEN_ISSUED", revoked: ["OAUTH_GRANT_REVOKED", "OAUTH_REFRESH_REUSE_DETECTED"], entityType: "oauth_grant", id: "grantId", label: "clientName" },
+};
+
 interface IssuedEvent {
+  kind: AccessKind;
   tokenId: string;
   label: string;
   role: string;
@@ -52,14 +60,25 @@ interface IssuedEvent {
 
 export type McpTokenStatus = "active" | "revoked" | "expired";
 
-async function issuedTokens(env: Env): Promise<IssuedEvent[]> {
+async function issuedOf(env: Env, kind: AccessKind): Promise<IssuedEvent[]> {
   const { events } = await getStores(env);
-  return (await events.recentAuditEventsByType("MCP_TOKEN_ISSUED", 500)).flatMap((e) => {
-    const p = e.payload as Partial<IssuedEvent>;
-    return typeof p.tokenId === "string" && typeof p.expiresAt === "string"
-      ? [{ tokenId: p.tokenId, label: String(p.label ?? ""), role: String(p.role ?? ""), subject: String(p.subject ?? ""), expiresAt: p.expiresAt, issuedAt: e.occurredAt }]
+  const k = KINDS[kind];
+  return (await events.recentAuditEventsByType(k.issued, 500)).flatMap((e) => {
+    const p = e.payload as Record<string, unknown>;
+    const id = p[k.id];
+    return typeof id === "string" && typeof p.expiresAt === "string"
+      ? [{ kind, tokenId: id, label: String(p[k.label] ?? ""), role: String(p.role ?? ""), subject: String(p.subject ?? ""), expiresAt: p.expiresAt, issuedAt: e.occurredAt }]
       : [];
   });
+}
+
+async function revokedIds(env: Env, kind: AccessKind): Promise<Set<string>> {
+  const { events } = await getStores(env);
+  const ids = new Set<string>();
+  for (const type of KINDS[kind].revoked) {
+    for (const e of await events.recentAuditEventsByType(type, 500)) ids.add(String((e.payload as Record<string, unknown>)[KINDS[kind].id]));
+  }
+  return ids;
 }
 
 /** Returns a Response if this module owns the route, else null. `actor` is the signed-in admin. */
@@ -111,22 +130,27 @@ export async function handleAdminMcpTokens(req: Request, env: Env, actor: string
     try {
       const { authFamilies } = await getStores(env);
       const now = new Date();
-      // The row decides: a token is active while its row lives, whatever events say (a revoke whose
-      // delete failed leaves the event and a working token, which must still show as active to be
-      // revoked again). Events add the label and owner, and the history of tokens no longer live.
-      const live = new Map(
-        (await authFamilies.listByPrefix(PAT_FAMILY_PREFIX, now.toISOString())).map((r) => [r.family.slice(PAT_FAMILY_PREFIX.length), r.expiresAt]),
-      );
-      const issued = await issuedTokens(env);
-      const tokens: Array<IssuedEvent & { status: McpTokenStatus }> = issued.map((t) => ({
-        ...t,
-        // Expired first: a lapsed row is purged, so a missing row means "revoked" only before the expiry.
-        status: live.has(t.tokenId) ? "active" : Date.parse(t.expiresAt) <= now.getTime() ? "expired" : "revoked",
-      }));
-      // A live token whose issue event is older than the scan above is still listed, so it can be revoked.
-      const seen = new Set(issued.map((t) => t.tokenId));
-      for (const [tokenId, expiresAt] of live) {
-        if (!seen.has(tokenId)) tokens.push({ tokenId, label: "", role: "", subject: "", expiresAt, issuedAt: "", status: "active" });
+      const tokens: Array<IssuedEvent & { status: McpTokenStatus }> = [];
+      for (const kind of ["token", "oauth"] as const) {
+        const prefix = KINDS[kind].prefix;
+        // The row decides "active": a credential works while its row lives, whatever events say (a revoke
+        // whose delete failed leaves the event and a working credential, which must stay revocable). Events
+        // add the label and owner, and the history of what no longer works.
+        const live = new Map((await authFamilies.listByPrefix(prefix, now.toISOString())).map((r) => [r.family.slice(prefix.length), r.expiresAt]));
+        const revoked = await revokedIds(env, kind);
+        const issued = await issuedOf(env, kind);
+        for (const t of issued) {
+          // A personal token's row disappears early only when it is revoked. A grant's row also lapses after
+          // 30 days without a refresh, before its 90-day cap, so a grant is "revoked" only with a revoke event.
+          const ended: McpTokenStatus =
+            Date.parse(t.expiresAt) <= now.getTime() ? "expired" : kind === "token" || revoked.has(t.tokenId) ? "revoked" : "expired";
+          tokens.push({ ...t, status: live.has(t.tokenId) ? "active" : ended });
+        }
+        // A live credential whose issue event is older than the scan above is still listed, so it can be revoked.
+        const seen = new Set(issued.map((t) => t.tokenId));
+        for (const [tokenId, expiresAt] of live) {
+          if (!seen.has(tokenId)) tokens.push({ kind, tokenId, label: "", role: "", subject: "", expiresAt, issuedAt: "", status: "active" });
+        }
       }
       return json({ tokens });
     } catch (err) {
@@ -138,23 +162,25 @@ export async function handleAdminMcpTokens(req: Request, env: Env, actor: string
   if (req.method === "DELETE" && UUID.test(id)) {
     try {
       const { events, authFamilies } = await getStores(env);
-      // Revocable while its row lives, found by id, so no audit scan limit can hide a working token.
-      if ((await authFamilies.currentJti(`${PAT_FAMILY_PREFIX}${id}`, new Date().toISOString())) === null) {
-        return json({ error: "not_found", message: "no active MCP token with this id" }, 404);
-      }
-      const issued = (await issuedTokens(env)).find((t) => t.tokenId === id);
+      const nowIso = new Date().toISOString();
+      // Revocable while its row lives, found by id, so no audit scan limit can hide a working credential.
+      let kind: AccessKind | null = null;
+      if ((await authFamilies.currentJti(`${PAT_FAMILY_PREFIX}${id}`, nowIso)) !== null) kind = "token";
+      else if ((await authFamilies.currentJti(`${OAUTH_FAMILY_PREFIX}${id}`, nowIso)) !== null) kind = "oauth";
+      if (!kind) return json({ error: "not_found", message: "no active MCP token or connected client with this id" }, 404);
+      const issued = (await issuedOf(env, kind)).find((t) => t.tokenId === id);
       // AUDIT BEFORE THE DELETE (#704): the ledger never misses a revocation that happened.
       await events.appendAudit({
-        eventType: "MCP_TOKEN_REVOKED",
-        entityType: "mcp_token",
+        eventType: KINDS[kind].revoked[0]!,
+        entityType: KINDS[kind].entityType,
         entityId: id,
         actor,
         refRunId: null,
         refCaseId: null,
         refMeasureVersionId: null,
-        payload: { tokenId: id, label: issued?.label ?? null, subject: issued?.subject ?? null },
+        payload: { [KINDS[kind].id]: id, label: issued?.label ?? null, subject: issued?.subject ?? null },
       });
-      await authFamilies.revoke(`${PAT_FAMILY_PREFIX}${id}`);
+      await authFamilies.revoke(`${KINDS[kind].prefix}${id}`);
     } catch (err) {
       return storeDown(err);
     }
