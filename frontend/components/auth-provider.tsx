@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { cancelSessionRefresh, refreshSession } from "@/lib/api/session-refresh";
+import { loginHref } from "@/lib/safe-next";
 
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
@@ -170,7 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (pathname?.startsWith("/login")) return;
     if (token) return;
 
-    // logout() already called router.replace("/login") and will handle the redirect.
+    // logout() already sent the user to /login (`loginHref`) and will handle the redirect.
     if (logoutInProgress.current) return;
 
     // Hydration can briefly render token=null before the external-store snapshot
@@ -187,7 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Only one refresh attempt per unauthenticated epoch.
     if (silentRefreshAttempted.current) {
-      router.replace("/login");
+      router.replace(loginHref(pathname, window.location.search));
       return;
     }
     silentRefreshAttempted.current = true;
@@ -225,7 +226,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem(USER_KEY, JSON.stringify({ email: result.email, role: result.role }));
           notifySessionChange();
         } else {
-          router.replace("/login");
+          // An MCP consent page is returned to after signing in; every other page signs in to its home.
+          router.replace(loginHref(pathname, window.location.search));
         }
       } finally {
         clearTimeout(slow);
@@ -283,7 +285,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.removeItem(TOKEN_KEY);
         localStorage.removeItem(USER_KEY);
         notifySessionChange();
-        router.replace("/login");
+        // An API 401 logs out through here too (`ApiClient.onUnauthorized`): on the MCP consent page the signed
+        // request must survive sign-in, or the client waits forever. Every other page signs in to its home.
+        router.replace(loginHref(window.location.pathname, window.location.search));
       }
     }),
     [router, token, user, reconnecting]

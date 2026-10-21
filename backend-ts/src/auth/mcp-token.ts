@@ -90,31 +90,56 @@ export interface McpVerifyDeps {
 }
 
 const refuse = (why: string): never => {
-  throw new OAuthError(OAuthErrorCode.InvalidToken, `${why}; mint a new MCP token in Admin → MCP access`);
+  throw new OAuthError(OAuthErrorCode.InvalidToken, `${why}; sign in again from your MCP client, or mint a new MCP token in Admin → MCP access`);
 };
 
 const str = (value: unknown): string | null => (typeof value === "string" && value.length > 0 ? value : null);
 
+export const OAUTH_FAMILY_PREFIX = "oauth:";
+export const OAUTH_ACCESS_TTL_SECONDS = 900;
+export const OAUTH_REFRESH_TTL_SECONDS = 30 * 86_400;
+export const OAUTH_GRANT_MAX_SECONDS = 90 * 86_400;
 /**
- * Verify a bearer token presented on `/mcp`. Accepts only the kinds that are access tokens (a PAT, and the
- * OAuth access token PR B adds); a code, a refresh token or any other kind is refused before its claims are
- * read. Returns the `AuthInfo` the SDK hands to the tools: `extra.sub`/`extra.role` are the audit actor and
- * the role the per-tool gate checks.
+ * A grant's row value from consent until its one-time code is redeemed (`routes/oauth.ts`): it names the code,
+ * so the code IS this row's state, and redeeming it is one atomic update to the live value. Not yet a connected
+ * client.
+ */
+const OAUTH_PENDING_PREFIX = "pending:";
+export const oauthPendingGrant = (codeJti: string): string => `${OAUTH_PENDING_PREFIX}${codeJti}~~0`;
+export const isOauthPendingGrant = (value: string): boolean => value.startsWith(OAUTH_PENDING_PREFIX);
+
+/**
+ * The account a token speaks for, if it still may: the account exists on this profile (`findDemoUser`
+ * applies the profile rule), its credential version is the one the token was minted under (a password
+ * change ends every token), and the token's role is an MCP role no higher than the account's.
+ */
+export function accountFor(sub: unknown, cv: unknown, role: unknown): { email: string; role: McpRole } | null {
+  if (typeof sub !== "string" || typeof cv !== "string" || typeof role !== "string") return null;
+  const user = findDemoUser(sub);
+  if (!user || credentialVersion(user) !== cv || !roleWithin(role, user.role)) return null;
+  return { email: user.email, role: role as McpRole };
+}
+
+/**
+ * Verify a bearer token presented on `/mcp`. Only the two kinds that are access tokens are accepted: a
+ * personal access token (its row must hold its own jti) and an OAuth access token (its grant's row must
+ * exist, so revoking the grant ends it at once). A code, a refresh token or any other kind fails both keys
+ * before its claims are read. Returns the `AuthInfo` the SDK hands to the tools: `extra.sub`/`extra.role`
+ * are the audit actor and the role the per-tool gate checks.
  */
 export async function verifyMcpAccessToken(token: string, deps: McpVerifyDeps): Promise<AuthInfo> {
-  const claims = readMcpToken(deps.secret, "pat", token);
+  const pat = readMcpToken(deps.secret, "pat", token);
+  const claims = pat ?? readMcpToken(deps.secret, "oauth-access", token);
   if (!claims) return refuse("invalid token");
-  const sub = str(claims.sub);
-  const role = str(claims.role);
-  const cv = str(claims.cv);
-  const jti = str(claims.jti);
   const fam = str(claims.fam);
-  if (!sub || !role || !cv || !jti || !fam || !fam.startsWith(PAT_FAMILY_PREFIX)) return refuse("invalid token");
+  const jti = str(claims.jti);
+  const clientId = str(claims.client_id);
+  if (!fam || !fam.startsWith(pat ? PAT_FAMILY_PREFIX : OAUTH_FAMILY_PREFIX)) return refuse("invalid token");
+  if (pat ? !jti : !clientId) return refuse("invalid token");
   if (claims.aud !== deps.resource) return refuse("token issued for another resource");
 
-  // `findDemoUser` applies the profile rule, so a demo account from another deployment is refused here.
-  const user = findDemoUser(sub);
-  if (!user || credentialVersion(user) !== cv || !roleWithin(role, user.role)) return refuse("token no longer valid for this account");
+  const account = accountFor(claims.sub, claims.cv, claims.role);
+  if (!account) return refuse("token no longer valid for this account");
 
   let current: string | null;
   try {
@@ -122,17 +147,17 @@ export async function verifyMcpAccessToken(token: string, deps: McpVerifyDeps): 
   } catch (err) {
     throw new McpStoreUnavailableError(err);
   }
-  if (current !== jti) return refuse("token revoked or expired");
+  if (pat ? current !== jti : current === null) return refuse("token revoked or expired");
 
-  const tokenId = fam.slice(PAT_FAMILY_PREFIX.length);
+  const credential = pat ? `pat:${fam.slice(PAT_FAMILY_PREFIX.length)}` : fam;
   return {
     token,
-    clientId: `pat:${tokenId}`,
+    clientId: pat ? credential : clientId!,
     scopes: ["mcp"],
     expiresAt: claims.exp as number,
     // The token's own audience (equal to `deps.resource`, checked above), so the SDK's `expectedResource`
     // comparison checks the token rather than echoing the configuration back to itself.
     resource: new URL(claims.aud as string),
-    extra: { sub: user.email, role, credential: `pat:${tokenId}` },
+    extra: { sub: account.email, role: account.role, credential },
   };
 }

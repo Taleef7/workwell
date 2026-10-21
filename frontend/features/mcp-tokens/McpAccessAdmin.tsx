@@ -23,6 +23,8 @@ export interface IssuedToken {
 }
 
 export interface TokenRow {
+  /** A personal token minted here, or a client connected through OAuth sign-in. */
+  kind?: "token" | "oauth";
   tokenId: string;
   label: string;
   role: string;
@@ -147,11 +149,13 @@ export function McpAccessAdmin() {
   return (
     <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6" data-testid="mcp-access">
       <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">mcp access</p>
-      <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">MCP tokens</h3>
+      <h3 className="mt-1 text-2xl font-semibold text-neutral-900 dark:text-neutral-100">MCP tokens and connected clients</h3>
       <p className="mt-1 max-w-3xl text-sm text-neutral-600 dark:text-neutral-400">
         A token lets Claude Desktop or Claude Code use WorkWell&apos;s read-only MCP tools as you. It works only on the MCP
         endpoint, never on the rest of the API, and it stops working when you revoke it, when it expires, or when your
-        password changes. Tool calls are recorded in the audit log under your name.
+        password changes. Tool calls are recorded in the audit log under your name. Clients that support sign-in
+        (claude.ai connectors, Claude Code, <code>mcp-remote</code>) can instead connect with no token: they open
+        WorkWell to approve, and appear below as connected clients.
       </p>
 
       <form onSubmit={create} className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
@@ -239,7 +243,10 @@ export function McpAccessAdmin() {
             {tokens.map((t) => (
               <li key={t.tokenId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                 <div className="min-w-0">
-                  <p className="truncate font-medium text-neutral-900 dark:text-neutral-100">{t.label || "(no label)"}</p>
+                  <p className="truncate font-medium text-neutral-900 dark:text-neutral-100">
+                    {t.label || "(no label)"}{" "}
+                    <span className="text-xs font-normal text-neutral-500">{t.kind === "oauth" ? "connected client (OAuth)" : "token"}</span>
+                  </p>
                   <p className="text-xs text-neutral-500">
                     {[ROLE_LABEL[t.role] ?? t.role, t.subject, t.issuedAt ? `created ${day(t.issuedAt)}` : "issued before the listed history"].filter(Boolean).join(" · ")} ·{" "}
                     {t.status === "expired" ? "expired" : "expires"} {day(t.expiresAt)}

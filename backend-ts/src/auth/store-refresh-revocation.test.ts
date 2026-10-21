@@ -124,7 +124,7 @@ test("listByPrefix returns the live families with that prefix only, with their e
   await store.rotate("mcp-patX", "j", "2026-11-01T00:00:00.000Z", now); // not the prefix (no colon)
   await store.rotate("login-family", "j", "2026-11-01T00:00:00.000Z", now);
   await store.rotate("mcp_pat:c", "j", "2026-11-01T00:00:00.000Z", now); // `_` is not a wildcard here
-  assert.deepEqual(await store.listByPrefix("mcp-pat:", now), [{ family: "mcp-pat:a", expiresAt: "2026-11-01T00:00:00.000Z" }]);
+  assert.deepEqual(await store.listByPrefix("mcp-pat:", now), [{ family: "mcp-pat:a", jti: "j", expiresAt: "2026-11-01T00:00:00.000Z" }]);
 });
 
 test("rotateIf replaces the jti only from the current one, so one of two concurrent rotations wins (#704)", async () => {

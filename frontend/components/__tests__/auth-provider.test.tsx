@@ -337,6 +337,25 @@ describe("AuthProvider — silent refresh on page load", () => {
     });
   });
 
+  // An expired session on the consent page reaches logout() through the API client's 401 handler, not the
+  // provider's redirect effect, so logout itself must keep the signed request for after sign-in.
+  it("logout on the MCP consent page returns to it after sign-in", async () => {
+    localStorage.setItem(TOKEN_KEY, JSON.stringify(freshToken));
+    localStorage.setItem(USER_KEY, JSON.stringify({ email: "admin@workwell.dev", role: "ADMIN" }));
+    mockPathname.mockReturnValue("/oauth/consent");
+    window.history.pushState({}, "", "/oauth/consent?request=signed.blob");
+    try {
+      let capturedAuth: ReturnType<typeof useAuth> | null = null;
+      renderProvider((auth) => { capturedAuth = auth; });
+      await waitFor(() => expect(capturedAuth?.token).not.toBeNull());
+      mockReplace.mockClear();
+      act(() => { capturedAuth!.logout(); });
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith(`/login?next=${encodeURIComponent("/oauth/consent?request=signed.blob")}`));
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("only attempts one refresh per unauthenticated epoch (silentRefreshAttempted guard)", async () => {
     // No token in storage. Default MSW handler returns 401.
     let refreshCallCount = 0;
@@ -488,8 +507,15 @@ describe("PUBLIC_ROUTES", () => {
     expect(routes.filter((r) => r.authenticated).length).toBeGreaterThan(0);
     expect(routes.some((r) => r.url.includes("("))).toBe(false);
 
+    // Outside the dashboard shell on purpose, yet signed-in only: the MCP consent page has no app chrome,
+    // and the provider sends a signed-out visitor to /login and back (`loginHref`).
+    const SIGNED_IN_WITHOUT_SHELL = new Set(["/oauth/consent"]);
     for (const { url, authenticated } of routes) {
       if (authenticated || url === "/login") continue;
+      if (SIGNED_IN_WITHOUT_SHELL.has(url)) {
+        expect(isPublicRoute(url), `${url} must stay behind sign-in`).toBe(false);
+        continue;
+      }
       expect(isPublicRoute(url), `app serves ${url} outside ${AUTHENTICATED_GROUP} but it is not public`)
         .toBe(true);
     }
