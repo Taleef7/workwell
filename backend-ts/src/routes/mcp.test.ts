@@ -148,6 +148,22 @@ test("an invalid tool argument still reaches the tool, which refuses it and audi
   assert.equal(await failedCalls(), before + 1, "the refused call is audited once");
 });
 
+test("the tool list is advertised as unchanging, so a subscriptions/listen request is answered and closed at once", async () => {
+  const discover = await rpcOf(await modern(1, "server/discover"));
+  assert.deepEqual((discover.result!.capabilities as { tools: unknown }).tools, { listChanged: false });
+  const listen = await modern(2, "subscriptions/listen", { notifications: { toolsListChanged: true } });
+  const body = await Promise.race([listen.text(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000))]);
+  assert.notEqual(body, null, "the response completes instead of holding a stream open");
+});
+
+test("OAuth discovery documents answer 404 with a pointer to MCP tokens, not the worker's 501", async () => {
+  for (const path of ["/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-authorization-server"]) {
+    const res = (await handleMcp(new Request(`http://x${path}`), env as never, { enforce: true }))!;
+    assert.equal(res.status, 404, path);
+    assert.match(await res.text(), /MCP token/);
+  }
+});
+
 test("an Origin header must be one of the CORS origins exactly; a request without one (a native client) passes", async () => {
   assert.equal((await modern(1, "tools/list").then((r) => r.status)), 200, "no Origin");
   const allowed = await send(

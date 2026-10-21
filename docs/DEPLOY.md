@@ -752,7 +752,7 @@ near a limit the same day.
 - **Green container, every evaluation 500s** → grep `OFFICIAL_ROUTING_MISCONFIGURED`.
 - **Evidence fails, health green** → grep `EVIDENCE_BUCKET_UNREACHABLE`.
 - **MCP answers 503 `mcp_unavailable`** → `WORKWELL_PUBLIC_API_URL` is unset or not a bare https origin
-  (only `/mcp` and the token routes are affected). **MCP answers 401** → the token is revoked, expired, a
+  (only `/mcp` and the token routes are affected), or the token store could not be read (fails closed). **MCP answers 401** → the token is revoked, expired, a
   login token, or minted before a password change; mint a new one on the Admin page (`docs/MCP.md`).
   MCP is `POST /mcp` with one answer per request, so MIE nginx's stream timeouts no longer apply.
 - **Deploy fails at the manager API (curl 7/28)** → check TCP 443 to `manager.os.mieweb.org`; don't loop

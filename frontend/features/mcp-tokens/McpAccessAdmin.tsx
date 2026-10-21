@@ -36,8 +36,12 @@ const ROLE_LABEL: Record<string, string> = { ROLE_CASE_MANAGER: "Case Manager", 
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
-export function claudeCodeCommand(issued: Pick<IssuedToken, "mcpUrl" | "token">): string {
-  return `claude mcp add --transport http workwell ${issued.mcpUrl} --header "Authorization: Bearer ${issued.token}"`;
+/**
+ * The Claude Code command, reading the token from `WORKWELL_MCP_TOKEN` so the token itself never lands in
+ * shell history (set it with `read -rs WORKWELL_MCP_TOKEN; export WORKWELL_MCP_TOKEN`, then paste).
+ */
+export function claudeCodeCommand(issued: Pick<IssuedToken, "mcpUrl">): string {
+  return `claude mcp add --transport http workwell ${issued.mcpUrl} --header "Authorization: Bearer $WORKWELL_MCP_TOKEN"`;
 }
 
 export function claudeDesktopConfig(issued: Pick<IssuedToken, "mcpUrl" | "token">): string {
@@ -213,7 +217,9 @@ export function McpAccessAdmin() {
           </div>
           <details className="mt-3 text-xs text-amber-900 dark:text-amber-100">
             <summary className="cursor-pointer font-medium">How to use it</summary>
-            <p className="mt-2">Claude Code: run</p>
+            <p className="mt-2">
+              Claude Code: put the token in <code>WORKWELL_MCP_TOKEN</code> without echoing it (<code>read -rs WORKWELL_MCP_TOKEN; export WORKWELL_MCP_TOKEN</code>, then paste), and run
+            </p>
             <pre className="mt-1 overflow-x-auto rounded-lg bg-white p-2 font-mono text-[11px] text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">{claudeCodeCommand(issued)}</pre>
             <p className="mt-2">
               Claude Desktop: add this entry under <code>mcpServers</code> in <code>claude_desktop_config.json</code>, then restart Claude Desktop.

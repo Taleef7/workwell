@@ -96,7 +96,9 @@ async function dispatchCtx(env: McpEnv, authInfo: AuthInfo | undefined, enforce:
 
 /** One server per request, every tool registered; the SDK picks the era from the request. */
 function serverFor(env: McpEnv, enforce: boolean, authInfo: AuthInfo | undefined): McpServer {
-  const server = new McpServer(SERVER_INFO);
+  // `listChanged: false`: the tool list never changes, and the SDK's default (true) would let a 2026-07-28
+  // `subscriptions/listen` hold an event stream open for nothing, against "one answer per request".
+  const server = new McpServer(SERVER_INFO, { capabilities: { tools: { listChanged: false } } });
   for (const tool of MCP_TOOLS) {
     server.registerTool(
       tool.name,
@@ -135,7 +137,13 @@ function handlerFor(env: McpEnv, enforce: boolean): McpHttpHandler {
 
 /** Returns a Response if this module owns the route, else null. `enforce` is the worker's auth switch. */
 export async function handleMcp(req: Request, env: McpEnv, opts: { enforce: boolean }): Promise<Response | null> {
-  if (new URL(req.url).pathname !== MCP_PATH) return null;
+  const { pathname } = new URL(req.url);
+  // No OAuth server answers here yet: a 401 sends MCP clients to these discovery documents, and a clear 404
+  // ends that search where the worker's 501 sent them on to a registration that cannot succeed.
+  if (pathname.startsWith("/.well-known/oauth-")) {
+    return json({ error: "not_found", message: "This server takes an MCP token minted in Admin → MCP access, not OAuth." }, 404);
+  }
+  if (pathname !== MCP_PATH) return null;
 
   const origin = req.headers.get("origin");
   if (origin !== null && !parseAllowedOrigins(env.WORKWELL_CORS_ALLOWED_ORIGINS).includes(origin)) {

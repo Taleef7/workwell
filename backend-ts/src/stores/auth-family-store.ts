@@ -25,8 +25,9 @@ export interface AuthFamilyStore {
   consume(family: string, jti: string, now: string): Promise<boolean>;
   /**
    * Replace the family's current token only while it is still `oldJti` (unexpired), in one statement;
-   * true when this call rotated it. Of two concurrent rotations from the same token, exactly one wins,
-   * and the loser can tell a lost race from a replay without revoking the family.
+   * true when this call rotated it. Of two concurrent rotations from the same token, exactly one wins.
+   * False alone does not say why (a lost race, a replay, a revoked or lapsed family); a caller that must
+   * tell them apart re-reads `currentJti`.
    */
   rotateIf(family: string, oldJti: string, newJti: string, expiresAt: string, now: string): Promise<boolean>;
   /**

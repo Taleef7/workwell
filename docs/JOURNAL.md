@@ -11,7 +11,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.1, owner-approved). It answers 2026-07-28 requests and the
   2025-era ones most clients still send, statelessly. The 2024-11-05 `/sse` transport is retired.
   - **Tokens:** admins mint MCP tokens on Admin → MCP access, 30 days by default and 90 at most.
-  - **Scope:** each token is signed with its own key and valid only on `/mcp`, never on `/api`, CDS or `$cql`.
+  - **Scope:** each kind of token is signed with a key of its own, never the login key, and is valid only on
+    `/mcp`, never on `/api`, CDS or `$cql`.
   - **Revocation:** one by one, through the refresh-family table, so no DDL.
   - **What ends a token:** a password change; and if the store cannot be read, the request is refused
     (fail closed).

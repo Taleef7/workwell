@@ -20,8 +20,8 @@ WorkWell exposes a read-only MCP surface for programmatic inspection of cases, r
 ## Security boundary
 
 **Transport access.** `POST /mcp` accepts only an **MCP token** (#704), never the login token:
-- An MCP token is signed with its own key, and its audience is this endpoint (`<WORKWELL_PUBLIC_API_URL>/mcp`), as
-  the 2026-07-28 spec requires.
+- An MCP token is signed with a key for its kind, never the login key, and its audience is this endpoint
+  (`<WORKWELL_PUBLIC_API_URL>/mcp`), as the 2026-07-28 spec requires.
 - It is refused on every other route (`/api/**`, `/api/auth/*`, `/cds-services/**`, `/$cql`).
 - **Revocable one by one:** revoking takes effect on the next request.
 - **Tied to its owner's current password:** it carries the account's credential version, so a password change
@@ -60,10 +60,11 @@ No new table: each token is one row in `auth_refresh_families` (`mcp-pat:<id>`).
 
 Paste the token where the examples say `<token>`. The URL is your stack's API plus `/mcp`.
 
-**Claude Code:**
+**Claude Code** (set `WORKWELL_MCP_TOKEN` first with `read -rs WORKWELL_MCP_TOKEN; export WORKWELL_MCP_TOKEN`, so
+the token stays out of shell history):
 
 ```bash
-claude mcp add --transport http workwell https://twh-api-ts.os.mieweb.org/mcp --header "Authorization: Bearer <token>"
+claude mcp add --transport http workwell https://twh-api-ts.os.mieweb.org/mcp --header "Authorization: Bearer $WORKWELL_MCP_TOKEN"
 ```
 
 **Claude Desktop**, through `mcp-remote` (`claude_desktop_config.json`):
@@ -84,8 +85,12 @@ claude mcp add --transport http workwell https://twh-api-ts.os.mieweb.org/mcp --
   because Windows can split the argument at the space. On Windows, `"command": "cmd"` with
   `"/c", "npx", …` also works.
 - **Errors:**
-  - a 401 means the token is revoked, expired or no longer valid for the account: mint a new one;
-  - a 503 `mcp_unavailable` means the stack's `WORKWELL_PUBLIC_API_URL` is unset.
+  - a 401 means the token is revoked, expired or no longer valid for the account: mint a new one. Until
+    OAuth ships, a client may then try OAuth discovery, and `/.well-known/oauth-*` answers 404;
+  - a 503 `mcp_unavailable` means either the stack's `WORKWELL_PUBLIC_API_URL` is unset or invalid, or the
+    token store could not be read (try again).
+- **Status in the list:** "active" means not revoked and not expired. A token minted before its owner's password
+  changed lists as active but is refused.
 
 ## Tool posture
 

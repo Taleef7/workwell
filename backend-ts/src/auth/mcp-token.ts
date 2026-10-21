@@ -90,7 +90,7 @@ export interface McpVerifyDeps {
 }
 
 const refuse = (why: string): never => {
-  throw new OAuthError(OAuthErrorCode.InvalidToken, why);
+  throw new OAuthError(OAuthErrorCode.InvalidToken, `${why}; mint a new MCP token in Admin → MCP access`);
 };
 
 const str = (value: unknown): string | null => (typeof value === "string" && value.length > 0 ? value : null);
@@ -130,7 +130,9 @@ export async function verifyMcpAccessToken(token: string, deps: McpVerifyDeps): 
     clientId: `pat:${tokenId}`,
     scopes: ["mcp"],
     expiresAt: claims.exp as number,
-    resource: new URL(deps.resource),
+    // The token's own audience (equal to `deps.resource`, checked above), so the SDK's `expectedResource`
+    // comparison checks the token rather than echoing the configuration back to itself.
+    resource: new URL(claims.aud as string),
     extra: { sub: user.email, role, credential: `pat:${tokenId}` },
   };
 }

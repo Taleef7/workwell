@@ -93,6 +93,7 @@ describe("McpAccessAdmin", () => {
     const config = JSON.parse(claudeDesktopConfig(ISSUED)) as { workwell: { args: string[]; env: { AUTH_HEADER: string } } };
     expect(config.workwell.args).toEqual(["-y", "mcp-remote", ISSUED.mcpUrl, "--transport", "http-only", "--header", "Authorization:${AUTH_HEADER}"]);
     expect(config.workwell.env.AUTH_HEADER).toBe("Bearer aaa.bbb.ccc");
-    expect(claudeCodeCommand(ISSUED)).toBe(`claude mcp add --transport http workwell ${ISSUED.mcpUrl} --header "Authorization: Bearer aaa.bbb.ccc"`);
+    expect(claudeCodeCommand(ISSUED)).toBe(`claude mcp add --transport http workwell ${ISSUED.mcpUrl} --header "Authorization: Bearer $WORKWELL_MCP_TOKEN"`);
+    expect(claudeCodeCommand(ISSUED)).not.toContain(ISSUED.token);
   });
 });

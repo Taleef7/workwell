@@ -302,8 +302,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
     // `?listId=` narrows a read to an ACO's attributed membership, which is the same disclosure the
     // CM/ADMIN gate on /api/subject-lists exists to make — so it carries the same gate, once, here
     // (ADR-082). Without this the gate reads as present and cannot fire for the widest read: a VIEWER
-    // with a list id could take the whole membership out of /api/exports/cases as a CSV.
-    if (new URL(req.url).searchParams.has("listId") && !listFilterAuthorized(principalRole)) {
+    // with a list id could take the whole membership out of /api/exports/cases as a CSV. `/mcp` is not one
+    // of those reads (a tool takes `listId` as an argument, behind its own role gate) and has no login
+    // principal here, so the query parameter means nothing to it.
+    if (pathname !== "/mcp" && new URL(req.url).searchParams.has("listId") && !listFilterAuthorized(principalRole)) {
       return json(
         {
           error: "forbidden",

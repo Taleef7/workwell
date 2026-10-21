@@ -132,6 +132,18 @@ test("a login token, a token of another kind, another audience, a stale credenti
   assert.equal((await mcp(expired)).status, 401, "expired");
   const unauthorized = await mcp(null);
   assert.match(unauthorized.headers.get("www-authenticate") ?? "", /^Bearer/, "a 401 carries the Bearer challenge");
+  const revokedLike = await mcp(await forge("pat", { cv: "stale-version" }));
+  assert.match(`${revokedLike.headers.get("www-authenticate")} ${await revokedLike.text()}`, /Admin → MCP access/, "a refusal says how to recover");
+});
+
+test("a listId query parameter means nothing to /mcp and does not trip the list gate", async () => {
+  const t = await minted();
+  const res = await call("/mcp?listId=11111111-1111-4111-8111-111111111111", {
+    method: "POST",
+    headers: { ...bearer(t.token), "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { _meta: MODERN_META } }),
+  });
+  assert.equal(res.status, 200);
 });
 
 test("revoking a token ends it at once, and the list shows active, revoked and expired", async () => {
