@@ -5,6 +5,19 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-21
+
+- **The MCP OAuth flow is under Playwright (#863 follow-up).** `e2e/tests/maui/mcp-oauth.spec.ts` (a write spec)
+  covers:
+  - a client's authorize link going through sign-in to the consent page;
+  - Approve leading to a code, then tokens, the read-only tools, and a refresh;
+  - a replayed code killing the grant;
+  - an admin's Revoke in Admin → MCP access ending the connection;
+  - a viewer able only to decline;
+  - an off-site `next` never leaving the app.
+
+  CI's Maui stack now sets `WORKWELL_PUBLIC_API_URL`.
+
 ## 2026-10-20
 
 - **MCP clients can sign in with OAuth (MCP 2026-07-28 authorization).** WorkWell is now its own OAuth 2.1

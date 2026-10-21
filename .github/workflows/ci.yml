@@ -903,6 +903,8 @@ jobs:
           WORKWELL_DERIVED_MEASURES: ${{ env.ROUTED_TRANSLATIONS }}
           # So the promotion gate below can recognise this build on /health, as the deploy's image does.
           WORKWELL_BUILD_SHA: ${{ github.sha }}
+          # The MCP resource and OAuth issuer (mcp-oauth.spec.ts); with auth on, /mcp and OAuth answer 503 without it.
+          WORKWELL_PUBLIC_API_URL: http://localhost:8080
         run: |
           nohup pnpm dev > ../backend-maui.log 2>&1 &
           for i in $(seq 1 60); do
