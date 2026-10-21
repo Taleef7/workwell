@@ -155,7 +155,9 @@ export async function handleMcp(req: Request, env: McpEnv, opts: { enforce: bool
     const pub = publicApiUrl(env, req, true);
     if (!pub.ok) return json({ error: "mcp_unavailable", reason: pub.reason }, 503);
     const resource = mcpResourceOf(pub.origin);
-    const families = (await getStores(env)).authFamilies;
+    // Resolved inside the token check, so a store that cannot even initialize fails closed as a 503 like a
+    // failed read (`McpStoreUnavailableError`), and a request with no token never reaches the database.
+    const families = { currentJti: async (family: string, now: string) => (await getStores(env)).authFamilies.currentJti(family, now) };
     let storeDown = false;
     try {
       authInfo = await verifyBearerToken(req.headers.get("authorization"), {

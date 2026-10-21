@@ -247,6 +247,20 @@ test("a store that cannot be read fails closed: /mcp answers 503, never 200", as
   assert.equal((await mcp(t.token)).status, 200, "and works again once the store does");
 });
 
+test("a store that cannot even initialize fails closed too: 503, not a 500", async () => {
+  const t = await minted();
+  const down = async () => {
+    throw new Error("db down");
+  };
+  const broken = {
+    WORKWELL_AUTH_JWT_SECRET: SECRET,
+    WORKWELL_PUBLIC_API_URL: PUBLIC,
+    DB: { prepare: () => ({ bind: () => ({ all: down, run: down, first: down }), all: down, run: down, first: down }), exec: down, batch: down },
+  } as unknown as Env;
+  assert.equal((await mcp(t.token, "tools/list", {}, undefined, broken)).status, 503);
+  assert.equal((await mcp(null, "tools/list", {}, undefined, broken)).status, 401, "without a token the database is not touched");
+});
+
 test("without auth credentials no path under /mcp answers 200, whatever the method", async () => {
   for (const path of ["/mcp", "/mcp/", "/mcp/message", "/sse"]) {
     for (const method of ["GET", "POST", "DELETE"]) {
