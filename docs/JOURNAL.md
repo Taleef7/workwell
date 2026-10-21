@@ -7,6 +7,20 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-20
 
+- **MCP moves to the 2026-07-28 spec, with tokens that last (#704).** `POST /mcp` is served by the official
+  TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.1, owner-approved). It answers 2026-07-28 requests and the
+  2025-era ones most clients still send, statelessly. The 2024-11-05 `/sse` transport is retired.
+  - **Tokens:** admins mint MCP tokens on Admin → MCP access, 30 days by default and 90 at most.
+  - **Scope:** each token is signed with its own key and valid only on `/mcp`, never on `/api`, CDS or `$cql`.
+  - **Revocation:** one by one, through the refresh-family table, so no DDL.
+  - **What ends a token:** a password change; and if the store cannot be read, the request is refused
+    (fail closed).
+  - **Tools:** they gained titles and read-only annotations. Bad arguments are still audited, and each tool audit
+    names its credential.
+  - **Config:** the new `WORKWELL_PUBLIC_API_URL` names each stack's public API; tokens are minted for that URL
+    plus `/mcp`.
+  - **Behaviour change:** a login token no longer opens `/mcp`.
+  - **Next:** OAuth 2.1 for MCP, so claude.ai connectors work and tokens refresh themselves.
 - **1 January rehearsed at small scale (#854).** `pnpm rehearse:year-change` runs the scheduler's own nightly
   (`runNightlyRecompute`) as of a given date against a Postgres copy, refusing any host but the one named and
   any WebChart tenant, then checks it. On a 1,000-patient corpus with Maui's routing: 31 December opened 783

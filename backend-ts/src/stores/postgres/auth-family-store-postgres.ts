@@ -34,4 +34,21 @@ export class PgAuthFamilyStore implements AuthFamilyStore {
   async revoke(family: string): Promise<void> {
     await this.pool.query(`DELETE FROM ${T} WHERE family = $1`, [family]);
   }
+
+  async consume(family: string, jti: string, now: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `DELETE FROM ${T} WHERE family = $1 AND jti = $2 AND expires_at > $3::timestamptz RETURNING 1 AS ok`,
+      [family, jti, now],
+    );
+    return rows.length === 1;
+  }
+
+  async rotateIf(family: string, oldJti: string, newJti: string, expiresAt: string, now: string): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `UPDATE ${T} SET jti = $3, expires_at = $4::timestamptz
+       WHERE family = $1 AND jti = $2 AND expires_at > $5::timestamptz RETURNING 1 AS ok`,
+      [family, oldJti, newJti, expiresAt, now],
+    );
+    return rows.length === 1;
+  }
 }

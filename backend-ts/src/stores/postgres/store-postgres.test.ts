@@ -460,4 +460,26 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
       await pool.query(`DELETE FROM ${SPIKE_SCHEMA}.auth_refresh_families WHERE family = ANY($1)`, [[fam, other]]);
     }
   });
+
+  test("[postgres] consume and rotateIf are single statements: of two concurrent calls exactly one wins (#704)", async () => {
+    const store = new PgAuthFamilyStore(pool);
+    const code = `test-code-${crypto.randomUUID()}`;
+    const grant = `test-grant-${crypto.randomUUID()}`;
+    const now = "2026-10-20T12:00:00.000Z";
+    try {
+      await store.rotate(code, "j", "2026-10-20T12:01:00.000Z", now);
+      assert.equal(await store.consume(code, "other", now), false);
+      const consumed = await Promise.all([1, 2, 3].map(() => store.consume(code, "j", now)));
+      assert.equal(consumed.filter(Boolean).length, 1, "one redemption wins");
+      assert.equal(await store.currentJti(code, now), null);
+
+      await store.rotate(grant, "r1", "2026-11-19T12:00:00.000Z", now);
+      const rotated = await Promise.all(["a", "b", "c"].map((n) => store.rotateIf(grant, "r1", `r2${n}`, "2026-11-19T12:00:00.000Z", now)));
+      assert.equal(rotated.filter(Boolean).length, 1, "one rotation wins");
+      assert.equal(await store.rotateIf(grant, "r1", "r3", "2026-11-19T12:00:00.000Z", now), false, "the old jti never rotates again");
+      assert.equal(await store.rotateIf(grant, (await store.currentJti(grant, now))!, "r4", "2026-11-19T12:00:00.000Z", "2026-11-19T12:00:00.000Z"), false, "nor a lapsed family");
+    } finally {
+      await pool.query(`DELETE FROM ${SPIKE_SCHEMA}.auth_refresh_families WHERE family = ANY($1)`, [[code, grant]]);
+    }
+  });
 }

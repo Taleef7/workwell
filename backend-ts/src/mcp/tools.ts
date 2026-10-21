@@ -832,4 +832,21 @@ export const MCP_TOOLS: McpTool[] = [
 
 export const MCP_TOOLS_BY_NAME: Record<string, McpTool> = Object.fromEntries(MCP_TOOLS.map((t) => [t.name, t]));
 
+/** The human-readable `title` each tool advertises (MCP 2026-07-28 `Tool.title`); every tool has one. */
+export const MCP_TOOL_TITLES: Record<string, string> = {
+  get_case: "Get a case",
+  list_cases: "List cases",
+  get_run_summary: "Get a run summary",
+  list_measures: "List measures",
+  get_measure_version: "Get a measure",
+  list_runs: "List runs",
+  explain_outcome: "Explain an outcome",
+  get_employee: "Get a subject",
+  check_compliance: "Check compliance",
+  list_noncompliant: "List open gaps",
+  explain_rule: "Explain a measure's rule",
+  get_measure_traceability: "Get measure traceability",
+  list_data_quality_gaps: "List data-quality gaps",
+};
+
 export { ToolArgError };

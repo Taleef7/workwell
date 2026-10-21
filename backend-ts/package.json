@@ -56,6 +56,7 @@
     "@mieweb/cloud-local": "workspace:*",
     "@mieweb/cloud-os": "workspace:*",
     "@mieweb/cloud-types": "workspace:*",
+    "@modelcontextprotocol/server": "2.3.1",
     "@work-well/measure-codegen": "workspace:*",
     "@work-well/measure-engine": "workspace:*",
     "@work-well/official-executor": "workspace:*",

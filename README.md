@@ -284,7 +284,7 @@ The surfaces another system can use, each documented and refusing dishonest answ
 | [CDS Hooks 2.0.1](docs/CDS_HOOKS.md) — `GET /cds-services`, invoke, feedback | Care-gap **cards** into a clinician's workflow: summary, plain-English reason, provenance, and a draft-order `suggestion` the clinician accepts — never `systemActions`, never `critical`. Nothing in WebChart calls it yet. |
 | [`GET /api/v1/compliance/{subject}/{measure}`](docs/COMPLIANCE_API.md) | One subject, one measure, one stable answer — status, population membership, and `populationsSource` saying where the booleans came from. **404 when no run has covered the subject**, never an empty 200. |
 | `GET /api/v1/openapi.json` · public `/api-docs` | Hand-authored OpenAPI 3.1.1 over the **promised** surface only, guarded by a two-way routed-path test. |
-| [MCP server](docs/MCP.md) | 13 read-only, role-gated tools (`/sse` stream + `/mcp/**` message endpoint) — an AI client reads compliance state; nothing mutates. |
+| [MCP server](docs/MCP.md) | 13 read-only, role-gated tools at `POST /mcp` (MCP 2026-07-28 and the 2025 versions, official SDK), with admin-minted, revocable MCP tokens — an AI client reads compliance state; nothing mutates. |
 | [`@work-well/measure-engine`](https://www.npmjs.com/package/@work-well/measure-engine) · [`@work-well/measure-codegen`](https://www.npmjs.com/package/@work-well/measure-codegen) | The content-free eval core and codegen on the public registry, with SLSA provenance ([`docs/PACKAGES.md`](docs/PACKAGES.md)). |
 
 ### Internal API highlights

@@ -2,52 +2,90 @@
 
 WorkWell exposes a read-only MCP surface for programmatic inspection of cases, runs, measures, measure versions, structured outcome explanations, employee compliance status, and data quality gaps.
 
+## Transport
+
+`POST /mcp`: Streamable HTTP, served by the official TypeScript SDK v2 (`@modelcontextprotocol/server`
+2.3.1, owner-approved 2026-10-20; `backend-ts/src/routes/mcp.ts`).
+
+- **Protocol versions:** 2026-07-28 (stateless: `_meta` on every request, `server/discover`, the
+  `MCP-Protocol-Version`/`Mcp-Method`/`Mcp-Name` headers) and the 2025 versions most clients still send
+  (`initialize` first), both answered statelessly on the same endpoint.
+- **One answer per request:** plain JSON for 2026-07-28, a single-message event stream (closed at once) for the
+  2025 versions. GET and DELETE answer 405; there are no sessions.
+- **Retired 2026-10-20:** the 2024-11-05 HTTP+SSE transport (`GET /sse` + `POST /mcp/message`). The spec
+  deprecates it and the SDK does not serve it; point a client at `/mcp` instead.
+- **Browser pages:** a request with an `Origin` header must come from one of `WORKWELL_CORS_ALLOWED_ORIGINS`
+  exactly (else 403). Native clients send no `Origin`.
+
 ## Security boundary
 
-MCP security is enforced at two layers:
+**Transport access.** `POST /mcp` accepts only an **MCP token** (#704), never the login token:
+- An MCP token is signed with its own key, and its audience is this endpoint (`<WORKWELL_PUBLIC_API_URL>/mcp`), as
+  the 2026-07-28 spec requires.
+- It is refused on every other route (`/api/**`, `/api/auth/*`, `/cds-services/**`, `/$cql`).
+- **Revocable one by one:** revoking takes effect on the next request.
+- **Tied to its owner's current password:** it carries the account's credential version, so a password change
+  ends it.
+- Its role is `ROLE_CASE_MANAGER` or `ROLE_ADMIN`, never above its owner's.
+- The account must still exist and be allowed on this deployment (Maui refuses another deployment's demo
+  accounts).
+- **Fails closed:** if the token store cannot be read, the answer is 503, never a pass.
+- **Behaviour change 2026-10-20:** a `ROLE_MCP_CLIENT` login token no longer opens `/mcp`. It still opens CDS
+  invoke and `$cql`; no real account has that role.
 
-**Transport access** — `/sse` and `/mcp/**` require one of:
-- `ROLE_ADMIN`
-- `ROLE_CASE_MANAGER`
-- `ROLE_MCP_CLIENT`
-
-**Tool execution** — each tool enforces its own application-role policy before running any query. `ROLE_MCP_CLIENT` alone is **not** sufficient to read employee, case, or compliance data. A service account that needs to call restricted tools must also hold a data-access role (`ROLE_CASE_MANAGER` or `ROLE_ADMIN`).
+**Tool execution.** Each tool enforces its own application-role policy (the matrix below) before running any
+query.
 
 - There is no public MCP mode in production.
-- MCP tool calls are audited as `MCP_TOOL_CALLED` regardless of outcome (including access-denied).
-- The audit actor comes from the authenticated security context, not a hardcoded transport identity.
+- MCP tool calls are audited as `MCP_TOOL_CALLED` regardless of outcome (including access-denied), with the
+  calling credential (`pat:<token id>`); the actor is the token's owner.
+- Invalid arguments reach the tool, which refuses them, so they are audited too (the SDK's own schema check is
+  deliberately a pass-through).
 - Denied tool calls return a structured `ACCESS_DENIED` safe error and are audited with `success=false`.
 
-## Claude Desktop / `mcp-remote`
+## MCP tokens (Admin → MCP access)
 
-`mcp-remote` supports custom headers, and WorkWell's remote MCP transport expects an authenticated bearer token.
-Use a JWT minted from `/api/auth/login` for a `ROLE_ADMIN` or `ROLE_CASE_MANAGER` account.
+An admin mints a token for themselves:
+- **Where:** on the Admin page, or `POST /api/admin/mcp-tokens` `{ label, role?, days? }`.
+- **Role:** Case Manager by default, or Admin.
+- **Lifetime:** 30 days by default, at most 90.
+- **Shown once:** the token appears only in the mint response. The issued and revoked events
+  (`MCP_TOKEN_ISSUED`, `MCP_TOKEN_REVOKED`, both audited before the change) never hold it.
+- **Listing:** `GET /api/admin/mcp-tokens` lists tokens as active, revoked or expired, and
+  `DELETE /api/admin/mcp-tokens/{id}` revokes one.
+
+No new table: each token is one row in `auth_refresh_families` (`mcp-pat:<id>`).
+
+## Connecting a client
+
+Paste the token where the examples say `<token>`. The URL is your stack's API plus `/mcp`.
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http workwell https://twh-api-ts.os.mieweb.org/mcp --header "Authorization: Bearer <token>"
+```
+
+**Claude Desktop**, through `mcp-remote` (`claude_desktop_config.json`):
 
 ```jsonc
 {
   "mcpServers": {
     "workwell": {
       "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://twh-api-ts.os.mieweb.org/sse",
-        "--transport",
-        "sse-only",
-        "--header",
-        "Authorization:${AUTH_HEADER}"
-      ],
-      "env": {
-        "AUTH_HEADER": "Bearer <JWT from /api/auth/login>"
-      }
+      "args": ["-y", "mcp-remote", "https://twh-api-ts.os.mieweb.org/mcp", "--transport", "http-only", "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer <token>" }
     }
   }
 }
 ```
 
-Use `Authorization:${AUTH_HEADER}` rather than `Authorization: Bearer ...` directly in `args` on Windows, because Claude Desktop / `npx` can mangle spaces in the command line.
-An access token lasts 15 minutes, and `mcp-remote` cannot refresh a fixed header, so when calls start
-answering 401, mint a fresh JWT from `/api/auth/login` and update the environment value.
+- **Windows:** write `Authorization:${AUTH_HEADER}` rather than putting `Authorization: Bearer …` in `args`,
+  because Windows can split the argument at the space. On Windows, `"command": "cmd"` with
+  `"/c", "npx", …` also works.
+- **Errors:**
+  - a 401 means the token is revoked, expired or no longer valid for the account: mint a new one;
+  - a 503 `mcp_unavailable` means the stack's `WORKWELL_PUBLIC_API_URL` is unset.
 
 ## Tool posture
 
@@ -85,7 +123,11 @@ answering 401, mint a fresh JWT from `/api/auth/login` and update the environmen
   row CMS's artifact scored. On a `staff_closed` row `logic` describes the frozen status, not `live_*`.
 - `list_runs` `measure_version` is the run read model's, as on the run detail and the runs CSV.
 
-## Tool inventory (v2.0.0)
+## Tool inventory (server 3.0.0)
+
+Every tool has a `title` and the annotations `readOnlyHint: true`, `destructiveHint: false`,
+`idempotentHint: true`, `openWorldHint: false`. An object result is also returned as `structuredContent`,
+beside the JSON text block.
 
 ### Tool role matrix
 
@@ -107,7 +149,7 @@ The table below shows **tool-execution** roles (transport access is separate —
 | `get_measure_traceability` | AUTHOR, APPROVER, CASE_MANAGER, ADMIN | Internal — traceability matrix |
 | `list_data_quality_gaps` | AUTHOR, APPROVER, CASE_MANAGER, ADMIN | Internal — data readiness |
 
-`ROLE_MCP_CLIENT` alone does not grant access to any tool. It only permits connection to the MCP transport. A service account must additionally hold the relevant data-access role.
+An MCP token carries `ROLE_CASE_MANAGER` or `ROLE_ADMIN`, so it reaches every tool its role is listed for.
 
 ## Tool schema examples
 

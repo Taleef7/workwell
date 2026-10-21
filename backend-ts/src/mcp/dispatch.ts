@@ -14,6 +14,8 @@ import { MCP_TOOLS_BY_NAME, ToolArgError, safeError, type McpToolDeps } from "./
 
 export interface CallToolResult {
   content: Array<{ type: "text"; text: string }>;
+  /** The payload itself when it is a JSON object (MCP `structuredContent`); the text block carries it too. */
+  structuredContent?: JsonRecord;
   isError: boolean;
 }
 
@@ -25,10 +27,16 @@ export interface DispatchCtx {
   role: string | null;
   /** When false (auth disabled), per-tool role gates are skipped (worker-level permitAll). */
   enforce: boolean;
+  /** The credential the call came with (`pat:<tokenId>`), recorded on the audit; never the token. */
+  credential?: string;
 }
+
+const isPlainObject = (value: unknown): value is JsonRecord =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
 
 const text = (payload: unknown, isError: boolean): CallToolResult => ({
   content: [{ type: "text", text: JSON.stringify(payload) }],
+  ...(isPlainObject(payload) ? { structuredContent: payload } : {}),
   isError,
 });
 
@@ -47,6 +55,7 @@ export async function callTool(toolName: string, args: JsonRecord, ctx: Dispatch
       resultPayload: {},
       success: false,
       sensitivityLabel: tool.sensitivity,
+      credential: ctx.credential,
       occurredAt,
       failureMessage: `ACCESS_DENIED: ${message}`,
     });
@@ -62,6 +71,7 @@ export async function callTool(toolName: string, args: JsonRecord, ctx: Dispatch
       resultPayload: payload,
       success: true,
       sensitivityLabel: tool.sensitivity,
+      credential: ctx.credential,
       occurredAt,
     });
     return text(payload, false);
@@ -74,6 +84,7 @@ export async function callTool(toolName: string, args: JsonRecord, ctx: Dispatch
       resultPayload: {},
       success: false,
       sensitivityLabel: tool.sensitivity,
+      credential: ctx.credential,
       occurredAt,
       failureMessage: message,
     });

@@ -30,4 +30,23 @@ export class SqliteAuthFamilyStore implements AuthFamilyStore {
   async revoke(family: string): Promise<void> {
     await this.db.prepare(`DELETE FROM auth_refresh_families WHERE family = ?`).bind(family).run();
   }
+
+  async consume(family: string, jti: string, now: string): Promise<boolean> {
+    const { results } = await this.db
+      .prepare(`DELETE FROM auth_refresh_families WHERE family = ? AND jti = ? AND expires_at > ? RETURNING 1 AS ok`)
+      .bind(family, jti, now)
+      .all<{ ok: number }>();
+    return (results ?? []).length === 1;
+  }
+
+  async rotateIf(family: string, oldJti: string, newJti: string, expiresAt: string, now: string): Promise<boolean> {
+    const { results } = await this.db
+      .prepare(
+        `UPDATE auth_refresh_families SET jti = ?, expires_at = ?
+         WHERE family = ? AND jti = ? AND expires_at > ? RETURNING 1 AS ok`,
+      )
+      .bind(newJti, expiresAt, family, oldJti, now)
+      .all<{ ok: number }>();
+    return (results ?? []).length === 1;
+  }
 }

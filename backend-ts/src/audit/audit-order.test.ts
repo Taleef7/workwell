@@ -13,7 +13,8 @@
  *
  * The route-level surfaces resolve their stores from `env` rather than taking them injected, so they
  * are not reachable THIS way — but they are reachable (`routes/segments.test.ts` patches the store's
- * prototype to make a write fail, and asserts the same property). An earlier version of this comment
+ * prototype to make a write fail, and asserts the same property; so does `routes/mcp-auth.test.ts` for
+ * minting and revoking MCP tokens, #704). An earlier version of this comment
  * said their ordering was not testable at all, and three cases were written to a weaker property as a
  * result (#612 review).
  *
