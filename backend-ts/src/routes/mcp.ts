@@ -151,7 +151,9 @@ export async function handleMcp(req: Request, env: McpEnv, opts: { enforce: bool
     const resource = mcpResourceOf(pub.origin);
     // A 401 names the Protected Resource Metadata (RFC 9728), so an OAuth-capable client can sign in from it.
     const challenge = { resourceMetadataUrl: `${pub.origin}/.well-known/oauth-protected-resource/mcp`, requiredScopes: ["mcp"] };
-    const families = (await getStores(env)).authFamilies;
+    // Resolved inside the token check, so a store that cannot even initialize fails closed as a 503 like a
+    // failed read (`McpStoreUnavailableError`), and a request with no token never reaches the database.
+    const families = { currentJti: async (family: string, now: string) => (await getStores(env)).authFamilies.currentJti(family, now) };
     let storeDown = false;
     try {
       authInfo = await verifyBearerToken(req.headers.get("authorization"), {
