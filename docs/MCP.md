@@ -122,13 +122,16 @@ WorkWell is also an OAuth 2.1 authorization server for its MCP endpoint, as MCP 
 **Rules:**
 - **Clients.** A client whose `client_id` is an https URL is described by the metadata document at that URL
   (CIMD; Claude's own clients):
-  - it is fetched only from an accepted publisher, `WORKWELL_OAUTH_CIMD_HOSTS` (default `claude.ai`, which
-    publishes both the connector's and Claude Code's documents); any other host is refused before a request;
+  - it is fetched only for an accepted client, `WORKWELL_OAUTH_CIMD_CLIENTS`, compared exactly (default:
+    Claude's connector, `https://claude.ai/oauth/mcp-oauth-client-metadata`, and Claude Code,
+    `https://claude.ai/oauth/claude-code-client-metadata`); any other `client_id` is refused before a
+    request, on any host, so a stranger's random URLs cannot spend the fetch limits below;
   - over https on port 443 only, with every resolved address checked at connect time (no private, loopback
     or link-local address), no redirects, 64 KB and 5 s at most;
   - at most 4 fetches in flight and 20 a minute, one per URL at a time, documents and failures cached apart;
-    the last good document stands in for up to a day while the publisher cannot answer (a timeout, 5xx or
-    429), never when it answers no;
+    the last good document stands in for up to a day while the publisher cannot answer (a timeout, a 403,
+    5xx or 429), asked for again a minute later, never when it answers no (404, 410, a bad document); a
+    failure that may pass is remembered for 5 seconds, a refusal for a minute;
   - its identity is that host, shown on the consent page, except when the code goes to a loopback address
     (Claude Code): a document proves who published the client, not which program listens on the port, so
     the page warns instead of calling it verified.

@@ -6,9 +6,11 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { LookupAddress } from "node:dns";
-import { CimdError, __clearCimdCache, cimdHostsFrom, cimdUrlProblem, cleanClientName, fetchClientMetadata, guardedLookup, type CimdDeps } from "./cimd.ts";
+import { CimdError, DEFAULT_CIMD_CLIENTS, __clearCimdCache, cimdClientsFrom, cimdUrlProblem, cleanClientName, fetchClientMetadata, guardedLookup, type CimdDeps } from "./cimd.ts";
 
 const CLAUDE_CODE = "https://claude.ai/oauth/claude-code-client-metadata";
+/** Test-made client ids are accepted only when a test lists them, as the deployment's setting would. */
+const allow = (...ids: string[]) => ({ allowedClients: [CLAUDE_CODE, ...ids] });
 const DOC = { client_id: CLAUDE_CODE, client_name: "Claude Code", redirect_uris: ["http://localhost/callback", "http://127.0.0.1/callback"], token_endpoint_auth_method: "none" };
 
 beforeEach(() => __clearCimdCache());
@@ -65,7 +67,7 @@ test("the lookup refuses a host if any address it resolves to is internal", asyn
 
 test("the real https request uses the guarded lookup: a name resolving to loopback is refused before any connection", async () => {
   const toLoopback = ((_h: string, _o: unknown, cb: (e: null, a: LookupAddress[]) => void) => cb(null, [{ address: "127.0.0.1", family: 4 }])) as never;
-  await assert.rejects(fetchClientMetadata("https://metadata.attacker.example/client.json", { lookup: toLoopback, allowedHosts: ["metadata.attacker.example"] }), /refused address/);
+  await assert.rejects(fetchClientMetadata("https://metadata.attacker.example/client.json", { lookup: toLoopback, ...allow("https://metadata.attacker.example/client.json") }), /refused address/);
 });
 
 test("a valid document is returned with its host, and cached by max-age", async () => {
@@ -107,16 +109,28 @@ test("a client name loses control and direction-override characters and is cappe
   assert.equal(cleanClientName(42), null);
 });
 
-test("only an accepted publisher's documents are fetched; anything else is refused before any request", async () => {
+// A host alone would not do: every new path on claude.ai is a new URL, and each would spend the shared fetch
+// budget, so a stranger sending random paths could lock the real clients out.
+test("only an accepted client's document is fetched; any other client_id, on any host, is refused before a request", async () => {
   const fake = fakeRequest({ chunks: [JSON.stringify(DOC)] });
-  for (const id of ["https://evil.example/client.json", "https://claude.ai.evil.example/meta", "https://sub.claude.ai/meta"]) {
-    await assert.rejects(fetchClientMetadata(id, { request: fake.request }), /accepted only from claude\.ai/, id);
+  for (const id of ["https://evil.example/client.json", "https://claude.ai/oauth/random-1", "https://claude.ai/x?n=1", "https://sub.claude.ai/oauth/claude-code-client-metadata"]) {
+    await assert.rejects(fetchClientMetadata(id, { request: fake.request }), /not an accepted client/, id);
   }
-  assert.equal(fake.calls.length, 0, "no request was made");
-  await assert.rejects(fetchClientMetadata(CLAUDE_CODE, { request: fake.request, allowedHosts: ["mcp.example"] }), /accepted only from mcp\.example/);
-  assert.deepEqual(cimdHostsFrom(undefined), ["claude.ai"]);
-  assert.deepEqual(cimdHostsFrom(" "), ["claude.ai"]);
-  assert.deepEqual(cimdHostsFrom("claude.ai, MCP.Example"), ["claude.ai", "mcp.example"]);
+  assert.equal(fake.calls.length, 0, "no request was made, so nothing was spent");
+  assert.equal((await fetchClientMetadata(CLAUDE_CODE, { request: fake.request })).clientName, "Claude Code", "the real one still works");
+  await assert.rejects(fetchClientMetadata(CLAUDE_CODE, { request: fake.request, allowedClients: ["https://mcp.example/client.json"] }), /not an accepted client/);
+
+  assert.deepEqual(cimdClientsFrom(undefined), [...DEFAULT_CIMD_CLIENTS]);
+  assert.deepEqual(cimdClientsFrom(" , "), [...DEFAULT_CIMD_CLIENTS]);
+  assert.deepEqual(cimdClientsFrom("https://mcp.example/c.json, http://bad.example/c, https://CLAUDE.ai/x"), ["https://mcp.example/c.json"], "an entry that could never match is dropped");
+  assert.deepEqual(DEFAULT_CIMD_CLIENTS, ["https://claude.ai/oauth/mcp-oauth-client-metadata", "https://claude.ai/oauth/claude-code-client-metadata"]);
+});
+
+test("the attack the allowlist stops: random claude.ai paths spend nothing, and the real client still signs in on a cold cache", async () => {
+  const fake = fakeRequest({ chunks: [JSON.stringify(DOC)] });
+  for (let i = 0; i < 50; i++) await assert.rejects(fetchClientMetadata(`https://claude.ai/x-${i}`, { request: fake.request }));
+  assert.equal(fake.calls.length, 0);
+  assert.equal((await fetchClientMetadata(CLAUDE_CODE, { request: fake.request })).clientName, "Claude Code");
 });
 
 test("concurrent requests for one document share one fetch", async () => {
@@ -131,9 +145,10 @@ test("failures never push a good document out of the cache", async () => {
   const good = fakeRequest({ headers: { "cache-control": "max-age=3600" }, chunks: [JSON.stringify(DOC)] });
   await fetchClientMetadata(CLAUDE_CODE, { request: good.request, now: () => now });
   const failing = fakeRequest({ status: 404 });
-  for (let i = 0; i < 300; i++) {
+  const missing = Array.from({ length: 300 }, (_, i) => `https://claude.ai/missing-${i}`);
+  for (const id of missing) {
     now += 4_000; // under the per-minute budget
-    await assert.rejects(fetchClientMetadata(`https://claude.ai/missing-${i}`, { request: failing.request, now: () => now }));
+    await assert.rejects(fetchClientMetadata(id, { request: failing.request, now: () => now, ...allow(...missing) }));
   }
   assert.equal(failing.calls.length, 300);
   await fetchClientMetadata(CLAUDE_CODE, { request: good.request, now: () => now });
@@ -141,22 +156,23 @@ test("failures never push a good document out of the cache", async () => {
 });
 
 test("at most 4 fetches in flight and 20 a minute; a refusal for load is not remembered as the answer", async () => {
+  const ids = [...Array.from({ length: 4 }, (_, i) => `https://claude.ai/slow-${i}`), "https://claude.ai/fifth", ...Array.from({ length: 21 }, (_, i) => `https://claude.ai/m-${i}`)];
   const hanging = fakeRequest({ hang: true });
-  const slow = Array.from({ length: 4 }, (_, i) => fetchClientMetadata(`https://claude.ai/slow-${i}`, { request: hanging.request, timeoutMs: 50 }));
-  await assert.rejects(fetchClientMetadata("https://claude.ai/fifth", { request: hanging.request, timeoutMs: 50 }), /too many/);
+  const slow = ids.slice(0, 4).map((id) => fetchClientMetadata(id, { request: hanging.request, timeoutMs: 50, ...allow(...ids) }));
+  await assert.rejects(fetchClientMetadata("https://claude.ai/fifth", { request: hanging.request, timeoutMs: 50, ...allow(...ids) }), /too many/);
   assert.equal(hanging.calls.length, 4);
   await Promise.allSettled(slow);
   const fine = fakeRequest({ chunks: [JSON.stringify({ ...DOC, client_id: "https://claude.ai/fifth" })] });
-  assert.equal((await fetchClientMetadata("https://claude.ai/fifth", { request: fine.request })).clientId, "https://claude.ai/fifth", "fetched once there was room");
+  assert.equal((await fetchClientMetadata("https://claude.ai/fifth", { request: fine.request, ...allow(...ids) })).clientId, "https://claude.ai/fifth", "fetched once there was room");
 
   __clearCimdCache();
   let now = 5_000_000;
   const failing = fakeRequest({ status: 404 });
-  for (let i = 0; i < 20; i++) await assert.rejects(fetchClientMetadata(`https://claude.ai/m-${i}`, { request: failing.request, now: () => now }), /404/);
-  await assert.rejects(fetchClientMetadata("https://claude.ai/m-20", { request: failing.request, now: () => now }), /too many/);
+  for (let i = 0; i < 20; i++) await assert.rejects(fetchClientMetadata(`https://claude.ai/m-${i}`, { request: failing.request, now: () => now, ...allow(...ids) }), /404/);
+  await assert.rejects(fetchClientMetadata("https://claude.ai/m-20", { request: failing.request, now: () => now, ...allow(...ids) }), /too many/);
   assert.equal(failing.calls.length, 20, "the 21st in a minute was not fetched");
   now += 60_000;
-  await assert.rejects(fetchClientMetadata("https://claude.ai/m-20", { request: failing.request, now: () => now }), /404/);
+  await assert.rejects(fetchClientMetadata("https://claude.ai/m-20", { request: failing.request, now: () => now, ...allow(...ids) }), /404/);
 });
 
 test("the last good document stands in when the publisher cannot answer, but not when it answers no", async () => {
@@ -164,13 +180,54 @@ test("the last good document stands in when the publisher cannot answer, but not
   const good = fakeRequest({ headers: { "cache-control": "max-age=60" }, chunks: [JSON.stringify(DOC)] });
   await fetchClientMetadata(CLAUDE_CODE, { request: good.request, now: () => now });
   now += 120_000;
-  for (const status of [503, 429]) {
+  // 403 too: a CDN's bot check on a datacenter address is the likeliest real failure.
+  for (const status of [503, 429, 403]) {
+    now += 61_000; // past the minute a stale answer waits before asking again
     assert.equal((await fetchClientMetadata(CLAUDE_CODE, { request: fakeRequest({ status }).request, now: () => now })).clientName, "Claude Code", String(status));
   }
+  now += 61_000;
   assert.equal((await fetchClientMetadata(CLAUDE_CODE, { request: fakeRequest({ hang: true }).request, timeoutMs: 20, now: () => now })).clientName, "Claude Code", "a timeout");
+
+  // While serving the stale copy, the publisher is asked again a minute later, not on every sign-in.
+  const down = fakeRequest({ status: 503 });
+  now += 61_000;
+  await fetchClientMetadata(CLAUDE_CODE, { request: down.request, now: () => now });
+  now += 30_000;
+  await fetchClientMetadata(CLAUDE_CODE, { request: down.request, now: () => now });
+  assert.equal(down.calls.length, 1, "the second sign-in did not wait on the publisher");
+
+  now += 61_000;
   await assert.rejects(fetchClientMetadata(CLAUDE_CODE, { request: fakeRequest({ status: 404 }).request, now: () => now }), /404/, "a withdrawn document is the answer");
   __clearCimdCache();
   await fetchClientMetadata(CLAUDE_CODE, { request: good.request, now: () => now });
   now += 2 * 86_400_000;
   await assert.rejects(fetchClientMetadata(CLAUDE_CODE, { request: fakeRequest({ status: 503 }).request, now: () => now }), /503/, "not after a day");
+});
+
+test("a failure that may pass is remembered for seconds, a refusal for a minute", async () => {
+  let now = 20_000_000;
+  const flaky = fakeRequest({ status: 503 });
+  await assert.rejects(fetchClientMetadata(CLAUDE_CODE, { request: flaky.request, now: () => now }), /503/);
+  now += 6_000;
+  const back = fakeRequest({ chunks: [JSON.stringify(DOC)] });
+  assert.equal((await fetchClientMetadata(CLAUDE_CODE, { request: back.request, now: () => now })).clientName, "Claude Code", "a blip on a cold cache blocks sign-in for seconds, not a minute");
+
+  __clearCimdCache();
+  const gone = fakeRequest({ status: 404 });
+  await assert.rejects(fetchClientMetadata(CLAUDE_CODE, { request: gone.request, now: () => now }), /404/);
+  now += 6_000;
+  await assert.rejects(fetchClientMetadata(CLAUDE_CODE, { request: gone.request, now: () => now }), /404/);
+  assert.equal(gone.calls.length, 1, "a 404 is the answer for a minute");
+});
+
+test("serving the stale copy never lengthens its day: a day after the last good fetch it is gone", async () => {
+  let now = 30_000_000;
+  await fetchClientMetadata(CLAUDE_CODE, { request: fakeRequest({ headers: { "cache-control": "max-age=60" }, chunks: [JSON.stringify(DOC)] }).request, now: () => now });
+  const down = fakeRequest({ status: 503 });
+  for (const hours of [6, 12, 18]) {
+    now = 30_000_000 + hours * 3_600_000;
+    assert.equal((await fetchClientMetadata(CLAUDE_CODE, { request: down.request, now: () => now })).clientName, "Claude Code", `${hours} h`);
+  }
+  now = 30_000_000 + 25 * 3_600_000;
+  await assert.rejects(fetchClientMetadata(CLAUDE_CODE, { request: down.request, now: () => now }), /503/);
 });

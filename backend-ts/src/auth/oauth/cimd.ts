@@ -3,10 +3,11 @@
  * URL is described by the JSON document at that URL, which the authorization server fetches.
  *
  * The URL arrives on an unauthenticated request (`GET /oauth/authorize`), so the fetch is fenced:
- * - **only from an accepted publisher**: the host must be one of `WORKWELL_OAUTH_CIMD_HOSTS` (default
- *   `claude.ai`, which publishes the documents of Claude's connector and of Claude Code). Without this, any
- *   caller could make the API fetch any public URL, and any host could be shown on the consent page as a
- *   verified publisher;
+ * - **only for an accepted client**: the `client_id` must be one of `WORKWELL_OAUTH_CIMD_CLIENTS`, exactly
+ *   (default: Claude's connector and Claude Code, both published by claude.ai). Without this, any caller could
+ *   make the API fetch any public URL and show any host as a verified publisher; and a host alone is not
+ *   enough, since every new path on it is a new URL that spends the shared fetch budget below, so a stranger
+ *   could spend it and lock out the real clients;
  * - **https on port 443 only**, a host name rather than an IP literal, no credentials, no fragment, and the URL
  *   exactly as `new URL()` normalizes it (no dot segments or other spellings);
  * - **every address DNS returns is checked at connect time** (`ip-guard.ts`), inside the connection's own
@@ -15,10 +16,11 @@
  * - **no redirects** (any 3xx is a failure), **64 KB** at most, counted as the body streams in, and **5 s** for
  *   the whole exchange;
  * - **bounded work**: one fetch per URL at a time (concurrent requests share it), at most 4 in flight and 20 a
- *   minute in all; documents and failures are cached apart (`max-age` up to an hour; failures a minute), so a
- *   stream of failing URLs never pushes a good document out. When a refresh fails for a reason that may pass
- *   (a timeout, a 5xx or 429, the limits above), the last good document is used for up to a day, so a sign-in
- *   does not depend on the publisher answering at that moment.
+ *   minute in all; documents and failures are cached apart (`max-age` up to an hour; a failure a minute, or
+ *   5 s when it may pass), so failures never push a good document out. When a refresh fails for a reason that
+ *   may pass (a timeout, a 403, 5xx or 429 — a CDN's bot check answers 403 — or the limits above), the last
+ *   good document is used for up to a day and asked for again a minute later, so a sign-in does not depend on
+ *   the publisher answering at that moment, nor wait on it every time.
  *
  * The document must name itself (`client_id` equal to the URL, compared as the raw string the client sent),
  * and give a `client_name` and `redirect_uris` (https or loopback http). Only public clients
@@ -39,7 +41,7 @@ export interface ClientMetadata {
   host: string;
 }
 
-/** `transient`: the failure may pass (a timeout, a 5xx or 429, this server's own limits), so it is not the answer. */
+/** `transient`: the failure may pass (a timeout, a 403, 5xx or 429, this server's own limits), so it is not the answer. */
 export class CimdError extends Error {
   constructor(
     message: string,
@@ -54,20 +56,28 @@ const TIMEOUT_MS = 5_000;
 const MAX_TTL_MS = 3_600_000;
 const DEFAULT_TTL_MS = 300_000;
 const NEGATIVE_TTL_MS = 60_000;
+const TRANSIENT_NEGATIVE_TTL_MS = 5_000;
 const STALE_MS = 86_400_000;
+const STALE_RETRY_MS = 60_000;
 const DOCUMENT_LIMIT = 64;
 const FAILURE_LIMIT = 256;
 const MAX_IN_FLIGHT = 4;
 const FETCHES_PER_MINUTE = 20;
 const USER_AGENT = "WorkWell-MCP-authorization-server";
 
-/** The publishers whose client metadata documents are fetched when nothing is configured. */
-export const DEFAULT_CIMD_HOSTS: readonly string[] = ["claude.ai"];
+/** The clients whose metadata documents are fetched when nothing is configured: Claude's connector and Claude Code. */
+export const DEFAULT_CIMD_CLIENTS: readonly string[] = [
+  "https://claude.ai/oauth/mcp-oauth-client-metadata",
+  "https://claude.ai/oauth/claude-code-client-metadata",
+];
 
-/** `WORKWELL_OAUTH_CIMD_HOSTS`: comma-separated host names; empty or unset means the default. */
-export function cimdHostsFrom(value: string | undefined): string[] {
-  const hosts = (value ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
-  return hosts.length ? hosts : [...DEFAULT_CIMD_HOSTS];
+/**
+ * `WORKWELL_OAUTH_CIMD_CLIENTS`: comma-separated `client_id` URLs, each as `new URL()` writes it (an entry
+ * that could never match a request is dropped); empty, unset or all dropped means the default.
+ */
+export function cimdClientsFrom(value: string | undefined): string[] {
+  const clients = (value ?? "").split(",").map((c) => c.trim()).filter((c) => c && cimdUrlProblem(c) === null);
+  return clients.length ? clients : [...DEFAULT_CIMD_CLIENTS];
 }
 
 /** Why `raw` cannot be a CIMD client id, or null. */
@@ -101,8 +111,8 @@ type Lookup = typeof dnsLookup;
 type RequestFn = (url: URL, options: RequestOptions, onResponse: (res: IncomingMessage) => void) => ClientRequest;
 
 export interface CimdDeps {
-  /** The accepted publishers (`cimdHostsFrom`); `DEFAULT_CIMD_HOSTS` when absent. */
-  allowedHosts?: readonly string[];
+  /** The accepted `client_id` URLs (`cimdClientsFrom`); `DEFAULT_CIMD_CLIENTS` when absent. */
+  allowedClients?: readonly string[];
   request?: RequestFn;
   lookup?: Lookup;
   now?: () => number;
@@ -147,7 +157,10 @@ function fetchDocument(url: URL, deps: CimdDeps): Promise<{ body: string; maxAge
         if (status !== 200) {
           res.resume();
           req.destroy();
-          return done(new CimdError(`client metadata answered ${status}${status >= 300 && status < 400 ? " (redirects are not followed)" : ""}`, status === 429 || status >= 500));
+          // Only a 404 or 410, a redirect or a bad document is the publisher's answer; a 403 is as likely a CDN's
+          // bot check on this server's address as a refusal.
+          const transient = status === 403 || status === 408 || status === 429 || status >= 500;
+          return done(new CimdError(`client metadata answered ${status}${status >= 300 && status < 400 ? " (redirects are not followed)" : ""}`, transient));
         }
         const chunks: Buffer[] = [];
         let size = 0;
@@ -199,7 +212,8 @@ export function parseClientMetadata(clientId: string, body: string, host: string
 }
 
 // Good documents and failures live apart, so failures (which anyone can cause) never evict a document.
-const documents = new Map<string, { expires: number; value: ClientMetadata }>();
+// `staleUntil` is fixed when the document is fetched, so asking again later never extends it.
+const documents = new Map<string, { expires: number; staleUntil: number; value: ClientMetadata }>();
 const failures = new Map<string, { expires: number; error: string }>();
 const inFlight = new Map<string, Promise<ClientMetadata>>();
 let budget = { windowStart: 0, used: 0 };
@@ -223,8 +237,7 @@ export async function fetchClientMetadata(clientId: string, deps: CimdDeps = {})
   const problem = cimdUrlProblem(clientId);
   if (problem) throw new CimdError(problem);
   const url = new URL(clientId);
-  const allowed = deps.allowedHosts ?? DEFAULT_CIMD_HOSTS;
-  if (!allowed.includes(url.hostname)) throw new CimdError(`client metadata is accepted only from ${allowed.join(", ")}`);
+  if (!(deps.allowedClients ?? DEFAULT_CIMD_CLIENTS).includes(clientId)) throw new CimdError("client_id is not an accepted client (WORKWELL_OAUTH_CIMD_CLIENTS)");
   const now = deps.now?.() ?? Date.now();
   const known = documents.get(clientId);
   if (known && known.expires > now) return known.value;
@@ -234,22 +247,29 @@ export async function fetchClientMetadata(clientId: string, deps: CimdDeps = {})
   if (pending) return pending;
 
   // The last good document stands in while the publisher (or this server's limit) cannot answer.
-  const stale = known && now - known.expires < STALE_MS ? known.value : null;
+  const stale = known && now < known.staleUntil ? known : null;
+  /** The last good document, asked for again a minute from now rather than on every sign-in. */
+  const useStale = (s: NonNullable<typeof stale>): ClientMetadata => {
+    remember(documents, clientId, { ...s, expires: now + STALE_RETRY_MS }, DOCUMENT_LIMIT);
+    return s.value;
+  };
   if (inFlight.size >= MAX_IN_FLIGHT || !takeFetch(now)) {
-    if (stale) return stale;
+    if (stale) return stale.value;
     throw new CimdError("too many client metadata fetches at once; try again in a minute", true);
   }
   const fetching = fetchDocument(url, deps)
     .then(({ body, maxAgeMs }) => {
       const value = parseClientMetadata(clientId, body, url.hostname);
-      remember(documents, clientId, { expires: now + Math.min(Math.max(maxAgeMs, 0), MAX_TTL_MS), value }, DOCUMENT_LIMIT);
+      const expires = now + Math.min(Math.max(maxAgeMs, 0), MAX_TTL_MS);
+      remember(documents, clientId, { expires, staleUntil: expires + STALE_MS, value }, DOCUMENT_LIMIT);
       failures.delete(clientId);
       return value;
     })
     .catch((err: unknown) => {
       const error = err instanceof CimdError ? err : new CimdError((err as Error).message);
-      if (error.transient && stale) return stale;
-      remember(failures, clientId, { expires: now + NEGATIVE_TTL_MS, error: error.message }, FAILURE_LIMIT);
+      if (error.transient && stale) return useStale(stale);
+      // A failure that may pass is remembered only briefly: a DNS blip after a deploy must not block sign-in.
+      remember(failures, clientId, { expires: now + (error.transient ? TRANSIENT_NEGATIVE_TTL_MS : NEGATIVE_TTL_MS), error: error.message }, FAILURE_LIMIT);
       throw error;
     })
     .finally(() => inFlight.delete(clientId));

@@ -21,8 +21,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - **Admin:** connected clients appear in Admin → MCP access and can be disconnected.
   - **Storage:** none new; codes and grants are refresh-family rows.
   - **Hardened after review:**
-    - metadata documents are fetched only from `claude.ai` (configurable), with global fetch limits and
-      separate caches;
+    - metadata documents are fetched only for Claude's two client ids (configurable; a host alone let random
+      paths spend the fetch budget), with global fetch limits, separate caches and a day of stale fallback;
     - a loopback redirect is never shown as verified, and the page warns;
     - the login `next` returns only to the consent page (a `/.//host` path escaped the app);
     - a viewer can decline;

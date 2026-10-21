@@ -20,8 +20,8 @@
  *   The user is re-checked at every refresh (exists on this profile, same credential version, MCP role).
  * - **Audited first.** `OAUTH_CONSENT_GRANTED` before the code row, `OAUTH_TOKEN_ISSUED` before the grant
  *   row, `OAUTH_REFRESH_REUSE_DETECTED` before the revoke. A store failure answers 503 and issues nothing.
- * - **Bounded.** Client metadata is fetched only from accepted publishers (`WORKWELL_OAUTH_CIMD_HOSTS`, default
- *   `claude.ai`; `auth/oauth/cimd.ts`), and request bodies are capped. There is no per-caller rate limit yet
+ * - **Bounded.** Client metadata is fetched only for accepted clients (`WORKWELL_OAUTH_CIMD_CLIENTS`, default
+ *   Claude's connector and Claude Code; `auth/oauth/cimd.ts`), and request bodies are capped. There is no per-caller rate limit yet
  *   (`docs/MCP.md`, known gaps).
  */
 import { randomUUID } from "node:crypto";
@@ -45,14 +45,14 @@ import { nowSeconds } from "../auth/jwt.ts";
 import { ClientError, registerClient, resolveClient, type ResolvedClient } from "../auth/oauth/clients.ts";
 import { isLoopbackRedirect, redirectMatches, redirectOrigin } from "../auth/oauth/redirect-uris.ts";
 import { isS256Challenge, verifierMatches } from "../auth/oauth/pkce.ts";
-import { cimdHostsFrom, type CimdDeps } from "../auth/oauth/cimd.ts";
+import { cimdClientsFrom, type CimdDeps } from "../auth/oauth/cimd.ts";
 
 interface Env extends StoresEnv {
   DB: CloudDatabase;
   WORKWELL_AUTH_JWT_SECRET?: string;
   WORKWELL_PUBLIC_API_URL?: string;
   WORKWELL_CORS_ALLOWED_ORIGINS?: string;
-  WORKWELL_OAUTH_CIMD_HOSTS?: string;
+  WORKWELL_OAUTH_CIMD_CLIENTS?: string;
 }
 
 const CODE_TTL_SECONDS = 60;
@@ -532,7 +532,7 @@ export async function handleOAuth(
   if (!pub.ok) return json({ error: "temporarily_unavailable", error_description: pub.reason }, 503);
   const studio = parseAllowedOrigins(env.WORKWELL_CORS_ALLOWED_ORIGINS)[0];
   if (!studio) return json({ error: "temporarily_unavailable", error_description: "no web app origin is configured" }, 503);
-  const cimd: CimdDeps = { allowedHosts: cimdHostsFrom(env.WORKWELL_OAUTH_CIMD_HOSTS), ...opts.cimd };
+  const cimd: CimdDeps = { allowedClients: cimdClientsFrom(env.WORKWELL_OAUTH_CIMD_CLIENTS), ...opts.cimd };
   const ctx: Ctx = { env, secret: env.WORKWELL_AUTH_JWT_SECRET ?? "", issuer: pub.origin, resource: mcpResourceOf(pub.origin), studio, cimd };
 
   const method = req.method;
