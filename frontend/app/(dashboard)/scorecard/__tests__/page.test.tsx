@@ -162,7 +162,9 @@ describe("ScorecardPage", () => {
     expect(screen.queryByRole("button", { name: "My providers" })).toBeNull();
     unmount();
 
-    serve(scorecard({ panel: { requested: "all", ownsPanel: true } }));
+    // An owner (the mappings agree with the card) looking at the whole practice: the click is what asks for "me".
+    navHolder.current.setUrl("/scorecard?panel=all");
+    serve(scorecard({ panel: { requested: "all", ownsPanel: true } }), [panelRow()]);
     render(<ScorecardPage />);
     fireEvent.click(await screen.findByRole("button", { name: "My providers" }));
     await vi.waitFor(() => expect(get).toHaveBeenCalledWith(expect.stringContaining("panel=me")));
@@ -294,6 +296,20 @@ describe("the default view and the URL", () => {
     await waitFor(() => expect(scorecardCalls().length).toBeGreaterThan(0));
     expect(scorecardCalls()[0]).toContain("panel=all");
     expect(scorecardCalls().every((u) => !u.includes("panel=me"))).toBe(true);
+  });
+
+  it("shows a panel=me link to someone who owns no panel as the whole practice, never as an empty card", async () => {
+    // A panel owner's address carries `panel=me`; sent on, it reached someone with no providers of their own,
+    // who got an empty "My providers" card and no toggle to leave it (the toggle is drawn for owners only).
+    navHolder.current.setUrl("/scorecard?panel=me&provider=p-b");
+    serve(scorecard(), [panelRow("quality-lead@maui.workwell.dev")]);
+    render(<ScorecardPage />);
+    await waitFor(() => expect(get).toHaveBeenCalledWith("/api/panels"));
+    await waitFor(() => expect(scorecardCalls().length).toBeGreaterThan(0));
+    expect(scorecardCalls().every((u) => u.includes("panel=all"))).toBe(true);
+    await waitFor(() => expect(navHolder.current.params.get("panel")).toBe("all"));
+    // The provider the link named is still chosen, now within the whole practice.
+    expect(navHolder.current.params.get("provider")).toBe("p-b");
   });
 
   it("honours an explicit whole-practice link even for someone who owns a panel", async () => {

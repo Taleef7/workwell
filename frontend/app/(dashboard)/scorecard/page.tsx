@@ -11,8 +11,9 @@
  * Deliberately absent: a ranking and any colour against a target. There is no agreed benchmark yet, and
  * a red cell would claim one. A rate on fewer than 20 patients is dimmed and says so, not hidden.
  *
- * The year, the panel and the chosen provider live in the URL, so a scorecard someone sends a colleague
- * opens on the same view, and a reload keeps it. Choosing a provider narrows what is drawn and asks the
+ * The year, the panel and the chosen provider live in the URL, so a reload keeps the view and a scorecard
+ * sent to a colleague opens on the same year and provider. "My providers" is always the viewer's own, so it
+ * travels as a choice, not as someone else's panel. Choosing a provider narrows what is drawn and asks the
  * server for nothing new: the card already holds every row.
  */
 import Link from "next/link";
@@ -152,12 +153,14 @@ export default function ScorecardPage() {
   const panelValue = searchParams.get("panel")?.trim().toLowerCase();
   const panelParam = panelValue === "me" ? "me" : panelValue === "all" ? "all" : null;
   /**
-   * The view being shown. The URL wins whenever it says anything; otherwise someone who owns a panel gets
-   * "My providers" and everyone else the whole practice. Nothing is fetched while that is still unknown
-   * (see `load`), so the "all" read while `ownsPanel` is `undefined` never reaches the server.
+   * The view being shown. An explicit `panel=all` always wins. "My providers" is only ever the VIEWER's own
+   * providers, so it is shown only to someone who owns a panel, whether the URL asks for it or says
+   * nothing: a `panel=me` link opened by someone who owns none (a panel owner's copied link, sent on)
+   * shows the whole practice. Obeying it served them an empty card with no control to leave it, since the
+   * toggle is only drawn for an owner. Nothing is fetched while that is still unknown (see `load`).
    */
-  const effectivePanel: "me" | "all" = panelParam ?? (ownsPanel ? "me" : "all");
-  const decided = panelParam !== null || ownsPanel !== undefined;
+  const effectivePanel: "me" | "all" = panelParam === "all" ? "all" : ownsPanel ? "me" : "all";
+  const decided = panelParam === "all" || ownsPanel !== undefined;
   const [card, setCard] = useState<Scorecard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -185,18 +188,19 @@ export default function ScorecardPage() {
   );
 
   /**
-   * Write the default into the URL ONCE, after the mappings resolve, so the address describes what the page
-   * shows and a link opens the same scorecard. Only when the URL names no view: an explicit choice, in
-   * either direction, is never overwritten.
+   * Make the address say what the page shows, ONCE, after the mappings resolve: the owner's default
+   * becomes `panel=me`, and a `panel=me` the viewer cannot have becomes `panel=all`. An explicit
+   * `panel=all` is never overwritten, nor an owner's `panel=me`.
    *
    * **The redirect itself is deliberately not unit-tested**, as on the work list: the jsdom
    * `next/navigation` mock updates synchronously, so a test would pass over either spelling. What it
    * decides is tested where it shows, in the panel the first request asks for.
    */
   useEffect(() => {
-    if (panelParam !== null || ownsPanel !== true) return;
+    const target = ownsPanel === true && panelParam === null ? "me" : ownsPanel === false && panelParam === "me" ? "all" : null;
+    if (!target) return;
     // Deferred a tick for the same reason `load` is: a synchronous setState inside an effect cascades renders.
-    const timer = setTimeout(() => setParams((params) => params.set("panel", "me")), 0);
+    const timer = setTimeout(() => setParams((params) => params.set("panel", target)), 0);
     return () => clearTimeout(timer);
   }, [ownsPanel, panelParam, setParams]);
 
