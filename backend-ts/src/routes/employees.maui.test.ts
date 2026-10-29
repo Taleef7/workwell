@@ -22,8 +22,10 @@ const testScript = `
   const en = await search("en");
   const exactId = await search("PAT-048");
   const byNumber = await search("048");
+  const typedNumbers = {};
+  for (const n of ["04", "03", "4", "12"]) typedNumbers[n] = (await search(n)).map((h) => h.externalId);
 
-  console.log(JSON.stringify({ nilo, omar, pa, en, exactId, byNumber }));
+  console.log(JSON.stringify({ nilo, omar, pa, en, exactId, byNumber, typedNumbers }));
 `;
 
 test("scoped profile (Maui) — employees search returns Maui patients and excludes TWH employees", () => {
@@ -53,6 +55,13 @@ test("Maui search: two letters find the patients named that way, not everyone wh
   const exactId = output.exactId as Hit[];
   assert.equal(exactId[0]?.externalId, "pat-048", "an id typed in full (any case) is the top result");
   assert.ok((output.byNumber as Hit[]).some((h) => h.externalId === "pat-048"), "an id is found by its number");
+
+  // Enter opens the top row, so a typed number must put the patient whose number it IS first, not the
+  // alphabetical first of every id that merely contains those digits ("04" is in pat-004 and pat-040..048).
+  const typed = output.typedNumbers as Record<string, string[]>;
+  assert.equal(typed["04"]?.[0], "pat-004");
+  assert.equal(typed["03"]?.[0], "pat-003");
+  assert.ok(typed["04"]!.length > 1, "the other ids holding the digits are still listed, below it");
 });
 
 const profileScript = `

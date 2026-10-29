@@ -169,7 +169,14 @@ function activityLine(e: AuditEventRow, measureName: string | null): string {
   return `${summary ?? label}${measure}${by}`;
 }
 
-/** See `OpenCaseSummary.assignedAt`: the ledger's answer for the case's current assignee, or nulls. */
+/**
+ * See `OpenCaseSummary.assignedAt`: the ledger's answer for the case's current assignee, or nulls.
+ *
+ * Known limit: assignments are audited BEFORE their compare-and-set, and the ledger records no
+ * completion. So a write that lost its race and names the same person as the write that won (a bulk
+ * assign landing just after a single assign to the same person) reads as the winner: right person,
+ * the loser's time and actor. Telling them apart needs the intent/completion pair (ADR-073 d4).
+ */
 function assignmentOf(
   c: CaseRecord,
   latest: AuditEventRow | undefined,
@@ -183,7 +190,9 @@ function assignmentOf(
     // and its time would describe a different person's hand-over. Say nothing rather than that.
     if (to !== current) return unknown;
     const via = latest.payload.panel ? "PANEL" : latest.payload.bulk === true ? "BULK" : "OPERATOR";
-    return { assignedAt: latest.occurredAt, assignedBy: latest.actor, assignedVia: via };
+    // A run's panel reconcile writes as "system", which names no person (as Recent Activity reads it).
+    const by = latest.actor && latest.actor !== "system" ? latest.actor : null;
+    return { assignedAt: latest.occurredAt, assignedBy: by, assignedVia: via };
   }
   // A panel places a case on INSERT without a CASE_ASSIGNED (ADR-080 d2): the case's creation is the time.
   if (c.assignmentSource === "PANEL") return { assignedAt: c.createdAt, assignedBy: null, assignedVia: "PANEL" };
@@ -352,12 +361,15 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
  *   so an id is searched only by a query holding a digit, or typed in full.
  *
  * What remains is ranked rather than filtered: a name that starts with the query beats one that merely
- * contains it, so "son" still finds Johnson, below Sonia.
+ * contains it, so "son" still finds Johnson, below Sonia. A query of digits alone that IS an id's number
+ * ("12" for pat-012) ranks with the id typed in full: Enter opens the top row, and among every id that
+ * merely contains "12" the alphabetical first would be someone else.
  */
 function searchRank(e: { externalId: string; name: string; role: string }, needle: string, matchRole: boolean): number | null {
   const id = e.externalId.toLowerCase();
   const name = e.name.toLowerCase();
-  if (id === needle) return 0;
+  const idNumber = /(\d+)$/.exec(id)?.[1];
+  if (id === needle || (/^\d+$/.test(needle) && idNumber !== undefined && Number(idNumber) === Number(needle))) return 0;
   if (name.startsWith(needle)) return 1;
   if (name.split(/\s+/).some((word) => word.startsWith(needle))) return 2;
   if (/\d/.test(needle) && id.includes(needle)) return 3;
