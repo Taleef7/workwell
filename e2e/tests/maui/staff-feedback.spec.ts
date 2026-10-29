@@ -143,12 +143,14 @@ test.describe("Work list: select every patient matching, not just the page", () 
   test("once the page is ticked, the bar offers every match, or says why not above 500", async ({ page }) => {
     await page.goto("/worklist");
     await waitForDataRows(page);
-    const onPage = await page.locator("tbody tr a[href^='/patients/']").count();
 
     await page.getByRole("checkbox", { name: /select all patients on this page/i }).filter({ visible: true }).first().check();
     const offer = page.getByRole("button", { name: /^Select all [\d,]+ matching patients$/ });
     const stated = page.getByText(/^[\d,]+ patients? selected$/);
     await expect(stated).toBeVisible();
+    // The page's own count of what the header box took. Not the patient links: a row carries more than
+    // one, and counting them read 50 on a page of 25.
+    const onPage = Number((await stated.innerText()).match(/^([\d,]+)/)![1].replace(/,/g, ""));
     // A list that fits on one page has nothing more to offer.
     if (!(await offer.isVisible())) {
       test.skip(true, `the default view fits on one page here (${onPage} patients)`);
