@@ -10,6 +10,7 @@
  * double-count doses). Dev-only offline tool — never the request path, no DB, no new deps
  * (global `fetch`).
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

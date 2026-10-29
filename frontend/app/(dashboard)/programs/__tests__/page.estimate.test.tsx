@@ -1,7 +1,6 @@
 /**
  * WebChart calculates and submits the pilot group's reported rates; WorkWell's are an estimate from
- * CMS's FHIR logic. The programs overview says so once, beside the overall KPI, and every card's rate
- * points at that note. The occupational deployment's measures are WorkWell's own, so it says nothing.
+ * CMS's FHIR logic. The programs overview says so once, and every card's rate points at that note. The occupational deployment's measures are WorkWell's own, so it says nothing.
  */
 import React from "react";
 import { render, screen } from "@testing-library/react";
@@ -64,8 +63,8 @@ describe("ProgramsPage estimate caveat", () => {
     expect(screen.getAllByText(ESTIMATE)).toHaveLength(1);
     expect(screen.getByText(ESTIMATE)).toHaveAttribute("id", "rate-estimate-note");
     expect(rate).toHaveAttribute("aria-describedby", expect.stringContaining("rate-estimate-note"));
-    // The overall KPI points at the same note.
-    expect(screen.getByText("Overall compliance").nextSibling).toHaveAttribute("aria-describedby", "rate-estimate-note");
+    // The per-provider rates are one link away (#852), on the patient deployment.
+    expect(screen.getByTestId("programs-scorecard-link")).toHaveAttribute("href", "/scorecard");
   });
 
   it("says nothing of the kind on the occupational deployment", async () => {
@@ -74,6 +73,6 @@ describe("ProgramsPage estimate caveat", () => {
     const rate = await screen.findByText("Compliance 72.0%");
     expect(screen.queryByText(ESTIMATE)).toBeNull();
     expect(rate.getAttribute("aria-describedby") ?? "").not.toContain("rate-estimate-note");
-    expect(screen.getByText("Overall compliance").nextSibling).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByTestId("programs-scorecard-link")).toBeNull();
   });
 });

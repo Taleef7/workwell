@@ -147,6 +147,7 @@ async function getReport(
       format: format === "csv" ? "csv" : "json",
       runIds: report.measures.map((m) => m.runId).filter((r): r is string => r !== null),
       compactedMeasures: report.compactedMeasures,
+      dataInsufficientMeasures: report.dataInsufficientMeasures,
       members: report.members,
       rows: report.rows.length,
     },
@@ -160,8 +161,10 @@ async function getReport(
       headers: {
         "content-type": "text/csv",
         "content-disposition": `attachment; filename="subject-list-report-${measurementYear}.csv"`,
-        // Exposed through config/cors.ts so a browser client can actually read it.
+        // Exposed through config/cors.ts so a browser client can actually read them.
         "x-workwell-compacted-measures": report.compactedMeasures.join(","),
+        // #853: measures refused because their data was too thin to trust; the CSV has no rows for them.
+        "x-workwell-data-insufficient-measures": report.dataInsufficientMeasures.join(","),
       },
     });
   }

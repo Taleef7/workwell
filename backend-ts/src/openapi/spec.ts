@@ -538,6 +538,16 @@ export function openApiDocument(): OpenApiDocument {
                 problems: { type: "integer", description: "How many problems the router found with this routing; any is a refused configuration." },
               },
             },
+            timezone: {
+              type: "object",
+              description:
+                "The process's zone and current UTC offset (#845). Measures are evaluated at offset 0; a deploy promotes an image only when utcOffsetMinutes is 0.",
+              required: ["tz", "utcOffsetMinutes"],
+              properties: {
+                tz: { type: ["string", "null"], description: "The TZ setting, UTC once pinned; null when unset." },
+                utcOffsetMinutes: { type: "integer", description: "Minutes east of UTC right now; 0 in a pinned process." },
+              },
+            },
             startedAt: { type: "string", format: "date-time", description: "When this process started." },
             uptimeSeconds: { type: "integer" },
             eventLoop: {
@@ -589,6 +599,17 @@ export function openApiDocument(): OpenApiDocument {
                 durationMs: { type: "number" },
                 ok: { type: "boolean", description: "Whether the overview warmed. The per-measure panels are attempted either way." },
                 failedMeasures: { type: "integer", description: "Measures with at least one panel that did not warm." },
+              },
+            },
+            lastPopulationRun: {
+              type: ["object", "null"],
+              description:
+                "The last population run this process finished, and the measures whose ingested data was too thin to trust (#853, `data_insufficient`): ids only. Per process: it resets on restart, so the run detail page is the durable record. Null until one has finished.",
+              required: ["runId", "status", "dataInsufficient"],
+              properties: {
+                runId: { type: "string" },
+                status: { type: "string" },
+                dataInsufficient: { type: "array", items: { type: "string" }, description: "Measure ids, sorted. Empty when every measure's data met its floors." },
               },
             },
             terminology: {

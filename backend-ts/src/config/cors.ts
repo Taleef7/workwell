@@ -34,7 +34,7 @@ function originHeaders(req: Request, allowed: string[]): Record<string, string> 
     // that does not exist for the page that needed it.
     // The staff-closed tab's three counts (#569) ride the same way: a header the browser cannot read
     // is a number the page cannot show.
-    "access-control-expose-headers": "X-Total-Count, X-WorkWell-Compacted-Measures, X-Staff-Closed-Gap, X-Staff-Closed-Verified, X-Staff-Closed-Unknown",
+    "access-control-expose-headers": "X-Total-Count, X-WorkWell-Compacted-Measures, X-WorkWell-Data-Insufficient-Measures, X-Staff-Closed-Gap, X-Staff-Closed-Verified, X-Staff-Closed-Unknown",
     vary: "Origin",
   };
 }

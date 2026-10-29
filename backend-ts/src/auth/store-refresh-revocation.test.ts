@@ -104,6 +104,44 @@ test("the family store forgets a family at its expiry and drops lapsed rows on t
   assert.equal(await store.currentJti("fam-b", "2026-09-24T21:00:01.000Z"), null);
 });
 
+test("consume deletes a family only for its current, unexpired jti, and only once (#704)", async () => {
+  const store = new SqliteAuthFamilyStore(await freshDb());
+  await store.rotate("code-1", "jti-1", "2026-10-20T12:01:00.000Z", "2026-10-20T12:00:00.000Z");
+  assert.equal(await store.consume("code-1", "jti-other", "2026-10-20T12:00:30.000Z"), false, "another jti does not consume it");
+  assert.equal(await store.consume("code-1", "jti-1", "2026-10-20T12:01:00.000Z"), false, "nor does the right jti at its expiry");
+  assert.equal(await store.consume("code-1", "jti-1", "2026-10-20T12:00:30.000Z"), true);
+  assert.equal(await store.consume("code-1", "jti-1", "2026-10-20T12:00:31.000Z"), false, "a second redemption finds nothing");
+  await store.rotate("code-2", "j", "2026-10-20T13:00:00.000Z", "2026-10-20T12:00:00.000Z");
+  const both = await Promise.all([1, 2].map(() => store.consume("code-2", "j", "2026-10-20T12:30:00.000Z")));
+  assert.equal(both.filter(Boolean).length, 1, "of two concurrent redemptions exactly one wins");
+});
+
+test("listByPrefix returns the live families with that prefix only, with their expiry (#704)", async () => {
+  const store = new SqliteAuthFamilyStore(await freshDb());
+  const now = "2026-10-20T12:00:00.000Z";
+  await store.rotate("mcp-pat:a", "j", "2026-11-01T00:00:00.000Z", now);
+  await store.rotate("mcp-pat:b", "j", "2026-10-20T11:00:00.000Z", "2026-10-20T10:00:00.000Z"); // lapsed by `now`
+  await store.rotate("mcp-patX", "j", "2026-11-01T00:00:00.000Z", now); // not the prefix (no colon)
+  await store.rotate("login-family", "j", "2026-11-01T00:00:00.000Z", now);
+  await store.rotate("mcp_pat:c", "j", "2026-11-01T00:00:00.000Z", now); // `_` is not a wildcard here
+  assert.deepEqual(await store.listByPrefix("mcp-pat:", now), [{ family: "mcp-pat:a", jti: "j", expiresAt: "2026-11-01T00:00:00.000Z" }]);
+});
+
+test("rotateIf replaces the jti only from the current one, so one of two concurrent rotations wins (#704)", async () => {
+  const store = new SqliteAuthFamilyStore(await freshDb());
+  const now = "2026-10-20T12:00:00.000Z";
+  await store.rotate("grant", "r1", "2026-11-19T12:00:00.000Z", now);
+  const raced = await Promise.all([
+    store.rotateIf("grant", "r1", "r2a", "2026-11-19T12:00:00.000Z", now),
+    store.rotateIf("grant", "r1", "r2b", "2026-11-19T12:00:00.000Z", now),
+  ]);
+  assert.deepEqual(raced.filter(Boolean).length, 1);
+  assert.ok(["r2a", "r2b"].includes((await store.currentJti("grant", now))!));
+  assert.equal(await store.rotateIf("grant", "r1", "r3", "2026-11-19T12:00:00.000Z", now), false, "a stale jti never rotates");
+  assert.equal(await store.rotateIf("gone", "r1", "r3", "2026-11-19T12:00:00.000Z", now), false, "nor does a missing family");
+  assert.equal(await store.rotateIf("grant", (await store.currentJti("grant", now))!, "r4", "2026-11-19T12:00:00.000Z", "2026-11-19T12:00:00.000Z"), false, "nor a lapsed one");
+});
+
 const authEvents = async (db: Env["DB"]) =>
   (
     (

@@ -64,6 +64,11 @@ export type ProgramSummary = {
     unmeasured: number;
     evaluationErrors: number;
   } | null;
+  /**
+   * The checks the latest run's data for this measure failed (#853): set means no rate is stated, the
+   * headline included. Absent from an older backend.
+   */
+  dataInsufficient?: string[] | null;
   /** The year the latest run scored and the day it describes (#637). */
   measurementYear?: number | null;
   asOf?: string | null;

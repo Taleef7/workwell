@@ -149,8 +149,8 @@ echo "[known limitations]"
 if [ -n "${CASE_ID:-}" ]; then
   st=$(req GET "/api/cases/$CASE_ID/evidence"); { [ "$st" = "200" ] && warn "evidence list → 200, but uploads are EPHEMERAL (in-container fs BUCKET) — expected for this cutover"; } || warn "evidence list → $st (BUCKET is the deferred binding)"
 fi
-st=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 6 -H "Authorization: Bearer $TOKEN" "$BASE_URL/sse" 2>/dev/null); st=${st:-000}
-warn "GET /sse → $st (MCP SSE subject to the MIE nginx proxy_read_timeout caveat — not a cutover regression)"
+st=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 6 -X POST "$BASE_URL/mcp" 2>/dev/null); st=${st:-000}
+{ [ "$st" = "401" ] && pass "POST /mcp without an MCP token → 401 (the login token is not accepted there)"; } || warn "POST /mcp unauthenticated → $st (expected 401; 503 means WORKWELL_PUBLIC_API_URL is unset)"
 
 echo "================================================================"
 printf 'RESULT: %s%d pass%s, %s%d fail%s, %s%d warn%s\n' "$c_grn" "$PASS" "$c_rst" "$c_red" "$FAIL" "$c_rst" "$c_yel" "$WARN" "$c_rst"

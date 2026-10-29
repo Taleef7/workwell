@@ -112,7 +112,7 @@ That is deliberate: when a number comes out of this system, somebody else can ch
 | MADiE test cases | CMS measure authors | The expected answers the measure's own authors publish | Our gate: 455 of 455 across 9 measures; nothing routes without it |
 | VSAC | National Library of Medicine | The national authority for clinical code lists | Completing code lists upstream ships capped |
 | Cypress | MITRE, open source | The official ONC certification test harness | Validated both QRDA document types to zero findings |
-| HAPI FHIR / `cqf-fhir-cr` | Smile CDR + CQFramework (Java) | An independent engine sharing no code with ours | Cross-executed our artifacts as a second opinion: 362 of 387 across eight measures |
+| HAPI FHIR / `cqf-fhir-cr` | Smile CDR + CQFramework (Java) | An independent engine sharing no code with ours | Cross-executed our artifacts as a second opinion: 397 of 455 across all nine measures, every disagreement attributed |
 | FHIR R4, QI-Core, US Core | HL7 | The data format and clinical profiles CMS measures target | The shape of everything the engine reads |
 | QRDA I / III | HL7 | The document formats for quality reporting | What we export for interoperability |
 

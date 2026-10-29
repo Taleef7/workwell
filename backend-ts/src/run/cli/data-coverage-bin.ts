@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node --import tsx
+import "../../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { main } from "./data-coverage.ts";
 
 main(process.argv.slice(2))

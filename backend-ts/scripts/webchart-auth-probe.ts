@@ -16,6 +16,7 @@
  * the signed assertion, and the access token are NEVER printed; token-response output is a
  * whitelist of non-secret fields (token_type, scope, expires_in).
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { webChartConfigFromEnv, type DataSourceEnv } from "../src/engine/ingress/data-source.ts";
 import { smartBackendServicesAuth } from "../src/engine/ingress/webchart/smart-backend-auth.ts";
 

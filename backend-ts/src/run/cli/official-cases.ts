@@ -450,11 +450,9 @@ export async function main(argv: string[], overrides: Partial<OfficialCasesCliDe
       );
     }
     for (const run of runs) {
-      const adjusted = run.summary.expectedAgreements + run.summary.referenceAgreements;
       deps.log(
-        `${run.measure.toUpperCase()}: raw ${run.summary.expectedAgreements}/${run.summary.total}; ` +
-          `reference-adjusted ${adjusted}/${run.summary.total}; unexpected=${run.summary.unexpectedMismatches}; ` +
-          `errors=${run.summary.errors}`,
+        `${run.measure.toUpperCase()}: ${run.summary.expectedAgreements}/${run.summary.total}; ` +
+          `mismatches=${run.summary.unexpectedMismatches}; errors=${run.summary.errors}`,
       );
     }
     deps.log(

@@ -32,6 +32,10 @@ A card `suggestion` is a *proposal* — a `ServiceRequest` with `intent=proposal
 where the order code carries an APPROVED terminology mapping, and accepted only by a clinician's explicit
 action.
 
+**A measure whose latest run's data was too thin to trust returns no card** (#853, owner decision
+2026-10-20): its outcome would be low because the data is missing, and a card would state that as a finding
+in the encounter. See `CDS_HOOKS.md`.
+
 ## 2) Active AI Surfaces
 All prompts are implemented in `backend-ts/src/ai/ai-assist.ts`; endpoint wiring lives in
 `backend-ts/src/routes/ai.ts`. Every system prompt is built from the deployment's subject term

@@ -174,14 +174,19 @@ export default function ProgramDetailPage() {
   // backend's MEASURE_IDENTITY table, so they agree) and it also supplies the MIPS/CMS label.
   const identity: NotationSource | null | undefined = identities[measureId] ?? program;
   const isDecrease = identity?.improvementNotation === "decrease";
-  const rate: DisplayRate = program
+  // #853: the latest run's data was too thin to trust, so no rate is stated, as on the programs card: one
+  // read off uncoded encounters is low because the data is missing, not because the care is.
+  const thin = Array.isArray(program?.dataInsufficient) && program.dataInsufficient.length > 0;
+  const shown: DisplayRate = program
     ? displayRate(program, identity)
     : { label: "Compliance", value: null, lowerIsBetter: false, numerator: 0, denominator: 0 };
+  const rate: DisplayRate = thin ? { ...shown, value: null } : shown;
   // Null until the trend is ready AND has a previous point. The old fallback compared the current
   // rate against the current summary, which renders "↑ 0.0 from previous" for a measure whose history
   // holds one run — a claim about a run that does not exist.
   const prevCounts = previousTrendPoint(view);
   const prevRate = prevCounts ? displayRate(prevCounts, identity) : null;
+  // A thin run's rate is null above, so it states no change from previous either.
   const delta = program && prevRate && rate.value !== null && prevRate.value !== null ? rate.value - prevRate.value : null;
   const yearLine = program ? yearLineFor([program], isPatientTerm) : null;
   // The FHIR artifact an officially routed measure runs today (from /api/measures), for the present-tense
@@ -282,10 +287,16 @@ export default function ProgramDetailPage() {
                 {rate.lowerIsBetter ? (
                   <p id="lower-is-better-note" className="text-xs text-neutral-500 dark:text-neutral-400">Lower is better</p>
                 ) : null}
-                <p id={rate.value === null ? "counted-yet-note" : undefined} className="text-xs text-neutral-500 dark:text-neutral-400">
-                  {rate.value === null ? `No ${SUBJECT.plural} counted yet` : `${fmtCount(rate.numerator)} / ${fmtCount(rate.denominator)}`}
-                </p>
-                {isPatientTerm && isSmallNumbers(rate) ? (
+                {thin ? (
+                  <p id="counted-yet-note" data-testid="measure-thin" className="text-xs text-amber-800 dark:text-amber-300">
+                    Data too thin to trust on the latest run
+                  </p>
+                ) : (
+                  <p id={rate.value === null ? "counted-yet-note" : undefined} className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {rate.value === null ? `No ${SUBJECT.plural} counted yet` : `${fmtCount(rate.numerator)} / ${fmtCount(rate.denominator)}`}
+                  </p>
+                )}
+                {isPatientTerm && !thin && isSmallNumbers(rate) ? (
                   <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                     Based on {fmtCount(rate.denominator)} {rate.denominator === 1 ? SUBJECT.singular : SUBJECT.plural} so far
                   </p>

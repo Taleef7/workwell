@@ -46,9 +46,11 @@ const withQuery = (path: string, p: URLSearchParams): string => {
  * from a practice-wide count must open the practice, because a staff member who owns a panel would
  * otherwise land on "My panel" and see a fraction of the number they clicked.
  */
-export function worklistHref(scope: ListScope & { wholePractice?: boolean } = {}): string {
+export function worklistHref(scope: ListScope & { wholePractice?: boolean; myPanel?: boolean } = {}): string {
   const p = params(scope);
   if (scope.wholePractice) p.set("panel", "all");
+  // A count over the caller's own providers (the scorecard's "My providers" total) opens their panel.
+  else if (scope.myPanel) p.set("panel", "me");
   return withQuery("/worklist", p);
 }
 

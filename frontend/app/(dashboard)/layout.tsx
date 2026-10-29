@@ -17,6 +17,7 @@ import {
   Shield,
   Users,
   ListOrdered,
+  Table2,
 } from "lucide-react";
 import {
   AppHeader,
@@ -43,6 +44,7 @@ import { ROLE_LABELS, labelFor } from "@/lib/status";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ThemeBrandSwitcher } from "@/components/theme-brand-switcher";
 import { canSeeEngineering } from "@/lib/public-demo";
+import { SUBJECT } from "@/lib/terminology";
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "WorkWell Measure Studio";
 const [APP_BADGE, ...appRest] = APP_NAME.split(" ");
@@ -54,6 +56,9 @@ const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 // (Cases, Worklist, Campaigns) are scoped to the roles whose API calls won't 403.
 const nav = [
   { href: "/programs", label: "Programs", icon: BarChart3 },
+  // Each provider's rates by location (#852). CM/ADMIN, as /api/scorecard is, and on the patient
+  // deployment only: the occupational deployment's "providers" are clinicians assigned round-robin.
+  { href: "/scorecard", label: "Scorecard", icon: Table2, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN], patientOnly: true },
   // The work list is the case manager's daily screen, so it comes first; Cases is the same gaps one
   // row per gap (#698).
   { href: "/worklist", label: "Worklist", icon: ClipboardList, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
@@ -283,6 +288,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     if (ENGINEERING_HREFS.has(item.href) && !canSeeEngineering(user?.role)) {
       return false;
     }
+    if ("patientOnly" in item && item.patientOnly && SUBJECT.singular !== "patient") return false;
     return !("roles" in item && item.roles) || hasAnyRole(user?.role, item.roles);
   });
 

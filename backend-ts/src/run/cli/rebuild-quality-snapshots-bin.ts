@@ -8,6 +8,7 @@
  * No shebang: with one, tsx's import scanner fails to parse this file's top-level await and dynamic
  * import ("Parse error …:2:113"); `pnpm rebuild:quality-snapshots` runs it through tsx anyway.
  */
+import "../../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { getStores, type StoresEnv } from "../../stores/factory.ts";
 import { rebuildSnapshotHistory } from "../../quality/materialize-run.ts";
 

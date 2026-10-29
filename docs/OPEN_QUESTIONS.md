@@ -110,9 +110,9 @@ compared.
 `ROADMAP_2026-08-30.md` §7.17 records this as *ask before building anything that assumes a single
 flat ACO*.
 
-It decides who submits, against which benchmark, and at what level performance is compared. The
-scorecards in #596 cannot be designed without it — a scorecard is a comparison, and nothing here
-currently knows what the comparison set is.
+It decides who submits, against which benchmark, and at what level performance is compared. The provider
+scorecard (#852) shipped without it: each provider's rate, location subtotals and the practice total, with
+no ranking, no target and no colour against one. Benchmarks and deciles wait on this answer.
 
 *(2.3 is answered; see §5.)*
 

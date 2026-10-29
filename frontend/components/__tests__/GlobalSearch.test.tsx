@@ -156,7 +156,7 @@ describe("GlobalSearch", () => {
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("does not navigate on Enter when multiple results are shown", async () => {
+  it("opens the TOP result on Enter when several are shown, since the server ranks the best match first", async () => {
     render(<GlobalSearch />);
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "multi" } });
@@ -165,7 +165,8 @@ describe("GlobalSearch", () => {
     expect(screen.getByText("Nia Calder")).toBeInTheDocument();
 
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(mockPush).not.toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith("/employees/pat-001");
   });
 
   it("does not search or open dropdown when query length is less than 2 chars", async () => {

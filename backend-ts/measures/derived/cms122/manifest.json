@@ -11,7 +11,7 @@
   },
   "scoring": "proportion",
   "populationBasis": "boolean",
-  "improvementNotation": "increase",
+  "improvementNotation": "decrease",
   "populations": [
     "initial-population",
     "denominator",
@@ -36,7 +36,7 @@
     "strippedElmAnnotations": true,
     "strippedValueSets": true,
     "rawBytes": 16786509,
-    "vendoredBytes": 2433703
+    "vendoredBytes": 2432323
   },
   "terminology": {
     "file": "terminology.json",
@@ -127,7 +127,7 @@
         {
           "oid": "2.16.840.1.113883.3.464.1003.110.12.1082",
           "reason": "release",
-          "had": 2000,
+          "had": 2030,
           "now": 2025,
           "declaredTotal": 2025
         },
@@ -233,7 +233,8 @@
     },
     "sha256": "sha256:20fd6aa9eee4a5bd5040a1ca1768b2e7f2aeb20a43a5ca13563038ddb6b3043b"
   },
-  "sha256": "sha256:594ec2b8da5871eb7eadb2aac8ad5eee6447990c58e7867760d5f955cd7f7f51",
+  "sha256": "sha256:ed1d50353f4a72a87853bccdb7997d1336811c8d14826eeaefae3416edec0ead",
+  "logicSha256": "sha256:5fe5e29b7f51dc13247322ab16a958054b2cf55a201a3de9e13c6a56dd31daa5",
   "derived": {
     "label": "WorkWell translation of CMS122v15",
     "derivedFrom": {
@@ -242,7 +243,7 @@
     },
     "base": {
       "catalogId": "cms122",
-      "manifestSha256": "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552"
+      "manifestSha256": "sha256:6f3f25f64a1ca13351082ffba87170bfa3ae8035b71efc56dcc542740a89c948"
     },
     "build": {
       "translator": "@cqframework/cql@4.0.0-beta.1",
@@ -311,7 +312,7 @@
         "total": 64,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:594ec2b8da5871eb7eadb2aac8ad5eee6447990c58e7867760d5f955cd7f7f51",
+          "artifactSha256": "sha256:ed1d50353f4a72a87853bccdb7997d1336811c8d14826eeaefae3416edec0ead",
           "terminologySha256": "sha256:20fd6aa9eee4a5bd5040a1ca1768b2e7f2aeb20a43a5ca13563038ddb6b3043b"
         }
       },
@@ -326,7 +327,7 @@
         "total": 26,
         "result": "pass",
         "ranAgainst": {
-          "artifactSha256": "sha256:594ec2b8da5871eb7eadb2aac8ad5eee6447990c58e7867760d5f955cd7f7f51",
+          "artifactSha256": "sha256:ed1d50353f4a72a87853bccdb7997d1336811c8d14826eeaefae3416edec0ead",
           "terminologySha256": "sha256:20fd6aa9eee4a5bd5040a1ca1768b2e7f2aeb20a43a5ca13563038ddb6b3043b"
         }
       }

@@ -13,7 +13,6 @@ import {
   classifyPopulationAgreement,
   populationCountsByRate,
   type FhirResource,
-  type OfficialMeasureId,
   type PopulationAgreement,
   type PopulationCounts,
 } from "./official-cases.ts";
@@ -26,23 +25,34 @@ export interface CrossEngineComparison {
   readonly agreement: PopulationAgreement;
 }
 
-export function compareReports(
-  measure: OfficialMeasureId,
-  caseName: string,
-  expectedReport: unknown,
-  actualReport: unknown,
-): CrossEngineComparison {
+export function compareReports(expectedReport: unknown, actualReport: unknown): CrossEngineComparison {
   const expected = populationCountsByRate(expectedReport as FhirResource);
   const actual = populationCountsByRate(actualReport as FhirResource);
   const multiRate = expected.length > 1 || actual.length > 1;
-  const agreement = classifyPopulationAgreement(
-    measure,
-    caseName,
-    expected[0]!,
-    actual[0]!,
-    multiRate ? { expected, actual } : undefined,
-  );
+  const agreement = classifyPopulationAgreement(expected[0]!, actual[0]!, multiRate ? { expected, actual } : undefined);
   return { expected, actual, agreement };
+}
+
+/**
+ * The second engine's own error, when it answered with a MeasureReport that carries one (#846). cqf-fhir-cr
+ * catches an exception inside an evaluation and still returns a MeasureReport: every population 0, the
+ * exception in a contained `OperationOutcome`. Compared as counts, that reads as a disagreement about the
+ * measure; it is the engine failing on the case's data (CMS165's `45e01fed`, a MedicationRequest whose
+ * medication is a Reference: cqframework/clinical-reasoning#1071), so the sweep records it as an engine
+ * error instead. Only `error` and `fatal` issues count; a warning beside real counts is still a result.
+ */
+export function engineErrorOf(report: unknown): string | undefined {
+  const contained = (report as { contained?: unknown } | null)?.contained;
+  if (!Array.isArray(contained)) return undefined;
+  for (const resource of contained as Array<{ resourceType?: unknown; issue?: unknown }>) {
+    if (resource?.resourceType !== "OperationOutcome" || !Array.isArray(resource.issue)) continue;
+    for (const issue of resource.issue as Array<{ severity?: unknown; diagnostics?: unknown; details?: { text?: unknown } }>) {
+      if (issue?.severity !== "error" && issue?.severity !== "fatal") continue;
+      const text = issue.details?.text ?? issue.diagnostics;
+      return typeof text === "string" && text.length > 0 ? text : `an OperationOutcome ${issue.severity} with no text`;
+    }
+  }
+  return undefined;
 }
 
 /**

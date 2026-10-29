@@ -67,6 +67,9 @@ test.describe("Maui terminology — the quality lead's pages", () => {
     await expect(posture.getByRole("link").first()).toBeVisible({ timeout: 20_000 });
     const postureText = await posture.innerText();
     expect(postureText, "a posture chip names its measure, not a raw id").not.toMatch(/\bcms\d+\b/);
+    // Folded for a case-managing seat since #865 (the gaps come first). Folded is not unmounted: the
+    // component is on the page either way, so the no-simulation-on-open check below still bites.
+    await page.getByText("Simulate compliance history", { exact: true }).click();
     await expect(page.getByRole("button", { name: /run simulation/i })).toBeVisible();
     // The old component fetched 300 ms after mount; give it well past that.
     await page.waitForTimeout(1_500);

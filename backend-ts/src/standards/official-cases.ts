@@ -116,15 +116,6 @@ export function officialMeasureName(catalogId: string): string | undefined {
   return MEASURES[catalogId as OfficialMeasureId]?.name;
 }
 
-export const CMS122_KNOWN_BAD_EXPECTEDS = new Set([
-  "ede0ee7a-18ab-4ba7-934c-23618f1270ea",
-  "e61be907-af68-493f-a6bc-3d93ef8b6c6e",
-  "cade5021-b1bf-43e9-a0a4-659c05b386d0",
-  "3b62b0a8-44f2-4365-bcb9-7cadef5bab2e",
-  "9cba6cfa-9671-4850-803d-e286c7d59ee7",
-  "f5771b74-a7de-439a-a51f-49a3863e086b",
-]);
-
 export interface FhirResource {
   resourceType: string;
   id?: string;
@@ -531,16 +522,20 @@ export function loadOfficialMeasureCases(
 
 export interface PopulationAgreement {
   pass: boolean;
-  status: "expected-agreement" | "reference-agreement" | "mismatch";
+  status: "expected-agreement" | "mismatch";
   differences: PopulationCode[];
   /** Per-rate detail for a multi-rate mismatch: which rate, which population, expected vs actual. */
   rateDifferences?: string[];
 }
 
-/** Classify raw population agreement, with the source repo's six CMS122 expected-result defects isolated. */
+/**
+ * Classify population agreement with the steward's expected counts. There are no exemptions (#846): six
+ * CMS122 cases were once passed when our engine answered numerator 1 against MADiE's 0, on the premise that
+ * MADiE was wrong. That premise came from a Java image with a since-fixed bug (cqframework/
+ * clinical_quality_language#1682); on cqf-fhir-cr 4.13.0 all six agree with MADiE, so an engine regression
+ * on exactly those cases would have passed silently.
+ */
 export function classifyPopulationAgreement(
-  measure: OfficialMeasureId,
-  uuid: string,
   expected: PopulationCounts,
   actual: PopulationCounts,
   /**
@@ -582,18 +577,7 @@ export function classifyPopulationAgreement(
   }
   const differences = POPULATION_CODES.filter((code) => expected[code] !== actual[code]);
   if (differences.length === 0) return { pass: true, status: "expected-agreement", differences };
-  const isKnownReferenceAgreement =
-    measure === "cms122" &&
-    CMS122_KNOWN_BAD_EXPECTEDS.has(uuid) &&
-    differences.length === 1 &&
-    differences[0] === "numerator" &&
-    expected.numerator === 0 &&
-    actual.numerator === 1;
-  return {
-    pass: isKnownReferenceAgreement,
-    status: isKnownReferenceAgreement ? "reference-agreement" : "mismatch",
-    differences,
-  };
+  return { pass: false, status: "mismatch", differences };
 }
 
 // Re-exported from the package rather than redeclared: a local copy is exactly the drift the
@@ -639,7 +623,6 @@ export interface OfficialCaseResult extends OfficialCase {
 export interface OfficialRunSummary {
   total: number;
   expectedAgreements: number;
-  referenceAgreements: number;
   unexpectedMismatches: number;
   errors: number;
 }
@@ -656,8 +639,9 @@ export interface OfficialMeasureRun {
    * `measure-bundle+sourced-supplement` — all of that, EXCEPT for the OIDs in `supplementedOids`,
    * which upstream's bundle does not ship at all and which came from our vendored sidecar instead
    * (ADR-053). A weaker claim, and it must never be blended into the headline number: for those value
-   * sets the CODES are ours. What stays upstream's is the answer key — the expected population vectors
-   * — which is why a green deck is still real evidence that the sourced codes are right.
+   * sets the CODES are ours. What stays upstream's is the answer key — the expected population vectors —
+   * so a green deck is evidence about the sourced codes ONLY where an expression reads them. CMS138's
+   * `…3.526.3.1278`, the one supplement today, is read by none, and is not in the release (#851).
    */
   valueSetMode: OfficialValueSetMode;
   /** Bare OIDs taken from the sidecar because the bundle ships no ValueSet for them. Usually empty. */
@@ -704,7 +688,6 @@ function summarizeCases(cases: OfficialCaseResult[]): OfficialRunSummary {
   return {
     total: cases.length,
     expectedAgreements: cases.filter((item) => item.agreement?.status === "expected-agreement").length,
-    referenceAgreements: cases.filter((item) => item.agreement?.status === "reference-agreement").length,
     unexpectedMismatches: cases.filter((item) => item.agreement?.status === "mismatch").length,
     errors: cases.filter((item) => item.error || item.loadError).length,
   };
@@ -850,7 +833,7 @@ export async function runOfficialMeasureCases(
       ...item,
       actual,
       actualRates,
-      agreement: classifyPopulationAgreement(loaded.measure, item.uuid, item.expected, actual, {
+      agreement: classifyPopulationAgreement(item.expected, actual, {
         expected: expectedRates,
         actual: actualRates,
       }),
@@ -1093,7 +1076,6 @@ function populationCell(item: OfficialCaseResult, code: PopulationCode): string 
 function resultLabel(item: OfficialCaseResult): string {
   if (item.loadError) return `ERROR (loader: ${escapeMarkdown(item.loadError)})`;
   if (item.error) return `ERROR (engine: ${escapeMarkdown(item.error)})`;
-  if (item.agreement?.status === "reference-agreement") return "PASS†";
   if (item.agreement?.status === "expected-agreement") return "PASS";
   return "FAIL";
 }
@@ -1125,20 +1107,18 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     "",
     "## Summary",
     "",
-    "| Measure | Cases | Raw expected agreement | Known-bad expecteds matching reference | Reference-adjusted pass | Unexpected mismatches | Errors |",
-    "|---|---:|---:|---:|---:|---:|---:|",
+    "| Measure | Cases | Agreement with expected | Mismatches | Errors |",
+    "|---|---:|---:|---:|---:|",
   ];
   for (const run of runs) {
-    const adjusted = run.summary.expectedAgreements + run.summary.referenceAgreements;
     lines.push(
       `| ${run.measure.toUpperCase()} | ${run.summary.total} | ${run.summary.expectedAgreements} (${percent(run.summary.expectedAgreements, run.summary.total)}) | ` +
-        `${run.summary.referenceAgreements} | ${adjusted} (${percent(adjusted, run.summary.total)}) | ` +
         `${run.summary.unexpectedMismatches} | ${run.summary.errors} |`,
     );
   }
   lines.push(
     "",
-    "† CMS122 reference agreement means the actual vector differs from the committed MADiE expected only at numerator `0→1` for one of the six UUIDs already reported by the source repo. It is an adjusted pass, not an engine defect.",
+    "Every case is compared with MADiE's expected counts as committed; no case is exempt.",
     "",
     "## Execution and terminology controls",
     "",
@@ -1164,10 +1144,10 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
           `WorkWell's vendored sidecar because the upstream bundle ships no ValueSet resource for them — ` +
           run.supplementedOids.map((oid) => `\`${oid}\``).join(", ") +
           `. Everything else is upstream's own terminology. **This is a weaker claim than the other ` +
-          `measures carry:** for these value sets the CODES are ours (sourced from VSAC at the pinned ` +
-          `release). What remains upstream's is the ANSWER KEY — the expected population vectors — which ` +
-          `is why agreement here is still real evidence that the sourced codes are right, and is not ` +
-          `evidence about upstream's terminology.`,
+          `measures carry:** for these value sets the CODES are ours (sourced from VSAC; a set the pinned ` +
+          `release does not list is recorded \`inRelease: false\` in the manifest). What remains upstream's ` +
+          `is the ANSWER KEY — the expected population vectors — so agreement is evidence about the ` +
+          `sourced codes only where an expression reads them, and never about upstream's terminology.`,
       );
     }
     for (const truncated of run.valueSets.truncated) {
@@ -1177,27 +1157,13 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     }
   }
 
-  const cms122 = runs.find((run) => run.measure === "cms122");
-  const knownCms122 = cms122?.cases.filter((item) => CMS122_KNOWN_BAD_EXPECTEDS.has(item.uuid)) ?? [];
-  if (knownCms122.length > 0) {
-    lines.push("", "## Investigated findings", "");
-  }
-  if (knownCms122.length > 0) {
-    const expectedMatches = knownCms122.filter((item) => item.agreement?.status === "expected-agreement").length;
-    const referenceMatches = knownCms122.filter((item) => item.agreement?.status === "reference-agreement").length;
-    lines.push(
-      `- **CMS122 source calibration:** ${expectedMatches}/${knownCms122.length} known-bad-expected UUIDs matched the committed numerator=0 value; ` +
-        `${referenceMatches}/${knownCms122.length} reproduced the source comparison's numerator=1 result. This is reported separately from adjusted pass/fail.`,
-    );
-  }
   for (const run of runs) {
     lines.push(
       "",
       `## ${run.measure.toUpperCase()} — ${run.measureName}`,
       "",
       `Measurement period: ${run.measurementPeriod.start} → ${run.measurementPeriod.end}. ` +
-        `Raw expected agreement ${run.summary.expectedAgreements}/${run.summary.total}; ` +
-        `reference-adjusted pass ${run.summary.expectedAgreements + run.summary.referenceAgreements}/${run.summary.total}.`,
+        `Agreement with expected ${run.summary.expectedAgreements}/${run.summary.total}.`,
       "",
       // Columns are DERIVED from the compared vector, not hand-listed. They diverged once: DENEXCEP was
       // added to `POPULATION_CODES` and the table kept rendering four columns, so the population that
@@ -1267,7 +1233,6 @@ export function renderOfficialCaseReport(runs: OfficialMeasureRun[], metadata: O
     "## Interpretation rules",
     "",
     "- `PASS` = exact agreement with the committed MADiE expected population counts.",
-    "- `PASS†` = exact agreement with the source repository's reference-engine discrepancy for one of the six known-bad CMS122 numerator expecteds.",
     "- `FAIL` = unexpected population mismatch requiring case-level investigation.",
     "- `ERROR` = loader or calculation failure; it is not counted as an agreement or an engine mismatch.",
     "- Expansion caps are reported independently. They are only assigned as a cause when a mismatched case actually depends on a code absent from the capped expansion.",

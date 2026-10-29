@@ -5,6 +5,10 @@ import { EMPLOYEES } from "../engine/synthetic/employee-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { handleComplianceSimulation } from "./compliance-simulation.ts";
 
+// engineForEnv falls back to process.env for the VSAC key, and a keyed engine reads the value-set store,
+// which `{}` cannot open. Clear an ambient key (a developer's shell) so this stays the inline, DB-less path.
+delete process.env.WORKWELL_VSAC_API_KEY;
+
 const ID = EMPLOYEES[0]!.externalId;
 const call = (path: string, method = "GET") => handleComplianceSimulation(new Request(`http://x${path}`, { method }), {});
 

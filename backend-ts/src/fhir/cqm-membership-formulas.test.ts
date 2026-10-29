@@ -1,8 +1,9 @@
 /**
  * #476 — pin population-membership derivation to the CQM IG's published formulas.
  *
- * Ruler: HL7 Quality Measure IG (`hl7.fhir.uv.cqm`) v1.0.0 - STU 1 (published 2025-09-11),
- * measure-conformance.html § "Subject-based Calculation", proportion scoring:
+ * Ruler: HL7 Quality Measure IG (`hl7.fhir.uv.cqm`) v2.0.0 - STU 2 (published 2026-09-16),
+ * measure-conformance.html § "Subject-based Calculation", proportion scoring. STU 1 (v1.0.0, 2025-09-11)
+ * states the identical formulas; compared word for word on 2026-10-19 (#846):
  *
  *   Denominator Membership = "Initial Population" and "Denominator"
  *                            and not "Denominator Exclusion"

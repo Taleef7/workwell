@@ -131,7 +131,7 @@ export function listIntegrations(
       displayName: "MCP server",
       status: "healthy",
       lastSyncAt: null,
-      detail: "Read-only MCP tools, served by this process over /sse.",
+      detail: "Read-only MCP tools, served by this process at POST /mcp.",
       config: {},
     },
     {

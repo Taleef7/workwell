@@ -246,7 +246,7 @@ jobs:
             exit 1
           fi
           echo "shard ${{ matrix.shard }}/3: $(echo "$files" | wc -l) test files"
-          node --import tsx --test $files 2>&1 \
+          node --import tsx --import ./src/engine/utc.ts --test $files 2>&1 \
             | tee "$RUNNER_TEMP/test-shard-${{ matrix.shard }}.log"
       # The store contract self-skips when it cannot reach Postgres, so "the job is green" has never
       # been evidence that the ceiling was exercised — on 2026-09-16 that had to be confirmed by hand,
@@ -510,7 +510,7 @@ jobs:
           # against silent skipping that silently skips.
           WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY: ${{ steps.vendor.outputs.credentialed }}
         run: |
-          pnpm exec node --import tsx --test \
+          pnpm exec node --import tsx --import ./src/engine/utc.ts --test \
             src/wiring/official-terminology.test.ts \
             src/wiring/derived-routing.test.ts \
             src/wiring/derived-terminology.test.ts \
@@ -518,6 +518,7 @@ jobs:
             src/wiring/official-corpus-outcomes.test.ts \
             src/wiring/corpus-official-population.test.ts \
             src/wiring/official-cms165-blood-pressure-identity.test.ts \
+            src/wiring/official-tz-cms165.test.ts \
             src/standards/literal-diff.test.ts \
             src/engine/ingress/webchart/devdb-official-eval.test.ts \
             src/engine/ingress/webchart/live-official-parity.test.ts \
@@ -623,7 +624,7 @@ jobs:
         run: |
           log="$RUNNER_TEMP/madie-e2e.log"
           set +e
-          pnpm exec node --import tsx --test \
+          pnpm exec node --import tsx --import ./src/engine/utc.ts --test \
             src/run/madie-end-to-end.test.ts \
             src/stores/postgres/madie-end-to-end-postgres.test.ts 2>&1 | tee "$log"
           status=${PIPESTATUS[0]}
@@ -902,6 +903,8 @@ jobs:
           WORKWELL_DERIVED_MEASURES: ${{ env.ROUTED_TRANSLATIONS }}
           # So the promotion gate below can recognise this build on /health, as the deploy's image does.
           WORKWELL_BUILD_SHA: ${{ github.sha }}
+          # The MCP resource and OAuth issuer (mcp-oauth.spec.ts); with auth on, /mcp and OAuth answer 503 without it.
+          WORKWELL_PUBLIC_API_URL: http://localhost:8080
         run: |
           nohup pnpm dev > ../backend-maui.log 2>&1 &
           for i in $(seq 1 60); do

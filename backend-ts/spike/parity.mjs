@@ -6,6 +6,7 @@
  *
  *   node spike/parity.mjs <bundle.json> [YYYY-MM-DD]
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

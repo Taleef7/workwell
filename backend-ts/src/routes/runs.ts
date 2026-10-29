@@ -64,6 +64,7 @@ import { isIncrementalEnabled } from "../run/incremental/incremental-eval.ts";
 import { isVsacConfigured } from "@work-well/measure-engine";
 import { rerunToVerify, UnsupportedCaseRerunError, CaseRerunFailedError } from "../case/case-rerun.ts";
 import type { PopulationCounts, StratumCounts } from "../fhir/measure-report.ts";
+import { dataInsufficientChecks, thinMeasuresOfRun, type SufficiencyCheck } from "../run/data-sufficiency.ts";
 import {
   buildMeasureReportBundle,
   buildSummaryMeasureReportFromCounts,
@@ -281,7 +282,16 @@ async function aggregateCountsForRun(
   measureId: string,
   env: RunsEnv,
 ): Promise<
-  | { counts: PopulationCounts[]; strata: StratumCounts[][]; unmeasured: number; evaluationErrors: number; official: OfficialReportIdentity | null; identityConflict: boolean }
+  | {
+      counts: PopulationCounts[];
+      strata: StratumCounts[][];
+      unmeasured: number;
+      evaluationErrors: number;
+      official: OfficialReportIdentity | null;
+      identityConflict: boolean;
+      /** #853: the checks this measure's data failed on the run, or null. */
+      dataInsufficient: SufficiencyCheck[] | null;
+    }
   | { error: Response }
 > {
   // Provenance comes from the RUN, not from the current deployment flag (Codex P1). A run's outcomes
@@ -306,10 +316,49 @@ async function aggregateCountsForRun(
     // a measure with no official evidence has one rate. Wrapped so the return type is uniform. A status
     // histogram cannot see evidence, so it cannot count evaluation errors; this branch serves authored
     // runs (including `seed:scale`), whose exports never carried that count either.
-    return { counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)], strata: [], unmeasured: 0, evaluationErrors: 0, official: null, identityConflict: false };
+    // A thin authored run is still thin: the flag is read off the same rows either way.
+    return {
+      counts: [populationCountsFromStatus(await os.countOutcomesByStatus(runId), measureId)],
+      strata: [],
+      unmeasured: 0,
+      evaluationErrors: 0,
+      official: null,
+      identityConflict: false,
+      dataInsufficient: aggregate.dataInsufficient,
+    };
   }
-  const { rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict } = aggregate;
-  return { counts: rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict };
+  const { rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict, dataInsufficient } = aggregate;
+  return { counts: rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict, dataInsufficient };
+}
+
+/**
+ * #853 (D12): a measure whose ingested data was too thin to trust is not reported. Its rates would be a
+ * confident number about data that is not there (uncoded encounters never qualify, so the rate reads low),
+ * so the export refuses rather than state it. 409, like `run_compacted`: the run is fine, its data is not.
+ */
+const dataInsufficientRefusal = (format: string, measureId: string, checks: readonly SufficiencyCheck[]): Response =>
+  json(
+    {
+      error: "data_insufficient",
+      measureId,
+      checks,
+      message:
+        `${format} is refused: this run's data for ${measureId} was too thin to trust (${checks.join(", ")}), ` +
+        `so its rate would describe missing data. The run's detail page says what fell short.`,
+    },
+    409,
+  );
+
+/** The checks any of these rows carries, or null when none does (#853). */
+function rowsDataInsufficient(rows: ReadonlyArray<{ evidence: unknown }>): SufficiencyCheck[] | null {
+  let checks: Set<SufficiencyCheck> | null = null;
+  for (const row of rows) {
+    const found = dataInsufficientChecks(row.evidence);
+    if (!found) continue;
+    checks ??= new Set();
+    for (const check of found) checks.add(check);
+  }
+  return checks ? [...checks].sort() : null;
 }
 
 /**
@@ -1316,6 +1365,8 @@ export async function handleRuns(
     // Mixed first: it is the deeper fault, and it does not depend on which row was read first.
     if (scoring.mixed) return mixedLogic("QRDA I");
     if (scoring.derived) return derivedNotReportable("QRDA I");
+    const thinI = rowsDataInsufficient(rows);
+    if (thinI) return dataInsufficientRefusal("QRDA I", measureId, thinI);
     return auditedExport((await getStores(env)).events, { actor, kind: "qrda1", path: pathname, params: url.searchParams, runId: qrda1Id }, async () => {
       const documents = buildQrda1Documents(run, measureId, rows, await qrda1BundleLookup(env, rows.map((r) => r.subjectId)));
       const nonConformant = documents.filter((d) => !d.conformant).length;
@@ -1369,6 +1420,7 @@ export async function handleRuns(
     // Mixed first: `official` is the first evaluated row's identity, which an unordered read picks.
     if (aggregate.identityConflict) return mixedLogic("QRDA III");
     if (aggregate.official?.kind === "derived") return derivedNotReportable("QRDA III");
+    if (aggregate.dataInsufficient) return dataInsufficientRefusal("QRDA III", measureId, aggregate.dataInsufficient);
     // Every rate and every stratum (ADR-074). This route refused a multi-rate measure with a 501 until
     // 2026-09-06 rather than emit rate 1 under the measure's identity; the exporter now reports each
     // group under its own criterion names, with its own performance rate and Reporting Strata.
@@ -1425,6 +1477,7 @@ export async function handleRuns(
       const goneMrAfter = await compacted(run, env);
       if (goneMrAfter) return goneMrAfter;
       if (aggregate.identityConflict) return mixedLogic("summary MeasureReport");
+      if (aggregate.dataInsufficient) return dataInsufficientRefusal("summary MeasureReport", measureId, aggregate.dataInsufficient);
       return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official, aggregate.strata), {
         [UNMEASURED_HEADER]: String(aggregate.unmeasured),
         [EVALUATION_ERRORS_HEADER]: String(aggregate.evaluationErrors),
@@ -1451,6 +1504,8 @@ export async function handleRuns(
       if (goneBundleAfter) return goneBundleAfter;
       // The bundle's first entry is a summary over every row, labelled with one identity and period.
       if (rowScoring(rows).mixed) return mixedLogic(`${type} MeasureReport`);
+      const thinMr = rowsDataInsufficient(rows);
+      if (thinMr) return dataInsufficientRefusal(`${type} MeasureReport`, measureId, thinMr);
       // Errored subjects get no individual report (ADR-077 d6); the header says how many were left out.
       const errored = rows.filter((r) => isEvaluationErrorEvidence(r.evidence)).length;
       return fhir(buildMeasureReportBundle(run, measureId, rows, generatedAt), { [EVALUATION_ERRORS_HEADER]: String(errored) });
@@ -1519,12 +1574,23 @@ export async function handleRuns(
     // `official` above stays null because it describes one measure's rate. Read from the rows' own
     // evidence by one identity-only DISTINCT, never from today's routing (#769). Memoized per finished run.
     const scoringLogic = await scoringLogicByMeasure(stores.outcomes, reconId, run.status);
+    // #853: WHICH measures were thin comes from the rows, as the exports refuse from them, so a lost or
+    // aged-out RUN_COMPLETED record can never make this page offer a rate or an export the server refuses.
+    // HOW short each fell is the pipeline's own measure of the bundles, kept only in that record: an entry
+    // whose record is gone carries no shortfalls, and the page says the detail was not kept.
+    const ledgerThin = Array.isArray(completedEvent?.payload?.dataInsufficient)
+      ? (completedEvent.payload.dataInsufficient as Array<{ measureId?: unknown; shortfalls?: unknown }>)
+      : [];
+    const dataInsufficient = (await thinMeasuresOfRun(stores.outcomes, run)).map(
+      (measureId) => ledgerThin.find((entry) => entry?.measureId === measureId) ?? { measureId, shortfalls: [] },
+    );
     return json({
       runId: reconId,
       status: run.status,
       unit: "subject-measure pairs",
       workItems,
       rowsPersisted,
+      ...(dataInsufficient && dataInsufficient.length > 0 ? { dataInsufficient } : {}),
       // FOLDED by status. Since ADR-079 `countOutcomesByStatus` groups by (status, out_of_population),
       // so one status can arrive as up to three rows — mapping them straight through turned a
       // histogram into indistinguishable duplicate buckets ("MISSING_DATA: 3000", "MISSING_DATA: 120")

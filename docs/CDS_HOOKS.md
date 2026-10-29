@@ -26,8 +26,9 @@ POST /cds-services/workwell-compliance-patient-view/feedback    → 200
 | `fhirServer`, `fhirAuthorization`, `prefetch` | body, optional | **Accepted and not evaluated.** See *Limits, stated*. |
 
 **Authentication:** discovery is public — it returns service metadata and no patient data. Invoke and
-feedback require the standard bearer token with `ROLE_MCP_CLIENT`, `ROLE_CASE_MANAGER` or `ROLE_ADMIN`, the
-same authority as `/sse` and `/mcp/**`. An anonymous invoke is **401**.
+feedback require the standard bearer (login) token with `ROLE_MCP_CLIENT`, `ROLE_CASE_MANAGER` or
+`ROLE_ADMIN`. An MCP token is never accepted here: it is valid only on `/mcp` (`docs/MCP.md`). An anonymous
+invoke is **401**.
 
 > **This is not the CDS Hooks JWT profile, and that is a stated gap.** The specification defines its own
 > scheme — a JWT the *client* signs (RS384/ES384), verified against a JWKS, with `aud` equal to the invoked
@@ -79,7 +80,7 @@ A successful invoke is `200` with a `cards` array, per the specification.
 
 | response | meaning |
 |---|---|
-| `{"cards": []}` | This patient **was** evaluated by a completed run and has no open gap. |
+| `{"cards": []}` | This patient **was** evaluated by a completed run and has no open gap WorkWell will state: none, or only in measures whose data was too thin to trust (below). |
 | one `info` card, *"No WorkWell evaluation on record…"* | Nothing has been evaluated for this patient — including the case where the id did not resolve. |
 
 > **These are deliberately not the same answer.** An empty array at the point of care reads as "no gaps",
@@ -127,6 +128,14 @@ single suggestion, because one order is the correct clinical action.
 > those differ — we persist `wc|4821`, the hook supplies `4821` — and a reference into the `wc` namespace
 > would name nothing the client can resolve (`|` is not a legal FHIR id either). Card identity still uses the
 > internal id, so feedback correlation is unaffected.
+
+### A measure on thin data says nothing (#853)
+
+When a measure's latest run found its data too thin to trust (coded encounter types, final blood pressures or
+record fetches below their floors, `DATA_MODEL_CONTRACTS` §4), that measure returns **no card**, its
+evaluation-failure card included (owner decision, 2026-10-20). Its rate would be low because the data is
+missing, and a card would put that into the encounter as a finding. Other measures' cards are unaffected, and
+the next run whose data meets the floors brings the measure's cards back.
 
 ### A failed evaluation is reported as ours
 

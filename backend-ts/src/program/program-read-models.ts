@@ -17,12 +17,13 @@ import { liveAnswerForCase, liveCellsFor } from "../compliance/live-cell.ts";
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import type { QualitySnapshotStore, QualitySnapshotRow, QualityScopeLevel } from "../stores/quality-snapshot-store.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { measureIdentityFor, type ScoringLogic } from "../measure/measure-identity.ts";
+import { measureIdentityFor, scoredByCurrentLogic, type ScoringLogic } from "../measure/measure-identity.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { STAFF_CLOSED_STATUSES } from "../case/worklist-read-model.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { day, isCompletedRun, round1, complianceRateOf, type ComplianceRateCounts } from "./rollup-shared.ts";
 import { officialMeasureRateResult, type MeasureRate } from "./measure-rate.ts";
+import { dataInsufficientChecks, type SufficiencyCheck } from "../run/data-sufficiency.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
@@ -99,6 +100,11 @@ export interface ProgramSummary {
    * whenever this is true. False when `includesAuthoredScaleCounts` (no logic is named at all) (#769).
    */
   scoringConflict: boolean;
+  /**
+   * The checks the winning run's data for this measure failed (#853, D12), or null. `measureRate` is null
+   * whenever this is set: the card says the data was too thin to trust instead of showing a low rate.
+   */
+  dataInsufficient: SufficiencyCheck[] | null;
   /**
    * The year the winning run SCORED and the day its numbers describe (#637), read from the run's own
    * record rather than its start date — a rerun started in January that scores the year before is
@@ -549,6 +555,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       measureRate: null,
       scoringLogics: [],
       scoringConflict: false,
+      dataInsufficient: null,
       measurementYear: null,
       asOf: null,
       logicVintage: null,
@@ -581,6 +588,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
       // `includesAuthoredScaleCounts`): no logic names it, and there is no one-logic claim to conflict.
       s.scoringLogics = s.includesAuthoredScaleCounts ? [] : result.scoringLogics;
       s.scoringConflict = s.includesAuthoredScaleCounts ? false : result.conflict;
+      s.dataInsufficient = result.dataInsufficient;
     }
     const period = s.latestRunId ? await runPeriodOf(deps.runStore, s.latestRunId) : null;
     s.measurementYear = period?.measurementYear ?? null;
@@ -604,7 +612,9 @@ export function logicVintageOf(
   measureId: string,
   rate: Pick<MeasureRate, "official"> | null,
   measurementYear: number | null,
-  manifestOf: (measureId: string) => (Parameters<typeof officialLogicVintage>[0] & { sha256?: string; version?: string }) | null = loadOfficialManifest,
+  manifestOf: (measureId: string) =>
+    | (Parameters<typeof officialLogicVintage>[0] & { sha256?: string; logicSha256?: string; version?: string })
+    | null = loadOfficialManifest,
   /** The translation this deployment would score the year with, if any (`routedTranslationFor`). */
   translationFor: (measureId: string, year: number) => { derived?: { label: string } } | null = routedTranslationFor,
 ): OfficialLogicVintage | null {
@@ -615,7 +625,11 @@ export function logicVintageOf(
   if (ran?.kind === "derived") return null;
   const manifest = manifestOf(measureId);
   if (!manifest) return null;
-  if (ran?.artifactSha256 ? ran.artifactSha256 !== manifest.sha256 : ran?.version && ran.version !== manifest.version) return null;
+  // The vintage describes the logic now vendored, so it applies only to a run scored by that logic
+  // (`scoredByCurrentLogic`, #848: an earlier vendoring with the same logic counts).
+  const sameLogic = (sha: string) =>
+    !!manifest.sha256 && scoredByCurrentLogic({ catalogId: measureId, sha256: manifest.sha256, logicSha256: manifest.logicSha256 }, sha);
+  if (ran?.artifactSha256 ? !sameLogic(ran.artifactSha256) : ran?.version && ran.version !== manifest.version) return null;
   const vintage = officialLogicVintage(manifest, measurementYear);
   if (!vintage) return null;
   // CMS's draft scored a year a routed translation covers (a run from before the translation was turned
@@ -871,7 +885,7 @@ export async function programTrend(
     while (trendPointsIn(runs, opts?.tz).length < 10 && runsFound >= window && window < TREND_RUN_WINDOW_MAX) {
       window = Math.min(window * 2, TREND_RUN_WINDOW_MAX);
       const read = await runsWithOutcomes(deps, measureId, filters, window);
-      runs = runPointsOf(read.groups);
+      runs = await trustedRunPoints(deps.outcomeStore, measureId, read.groups);
       runsFound = read.runsFound;
     }
     const stamped = await withMeasurementYears(deps.runStore, runs);
@@ -944,7 +958,29 @@ export async function programTrend(
   // NOTE: Java unions a `run_based` branch for aggregate-only seeded runs; the TS floor `runs`
   // table has no compliant/total columns, so every TS run with data has outcomes — the
   // outcome-based branch is complete here.
-  return widenAndServe({ runs: runPointsOf(first.groups), runsFound: first.runsFound, window: TREND_RUN_WINDOW });
+  return widenAndServe({ runs: await trustedRunPoints(deps.outcomeStore, measureId, first.groups), runsFound: first.runsFound, window: TREND_RUN_WINDOW });
+}
+
+/**
+ * The per-run trend points, without a run whose data for this measure was too thin to trust (#853): its
+ * rate is low because the data is missing, so it is no point on the measure's history, and the newest
+ * trusted run stays the newest point. The flag is on EVERY row of a thin measure (errored ones included,
+ * and cleared on every row of a sufficient one), so one row per run decides it, read unsorted. Runs only on
+ * a trend-memo miss: the computed points are what the memo keeps.
+ */
+async function trustedRunPoints(
+  outcomes: Pick<OutcomeStore, "listOutcomes">,
+  measureId: string,
+  groups: RunGroup[],
+): Promise<ProgramTrendPoint[]> {
+  const trusted: ProgramTrendPoint[] = [];
+  // One at a time: a window can hold dozens of runs, and fanning the probes out at once is how a request
+  // drains the connection pool.
+  for (const point of runPointsOf(groups)) {
+    const [row] = await outcomes.listOutcomes(point.runId, { measureId, limit: 1, offset: 0, order: "none" });
+    if (row === undefined || dataInsufficientChecks(row.evidence) === null) trusted.push(point);
+  }
+  return trusted;
 }
 
 /**

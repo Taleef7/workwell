@@ -5,8 +5,155 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-29
+
+- **The pilot group's sandbox findings, the five that need no new decision (#865).**
+  - **Search:** two letters no longer list every patient. The role is matched on the employee profile only, an
+    id only by a query with a digit, and a name match ranks first. Enter opens the top result.
+  - **Case timeline:** each entry reads in words from one server-side describer (`case/case-event-text.ts`).
+    The stored payload is behind an admin-only Details. Recent Activity on the patient page uses the same
+    describer, so it now shows outreach (it looked for the wrong event type).
+  - **Patient page:** Open Cases first, an Open case button per gap, the evidence and simulation folded for
+    staff. Each gap says when and how its current assignee got it (`CaseEventStore.latestCaseEventsOfType`).
+  - **Scorecard:** a provider picker, with year, panel and provider in the URL, opens on My providers for a
+    panel owner.
+  - **Work list:** "Select all N matching" (up to 500 patients). The bulk-assign endpoint is unchanged.
+  - New read-only Maui e2e spec `staff-feedback.spec.ts`; each finding was also driven in a browser on a
+    local Maui stack.
+- **Next:** the patient page as the place to act (outreach for several gaps at once, inline actions) is PR 2.
+
+## 2026-10-21
+
+- **The MCP OAuth flow is under Playwright (#863 follow-up).** `e2e/tests/maui/mcp-oauth.spec.ts` (a write spec)
+  covers:
+  - a client's authorize link going through sign-in to the consent page;
+  - Approve leading to a code, then tokens, the read-only tools, and a refresh;
+  - a replayed code killing the grant;
+  - an admin's Revoke in Admin → MCP access ending the connection;
+  - a viewer able only to decline;
+  - an off-site `next` never leaving the app.
+
+  CI's Maui stack now sets `WORKWELL_PUBLIC_API_URL`.
+
+## 2026-10-20
+
+- **MCP clients can sign in with OAuth (MCP 2026-07-28 authorization).** WorkWell is now its own OAuth 2.1
+  authorization server for `/mcp`, so claude.ai connectors, Claude Code and `mcp-remote` connect with the URL
+  alone.
+  - **Flow:** the client opens WorkWell, the user signs in and approves on a consent page, and the tokens
+    refresh themselves.
+  - **Clients:** CIMD documents are fetched behind an SSRF guard, and self-registration is loopback only and
+    marked unverified.
+  - **Rules:** PKCE S256 and the `/mcp` resource are required.
+  - **Codes:** single use, and a replayed code kills the grant.
+  - **Refresh tokens:** they rotate atomically, with a 5-second grace (audited) for concurrent refreshes;
+    any other reuse revokes the grant. The user is re-checked on every refresh.
+  - **Admin:** connected clients appear in Admin → MCP access and can be disconnected.
+  - **Storage:** none new; codes and grants are refresh-family rows.
+  - **Hardened after review:**
+    - metadata documents are fetched only for Claude's two client ids (configurable; a host alone let random
+      paths spend the fetch budget), with global fetch limits, separate caches and a day of stale fallback;
+    - a loopback redirect is never shown as verified, and the page warns;
+    - the login `next` returns only to the consent page (a `/.//host` path escaped the app);
+    - a viewer can decline;
+    - DCR and token bodies are capped; IPv6 fetches go to global unicast only;
+    - `resource` is compared as a URL.
+- **MCP moves to the 2026-07-28 spec, with tokens that last (#704).** `POST /mcp` is served by the official
+  TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.1, owner-approved). It answers 2026-07-28 requests and the
+  2025-era ones most clients still send, statelessly. The 2024-11-05 `/sse` transport is retired.
+  - **Tokens:** admins mint MCP tokens on Admin → MCP access, 30 days by default and 90 at most.
+  - **Scope:** each kind of token is signed with a key of its own, never the login key, and is valid only on
+    `/mcp`, never on `/api`, CDS or `$cql`.
+  - **Revocation:** one by one, through the refresh-family table, so no DDL.
+  - **What ends a token:** a password change; and if the store cannot be read, the request is refused
+    (fail closed).
+  - **Tools:** they gained titles and read-only annotations. Bad arguments are still audited, and each tool audit
+    names its credential.
+  - **Config:** the new `WORKWELL_PUBLIC_API_URL` names each stack's public API; tokens are minted for that URL
+    plus `/mcp`.
+  - **Behaviour change:** a login token no longer opens `/mcp`.
+  - **Next:** OAuth 2.1 for MCP, so claude.ai connectors work and tokens refresh themselves.
+- **1 January rehearsed at small scale (#854).** `pnpm rehearse:year-change` runs the scheduler's own nightly
+  (`runNightlyRecompute`) as of a given date against a Postgres copy, refusing any host but the one named and
+  any WebChart tenant, then checks it. On a 1,000-patient corpus with Maui's routing: 31 December opened 783
+  cases; 1 January scored all six with the 2027 translations, closed all 783 as rolled over with 783 audit
+  events in 1.8 s, and opened 17. The 2027 work list starts nearly empty, because each measure counts only
+  patients with a 2027 visit. A run now logs and records (`RUN_COMPLETED.rollover`) how many it rolled over
+  and how long it took. The 1 January checklist is in `DEPLOY.md`. Next: Maui's own numbers on a copy in
+  December, where the Neon round trip sets the rollover's time.
+- **A run says when its data is too thin to trust (#853).** Three floors on live WebChart data, the owner's
+  call: coded encounter types ≥95% for CMS-scored measures, final blood pressures ≥95% for CMS165, failed
+  record fetches <1%. A measure below one ends the run `PARTIAL_FAILURE` with `data_insufficient:<measure>`,
+  its outcomes carry the flag, its out-of-population rows close no case, and QRDA I/III, the MeasureReports,
+  the Programs card and the attributed-list report refuse it. No DDL. The corpus never trips it. The coding
+  floors count only the measurement period's encounters and blood pressures, the data the measures read, and
+  wait for 100 of them; old uncoded history no longer fails a practice that codes well now. A review
+  found four more places still stating the rate: the measure page, the trend, the quality snapshots and MCP.
+  All four are fixed. The owner decided a thin measure's CDS cards are withheld.
+- **The provider scorecard (#852).** `/scorecard` (CM/ADMIN, Maui) gives each measure's rate per provider,
+  location subtotals and the practice total, with the counts behind each rate, small numbers (<20) dimmed, and
+  open gaps linked to the work list. It counts through the list report's own code, so a cell equals that
+  report's rate for the provider's patients (asserted through both routes). Both now read one unordered,
+  narrowed statement: 0.29 s for 20,000 rows on Postgres, down from 1.4 s for the paged full read. The list
+  report never selects a seeded or import run, and a list of errors still reports every rate. Review caught
+  open gaps stopping at the case store's default page of 50. The pooled "Overall compliance" is gone from
+  Programs. No benchmarks yet (OPEN_QUESTIONS §2.2).
+
 ## 2026-10-19
 
+- **The simulate-route test no longer fails on a machine with a VSAC key in its shell.** `engineForEnv` falls
+  back to `process.env` for the key, and a keyed engine opens the value-set store, which the test's `{}` env
+  cannot. The test now clears the key, as the MADiE end-to-end tests do. Production is unchanged.
+- **Terminology is taken at the release by its title, and Advanced Illness is the release's 2,030 codes (#851).**
+  The official completion used VSAC's drifting `manifest=` form and only refused an answer short of CMS's
+  declared count, so Advanced Illness was pinned at 2,000 codes (33 short of the release, 3 outside it) in
+  cms122/125/130/165. Every set is now expanded with `expansion=<release title>`, held to VSAC's exact total
+  and its echo of the release; 1082 equals the release's published file code for code. The translations'
+  member-by-member workaround is gone: one call per set reproduced all six sidecars byte for byte. cms138's
+  `…1278` is not in the release; it is sourced as VSAC serves it and recorded `inRelease: false`.
+- **Every artifact claims only what it meets, and identity follows the logic (#848).** Vendoring drops each
+  Library's `cql-library`/`elm-xml-library` claim with the content it strips; CMS's Measure claims stay as
+  shipped. The translations also drop `crmi-publishablelibrary` and `publishable-measure-cqfm`, carry no
+  empty `identifier`, and publish the notation WorkWell's semantics imply (CMS122: `decrease`; rule D6 now
+  checks that). Each official manifest records `logicSha256` (ELM + Measure groups), the lineage keeps every
+  vendoring's sha, and the four export gates ask whether a run was scored by the current logic, so this
+  re-vendor (identical logic, two claims fewer) keeps CMS's identity on every older run's exports.
+  Terminology is outside the logic hash, as it was outside the old bytes check: a run scored with the
+  2,000-code Advanced Illness list keeps CMS's identity too. The translations get the same continuity
+  (`TRANSLATION_LOGIC_LINEAGE`): five of six rebuilt with identical logic; cms122's notation change moved
+  its logic, so its older runs fall back.
+- **The MADiE gate has no exemption, and every cross-engine disagreement has a cause (#846, closes #572).**
+  Six CMS122 cases passed as "reference agreement" when our engine answered numerator 1, on the premise that
+  MADiE was wrong. That premise came from an old Java image's bug, so a regression on exactly those cases
+  would have passed; the gate now compares every case and is 455/455.
+  - The Java image is pinned by digest (v8.12.0-2), and a Java exception is counted as an engine error, not
+    a disagreement. All nine measures swept on it: 397 of 455 agree with the period sent. The other
+    57 are Java's second-precision period (none remain with the measure's default period), plus one Java
+    exception.
+  - `docs/evidence/CROSS_ENGINE_2026-10-19.md` supersedes the August and September causes: the medication
+    disagreements were the old image's `convert … to days` bug, and CMS165's was the second-precision
+    period, not a harness difference.
+  - Five stale conformance statements corrected (the QM IG 2.0.0 citation, the score's exception term, the
+    formula test's ruler, `Exp`/`Ln`, the `$cql` addendum).
+- **MeasureReports meet DEQM 1.0.0 on CMS's and the translations' reports (#849).** Owner decisions: DEQM
+  1.0.0 (UV) is the target, and no stratifier code yet. The canonical carries `|version`, scoring is stated
+  on the root, and every element carries the artifact's `linkId`. Measured with the HL7 validator: 0 DEQM
+  1.0.0 errors on an unstratified report scored by CMS's artifact or a translation (12 each before); a stratified
+  one (cms125, cms130, cms137) keeps one `deqm-7` per stratifier, an authored one its 11; STU5 stays at 3 per report; base R4 stays at 0.
+  A report now states exactly the populations its measure declares.
+- **Every process evaluates in UTC, and an engine upgrade cannot silently make a resolved diagnosis current
+  (#845).** A date-only FHIR value took the host's offset while fqm evaluates at 0, so a non-UTC host could
+  change a result. Measured: a CMS165 onset entered the population under Tokyo time and not under UTC.
+  - Every entry point now imports `src/engine/utc.ts` first: the server, the dev worker, the calculation
+    thread, every CLI, every top-level script and every `.mjs` script that runs a measure (found by what it
+    imports). A test refuses one that does not.
+  - The image sets `TZ=UTC`, and the test runner and CI are pinned.
+  - The published measure-engine package keeps evaluating in its caller's zone. Its patient data takes that
+    zone too, and fixing the period alone would split them (Codex review).
+  - `/health` reports the zone, and the deploy gate refuses a build whose offset is not 0.
+  - A guard runs every committed bundle's QICoreCommon on our engine: a resolved Condition with no
+    abatement is never prevalent. On cql-execution 4.0.0-beta.1 the same check fails, which is the
+    upstream translator bug (CQL issue 1871).
 - **The first deploy without code lists in the image left both stacks refusing their routing.** Each stored
   its lists in its bucket and pushed a clean image, but each new backend reported 4 routing problems, and
   no container log was reachable to say why. Locally the fetch works end to end against an S3 stand-in, so

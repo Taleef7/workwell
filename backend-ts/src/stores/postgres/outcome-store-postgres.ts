@@ -213,7 +213,8 @@ export class PgOutcomeStore implements OutcomeStore {
     // `jsonb_strip_nulls` is what keeps `evaluationError` ABSENT rather than null on a row that did
     // not error — the aggregator tests key presence, so carrying the key with a null would read every
     // row as a failure. The whole `official` object is kept (populations, rates, strata, ecqmId,
-    // version); `expressionResults` and `qrda1Import` are what this drops, and they are the bulk.
+    // version), and `dataInsufficient` (#853), so a report refuses a thin run's rates from this read;
+    // `expressionResults` and `qrda1Import` are what this drops, and they are the bulk.
     //
     // No ORDER BY: the caller folds. See the interface for why that is safe here and why the page
     // window it replaces was not a saving.
@@ -221,12 +222,47 @@ export class PgOutcomeStore implements OutcomeStore {
       `SELECT status,
               jsonb_strip_nulls(jsonb_build_object(
                 'official', evidence_json -> 'official',
-                'evaluationError', evidence_json -> 'evaluationError'
+                'evaluationError', evidence_json -> 'evaluationError',
+                'dataInsufficient', evidence_json -> 'dataInsufficient'
               )) AS evidence
          FROM ${T} WHERE run_id = $1 AND measure_id = $2`,
       [runId, measureId],
     );
     return rows.map((r) => ({ status: r.status, evidence: r.evidence }));
+  }
+
+  async listOutcomeSubjectMembershipsForRun(
+    runId: string,
+    measureId: string,
+  ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>> {
+    if (!isUuid(runId)) return [];
+    // The membership projection's narrowing, verbatim, plus four plain columns. No ORDER BY: the caller
+    // keeps the newest row per subject by comparing, and orders what it serves itself.
+    const { rows } = await this.pool.query<{
+      id: string;
+      subject_id: string;
+      evaluated_at: Date | string;
+      out_of_population: boolean | null;
+      status: string;
+      evidence: unknown;
+    }>(
+      `SELECT id, subject_id, evaluated_at, out_of_population, status,
+              jsonb_strip_nulls(jsonb_build_object(
+                'official', evidence_json -> 'official',
+                'evaluationError', evidence_json -> 'evaluationError',
+                'dataInsufficient', evidence_json -> 'dataInsufficient'
+              )) AS evidence
+         FROM ${T} WHERE run_id = $1 AND measure_id = $2`,
+      [runId, measureId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      subjectId: r.subject_id,
+      evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
+      outOfPopulation: flagOf(r.out_of_population),
+      status: r.status,
+      evidence: r.evidence,
+    }));
   }
 
   async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {

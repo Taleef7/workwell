@@ -136,6 +136,17 @@ const PAGE_SIZES = [25, 50, 100].map((n) => ({ value: String(n), label: String(n
  */
 const BULK_ASSIGN_MAX = 500;
 
+/**
+ * The most patients "Select all N matching" can take, and not a number chosen here: `GET
+ * /api/worklist/patients` clamps `limit` to 500 (`backend-ts/src/routes/worklist.ts`). Asking for more
+ * would quietly return the first 500 under a bar claiming every match, so above it the offer is refused
+ * and says to narrow the filters.
+ *
+ * It counts PATIENTS; {@link BULK_ASSIGN_MAX} counts their gaps, and a selection under this one can
+ * still be over that one.
+ */
+const SELECT_MATCHING_MAX = 500;
+
 /** How long the search box waits for typing to settle before it filters (#658). Cases uses 300 ms;
  *  this list's search is the costlier read, so it waits a little longer. */
 const SEARCH_DEBOUNCE_MS = 400;
@@ -184,6 +195,23 @@ export default function WorklistPage() {
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(0);
   const requestSeq = useRef(0);
+  /**
+   * Every patient matching the filters, once "Select all N matching" has answered — kept apart from
+   * `rows`, which is the page on screen. While it is set, the bulk bar acts on these patients' gaps.
+   */
+  const [matching, setMatching] = useState<{ rows: WorklistPatientRow[] } | null>(null);
+  const [selectingAll, setSelectingAll] = useState(false);
+  /**
+   * The ticket of the select-all still in flight, or null once it is abandoned. `requestSeq` cannot
+   * carry the abandonment by itself: unticking a checkbox must drop the answer too, and bumping the
+   * shared counter for that would also drop a page load in flight and leave the list loading forever.
+   */
+  const selectAllTicket = useRef<number | null>(null);
+  const clearMatching = useCallback(() => {
+    selectAllTicket.current = null;
+    setSelectingAll(false);
+    setMatching(null);
+  }, []);
 
   // URL is the state, so a filtered list is a link someone can send a colleague — which is what the
   // "saved filters" ask turned out to mean in practice.
@@ -352,20 +380,15 @@ export default function WorklistPage() {
   /** "Medicare (all)" — every code the roster actually has in that category. */
   const togglePayerGroup = togglePayerCodes;
 
-  const load = useCallback(async () => {
-    // Nothing is fetched until the view is DECIDED. When the URL says nothing, `effectivePanel` reads
-    // "all" while the mappings are in flight, so loading immediately meant a mapped staffer's first
-    // paint was a whole-practice query — several thousand other people's patients, flashed on screen
-    // and then replaced by their own panel, plus a second heavy query to do it.
-    if (panelFilter === null && ownsPanel === undefined) return;
-    // A request sequence, like /cases has: typing in the search box fires several of these, and without
-    // it a slower earlier response resolves last and overwrites the current rows with stale ones.
-    const ticket = (requestSeq.current += 1);
-    setLoading(true);
-    setError(null);
-    setLoadFailed(false);
-    try {
-      const params = new URLSearchParams({ status: statusView, limit: String(pageSize), offset: String(page * pageSize) });
+  /**
+   * The list's query for one window of it. The page load and "Select all N matching" both build here,
+   * so the patients the second selects are the ones the first is paging through: two copies of this
+   * filter list would drift the first time a filter was added to one, and an assign would then act on
+   * patients the screen never showed.
+   */
+  const listQuery = useCallback(
+    (limit: number, offset: number) => {
+      const params = new URLSearchParams({ status: statusView, limit: String(limit), offset: String(offset) });
       if (providerFilter) params.set("providerId", providerFilter);
       if (assigneeFilter) params.set("assignee", assigneeFilter);
       if (outcomeFilter) params.set("outcome", outcomeFilter);
@@ -380,7 +403,28 @@ export default function WorklistPage() {
       // Only "me" is sent: "all" is the ABSENCE of a panel constraint, and spelling it out would make
       // the server resolve a filter it is about to ignore.
       if (effectivePanel === "me") params.set("panel", "me");
-      const { data, headers } = await api.getWithHeaders<WorklistPatientRow[]>(`/api/worklist/patients?${params.toString()}`);
+      return params.toString();
+    },
+    [statusView, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, siteId, from, to, payerFilter, effectivePanel],
+  );
+
+  const load = useCallback(async () => {
+    // Nothing is fetched until the view is DECIDED. When the URL says nothing, `effectivePanel` reads
+    // "all" while the mappings are in flight, so loading immediately meant a mapped staffer's first
+    // paint was a whole-practice query — several thousand other people's patients, flashed on screen
+    // and then replaced by their own panel, plus a second heavy query to do it.
+    if (panelFilter === null && ownsPanel === undefined) return;
+    // A request sequence, like /cases has: typing in the search box fires several of these, and without
+    // it a slower earlier response resolves last and overwrites the current rows with stale ones.
+    const ticket = (requestSeq.current += 1);
+    setLoading(true);
+    setError(null);
+    setLoadFailed(false);
+    // A reload is a different list (another filter, page or size), so "every matching patient" no
+    // longer describes it; the ticket above also drops a select-all still in flight.
+    clearMatching();
+    try {
+      const { data, headers } = await api.getWithHeaders<WorklistPatientRow[]>(`/api/worklist/patients?${listQuery(pageSize, page * pageSize)}`);
       if (ticket !== requestSeq.current) return;
       setRows(data ?? []);
       setTotal(Number(headers.get("X-Total-Count") ?? data?.length ?? 0));
@@ -396,7 +440,7 @@ export default function WorklistPage() {
     } finally {
       if (ticket === requestSeq.current) setLoading(false);
     }
-  }, [api, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, payerFilter, effectivePanel, panelFilter, ownsPanel, siteId, from, to, pageSize, page, statusView]);
+  }, [api, listQuery, clearMatching, panelFilter, ownsPanel, pageSize, page]);
 
   // Deferred a tick, matching `/cases`: the lint rule forbids a synchronous setState inside an effect
   // (it cascades renders), and `load` sets loading/rows/total on entry.
@@ -407,11 +451,65 @@ export default function WorklistPage() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  const selectedRows = useMemo(() => rows.filter((r) => selected.includes(r.employeeId)), [rows, selected]);
+  // Every matching patient once "Select all N matching" has answered, otherwise the ticked rows on
+  // this page. Everything below — the counts, the cap, the warning, the assign — reads this one list.
+  const selectedRows = useMemo(
+    () => matching?.rows ?? rows.filter((r) => selected.includes(r.employeeId)),
+    [matching, rows, selected],
+  );
   // The button says exactly what it will do: every ACTIVE gap of every selected patient, counted.
   const selectedGapIds = useMemo(() => selectedRows.flatMap((r) => r.openGaps.map((g) => g.caseId)), [selectedRows]);
   const allSelected = rows.length > 0 && rows.every((r) => selected.includes(r.employeeId));
   const overBulkCap = selectedGapIds.length > BULK_ASSIGN_MAX;
+  // The page is ticked and the list runs past it. Not while the list is loading: the rows on screen are
+  // the outgoing list's, and a select-all started then would take a later ticket than that load, which
+  // would then drop its own answer and leave the list loading.
+  const offerSelectMatching = canBulkAct && allSelected && total > rows.length && !loading;
+  const matchingTooMany = total > SELECT_MATCHING_MAX;
+
+  /**
+   * Fetch every patient matching the filters, through the same query the page load builds.
+   *
+   * **The ticket comes from `requestSeq`, the counter `load` uses, on purpose.** A filter, page or size
+   * changed while this is in flight runs `load`, which takes a later ticket; this answer then belongs
+   * to the OLD filters and is dropped, rather than selecting patients the screen no longer describes.
+   * A later select-all supersedes it the same way. `selectAllTicket` drops it when a checkbox changes.
+   */
+  async function selectAllMatching() {
+    if (!offerSelectMatching || matchingTooMany || selectingAll) return;
+    const ticket = (requestSeq.current += 1);
+    selectAllTicket.current = ticket;
+    setSelectingAll(true);
+    const current = () => ticket === requestSeq.current && ticket === selectAllTicket.current;
+    try {
+      const { data, headers } = await api.getWithHeaders<WorklistPatientRow[]>(
+        `/api/worklist/patients?${listQuery(SELECT_MATCHING_MAX, 0)}`,
+      );
+      if (!current()) return;
+      selectAllTicket.current = null;
+      setSelectingAll(false);
+      const found = data ?? [];
+      const matched = Number(headers.get("X-Total-Count") ?? found.length);
+      // The list can grow past the cap between the page load and the click. The server then answers
+      // with the first 500, and selecting those as "all" would leave the rest out without a word.
+      if (matched > found.length) {
+        emitToast(
+          `${matched.toLocaleString()} ${SUBJECT.plural} now match, more than ${SELECT_MATCHING_MAX} can be selected at once. Narrow the filters; this page is still selected.`,
+          "error",
+        );
+        return;
+      }
+      setMatching({ rows: found });
+    } catch (err) {
+      if (!current()) return;
+      selectAllTicket.current = null;
+      setSelectingAll(false);
+      emitToast(
+        `Could not select every matching ${SUBJECT.singular}: ${err instanceof Error ? err.message : "Unknown error"}. This page is still selected.`,
+        "error",
+      );
+    }
+  }
   // How many of the selected gaps currently belong to someone OTHER than the target. The grouping goes
   // to trouble to mark those in the list (dimmed, with a tooltip); taking them without a word would
   // undo that — a filtered "assigned to me" view plus select-all silently reassigns colleagues' work.
@@ -780,9 +878,39 @@ export default function WorklistPage() {
         <div className="rounded-xl border border-primary-200 bg-primary-50 p-3 max-md:sticky max-md:top-0 max-md:z-20 max-md:shadow-md dark:border-primary-800 dark:bg-primary-900/20 max-md:dark:bg-neutral-900">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="font-semibold text-primary-900 dark:text-primary-200">
-              {selected.length} {SUBJECT.singular}
-              {selected.length === 1 ? "" : "s"} selected
+              {matching ? (
+                `All ${matching.rows.length.toLocaleString()} matching ${matching.rows.length === 1 ? SUBJECT.singular : SUBJECT.plural} selected (${selectedGapIds.length.toLocaleString()} open gap${selectedGapIds.length === 1 ? "" : "s"})`
+              ) : (
+                <>
+                  {selected.length} {SUBJECT.singular}
+                  {selected.length === 1 ? "" : "s"} selected
+                </>
+              )}
             </span>
+            {/*
+              The page is the most the header checkbox can take, and a provider's open gaps are often
+              more than a page. Offered only once the whole page is ticked, the way mail clients do it.
+            */}
+            {offerSelectMatching && !matching ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={matchingTooMany || selectingAll}
+                  aria-describedby={matchingTooMany ? "worklist-select-matching-reason" : undefined}
+                  onClick={() => void selectAllMatching()}
+                >
+                  {selectingAll
+                    ? `Selecting all ${total.toLocaleString()} ${SUBJECT.plural}…`
+                    : `Select all ${total.toLocaleString()} matching ${SUBJECT.plural}`}
+                </Button>
+                {matchingTooMany ? (
+                  <span id="worklist-select-matching-reason" className="text-xs text-neutral-700 dark:text-neutral-300">
+                    More than {SELECT_MATCHING_MAX} {SUBJECT.plural} match. Narrow the filters to select them all at once.
+                  </span>
+                ) : null}
+              </>
+            ) : null}
             <Select
               label="Assignee for selected"
               hideLabel
@@ -815,8 +943,11 @@ export default function WorklistPage() {
             */}
             {overBulkCap ? (
               <span className="text-xs text-danger-700 dark:text-danger-300">
-                Too many for one assignment ({selectedGapIds.length} gaps, limit {BULK_ASSIGN_MAX}) — select fewer
-                {SUBJECT.plural} or reduce the page size.
+                Too many for one assignment ({selectedGapIds.length} gaps, limit {BULK_ASSIGN_MAX}) —{" "}
+                {/* The page size does not bound the matching set, so it is not the remedy there. */}
+                {matching
+                  ? "narrow the filters, or work one page at a time."
+                  : `select fewer ${SUBJECT.plural} or reduce the page size.`}
               </span>
             ) : null}
             {takingFromOthers > 0 && !overBulkCap ? (
@@ -824,7 +955,14 @@ export default function WorklistPage() {
                 {takingFromOthers} of {selectedGapIds.length} currently belong to someone else.
               </span>
             ) : null}
-            <button type="button" className="text-primary-800 hover:underline dark:text-primary-200" onClick={() => setSelected([])}>
+            <button
+              type="button"
+              className="text-primary-800 hover:underline dark:text-primary-200"
+              onClick={() => {
+                clearMatching();
+                setSelected([]);
+              }}
+            >
               Clear selection
             </button>
           </div>
@@ -850,7 +988,10 @@ export default function WorklistPage() {
                       className="@max-4xl:h-5 @max-4xl:w-5"
                       aria-label={`Select all ${SUBJECT.plural} on this page`}
                       checked={allSelected}
-                      onChange={(e) => setSelected(e.target.checked ? rows.map((r) => r.employeeId) : [])}
+                      onChange={(e) => {
+                        clearMatching();
+                        setSelected(e.target.checked ? rows.map((r) => r.employeeId) : []);
+                      }}
                     />
                     <span className="font-medium normal-case tracking-normal @4xl:hidden">Select all {SUBJECT.plural} on this page</span>
                   </label>
@@ -901,11 +1042,14 @@ export default function WorklistPage() {
                             className="@max-4xl:h-5 @max-4xl:w-5"
                             aria-label={`Select ${row.employeeName}`}
                             checked={selected.includes(row.employeeId)}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              // Any change to what is ticked ends "every matching patient": the bar
+                              // goes back to describing the boxes on screen.
+                              clearMatching();
                               setSelected((existing) =>
                                 e.target.checked ? [...existing, row.employeeId] : existing.filter((id) => id !== row.employeeId),
-                              )
-                            }
+                              );
+                            }}
                           />
                         </label>
                       </td>

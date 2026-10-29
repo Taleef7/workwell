@@ -33,6 +33,7 @@ import { toMeasure, toMeasureDetail } from "../measure/measure-read-models.ts";
 import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
+import { thinMeasuresOfRun } from "../run/data-sufficiency.ts";
 import { AGE_BANDS, hasActiveSubjectFilters, isAgeBand, isSex, matchesSubjectFilters, payerCodesOf } from "../compliance/subject-filters.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { JsonRecord } from "./tool-audit.ts";
@@ -302,13 +303,17 @@ async function getRunSummary(args: JsonRecord, deps: McpToolDeps): Promise<unkno
   const totalCases = await deps.caseStore.countByLastRun(run.id);
   // Counts-based (bounded GROUP BY) — never materialize a seed:scale run's 120k rows for the summary.
   const s = toRunSummaryFromCounts(run, await deps.outcomeStore.countOutcomesByStatus(run.id), totalCases);
+  // #853: a rate over a measure whose data was too thin to trust is the dashboard's refused number, so
+  // the run states none, and says which measures were thin.
+  const dataInsufficient = await thinMeasuresOfRun(deps.outcomeStore, run);
   return {
     run_id: s.runId,
     scope: s.scopeType,
     total_cases: s.totalCases,
     compliant_count: s.compliantCount,
     non_compliant_count: s.nonCompliantCount,
-    pass_rate: s.passRate,
+    pass_rate: dataInsufficient.length > 0 ? null : s.passRate,
+    data_insufficient: dataInsufficient,
     duration: s.durationMs,
     outcome_counts: s.outcomeCounts,
     started_at: s.startedAt,
@@ -400,7 +405,8 @@ async function listRuns(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
       const notInPopulation = statusCounts
         .filter((c) => c.status === "MISSING_DATA" && c.outOfPopulation === true)
         .reduce((sum, c) => sum + c.count, 0);
-      const complianceRate = complianceRateOf({
+      const dataInsufficient = await thinMeasuresOfRun(deps.outcomeStore, run);
+      const complianceRate = dataInsufficient.length > 0 ? null : complianceRateOf({
         compliant: counts.COMPLIANT ?? 0,
         dueSoon: counts.DUE_SOON ?? 0,
         overdue: counts.OVERDUE ?? 0,
@@ -422,6 +428,7 @@ async function listRuns(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
         duration_ms: item.durationMs,
         total_evaluated: item.totalEvaluated,
         compliance_rate: complianceRate,
+        data_insufficient: dataInsufficient,
         outcome_counts: counts,
       };
     }),
@@ -824,5 +831,22 @@ export const MCP_TOOLS: McpTool[] = [
 ];
 
 export const MCP_TOOLS_BY_NAME: Record<string, McpTool> = Object.fromEntries(MCP_TOOLS.map((t) => [t.name, t]));
+
+/** The human-readable `title` each tool advertises (MCP 2026-07-28 `Tool.title`); every tool has one. */
+export const MCP_TOOL_TITLES: Record<string, string> = {
+  get_case: "Get a case",
+  list_cases: "List cases",
+  get_run_summary: "Get a run summary",
+  list_measures: "List measures",
+  get_measure_version: "Get a measure",
+  list_runs: "List runs",
+  explain_outcome: "Explain an outcome",
+  get_employee: "Get a subject",
+  check_compliance: "Check compliance",
+  list_noncompliant: "List open gaps",
+  explain_rule: "Explain a measure's rule",
+  get_measure_traceability: "Get measure traceability",
+  list_data_quality_gaps: "List data-quality gaps",
+};
 
 export { ToolArgError };

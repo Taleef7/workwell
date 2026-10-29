@@ -600,6 +600,8 @@ test("programTrend — monthly snapshot scope fallback on Maui profile and snaps
       outcomeStore: {
         listOutcomesWithRun: async () => [mauiRow],
         listLatestPopulationRuns: latestRunsFromRows([mauiRow]),
+        // The trend's thin-run probe (#853): no row carries the flag here.
+        listOutcomes: async () => [],
       },
       runStore: { listRuns: async () => [] },
       caseStore: { listCases: async () => [] },

@@ -64,8 +64,24 @@ const RULES: Rule[] = [
   // load-bearing and cannot fire (review). Its public-ness is asserted by an actual unauthenticated request
   // in `openapi.test.ts`, which is the only thing that proves it.
 
-  { pattern: rx("/sse"), access: [A, CM, MCP] },
+  // MCP (#704). Exactly `/mcp` is PERMIT here because `routes/mcp.ts` authenticates it itself, with MCP
+  // tokens only: a token minted for that endpoint, which `extractPrincipal` (login tokens) can never read,
+  // and which no other route accepts. The actor and role come from that token, not from this gate.
+  // Order is load-bearing: `rx("/mcp/**")` also matches the bare path, so the exact rule comes first, and
+  // anything under `/mcp/` stays gated, so a future sub-route is never public by accident. The 2024-11-05
+  // transport (`/sse`, `/mcp/message`) is retired; `/mcp/message` now matches the gated rule and no handler.
+  { pattern: rx("/mcp"), access: "PERMIT" },
   { pattern: rx("/mcp/**"), access: [A, CM, MCP] },
+
+  // The MCP authorization server (`routes/oauth.ts`). Discovery, registration, authorize and token are public
+  // by design (OAuth 2.1): the token endpoint authenticates the code or refresh token itself, and authorize
+  // only sends the browser to the web app's consent page, where the user signs in as usual. The consent API
+  // is not public: reading a request needs any signed-in user (its answer carries the decline redirect, so a
+  // viewer can still send the client `access_denied`), approving one a Case Manager or Admin.
+  { pattern: rx("/.well-known/**"), access: "PERMIT" },
+  { pattern: rx("/oauth/**"), access: "PERMIT" },
+  { method: "GET", pattern: rx("/api/oauth/consent"), access: "AUTHENTICATED" },
+  { method: "POST", pattern: rx("/api/oauth/consent"), access: [A, CM] },
 
   // CDS Hooks (ADR-067). These rules are MANDATORY, not a refinement: `/cds-services` matches no `/api/**`
   // rule, and `authorize` ends with `return { ok: true }` for non-`/api` paths (permitAll, mirroring
@@ -74,7 +90,7 @@ const RULES: Rule[] = [
   //
   // Discovery is PERMIT: it returns service metadata and no patient data, and a CDS client must be able to
   // discover the service during onboarding (the spec imposes no auth on it). Invoke and feedback are
-  // machine-client work, so they reuse the SAME authority as /sse and /mcp/** rather than inventing a role
+  // machine-client work, so they reuse the SAME authority as /mcp/** rather than inventing a role
   // — the user directory stays hardcoded (CLAUDE.md hard rule).
   //
   // Order is load-bearing: `rx("/cds-services/**")` expands to `^/cds-services(?:/.*)?$`, which ALSO
@@ -86,7 +102,7 @@ const RULES: Rule[] = [
   // The `$cql` Evaluation Service (#474). Same shape and same reasoning as the CDS Hooks rules above:
   // `/$cql` is outside `/api/`, where this function ends in permitAll, and the endpoint executes
   // caller-supplied CQL — without this rule it would be an anonymous compute service. Machine-client
-  // authority, matching /sse, /mcp/** and CDS invoke.
+  // authority, matching /mcp/** and CDS invoke.
   { pattern: rx("/$cql"), access: [A, CM, MCP] },
 
   // Outreach templates: the picker on the case-detail outreach action is the CASE_MANAGER's
@@ -180,6 +196,9 @@ const RULES: Rule[] = [
   // seat is a VIEWER too, so leaving the reads to the /api/** catch-all would expose all of it. The
   // identity routes are restricted for exactly this reason. Must precede the catch-alls below.
   { pattern: rx("/api/subject-lists/**"), access: [CM, A] },
+  // The provider scorecard (#852): every provider's rates are the practice's own performance figures, so
+  // the VIEWER seat (the public /sandbox, the Maui clinician seat) does not read them. Before the catch-alls.
+  { pattern: rx("/api/scorecard/**"), access: [CM, A] },
   // Bulk downloads (production-readiness review 2026-10-15, owner decision D5). Every patient's rows in one
   // file is a minimum-necessary question, so the CSV exports, the per-patient QRDA I documents, the QRDA III
   // and MeasureReport files are CM/ADMIN, and the audit-ledger export is ADMIN. BROWSING the same rows in the

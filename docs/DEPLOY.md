@@ -90,22 +90,20 @@ exits 1 unless the bytes hash to the manifest's pin and every declared set is pr
 uncapped, so the deploy fails here instead of shipping an image whose evaluations all 500 while health
 stays 200.
 
-**When VSAC moves (2026-10-15).** (The official artifacts' version is under Step 1a.) VSAC's expansion of a GROUPING value set at a pinned release resolves
-its members at their latest version, so a member republished after the release changes the grouping's
-answer (Advanced Illness 1082 went from the release's 2,025 codes to 2,027 overnight, and every
-translation declaring it failed its pin). Two defences:
-- each pure grouping is also expanded member by member at the release; when that differs from VSAC's
-  grouping answer the members win, which is the release, and the log says `WARNING … differs from its
-  members` with the codes;
+**When VSAC moves (2026-10-15; fixed at the source by #851).** (The official artifacts' version is under Step 1a.)
+VSAC's `manifest=` expansion of a GROUPING value set resolves its members at their latest version, so a
+member republished after the release changed the grouping's answer (Advanced Illness 1082 went from the
+release's 2,025 codes to 2,027 overnight, and every translation declaring it failed its pin). Every set is
+now expanded with `expansion=<the release Library's title>` ("eCQM Update 2026-05-14"), which is the
+release's own answer and does not drift; VSAC's echo of the release is checked, and a declared set the
+release does not list is refused. It reproduced all six translation sidecars byte for byte. The remaining
+defence:
 - `--fallback-dir` restores the stack's stored copy (pulled from its bucket before vendoring; CI pulls
   Maui's in one step that alone holds the bucket key) when VSAC still does not reproduce the pin or
   cannot be reached, and the same pin check judges the copy. Until the old images that carry sidecars are
   deleted, the restore step also seeds copies from the last deployed image. The log says `WARNING … restored
   it from`. A deploy that needed it is fine to ship; a translation whose pin changed has no older copy,
   so it still needs VSAC.
-- `--emit-block` (producing a NEW pin) REFUSES when a grouping and its members disagree: the members are
-  the release at `ecqm-update-2026-05-14` (checked against its published file) but not at every release,
-  so a pin is never produced over a disagreement without checking the published value-set file.
 
 On Maui the registry login runs before the restore step, so its seed from the last image works even if
 the package is made private.
@@ -123,8 +121,17 @@ content names (old name `--complete-capped-expansions` still accepted).
   "$RUNNER_TEMP/terminology"`. When the re-vendored manifest differs from the committed
   one in its `terminology` block ALONE, and the stored copy hashes to the committed pin, the committed
   manifest and that sidecar are put back (`WARNING … restored the committed manifest`). Anything else
-  stands and the gate fails as before. Member-by-member expansion is NOT used here: at
-  `ecqm-fhir-update-2025` a grouping's members disagree with both VSAC's answer and the release.
+  stands and the gate fails as before.
+- **At the release, exactly (#851).** A completion is expanded with `expansion=eCQM FHIR Update 2025` and
+  must equal VSAC's own total, with VSAC confirming the release. The earlier `manifest=` form completed
+  Advanced Illness to 2,000 codes, accepted because it exceeded CMS's declared 1,997, where the release
+  and its published value-set file hold 2,030. A CAPPED set the release does not list stays capped
+  (routing refuses). An ABSENT one cannot (fqm refuses the whole measure over a missing declared set), so
+  it is sourced as VSAC serves it, warned about, and recorded `inRelease: false`: cms138's
+  `…3.526.3.1278`, not in eCQM FHIR Update 2025.
+- **A changed official pin needs VSAC once per stack.** The buckets hold only the sidecars earlier deploys
+  stored, so the first CI run and each stack's first deploy after a pin moves (cms122/125/130/165 at #851)
+  re-expand from VSAC; `--fallback-dir` has no copy of the new pin to restore. That deploy then stores it.
 - `_VENDOR` (build time) and `WORKWELL_VSAC_API_KEY_TWH` (runtime resolver, ADR-023) are separate
   secrets on purpose (ADR-036), even though they hold the same UMLS key.
 - **Landing order — secrets before manifests.** Add or change the secret in the **same change** that
@@ -138,8 +145,13 @@ content names (old name `--complete-capped-expansions` still accepted).
   ```
 
   A new completion changes `officialLogicVersion` (ADR-040) and invalidates that measure's `eval_state`.
-- `pnpm official:terminology-audit [<MADiE name>]` lists value sets the ELM retrieves but the bundle does
-  not ship (CMS138 is the known case). Only VSAC fixes those; the MADiE deck is the real check.
+  A re-vendor that changes `bundle.json` adds an entry to `CMS_ARTIFACT_LINEAGE`
+  (`src/measure/measure-identity.ts`) and keeps the old one: the manifest's `logicSha256` decides whether
+  runs scored by the earlier bytes keep CMS's identity in their exports (#848). A translation rebuild does
+  the same in `TRANSLATION_LOGIC_LINEAGE`; a test fails until the new sha is there.
+- `pnpm official:terminology-audit [<MADiE name>]` lists value sets the ELM declares but the bundle does
+  not ship (CMS138 is the known case). Only VSAC fixes those. The MADiE deck checks such a set only where an
+  expression reads it; CMS138's never does.
 
 ##### Step 1b — vendoring a NEW measure when you cannot read the secret
 
@@ -318,6 +330,36 @@ writes a `WARN` containing `no segment makes them applicable` when this is owed.
 - **Measure performance on a quiet, warm worker** — not during the nightly (12:00 UTC, ~90 min on Maui)
   and not in the first minutes after a deploy.
 
+### 1 January 2027: the year change (#854)
+
+The scheduler runs Monday to Friday, so Thursday 31 December is the last 2026 nightly and **Friday 1 January,
+12:00 UTC (7:00 AM Eastern)**, the first 2027 one. Rehearsed with `pnpm rehearse:year-change` (2026-10-20, a
+1,000-patient corpus on a local Postgres; the December rehearsal on a copy of Maui adds Maui's own numbers).
+What that nightly does:
+- every routed measure is scored by its 2027 translation (`WorkWell translation of CMS… (ww-2027.1)`);
+- every 2026 case still open for a patient it evaluates closes `RESOLVED` / `CYCLE_ROLLED_OVER`, one
+  `CASE_RESOLVED` audit event each: 783 per 1,000 patients rehearsed, about 15,300 on Maui. The closes are
+  sequential, two writes each (1.8 s for 783 locally), so on Neon the time is about 2 × the count × one round
+  trip; the run log states it;
+- **the 2027 work list starts nearly empty and fills as patients are seen.** Each of the six measures counts
+  only patients with a visit in 2027: 17 cases per 1,000 on the corpus (8 in 1,000 have a 1 January visit),
+  none on real data. The rates rest on those few patients (Programs marks a denominator under 20 as small);
+- a measure nobody has entered yet logs `WARN … not one of N subjects entered the official initial
+  population`: expected that day;
+- the data-sufficiency check (#853) waits for 100 encounters in the year, so it stays silent.
+
+**On call, after 13:30 UTC:**
+1. The newest run is `COMPLETED` with no failures, and its log says `Closed N case(s) from an earlier cycle as
+   rolled over in … s.` with nothing after it about cases that could not be closed or have no audit event.
+   N is within ±10% of the work list's open total on 31 December (the cases page, status Open).
+2. Each measure's page names its 2027 translation.
+3. The work list shows only 2027 cases, few of them.
+4. `/health` is UP and its `lastPopulationRun` is that run, with no data-insufficient measure.
+5. Tell MIE the year changed, with N and the run's time.
+
+If the run FAILED, nothing rolled over (the closes come after the last chunk): start one ALL_PROGRAMS run from
+the Runs page (`POST /api/runs/manual`), which rolls over as the nightly does.
+
 ### Which run scopes are SCHEDULED, and which answer in the request (ADR-085, #590)
 
 `ALL_PROGRAMS`, `SITE` and `MEASURE` are scheduled: **201** with `status: RUNNING` and a `runId` — poll
@@ -403,6 +445,7 @@ From `backend-ts/`, with `DATABASE_URL` set. Idempotent and resumable. Undo SQL 
 | `pnpm seed:trend-history --weeks N --as-of <date>` | synthetic weekly runs | refuses under retention | `triggered_by='seed:trend-history'` |
 | `pnpm resolve-valuesets --manifest <canonical> [--official <id>]` | VSAC expansions into `value_sets` (descriptive) | TWH: done | `DELETE FROM value_sets WHERE source='VSAC'` |
 | `pnpm outcomes:compact` | one retention pass | also runs after each Maui nightly | none |
+| `pnpm rehearse:year-change --evaluation-date <date> --confirm-host <host> [--out <file.json>]` | the nightly as of that date: runs, outcomes, cases, audit; as of a new year it closes the old year's cases (#854) | a COPY only: refuses unless `--confirm-host` repeats `DATABASE_URL`'s host, and with WebChart configured | discard the copy |
 
 A crashed `seed:scale` leaves RUNNING runs that are not auto-swept — roll back before resuming.
 
@@ -481,6 +524,8 @@ delivers scheduled runs hours apart; to heal now, run the reconcile workflow by 
 | `WORKWELL_AUTH_ENABLED`, `WORKWELL_AUTH_JWT_SECRET` | B | Auth defaults on; `false` refused in production. |
 | `WORKWELL_AUTH_COOKIE_SAME_SITE` / `_SECURE` | B | **`None` / `true` in production**; defaults `Lax` / `false` locally. |
 | `WORKWELL_CORS_ALLOWED_ORIGINS` | B | Exact origins; production refuses wildcard/blank/`localhost` with **503 `unsafe_configuration`**. First origin = Studio link in CDS cards; add a browser CDS client's origin deliberately (ADR-067). |
+| `WORKWELL_PUBLIC_API_URL` | B | The API's public origin (`https://twh-api-ts.os.mieweb.org`; no path or trailing slash). MCP tokens are minted for `<it>/mcp`. Unset or invalid with auth on: `/mcp` and the MCP token routes answer 503, nothing else is affected. Set in every deploy and reconciler (`public-api-url.workflows.test.ts`). |
+| `WORKWELL_OAUTH_CIMD_CLIENTS` | B | Optional. Comma-separated MCP client ids (https URLs, exactly as clients send them) whose metadata documents the OAuth server fetches; unset = Claude's connector and Claude Code (`https://claude.ai/oauth/mcp-oauth-client-metadata`, `https://claude.ai/oauth/claude-code-client-metadata`). Any other https `client_id` is refused before a request. Set nowhere today. |
 | `WORKWELL_SCHEDULER_ENABLED` | B | `true` enables the nightly scheduler. |
 | corpus / chunk / anchor / retention vars | B | See the Maui table. |
 | `WORKWELL_OFFICIAL_MEASURES` | B | Catalog ids run by the official artifact; `all` refused. A build arg baked into the image, never container env (flip checklist, #768). |
@@ -671,8 +716,8 @@ Set a hard monthly usage limit and store the key only as the `OPENAI_API_KEY` se
 - Frontend: `/` → 200. DB: `psql "<direct url>" -c "SELECT 1"`.
 - All health endpoints are DB-free, so also grep the log for `WORKWELL_ALERT` and the boot warm line.
 - `scripts/smoke-shadow.sh https://<api-host>` runs the post-deploy checklist (health, runs, open cases,
-  the four CSV exports, integrations, MCP sync, outreach delivery) as PASS/FAIL/WARN; WARNs are known
-  limitations (its evidence line predates R2; `/sse` is the ingress caveat below).
+  the four CSV exports, integrations, MCP sync, outreach delivery, and `POST /mcp` refusing an
+  unauthenticated call) as PASS/FAIL/WARN; WARNs are known limitations (its evidence line predates R2).
 
 ## Rollback
 
@@ -707,9 +752,10 @@ near a limit the same day.
 - **`503 statement_timeout`** → a read hit the 30 s role default, often a cold read model after a deploy.
 - **Green container, every evaluation 500s** → grep `OFFICIAL_ROUTING_MISCONFIGURED`.
 - **Evidence fails, health green** → grep `EVIDENCE_BUCKET_UNREACHABLE`.
-- **MCP/SSE drops every ~60 s (504)** → MIE nginx defaults; the fix is an MIE vhost change on the SSE/MCP
-  locations (`proxy_buffering off`, `proxy_read_timeout 3600s`, `proxy_http_version 1.1`, empty
-  `Connection`). MCP is at `/sse` + `/mcp/**` and needs a WorkWell JWT (`docs/MCP.md`).
+- **MCP answers 503 `mcp_unavailable`** → `WORKWELL_PUBLIC_API_URL` is unset or not a bare https origin
+  (only `/mcp` and the token routes are affected), or the token store could not be read (fails closed). **MCP answers 401** → the token is revoked, expired, a
+  login token, or minted before a password change; mint a new one on the Admin page (`docs/MCP.md`).
+  MCP is `POST /mcp` with one answer per request, so MIE nginx's stream timeouts no longer apply.
 - **Deploy fails at the manager API (curl 7/28)** → check TCP 443 to `manager.os.mieweb.org`; don't loop
   state-changing requests by hand; when it recovers, `gh run rerun <run-id> --failed`.
 - **`Container is 'offline', expected running`** after the ~3 min poll → the container did not start:

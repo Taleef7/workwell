@@ -1,5 +1,7 @@
 # CMS2's seven cross-engine disagreements, run to a cause
 
+> **Superseded 2026-10-19 (#846): read `CROSS_ENGINE_2026-10-19.md`.** The seven were cqf-fhir-cr 8.10.0's `convert … to days` bug (cqframework/clinical_quality_language#1682). Java does not take the start from `boundsPeriod` instead of `authoredOn`: both engines take `Coalesce(boundsPeriod, authoredOn, validityPeriod)`. A stated `boundsPeriod.high` let the period skip the broken conversion, which is why the last mutation below moved the sweep to 36/36. On the pinned v8.12.0-2 image CMS2 is 36/36 unmutated.
+
 Date: 2026-09-07. The MM-1c precondition for CMS2's flip (`docs/ROADMAP_2026-08-30.md` §5;
 `LOCKED_DECISIONS.md` §4A.5 — no known-unverified measure is routed to the pilot). The disagreements
 themselves were found on 2026-08-04 (`CROSS_ENGINE_2026-08-04.md`) and recorded as **undiagnosed**;

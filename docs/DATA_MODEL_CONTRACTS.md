@@ -27,6 +27,15 @@ run (`compliance/live-cell.ts`).
 - **Out-of-population never opens a case (ADR-078):** the outcome persists as MISSING_DATA;
 `planCaseUpsert` no-ops, or closes an active case `RESOLVED`, `closed_reason='OUT_OF_POPULATION'`,
 `closed_by=NULL` (audited `CASE_RESOLVED`). In-population MISSING_DATA from a completed evaluation opens one.
+- **A data-insufficient measure closes nothing as out of population (#853, D12).** When a live run's ingested
+data falls below a floor (coded `Encounter.type` ≥95%, final blood pressure ≥95% for CMS165, failed record
+fetches <1%; `run/data-sufficiency.ts`; the first two counted over the measurement period the measures read,
+the evaluation date's calendar year, and judged only once at least 100 are in it), the measure's
+out-of-population rows skip the upsert (neither close
+nor open); its other rows behave as usual, and its rows still count as answered for the cycle rollover. The
+run is PARTIAL_FAILURE. Judged once, before the first chunk; the corpus never fires it. The blood-pressure
+floor counts only panels CMS165 can read (`isBloodPressure`): data sending separate systolic and diastolic
+readings, or no LOINC system, counts 0 of 0 and passes it while CMS165 reads no blood pressure at all.
 - **A failed evaluation never changes a case.** An engine or batch error, or a subject whose WebChart record
 could not be read (never evaluated, T3), persists MISSING_DATA with `evaluationError` and marks the run
 PARTIAL_FAILURE, but no case is opened, reopened, updated or rolled
@@ -66,17 +75,27 @@ on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfil
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
 leave an "Evidence uploaded" row on the case timeline (an owner question, `OPEN_QUESTIONS.md`).
-- **The sweep reports 63 hits across 19 files (2026-10-17); check the count, not the labels.** The 64th,
+- **The sweep reports 67 hits across 20 files (2026-10-20); check the count, not the labels.** The four
+added on 2026-10-20 are all in `routes/oauth.ts` (MCP OAuth) and none is a violation:
+  - in `redeemCode` (read by the matcher as the `spent()` helper), a read of the grant row precedes
+    `OAUTH_CODE_REUSE_DETECTED`; the redemption itself (one `rotateIf`, pending to live) follows the code's
+    `OAUTH_TOKEN_ISSUED`, so a ledger outage leaves the code redeemable;
+  - the three in `gone()` are a helper the matcher takes for the enclosing function (`refresh`): the read of
+    the grant row before `OAUTH_TOKEN_REFRESHED`, which precedes its rotation; then a race's lost rotation and
+    re-read before the refused-race audit (`OAUTH_REFRESH_RACE_REFUSED`, which changes nothing) and the
+    replay audit, which precedes its revoke.
+
+  The 64th,
 `dispatchOutreach`'s render before its audit, left when the record step became `recordDispatch`; the
 mutate-first exception above is unchanged. The six
 added since 2026-10-02 are all in `rerunToVerify`: #763 removed a local `const … = (` the matcher read as
 a function start, so that function's earlier run writes now show against its `CASE_RERUN_FAILED` audit.
 The code is unchanged; the old count was the undercount. The files
-above account for 9; the other 10 are not violations: `panel-assignment` (mapping before consequences),
+above account for 9; the other 11 are not violations: `panel-assignment` (mapping before consequences),
 `segments` and `outcome-compaction` (matcher artifacts / the ADR-073 d4 completion event),
 `subject-lists` (audit in `beforeComplete`), `evidence-service`, `audit-packet`, `materialize-run`,
-`measure-seed` (reads or pure computation), `case-event-store-postgres` (the audit writer itself) and
-`store-contract` (the test that drives them).
+`measure-seed` (reads or pure computation), `case-event-store-postgres` (the audit writer itself),
+`store-contract` (the test that drives them) and `oauth` (above).
 - **Missing primitive:** no cross-store `applyCaseAction({ patch, action, audit })` (`CaseEventStore` +
 `CaseStore`), and no open issue tracks it (#598 was closed by a PR keyword on 2026-09-21; its remainder
 was listed in #614, which was closed on 2026-09-23 as superseded by the milestone, and no milestone issue
@@ -131,7 +150,13 @@ WorkWell translation (decision 3) adds `official.kind: "derived"`, `label`, `url
 `ecqmId` is `null`: read `kind` before falling back to any CMS identity. QRDA I/III refuse such a run
 (422 `derived_logic_not_reportable`); a run whose evaluated rows were scored by more than one logic (CMS's
 artifact, a translation, authored CQL) or period is refused by QRDA I/III and every MeasureReport type
-(422 `mixed_logic`); an errored row counts as no logic.
+(422 `mixed_logic`); an errored row counts as no logic. `dataInsufficient: { checks }` (#853) is set on every
+outcome of a data-insufficient measure, errored rows included, and removed from every other (so a
+copied-forward row never keeps it); a measure with any such row is refused by QRDA I/III and every MeasureReport
+type (409 `data_insufficient`). No surface states its rate: the programs card and measure page (headline and
+change), the run reconciliation and run page, the trend (a thin run is no point on it), the quality-over-time
+snapshot (the month keeps its earlier one), the scorecard, MCP `list_runs`/`get_run_summary` (`null` plus
+`data_insufficient`), and its CDS cards are withheld (`CDS_HOOKS.md`).
 - **Evaluation failure** replaces the evidence with `{ "evaluationError": "<cause>", "message": "<error
 text>" }` and forces `MISSING_DATA` (`run/run-pipeline.ts`); imports keep `qrda1Import`. Readers test the
 key, never the cause: `"engine failure"` in the run pipeline, `"source fetch failed"` (with WebChart's error)
@@ -245,7 +270,15 @@ evaluatedAt, rate, initialPopulation, denominator, denominatorExclusion, denomin
 numerator, status, outOfPopulation, evaluationError, providerId, payer, executedLogic`
 
 - `measurementYear` is REQUIRED. Per measure: the newest reportable population run whose own measurement
-period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date.
+period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date. A seeded run
+(`seed:scale`, `seed:trend-history`) or one created for QRDA I imports (`requestedScope.importDriven`) is
+never selected (#852).
+- The rate count is the widest the list members' newest evaluated rows carry; a list none of whose rows was
+evaluated takes the run's (every subject's newest row), so it still reports every rate (CMS137's two). A
+superseded duplicate never sets it. The provider scorecard (`GET /api/scorecard`, CM/ADMIN) selects, reads
+and counts through the same code (`compliance/measure-year-rates.ts`, one unordered narrowed read), so a
+provider's cell is this report's rate for a list of exactly that provider's patients. Rows are served in
+(`evaluatedAt`, id) order.
 - `rowStatus`: `EVALUATED`, one row per (measure, rate); `MISSING_FROM_RUN`, a matched member the run never
 evaluated, one row per measure, patient/provider/payer filled, population/status/rate columns empty
 (never `0`/`false`); `NOT_MATCHED` (NOT_FOUND/AMBIGUOUS), exactly ONE row per unmatched member (never
@@ -259,7 +292,9 @@ disjoint, assigned in order error -> out of population -> no rate -> scored, nev
 stay separate.
 - Compaction refuses per measure: `compactionStatus: "compacted"`, no rows, `missingFromRun: 0`, named in
 the CORS-exposed `X-WorkWell-Compacted-Measures`; **409 `run_compacted`** only when every run is exposed;
-never a truncated 200.
+never a truncated 200. A data-insufficient measure (#853) is refused the same way: `compactionStatus:
+"data_insufficient"`, no rows, `missingFromRun: 0`, named in `X-WorkWell-Data-Insufficient-Measures`; **409
+`data_insufficient`** when every measure is refused (compacted or thin).
 - `rawIdentifier`, subject name and rate label pass through `csvTextCell` (defuses a leading `=`, `+`,
 `-`, `@`, tab, CR).
 - `ecqmId` is CMS-prefixed (`CMS137FHIR`, `ecqmIdOf`) since #769; it was the evidence's bare `137FHIR`.
