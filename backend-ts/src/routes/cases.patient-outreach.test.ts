@@ -144,7 +144,7 @@ test("the employee profile sends one message per case on the chosen channel, eac
   }
 });
 
-test("a case whose dispatch throws is reported unrecorded, and the cases after it are still sent", async () => {
+test("a case whose dispatch throws is reported failed (it may have gone out), and the cases after it are still sent", async () => {
   let calls = 0;
   const mk = (id: string, measureId: string) => ({
     id, employeeId: "emp-006", measureId, evaluationPeriod: "2026-01-01", status: "OPEN", priority: "HIGH", assignee: null,
@@ -166,7 +166,9 @@ test("a case whose dispatch throws is reported unrecorded, and the cases after i
   };
   const out = await sendPatientOutreachMessages(deps as never, cases as never, { actor: "cm@workwell.dev" });
   assert.deepEqual(recorded, ["c1", "c3"]);
-  assert.deepEqual(out.unrecorded, ["c2"]);
+  assert.deepEqual(out.failed, ["c2"]);
+  assert.deepEqual(out.unrecorded, [], "a per-case throw is not known to have sent, so it is not called unrecorded");
+  assert.equal(out.messages, 2, "only the cases known to have sent are counted");
   assert.deepEqual(out.results.map((r) => [r.caseId, r.recorded]), [["c1", true], ["c2", false], ["c3", true]]);
 });
 

@@ -22,7 +22,10 @@ interface PreviewMessage {
 
 interface SendResult {
   messages: number;
+  /** Sent, but the gap holds no record of it. */
   unrecorded: string[];
+  /** The send threw (one message per gap only): it may or may not have gone out. */
+  failed?: string[];
 }
 
 /**
@@ -50,7 +53,9 @@ export function GapOutreach({
   const [previewing, setPreviewing] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<{ message: string; stale: boolean } | null>(null);
+  // Labels, not ids, taken when the answer arrives: the refetch after a send may change the ticked gaps.
   const [unrecorded, setUnrecorded] = useState<string[]>([]);
+  const [failed, setFailed] = useState<string[]>([]);
 
   const caseIds = cases.map((c) => c.caseId);
   const key = `${channel}|${caseIds.join(',')}`;
@@ -81,11 +86,15 @@ export function GapOutreach({
     setSending(true);
     setError(null);
     setUnrecorded([]);
+    setFailed([]);
+    const byId = new Map(cases.map((c) => [c.caseId, labelFor(c)]));
+    const labels = (ids: string[] | undefined) => (ids ?? []).map((id) => byId.get(id) ?? id);
     try {
       const out = await api.post<object, SendResult>('/api/cases/patient-outreach', { caseIds, channel });
       setPreview(null);
-      setUnrecorded(out.unrecorded ?? []);
-      emitToast(out.messages === 1 ? 'Message sent' : `${out.messages} messages sent`, 'success');
+      setUnrecorded(labels(out.unrecorded));
+      setFailed(labels(out.failed));
+      if (out.messages > 0) emitToast(out.messages === 1 ? 'Message sent' : `${out.messages} messages sent`, 'success');
       onSent();
     } catch (err) {
       setError({ message: err instanceof Error ? err.message : 'Could not send the message', stale: err instanceof ApiError && err.status === 409 });
@@ -93,9 +102,6 @@ export function GapOutreach({
       setSending(false);
     }
   }
-
-  const byId = new Map(cases.map((c) => [c.caseId, c]));
-  const unrecordedLabels = unrecorded.map((id) => (byId.has(id) ? labelFor(byId.get(id)!) : id));
 
   return (
     <div className="mt-4 rounded-xl border border-neutral-200 dark:border-neutral-800 p-4" data-testid="gap-outreach">
@@ -138,8 +144,9 @@ export function GapOutreach({
               data-testid="gap-outreach-preview"
               className="mt-3 rounded-lg bg-neutral-50 dark:bg-neutral-800/50 p-3 text-sm text-neutral-800 dark:text-neutral-200"
             >
-              <p className="font-medium [overflow-wrap:anywhere]">Subject: {m.subject}</p>
-              <p className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{m.bodyText}</p>
+              {/* Only an email carries a subject; a text or a call is the body alone. */}
+              {channel === 'EMAIL' ? <p className="mb-1 font-medium [overflow-wrap:anywhere]">Subject: {m.subject}</p> : null}
+              <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.bodyText}</p>
             </div>
           ))
         : null}
@@ -153,10 +160,16 @@ export function GapOutreach({
           ) : null}
         </p>
       ) : null}
-      {unrecordedLabels.length > 0 ? (
+      {unrecorded.length > 0 ? (
         <p role="alert" data-testid="gap-outreach-unrecorded" className="mt-3 text-sm text-amber-700 dark:text-amber-400">
-          The message went out, but {unrecordedLabels.length === 1 ? 'this gap holds' : 'these gaps hold'} no record of it:{' '}
-          {unrecordedLabels.join(', ')}. Check {unrecordedLabels.length === 1 ? 'its' : 'their'} timeline before sending again.
+          The message went out, but {unrecorded.length === 1 ? 'this gap holds' : 'these gaps hold'} no record of it:{' '}
+          {unrecorded.join(', ')}. Check {unrecorded.length === 1 ? 'its' : 'their'} timeline before sending again.
+        </p>
+      ) : null}
+      {failed.length > 0 ? (
+        <p role="alert" data-testid="gap-outreach-failed" className="mt-3 text-sm text-red-600 dark:text-red-400">
+          Sending failed for {failed.join(', ')}. {failed.length === 1 ? 'Its message' : 'Their messages'} may still have
+          gone out: check the timeline before sending again.
         </p>
       ) : null}
     </div>

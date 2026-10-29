@@ -48,11 +48,16 @@ export interface PatientOutreachMessage {
 }
 
 export interface PatientOutreachResult {
-  /** How many messages went out: one on a patient deployment, one per case otherwise. */
+  /** How many messages are known to have gone out: one on a patient deployment, one per sent case otherwise. */
   messages: number;
   results: DispatchResult[];
   /** Cases whose message went out but whose record of it failed: the page must say so. */
   unrecorded: string[];
+  /**
+   * Cases whose own send threw (one message per case only): the throw may have come before the message or
+   * after it, so the page says it may have gone out rather than that it did or did not.
+   */
+  failed: string[];
 }
 
 const isPatientDeployment = (): boolean => DEPLOYMENT_PROFILE.subjectTerm === "patient";
@@ -103,6 +108,7 @@ export async function sendPatientOutreachMessages(
   opts: DispatchOptions,
 ): Promise<PatientOutreachResult> {
   let results: DispatchResult[];
+  const failed: string[] = [];
   if (isPatientDeployment()) {
     // Throws only before its message is sent; after it, a case whose record failed comes back unrecorded.
     results = await dispatchPatientOutreach(deps, cases, opts);
@@ -114,6 +120,7 @@ export async function sendPatientOutreachMessages(
       try {
         results.push(await dispatchOutreach(deps, c, opts));
       } catch {
+        failed.push(c.id);
         results.push({
           caseId: c.id, employeeId: c.employeeId, channel: opts.channel ?? "EMAIL", toAddress: "",
           status: "FAILED", messageId: "", templateName: "", recorded: false,
@@ -122,8 +129,9 @@ export async function sendPatientOutreachMessages(
     }
   }
   return {
-    messages: isPatientDeployment() ? 1 : cases.length,
+    messages: isPatientDeployment() ? 1 : cases.length - failed.length,
     results,
-    unrecorded: results.filter((r) => !r.recorded).map((r) => r.caseId),
+    unrecorded: results.filter((r) => !r.recorded && !failed.includes(r.caseId)).map((r) => r.caseId),
+    failed,
   };
 }

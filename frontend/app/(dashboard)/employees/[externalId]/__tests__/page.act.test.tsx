@@ -124,13 +124,34 @@ describe("one message for the ticked gaps", () => {
     await waitFor(() => expect(profileReads()).toBeGreaterThan(readsBefore));
   });
 
-  it("a changed channel clears the preview too", async () => {
+  it("a changed channel clears the preview too, and a text's preview has no subject", async () => {
     render(<EmployeeProfilePage />);
     await userEvent.click(await screen.findByRole("button", { name: "Preview message" }));
     await waitFor(() => expect(sendButton()).toBeEnabled());
+    expect(screen.getByTestId("gap-outreach-preview")).toHaveTextContent("Subject: A reminder from your clinic");
     await userEvent.click(screen.getByRole("combobox", { name: "Channel" }));
     await userEvent.click(await screen.findByRole("option", { name: "SMS" }));
     expect(sendButton()).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Preview message" }));
+    await waitFor(() => expect(sendButton()).toBeEnabled());
+    expect(screen.getByTestId("gap-outreach-preview")).not.toHaveTextContent("Subject:");
+  });
+
+  it("a per-gap send that failed says it may still have gone out, and the toast counts only the sent ones", async () => {
+    setSubject("employee");
+    post.mockImplementation((_url: string, body?: { dryRun?: boolean }) =>
+      Promise.resolve(body?.dryRun ? PREVIEW : { dryRun: false, messages: 1, unrecorded: [], failed: ["case-2"], results: [] }),
+    );
+    render(<EmployeeProfilePage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Preview message" }));
+    const send = screen.getByRole("button", { name: /^Send \d+ messages?$/ });
+    await waitFor(() => expect(send).toBeEnabled());
+    await userEvent.click(send);
+    const warning = await screen.findByTestId("gap-outreach-failed");
+    expect(warning).toHaveTextContent(/may still have\s+gone out/);
+    expect(warning).toHaveTextContent(/cms122|Diabetes HbA1c/i);
+    expect(screen.queryByTestId("gap-outreach-unrecorded")).toBeNull();
+    expect(emitToast).toHaveBeenCalledWith("Message sent", "success");
   });
 
   it("names the gaps whose record of a sent message failed", async () => {
