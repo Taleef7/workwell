@@ -11,8 +11,13 @@
  * `expressionResults` bulk. The paged full read it replaced re-sorted the measure's evidence per page,
  * 1.4 s for 20,000 rows on Postgres against 0.14 s. One evidence per distinct scoring logic is kept,
  * which is all `scoringOfRows` needs to name the logic and detect a mix.
+ *
+ * Rows of one (run, measure) carry a handful of distinct evidences, and on Postgres the rows that carry
+ * the same one share ONE object, so what is derived from an evidence (its error marker, rates, scoring
+ * key, memberships per status) is derived once per object, not once per row; each evaluation time is
+ * parsed once, not on every comparison of the sort.
  */
-import { scoringIdentityOf, type OutcomeRecord, type OutcomeStore } from "../stores/outcome-store.ts";
+import { scoringIdentityOf, type OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
 import {
   createRateAggregator,
@@ -158,7 +163,9 @@ export async function readMeasureYearRows(
   measurementYear: number,
   keep: (subjectId: string) => boolean = () => true,
 ): Promise<MeasureYearRows> {
-  const newest = new Map<string, LeanRow>();
+  // The newest kept row per subject, with its `evaluatedAt` parsed once: comparing re-parsed both
+  // timestamps on every call, and as the sort's comparator that was most of the read's time at 20,000 rows.
+  const newest = new Map<string, { row: LeanRow; at: number }>();
   // One evidence per distinct logic key, from an evaluated row: `scoringOfRows` over these answers as it
   // would over every row, because the key decides the answer. O(logics) blobs, never O(rows).
   const logicEvidence = new Map<string, unknown>();
@@ -173,53 +180,90 @@ export async function readMeasureYearRows(
   let periodMismatch = false;
   // Every subject's newest row's rate count (0 for an errored row), kept or not: the run's own count, the
   // fallback for a kept set none of whose rows was evaluated.
-  const runNewest = new Map<string, { id: string; evaluatedAt: string; rates: number }>();
+  const runNewest = new Map<string, { id: string; at: number; rates: number }>();
   const logicKeyByRaw = new Map<string, string>();
-
-  for (const row of await outcomes.listOutcomeSubjectMembershipsForRun(runId, measureId)) {
-    const errored = isEvaluationErrorEvidence(row.evidence);
-    const seenInRun = runNewest.get(row.subjectId);
-    if (!seenInRun || isNewer(row, seenInRun)) {
-      runNewest.set(row.subjectId, { id: row.id, evaluatedAt: row.evaluatedAt, rates: errored ? 0 : rateCountOf(row.evidence) });
+  // Everything below that is read off a row's evidence, derived once per evidence OBJECT: the Postgres
+  // read hands every row of a (run, measure) with the same narrowed evidence one shared object, so 20,000
+  // rows are a handful of derivations. Each value is a function of the evidence alone (memberships of the
+  // evidence and the status), so a row reads exactly what deriving it afresh would give. Where every row
+  // has its own object (the SQLite floor) each is derived once, as before.
+  const derivedByEvidence = new Map<unknown, Derived>();
+  const derive = (evidence: unknown): Derived => {
+    let derived = derivedByEvidence.get(evidence);
+    if (!derived) {
+      const errored = isEvaluationErrorEvidence(evidence);
+      derived = { errored, rates: errored ? 0 : rateCountOf(evidence), kept: null, membershipsByStatus: new Map() };
+      derivedByEvidence.set(evidence, derived);
     }
-    if (!keep(row.subjectId)) continue;
-    const identity = officialReportIdentity(row.evidence);
+    return derived;
+  };
+  // What only a KEPT row reads, so a list report's non-members cost no more than the two values above.
+  const keptOf = (derived: Derived, evidence: unknown): KeptDerived => {
+    if (derived.kept) return derived.kept;
+    const identity = officialReportIdentity(evidence);
     const period = identity?.measurementPeriod;
-    if (period && new Date(period.start).getUTCFullYear() !== measurementYear) periodMismatch = true;
-    const held = newest.get(row.subjectId);
-    if (held) {
-      duplicateRowsCollapsed += 1;
-      if (!isNewer(row, held)) continue;
-    }
     // Exact: `namingMemoKey` reads the TRIMMED identity and `scoringLogicKeyOf` the raw block, so two rows
     // differing only in an untrimmed digest or a partial period share the first and not the second; keyed
     // on both, one evidence per key answers `scoringOfRows` as every row would. Both are functions of the
-    // raw `scoringIdentityOf` projection alone, so they are computed once per distinct projection, not per
-    // row (most of the read's time at 20,000 rows went to them).
+    // raw `scoringIdentityOf` projection alone, so they are computed once per distinct projection.
     let logicKey = "";
-    if (!errored) {
-      const raw = JSON.stringify(scoringIdentityOf((row.evidence as { official?: unknown } | null)?.official));
+    if (!derived.errored) {
+      const raw = JSON.stringify(scoringIdentityOf((evidence as { official?: unknown } | null)?.official));
       const known = logicKeyByRaw.get(raw);
-      logicKey = known ?? intern(JSON.stringify([namingMemoKey(scoringIdentityKey(identity), identity), scoringLogicKeyOf(row.evidence)?.key ?? null]));
+      logicKey = known ?? intern(JSON.stringify([namingMemoKey(scoringIdentityKey(identity), identity), scoringLogicKeyOf(evidence)?.key ?? null]));
       if (known === undefined) logicKeyByRaw.set(raw, logicKey);
     }
-    if (!errored && !logicEvidence.has(logicKey)) logicEvidence.set(logicKey, row.evidence);
-    const checks = dataInsufficientChecks(row.evidence);
-    newest.set(row.subjectId, {
-      id: row.id,
-      subjectId: row.subjectId,
-      evaluatedAt: row.evaluatedAt,
-      status: row.status,
-      ...(row.outOfPopulation !== undefined ? { outOfPopulation: row.outOfPopulation } : {}),
-      errored,
-      // Strata are not read: neither report states them, and they are most of a parsed row's size.
-      memberships: parseRateRow(row, measureId).memberships,
+    const checks = dataInsufficientChecks(evidence);
+    derived.kept = {
+      otherYear: !!period && new Date(period.start).getUTCFullYear() !== measurementYear,
       logicKey,
       thin: checks ? intern(checks.join(",")) : null,
+    };
+    return derived.kept;
+  };
+
+  for (const row of await outcomes.listOutcomeSubjectMembershipsForRun(runId, measureId)) {
+    const derived = derive(row.evidence);
+    const at = Date.parse(row.evaluatedAt);
+    const seenInRun = runNewest.get(row.subjectId);
+    if (!seenInRun || isNewerAt(at, row.id, seenInRun.at, seenInRun.id)) {
+      runNewest.set(row.subjectId, { id: row.id, at, rates: derived.rates });
+    }
+    if (!keep(row.subjectId)) continue;
+    const kept = keptOf(derived, row.evidence);
+    if (kept.otherYear) periodMismatch = true;
+    const held = newest.get(row.subjectId);
+    if (held) {
+      duplicateRowsCollapsed += 1;
+      if (!isNewerAt(at, row.id, held.at, held.row.id)) continue;
+    }
+    if (!derived.errored && !logicEvidence.has(kept.logicKey)) logicEvidence.set(kept.logicKey, row.evidence);
+    let memberships = derived.membershipsByStatus.get(row.status);
+    if (!memberships) {
+      // Strata are not read: neither report states them, and they are most of a parsed row's size. The
+      // status is part of the key because an authored row's membership is read off it.
+      memberships = parseRateRow(row, measureId).memberships;
+      derived.membershipsByStatus.set(row.status, memberships);
+    }
+    newest.set(row.subjectId, {
+      at,
+      row: {
+        id: row.id,
+        subjectId: row.subjectId,
+        evaluatedAt: row.evaluatedAt,
+        status: row.status,
+        ...(row.outOfPopulation !== undefined ? { outOfPopulation: row.outOfPopulation } : {}),
+        errored: derived.errored,
+        memberships,
+        logicKey: kept.logicKey,
+        thin: kept.thin,
+      },
     });
   }
 
-  const rows = [...newest.values()].sort((a, b) => (isNewer(a, b) ? 1 : isNewer(b, a) ? -1 : 0));
+  const rows = [...newest.values()]
+    .sort((a, b) => (isNewerAt(a.at, a.row.id, b.at, b.row.id) ? 1 : isNewerAt(b.at, b.row.id, a.at, a.row.id) ? -1 : 0))
+    .map((held) => held.row);
   let keptRates = 0;
   for (const row of rows) if (!row.errored) keptRates = Math.max(keptRates, row.memberships.length);
   let runRates = 0;
@@ -257,15 +301,32 @@ export async function readMeasureYearRows(
   };
 }
 
+/** A row's evidence, read once per evidence object (`readMeasureYearRows`). */
+interface Derived {
+  errored: boolean;
+  /** The rate count the run's own declared count reads: 0 for an errored row. */
+  rates: number;
+  /** Filled by the first KEPT row carrying this evidence. */
+  kept: KeptDerived | null;
+  /** `parseRateRow`'s memberships, per status (an authored row's membership is read off its status). */
+  membershipsByStatus: Map<string, PopulationMembership[]>;
+}
+
+interface KeptDerived {
+  /** The evidence states a measurement period that starts in another year. */
+  otherYear: boolean;
+  logicKey: string;
+  thin: string | null;
+}
+
 /**
- * Compared as INSTANTS, not as strings: `2027-01-01T10:00:00+02:00` is earlier than `2027-01-01T09:30:00Z`
- * and sorts after it lexically, so a string compare could pick the older clinical evaluation. The id
- * breaks a genuine tie, and is compared as a string because that is all it is.
+ * Is row A (evaluated at `aAt`, `Date.parse`d once by the caller) newer than row B? Compared as INSTANTS,
+ * not as strings: `2027-01-01T10:00:00+02:00` is earlier than `2027-01-01T09:30:00Z` and sorts after it
+ * lexically, so a string compare could pick the older clinical evaluation. The id breaks a genuine tie,
+ * and is compared as a string because that is all it is; it decides alone when either time is unreadable.
  */
-function isNewer(row: Pick<OutcomeRecord, "id" | "evaluatedAt">, held: Pick<LeanRow, "id" | "evaluatedAt">): boolean {
-  const a = Date.parse(row.evaluatedAt);
-  const b = Date.parse(held.evaluatedAt);
-  return Number.isFinite(a) && Number.isFinite(b) ? (a === b ? row.id > held.id : a > b) : row.id > held.id;
+function isNewerAt(aAt: number, aId: string, bAt: number, bId: string): boolean {
+  return Number.isFinite(aAt) && Number.isFinite(bAt) ? (aAt === bAt ? aId > bId : aAt > bAt) : aId > bId;
 }
 
 export interface Buckets {

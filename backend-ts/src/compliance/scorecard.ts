@@ -245,8 +245,9 @@ async function readColumn(
 
   // Compaction, the one thing that changes a terminal run's rows, is checked before the read (an exposed
   // run is never read) and after it (a pass that began during the read), as the list report does. Nothing
-  // is cached: the narrowed read is fast enough per request (0.14 s for 20,000 rows on Postgres), and a
-  // cache of every subject's row is memory the next nightly makes stale.
+  // is cached, so every request reads each measure's evidence again: on a quarter-CPU Postgres (Maui's
+  // Neon compute) that read is most of the page, about 0.6 s per measure for 20,000 rows and 2 s for
+  // CMS137 (2026-10-29), and a cache of every subject's row is memory the next nightly makes stale.
   if ((await compactionExposure(run, deps.events)).exposed) return column("compacted", run, null);
   const read = await readMeasureYearRows(deps.outcomes, run.runId, m.id, measurementYear);
   if ((await compactionExposure(run, deps.events)).exposed) return column("compacted", run, null);
