@@ -9,9 +9,10 @@
  * checked condition; see `case/case-read-models.ts` for why. The compliance
  * data (outcomes, open cases, audit timeline) is real.
  */
-import type { CaseStore } from "../stores/case-store.ts";
+import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import type { OutcomeRecord, OutcomeStore } from "../stores/outcome-store.ts";
-import type { CaseEventStore } from "../stores/case-event-store.ts";
+import type { AuditEventRow, CaseEventStore } from "../stores/case-event-store.ts";
+import { describeCaseEvent } from "../case/case-event-text.ts";
 import { DEPLOYMENT_PROFILE, employeeById, employees, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { DIRECTORY } from "../config/deployment-profile.ts";
@@ -67,6 +68,15 @@ export interface OpenCaseSummary {
   logic: ScoringLogic | null;
   priority: string;
   assignee: string | null;
+  /**
+   * When and how the CURRENT assignee got this gap (#865), from the ledger: the newest `CASE_ASSIGNED`
+   * when it names that assignee, else the case's creation for one a provider's panel placed when the
+   * nightly opened it. Null when the ledger cannot say, so the page never states a time it guessed.
+   */
+  assignedAt: string | null;
+  /** Who assigned it; null for the panel placement a run made. */
+  assignedBy: string | null;
+  assignedVia: "PANEL" | "BULK" | "OPERATOR" | null;
   slaDueDate: string | null;
 }
 export interface AuditEventSummary {
@@ -147,23 +157,37 @@ function actualDaysSince(evidence: unknown): number | null {
   return hadExam && typeof daysDef?.result === "number" ? daysDef.result : null;
 }
 
-function humanReadable(eventType: string, actor: string | null, measureName: string | null): string {
-  const who = actor && actor !== "system" ? actor : "System";
+/**
+ * One Recent Activity line: the case timeline's own sentence (`describeCaseEvent`, so the two pages
+ * cannot word one event two ways), the measure it belongs to, and who did it. The run's own events
+ * (actor "system") name nobody.
+ */
+function activityLine(e: AuditEventRow, measureName: string | null): string {
+  const { label, summary } = describeCaseEvent({ eventType: e.eventType, payload: e.payload });
   const measure = measureName ? ` (${measureName})` : "";
-  switch (eventType) {
-    case "CASE_CREATED":
-      return `${who} opened a case${measure}`;
-    case "CASE_UPDATED":
-      return `${who} updated the case${measure}`;
-    case "CASE_RESOLVED":
-      return `${who} resolved the case${measure}`;
-    case "OUTREACH_SENT":
-      return `${who} sent outreach${measure}`;
-    case "CASE_SLA_BREACHED":
-      return `Case SLA breached — priority escalated${measure}`;
-    default:
-      return eventType.replace(/_/g, " ").toLowerCase();
+  const by = e.actor && e.actor !== "system" ? ` by ${e.actor}` : "";
+  return `${summary ?? label}${measure}${by}`;
+}
+
+/** See `OpenCaseSummary.assignedAt`: the ledger's answer for the case's current assignee, or nulls. */
+function assignmentOf(
+  c: CaseRecord,
+  latest: AuditEventRow | undefined,
+): Pick<OpenCaseSummary, "assignedAt" | "assignedBy" | "assignedVia"> {
+  const unknown = { assignedAt: null, assignedBy: null, assignedVia: null };
+  const current = c.assignee?.trim().toLowerCase();
+  if (!current) return unknown;
+  if (latest) {
+    const to = typeof latest.payload.assignee === "string" ? latest.payload.assignee.trim().toLowerCase() : "";
+    // The newest assignment names someone else: the row changed without one (or the ledger has a gap),
+    // and its time would describe a different person's hand-over. Say nothing rather than that.
+    if (to !== current) return unknown;
+    const via = latest.payload.panel ? "PANEL" : latest.payload.bulk === true ? "BULK" : "OPERATOR";
+    return { assignedAt: latest.occurredAt, assignedBy: latest.actor, assignedVia: via };
   }
+  // A panel places a case on INSERT without a CASE_ASSIGNED (ADR-080 d2): the case's creation is the time.
+  if (c.assignmentSource === "PANEL") return { assignedAt: c.createdAt, assignedBy: null, assignedVia: "PANEL" };
+  return unknown;
 }
 
 /** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
@@ -259,6 +283,9 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   }
   if (unread.length > 0) for (const [key, logic] of await scoringLogicForCases(deps.outcomes, unread)) caseLogic.set(key, logic);
 
+  // One read for every open gap's newest assignment, not a timeline per gap.
+  const assignments = await deps.events.latestCaseEventsOfType(openCases.map((c) => c.id), "CASE_ASSIGNED");
+
   const openCaseSummaries: OpenCaseSummary[] = openCases
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((c) => ({
@@ -269,6 +296,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       logic: caseLogic.get(caseLogicKey(c)) ?? null,
       priority: c.priority,
       assignee: c.assignee,
+      ...assignmentOf(c, assignments[c.id]),
       slaDueDate: null, // SLA not modeled on the TS case row
     }));
 
@@ -288,7 +316,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
         occurredAt: e.occurredAt,
         actor: e.actor ?? "system",
         measureName,
-        summary: humanReadable(e.eventType, e.actor, measureName),
+        summary: activityLine(e, measureName),
       };
     });
 
