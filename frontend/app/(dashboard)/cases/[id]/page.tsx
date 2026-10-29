@@ -1055,6 +1055,12 @@ export default function CaseDetailPage() {
                     <p className="font-semibold text-neutral-900 dark:text-neutral-100">{appointment.appointmentType}</p>
                     <p className="text-neutral-700 dark:text-neutral-300">{new Date(appointment.scheduledAt).toLocaleString()} • {appointment.location}</p>
                     <p className="text-xs text-neutral-600 dark:text-neutral-400">Status: {appointment.status} • Created by: {appointment.createdBy}</p>
+                    {/* The notes staff typed when scheduling: the timeline no longer shows them the payload. */}
+                    {appointment.notes?.trim() ? (
+                      <p data-testid="appointment-notes" className="mt-1 whitespace-pre-wrap break-words text-neutral-700 dark:text-neutral-300">
+                        Notes: {appointment.notes.trim()}
+                      </p>
+                    ) : null}
                   </div>
                 ))}
               </div>

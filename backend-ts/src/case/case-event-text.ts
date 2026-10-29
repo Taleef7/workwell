@@ -167,10 +167,12 @@ export function describeCaseEvent(
       const type = text(p.appointmentType);
       const at = when(p.scheduledAt, timeZone);
       const where = text(p.location);
+      // The writer records no notes as "": staff typed these, and the timeline is no longer JSON to them.
+      const notes = text(p.notes);
       const summary = [type ? `${type} scheduled` : "Scheduled", at ? `for ${at}` : null, where ? `at ${where}` : null]
         .filter(Boolean)
         .join(" ");
-      return { label: "Appointment Scheduled", summary };
+      return { label: "Appointment Scheduled", summary: notes ? `${summary}, with the note: ${notes}` : summary };
     }
     case "EVIDENCE_UPLOADED": {
       const file = text(p.fileName);

@@ -83,6 +83,16 @@ test("appointments name the practice's zone; an unreadable time is left out, nev
   assert.equal(say("APPOINTMENT_SCHEDULED", { appointmentType: "Mammogram", scheduledAt: "soon", location: "Clinic" }).summary, "Mammogram scheduled at Clinic");
 });
 
+test("an appointment's notes are in its sentence; the writer's empty notes add nothing", () => {
+  // Staff typed these, and with the payload hidden from them the sentence is where they read them.
+  assert.equal(
+    say("APPOINTMENT_SCHEDULED", { appointmentType: "Mammogram", scheduledAt: "soon", location: "Clinic", notes: "Bring prior films" }).summary,
+    "Mammogram scheduled at Clinic, with the note: Bring prior films",
+  );
+  // `scheduleAppointment` writes `notes: ""` when none were typed.
+  assert.equal(say("APPOINTMENT_SCHEDULED", { appointmentType: "Mammogram", scheduledAt: "soon", location: "Clinic", notes: "" }).summary, "Mammogram scheduled at Clinic");
+});
+
 test("evidence and the AI explanation", () => {
   assert.equal(say("EVIDENCE_UPLOADED", { fileName: "result.pdf", description: "" }).summary, "Uploaded result.pdf");
   assert.equal(say("EVIDENCE_DOWNLOADED", { fileName: "result.pdf" }).summary, "Downloaded result.pdf");

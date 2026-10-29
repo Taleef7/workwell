@@ -644,6 +644,30 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
       }
     });
 
+    it("shows staff the notes they typed on an appointment, which the payload used to carry", async () => {
+      pilot.on = true;
+      currentRole = "ROLE_CASE_MANAGER";
+      const base = get.getMockImplementation()!;
+      const appointment = (id: string, notes: string | null) => ({
+        id, appointmentType: "Mammogram", scheduledAt: "2026-11-03T15:00:00.000Z", location: "Wailuku Clinic",
+        status: "PENDING", notes, createdBy: "quality-staff@maui.workwell.dev",
+      });
+      get.mockImplementation((url: string) =>
+        url === "/api/cases/case-001/appointments"
+          ? Promise.resolve([appointment("appt-1", "Bring prior films"), appointment("appt-2", null)])
+          : base(url),
+      );
+      try {
+        render(<CaseDetailPage />);
+        const notes = await screen.findAllByTestId("appointment-notes");
+        // One line, for the appointment that has notes; none for the one without.
+        expect(notes).toHaveLength(1);
+        expect(notes[0]).toHaveTextContent("Notes: Bring prior films");
+      } finally {
+        pilot.on = false;
+      }
+    });
+
     it("names an entry from an older server by its type, stripping only a leading prefix", async () => {
       // The old chain of replaces cut "RUN_" out of the middle and printed "Reverified".
       withCaseOverrides({ timeline: [{ ...recheck, label: undefined, summary: undefined }] });
