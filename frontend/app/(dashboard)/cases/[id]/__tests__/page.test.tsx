@@ -23,6 +23,15 @@ vi.mock("@/components/auth-provider", () => ({
   useAuth: () => ({ user: { role: currentRole }, token: "test-token", updateToken: () => {} }),
 }));
 
+// Tests run with the public-demo default, where every role sees the engineering surfaces. A test that
+// needs the pilot's rule (`NEXT_PUBLIC_PUBLIC_DEMO=off`: the admin seat only) turns this on.
+const pilot = vi.hoisted(() => ({ on: false }));
+vi.mock("@/lib/public-demo", () => ({
+  PUBLIC_DEMO: true,
+  isPilotMode: () => pilot.on,
+  canSeeEngineering: (role: string | null | undefined) => !pilot.on || role === "ROLE_ADMIN",
+}));
+
 function makeCaseDetail(overrides: Record<string, unknown> = {}) {
   return {
     caseId: "case-001",
@@ -590,6 +599,58 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     render(<CaseDetailPage />);
     await waitFor(() => expect(within(timelinePanel()).getByText("Created")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: /show history/i })).not.toBeInTheDocument();
+  });
+
+  describe("reads in words, not as the stored payload (#865)", () => {
+    const recheck = {
+      eventType: "CASE_RERUN_VERIFIED",
+      occurredAt: "2026-03-03T00:00:00.000Z",
+      actor: "quality-staff@maui.workwell.dev",
+      label: "Re-checked",
+      summary: "Re-checked: was overdue, now compliant",
+      payload: { previousOutcomeStatus: "OVERDUE", newOutcomeStatus: "COMPLIANT" },
+    };
+
+    it("shows staff the label and the sentence, and no payload at all", async () => {
+      pilot.on = true;
+      currentRole = "ROLE_CASE_MANAGER";
+      withCaseOverrides({ timeline: [recheck] });
+      try {
+        render(<CaseDetailPage />);
+        const panel = await waitFor(() => {
+          const p = timelinePanel();
+          expect(within(p).getByText("Re-checked")).toBeInTheDocument();
+          return p;
+        });
+        expect(within(panel).getByTestId("timeline-summary")).toHaveTextContent("Re-checked: was overdue, now compliant");
+        expect(within(panel).queryByTestId("timeline-details")).not.toBeInTheDocument();
+        expect(within(panel).queryByText(/previousOutcomeStatus/)).not.toBeInTheDocument();
+      } finally {
+        pilot.on = false;
+      }
+    });
+
+    it("keeps the payload one click away for the engineering seat", async () => {
+      pilot.on = true;
+      currentRole = "ROLE_ADMIN";
+      withCaseOverrides({ timeline: [recheck] });
+      try {
+        render(<CaseDetailPage />);
+        const details = await screen.findByTestId("timeline-details");
+        expect(details).not.toHaveAttribute("open");
+        expect(within(details).getByText(/"previousOutcomeStatus": "OVERDUE"/)).toBeInTheDocument();
+      } finally {
+        pilot.on = false;
+      }
+    });
+
+    it("names an entry from an older server by its type, stripping only a leading prefix", async () => {
+      // The old chain of replaces cut "RUN_" out of the middle and printed "Reverified".
+      withCaseOverrides({ timeline: [{ ...recheck, label: undefined, summary: undefined }] });
+      render(<CaseDetailPage />);
+      await waitFor(() => expect(within(timelinePanel()).getByText("Rerun Verified")).toBeInTheDocument());
+      expect(within(timelinePanel()).queryByTestId("timeline-summary")).not.toBeInTheDocument();
+    });
   });
 });
 
