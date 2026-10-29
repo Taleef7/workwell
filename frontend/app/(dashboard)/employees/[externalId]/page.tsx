@@ -12,6 +12,8 @@ import { UNASSIGN_VALUE, useAssignableUsers } from '@/features/panel/use-assigna
 import { SUBJECT } from "@/lib/terminology";
 import Link from 'next/link';
 import { useEmployeeProfile, type OpenCaseSummary } from '@/features/employee/hooks/useEmployeeProfile';
+import { GapOutreach } from '@/features/employee/components/GapOutreach';
+import { isSensitiveMeasure } from '@/lib/sensitive-measures';
 import { ComplianceSummaryBar, shownStatusOf } from '@/features/employee/components/ComplianceSummaryBar';
 import { IndividualComplianceStatus } from '@/features/employee/components/IndividualComplianceStatus';
 import { SimulateComplianceHistory } from '@/features/employee/components/SimulateComplianceHistory';
@@ -109,6 +111,28 @@ function assignedLine(c: OpenCaseSummary): string | null {
   return `Assigned ${day}${by}${c.assignedVia === 'BULK' ? ' (bulk)' : ''}`;
 }
 
+const CONTACT_VERBS: Record<string, string> = { EMAIL: 'Emailed', SMS: 'Texted', PHONE: 'Called' };
+const DELIVERY_LABELS: Record<string, string> = { SIMULATED: 'simulated', SENT: 'sent', QUEUED: 'queued', FAILED: 'delivery failed' };
+
+/**
+ * When the gap was last contacted, how and by whom (#868), so staff do not message a patient twice
+ * without knowing it. Null for a server from before the fields: absent is not "never contacted".
+ */
+function lastContactLine(c: OpenCaseSummary): string | null {
+  if (c.lastOutreachAt === undefined) return null;
+  if (c.lastOutreachAt === null) return 'Not contacted yet';
+  const at = new Date(c.lastOutreachAt);
+  if (Number.isNaN(at.getTime())) return null;
+  const day = at.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const verb = CONTACT_VERBS[c.lastOutreachChannel ?? ''] ?? 'Contacted';
+  const by = c.lastOutreachBy ? ` by ${c.lastOutreachBy}` : '';
+  const status = c.lastOutreachDeliveryStatus;
+  const delivery = status ? ` · ${DELIVERY_LABELS[status] ?? status.toLowerCase()}` : '';
+  return `${verb} ${day}${by}${delivery}`;
+}
+
+const CLOSED_STATUSES = new Set(['RESOLVED', 'CLOSED', 'EXCLUDED']);
+
 export default function EmployeeProfilePage() {
   const { externalId: rawExternalId } = useParams<{ externalId: string }>();
   // useParams returns the segment still percent-encoded; live WebChart ids contain "|" (wc%7Cwc-6),
@@ -126,6 +150,37 @@ export default function EmployeeProfilePage() {
   // The evidence and simulation cards open by default only for the engineering seat; staff start from
   // the gaps and the actions, and open the evidence when they want it.
   const engineering = canSeeEngineering(user?.role);
+  const api = useApi();
+  // The gaps ticked for one message (#868): staff's own choices over the default, which is every gap but
+  // CMS2 and CMS137 — a message never names those, and including them is a person's decision (Q1).
+  const [ticked, setTicked] = useState<Record<string, boolean>>({});
+  const isTicked = (c: OpenCaseSummary) => ticked[c.caseId] ?? !isSensitiveMeasure(c.measureId);
+  const [rechecking, setRechecking] = useState<string | null>(null);
+  const [recheckErrors, setRecheckErrors] = useState<Record<string, string>>({});
+
+  /** Rerun to verify ONE gap from the patient page (#868): the case page's action, without opening it. */
+  async function recheck(c: OpenCaseSummary) {
+    if (rechecking) return;
+    setRechecking(c.caseId);
+    setRecheckErrors((errors) => {
+      const rest = { ...errors };
+      delete rest[c.caseId];
+      return rest;
+    });
+    try {
+      const detail = await api.post<undefined, { status?: string }>(`/api/cases/${c.caseId}/rerun-to-verify`);
+      const label = compactLabelFor(c.measureId, c.measureName, c.logic);
+      emitToast(
+        CLOSED_STATUSES.has((detail?.status ?? '').toUpperCase()) ? `${label}: closed on re-check` : `${label}: still open after re-check`,
+        'success',
+      );
+      refetch();
+    } catch (err) {
+      setRecheckErrors((errors) => ({ ...errors, [c.caseId]: err instanceof Error ? err.message : 'The re-check failed' }));
+    } finally {
+      setRechecking(null);
+    }
+  }
 
   // Skeletons on the first load of THIS patient only. A refresh (after Recalculate or any finished run)
   // keeps the page mounted, so a simulation result and the chosen date survive it; a different
@@ -205,6 +260,9 @@ export default function EmployeeProfilePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-800">
+                {canManageThisCase ? (
+                  <th scope="col" className="pb-2 pr-2 font-medium"><span className="sr-only">In the message</span></th>
+                ) : null}
                 <th scope="col" className="pb-2 font-medium">Measure</th>
                 <th scope="col" className="pb-2 font-medium">Status</th>
                 <th scope="col" className="pb-2 font-medium">Priority</th>
@@ -215,6 +273,20 @@ export default function EmployeeProfilePage() {
             <tbody>
               {profile.openCases.map((c) => (
                 <tr key={c.caseId} className="border-b border-neutral-200 dark:border-neutral-800 last:border-0 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
+                  {canManageThisCase ? (
+                    <td className="py-2 pr-2 align-top">
+                      {/* A 44px target: a bare checkbox is a 13px tap on a phone. */}
+                      <label className="inline-flex min-h-11 min-w-11 items-center justify-center -m-3">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          aria-label={`Include ${compactLabelFor(c.measureId, c.measureName, c.logic)} in the message`}
+                          checked={isTicked(c)}
+                          onChange={(e) => setTicked((t) => ({ ...t, [c.caseId]: e.target.checked }))}
+                        />
+                      </label>
+                    </td>
+                  ) : null}
                   <td className="py-2">
                     <Link
                       href={`/cases/${c.caseId}`}
@@ -223,11 +295,21 @@ export default function EmployeeProfilePage() {
                     >
                       {compactLabelFor(c.measureId, c.measureName, c.logic)}
                     </Link>
+                    {canManageThisCase && isPatientTerm && isSensitiveMeasure(c.measureId) ? (
+                      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400" data-testid="sensitive-note">
+                        Left out unless ticked. A message calls it only &ldquo;a visit with your care team&rdquo;.
+                      </p>
+                    ) : null}
                   </td>
                   <td className="py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(c.outcomeStatus)}`}>
                       {labelFor(OUTCOME_LABELS, c.outcomeStatus)}
                     </span>
+                    {lastContactLine(c) ? (
+                      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400 [overflow-wrap:anywhere]" data-testid="last-contact">
+                        {lastContactLine(c)}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="py-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[c.priority] ?? ''}`}>
@@ -250,15 +332,33 @@ export default function EmployeeProfilePage() {
                     ) : null}
                   </td>
                   <td className="py-2 pl-2 text-right">
-                    {/* A button-sized target, not only the measure name: the staff did not read the name
-                        as the way into the case. Its accessible name starts with what it shows. */}
-                    <Link
-                      href={`/cases/${c.caseId}`}
-                      aria-label={`Open case: ${compactLabelFor(c.measureId, c.measureName, c.logic)}`}
-                      className="inline-flex whitespace-nowrap rounded border border-primary-300 dark:border-primary-700 px-2.5 py-1 text-xs font-semibold text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/40"
-                    >
-                      Open case →
-                    </Link>
+                    <div className="inline-flex flex-wrap justify-end gap-2">
+                      {canManageThisCase ? (
+                        <button
+                          type="button"
+                          onClick={() => void recheck(c)}
+                          disabled={rechecking !== null}
+                          aria-label={`Re-check: ${compactLabelFor(c.measureId, c.measureName, c.logic)}`}
+                          className="inline-flex whitespace-nowrap rounded border border-neutral-300 dark:border-neutral-700 px-2.5 py-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50 disabled:opacity-50"
+                        >
+                          {rechecking === c.caseId ? 'Checking…' : 'Re-check'}
+                        </button>
+                      ) : null}
+                      {/* A button-sized target, not only the measure name: the staff did not read the name
+                          as the way into the case. Its accessible name starts with what it shows. */}
+                      <Link
+                        href={`/cases/${c.caseId}`}
+                        aria-label={`Open case: ${compactLabelFor(c.measureId, c.measureName, c.logic)}`}
+                        className="inline-flex whitespace-nowrap rounded border border-primary-300 dark:border-primary-700 px-2.5 py-1 text-xs font-semibold text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/40"
+                      >
+                        Open case →
+                      </Link>
+                    </div>
+                    {recheckErrors[c.caseId] ? (
+                      <p role="alert" className="mt-1 text-left text-xs text-red-600 dark:text-red-400 [overflow-wrap:anywhere]">
+                        {recheckErrors[c.caseId]}
+                      </p>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -266,6 +366,13 @@ export default function EmployeeProfilePage() {
           </table>
           </ScrollRegion>
         )}
+        {canManageThisCase && profile.openCases.length > 0 ? (
+          <GapOutreach
+            cases={profile.openCases.filter(isTicked)}
+            labelFor={(c) => compactLabelFor(c.measureId, c.measureName, c.logic)}
+            onSent={refetch}
+          />
+        ) : null}
       </div>
 
       {/* Measure details */}
