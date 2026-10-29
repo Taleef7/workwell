@@ -488,6 +488,25 @@ export function recordWarm(record: WarmRecord): void {
   if (warms.length > MAX_WARM_RECORDS) warms.shift();
 }
 
+// ── 5. The last population run's data sufficiency (#853) ──────────────────────────────────────────────
+
+/**
+ * The last population run this process finished, and the measures whose data was too thin to trust
+ * (`data_insufficient`, D12). Ids only, as everything public here is. Per process: it resets on restart, so
+ * the run detail page (which reads the ledger) is the durable record.
+ */
+export interface RunSufficiencyRecord {
+  runId: string;
+  status: string;
+  dataInsufficient: string[];
+}
+
+let lastPopulationRun: RunSufficiencyRecord | null = null;
+
+export function recordRunSufficiency(record: RunSufficiencyRecord): void {
+  lastPopulationRun = { runId: record.runId, status: record.status, dataInsufficient: [...record.dataInsufficient].sort() };
+}
+
 /**
  * The memory this process may use. A container with no memory limit reports the cgroup's "max" as a
  * number near 2^64 through `process.constrainedMemory()` (the pilot's read 17,592,186,044,416 MB), and a
@@ -553,6 +572,11 @@ export interface RuntimeHealth {
   routing: RoutingHealth | null;
   /** Null where the stack fetches no terminology (no bucket configured, nothing vendored). */
   terminology: TerminologyHealth | null;
+  /**
+   * The process's zone and current UTC offset (#845). Evaluation assumes offset 0: a date-only FHIR value
+   * takes the host's offset, while the measurement period is at 0. The deploy gate refuses any other offset.
+   */
+  timezone: { tz: string | null; utcOffsetMinutes: number };
   startedAt: string;
   uptimeSeconds: number;
   eventLoop: {
@@ -568,6 +592,8 @@ export interface RuntimeHealth {
   previousStall: { at: string; stalledForMs: number; requestsInFlight: number } | null;
   /** The newest read-model warm: when, how long, and whether it worked. Null until one has finished. */
   lastWarm: { trigger: WarmRecord["trigger"]; finishedAt: string; durationMs: number; ok: boolean; failedMeasures: number } | null;
+  /** The last population run this process finished, and its `data_insufficient` measures (#853). Null until one has. */
+  lastPopulationRun: RunSufficiencyRecord | null;
 }
 
 export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
@@ -577,6 +603,8 @@ export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
     build: { sha: buildSha() },
     routing,
     terminology,
+    // `0 -` rather than unary minus, so UTC reports 0 and not -0.
+    timezone: { tz: process.env.TZ ?? null, utcOffsetMinutes: 0 - new Date(now).getTimezoneOffset() },
     startedAt: PROCESS_STARTED_AT,
     uptimeSeconds: Math.round((now - Date.parse(PROCESS_STARTED_AT)) / 1000),
     eventLoop: {
@@ -593,6 +621,7 @@ export function runtimeHealth(now: number = Date.now()): RuntimeHealth {
     lastWarm: lastWarm
       ? { trigger: lastWarm.trigger, finishedAt: lastWarm.finishedAt, durationMs: lastWarm.durationMs, ok: lastWarm.ok, failedMeasures: lastWarm.failedMeasures.length }
       : null,
+    lastPopulationRun: lastPopulationRun ? { ...lastPopulationRun, dataInsufficient: [...lastPopulationRun.dataInsufficient] } : null,
   };
 }
 

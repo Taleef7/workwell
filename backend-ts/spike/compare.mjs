@@ -9,6 +9,7 @@
  * Exit code 0 iff every define of every scenario matches exactly.
  *   node spike/compare.mjs
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

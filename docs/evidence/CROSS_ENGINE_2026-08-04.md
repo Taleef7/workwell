@@ -1,5 +1,7 @@
 # Two independently written engines over the same official artifact — the first run
 
+> **Superseded 2026-10-19 (#846): read `CROSS_ENGINE_2026-10-19.md` for the causes.** This run used cqf-fhir-cr 8.10.0. CMS122's and CMS125's medication disagreements were that image's `convert … to days` bug (cqframework/clinical_quality_language#1682), not how `medicationRequestPeriod` reads a missing `dosageInstruction`; CMS125's other two are Java's second-precision period end. On the pinned v8.12.0-2 image CMS122 is 55/55, and CMS125 64/66 with the period sent and 66/66 without.
+
 Date: 2026-08-04. **ROADMAP_2026-08-04 §4 V4 / milestone B7** — the second of the two checks that replaced
 the retired Cypress bar (ADR-058). Command: `backend-ts/scripts/cross-engine-check.ts`.
 

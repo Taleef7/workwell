@@ -99,12 +99,16 @@ test("complianceRateOf — pins CMS denominator (e.g. 38 compliant, 7 overdue, 3
 
 // Minimal fakes: programTrend only touches outcomeStore.listOutcomesWithRun (per-run path) and
 // qualitySnapshots.querySnapshots (monthly path). runStore/caseStore are unused by programTrend.
-function fakeDeps(opts: { snaps?: QualitySnapshotRow[]; perRun?: OutcomeWithRun[]; withSnapshots?: boolean }): ProgramDeps {
+function fakeDeps(opts: { snaps?: QualitySnapshotRow[]; perRun?: OutcomeWithRun[]; withSnapshots?: boolean; thinRuns?: string[] }): ProgramDeps {
   const deps = {
     runStore: {} as ProgramDeps["runStore"],
     caseStore: {} as ProgramDeps["caseStore"],
     outcomeStore: {
       listOutcomesWithRun: async () => opts.perRun ?? [],
+      // The thin-run probe (#853) reads one row's evidence per run: a thin run's rows all carry the flag.
+      listOutcomes: async (runId: string) => [
+        { evidence: opts.thinRuns?.includes(runId) ? { dataInsufficient: { checks: ["encounterTypeCoded"] } } : {} },
+      ],
       listLatestPopulationRuns: latestRunsFromRows(() => opts.perRun ?? []),
     } as unknown as ProgramDeps["outcomeStore"],
   } as ProgramDeps;
@@ -299,6 +303,7 @@ function countingDeps(rows: OutcomeWithRun[]): { deps: ProgramDeps; reads: () =>
     } as unknown as ProgramDeps["runStore"],
     caseStore: {} as ProgramDeps["caseStore"],
     outcomeStore: {
+      listOutcomes: async () => [],
       listOutcomesWithRun: async () => {
         reads++;
         return rows;
@@ -367,4 +372,18 @@ test("programTrend — a zone that merges the memo's days into fewer than ten re
   assert.deepEqual((await programTrend(deps, measureId, {}, { tz: "Pacific/Honolulu" })).map((p) => p.runId), honoluluDays);
   assert.deepEqual((await programTrend(deps, measureId, {})).map((p) => p.runId), utcDays, "UTC unchanged off the wider memo");
   assert.equal(reads(), again, "the wider base was memoized for both zones");
+});
+
+test("programTrend — a run whose data was too thin to trust is no point on the trend (#853)", async () => {
+  const deps = fakeDeps({
+    withSnapshots: false,
+    perRun: [
+      perRunRow("run-trusted-1", "2026-06-01T00:00:00Z", "COMPLIANT"),
+      perRunRow("run-trusted-2", "2026-06-02T00:00:00Z", "COMPLIANT"),
+      perRunRow("run-thin", "2026-06-03T00:00:00Z", "OVERDUE", "PARTIAL_FAILURE"),
+    ],
+    thinRuns: ["run-thin"],
+  });
+  const pts = await programTrend(deps, "audiogram", {});
+  assert.deepEqual(pts.map((p) => p.runId).sort(), ["run-trusted-1", "run-trusted-2"]);
 });

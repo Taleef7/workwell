@@ -32,6 +32,7 @@ import { profileForId, replaceLiveDirectory } from "../engine/ingress/webchart/l
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 import { OfficialCalculationError } from "../wiring/official-calculation-error.ts";
+import { runtimeHealth } from "../admin/runtime-health.ts";
 
 const dbPath = join(tmpdir(), `workwell-pipeline-${crypto.randomUUID()}.sqlite`);
 let deps: RunPipelineDeps;
@@ -452,10 +453,12 @@ test("T3: a subject WebChart could not read is an evaluation error, never 'out o
     assert.deepEqual(evaluated, ["read-1"], "only the readable subject reaches the engine, in the batch or alone");
     const rows = await outcomeStore.listOutcomes(result.runId);
     const row = (id: string) => rows.find((r) => r.subjectId === `wc|${id}`)!;
-    assert.deepEqual(row("unread-1").evidence, { evaluationError: "source fetch failed", message: "Observation search timed out" });
+    // Two of three records unread is far past the 1% limit, so the measure is also data_insufficient (#853).
+    const thinFlag = { dataInsufficient: { checks: ["failedFetches"] } };
+    assert.deepEqual(row("unread-1").evidence, { evaluationError: "source fetch failed", message: "Observation search timed out", ...thinFlag });
     assert.equal(row("unread-1").status, "MISSING_DATA");
     assert.notEqual(row("unread-1").outOfPopulation, true, "an unread subject is not a claim about the population");
-    assert.deepEqual(row("bare-marker").evidence, { evaluationError: "source fetch failed", message: "WebChart's record for this patient could not be read" });
+    assert.deepEqual(row("bare-marker").evidence, { evaluationError: "source fetch failed", message: "WebChart's record for this patient could not be read", ...thinFlag });
     assert.equal(row("read-1").outOfPopulation, true, "a readable subject is still scored by the logic");
     assert.equal(result.status, "PARTIAL_FAILURE");
 
@@ -470,6 +473,108 @@ test("T3: a subject WebChart could not read is an evaluation error, never 'out o
     assert.equal(terminal?.payload.liveTenant?.status, "COMPLETED");
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("#853: thin live data marks the measure data_insufficient, and an out-of-population row closes nothing; coded data closes as before", async () => {
+  // Fifty 2026 visits each, so the two patients reach the minimum the floor needs before it judges.
+  const withEncounter = (id: string, coded: boolean): unknown => {
+    const bundle = patientOnly(id) as { entry: unknown[] };
+    for (let i = 0; i < 50; i += 1) {
+      const at = `2026-05-${String((i % 28) + 1).padStart(2, "0")}T14:00:00Z`;
+      bundle.entry.push({
+        resource: {
+          resourceType: "Encounter",
+          id: `${id}-enc-${i}`,
+          status: "finished",
+          period: { start: at, end: at },
+          type: coded ? [{ coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213" }] }] : [{ text: "Office visit" }],
+        },
+      });
+    }
+    return bundle;
+  };
+  // CMS's logic finds every subject outside the initial population, as uncoded visit types make it do.
+  const engine = {
+    async evaluate() {
+      return { outcome: "MISSING_DATA", evidence: { official: { populationResults: { ipp: false } } }, inInitialPopulation: false };
+    },
+    async evaluateBatch(_measureId: string, subjects: () => Array<{ subjectId: string }>) {
+      const results = new Map<string, unknown>();
+      for (const s of subjects()) {
+        results.set(s.subjectId, { outcome: "MISSING_DATA", evidence: { official: { populationResults: { ipp: false } } }, inInitialPopulation: false });
+      }
+      return results;
+    },
+    logicFor: () => ({ version: "official-fqm:1.0.000:artifact:terminology", kind: "official" as const, warning: null }),
+  } as unknown as RunPipelineDeps["engine"];
+
+  const runOver = async (coded: boolean) => {
+    const { p, runStore, outcomeStore, caseStore } = await freshPipelineDb();
+    const audits: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z" });
+    const period = bucketPeriodForMeasure("audiogram", "2026-06-01");
+    const open = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "wc|thin-1", measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+    const result = await executeManualRun({
+      runStore,
+      outcomeStore,
+      caseStore,
+      engine,
+      employees: [],
+      webChartEnv: WEBCHART_ENV,
+      webChartClient: fixtureWebChartClient([withEncounter("thin-1", coded), withEncounter("thin-2", coded)]),
+      events: { async appendAudit(input) { audits.push(input as never); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); }, async recordCaseEvents() {} },
+    }, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-01" });
+    return { p, runStore, outcomeStore, caseStore, audits, result, caseId: open!.id };
+  };
+
+  const thin = await runOver(false);
+  try {
+    assert.equal(thin.result.status, "PARTIAL_FAILURE", "a measure scored on data this thin is a partial failure");
+    assert.equal((await thin.runStore.getRun(thin.result.runId))?.status, "PARTIAL_FAILURE");
+    const rows = await thin.outcomeStore.listOutcomes(thin.result.runId);
+    assert.equal(rows.length, 2);
+    for (const row of rows) {
+      assert.deepEqual((row.evidence as { dataInsufficient?: unknown }).dataInsufficient, { checks: ["encounterTypeCoded"] });
+      assert.equal(row.outOfPopulation, true, "the logic's answer is persisted as it came");
+    }
+    const kept = await thin.caseStore.getCase(thin.caseId);
+    assert.equal(kept?.status, "OPEN", "an out-of-population answer read off uncoded encounters closes nothing");
+    const completed = thin.audits.find((a) => a.eventType === "RUN_COMPLETED")!;
+    assert.deepEqual(
+      (completed.payload.dataInsufficient as Array<{ measureId: string; shortfalls: Array<{ check: string; count: number; of: number }> }>)
+        .map((v) => ({ measureId: v.measureId, shortfalls: v.shortfalls.map((s) => [s.check, s.count, s.of]) })),
+      [{ measureId: "audiogram", shortfalls: [["encounterTypeCoded", 0, 100]] }],
+    );
+    const logs = await thin.runStore.listLogs(thin.result.runId, 100);
+    assert.ok(logs.some((l) => l.message.startsWith("data_insufficient:audiogram — encounter types coded: 0 of 100")), "the run log names the measure and the shortfall");
+    assert.deepEqual(runtimeHealth().lastPopulationRun, { runId: thin.result.runId, status: "PARTIAL_FAILURE", dataInsufficient: ["audiogram"] });
+  } finally {
+    try { rmSync(thin.p, { force: true }); } catch { /* best effort */ }
+  }
+
+  const coded = await runOver(true);
+  try {
+    assert.equal(coded.result.status, "COMPLETED");
+    const rows = await coded.outcomeStore.listOutcomes(coded.result.runId);
+    assert.ok(rows.every((r) => !("dataInsufficient" in (r.evidence as object))), "no flag on sufficient data");
+    const closed = await coded.caseStore.getCase(coded.caseId);
+    assert.equal(closed?.closedReason, "OUT_OF_POPULATION", "the control: the same answer on coded data closes the case (ADR-078)");
+    assert.deepEqual(runtimeHealth().lastPopulationRun, { runId: coded.result.runId, status: "COMPLETED", dataInsufficient: [] });
+  } finally {
+    try { rmSync(coded.p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("#853: the synthetic corpus never fires the gate, on 1 January included", async () => {
+  // The gate measures live WebChart data only; the corpus codes every encounter and finalises every blood
+  // pressure, and a new year's empty period is never a measure of coding.
+  for (const evaluationDate of ["2026-06-01", "2027-01-01"]) {
+    const res = await executeManualRun(deps, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate });
+    assert.equal(res.status, "COMPLETED", evaluationDate);
+    const rows = await deps.outcomeStore.listOutcomes(res.runId);
+    assert.ok(rows.length > 0);
+    assert.ok(rows.every((r) => !("dataInsufficient" in (r.evidence as object))), evaluationDate);
   }
 });
 
@@ -1177,6 +1282,75 @@ test("Fable M10: a still-open PRIOR-cycle case is closed (CYCLE_ROLLED_OVER, aud
       (a) => a.eventType === "CASE_RESOLVED" && (a.payload as { reason?: string })?.reason === "CYCLE_ROLLED_OVER",
     );
     assert.equal(rolled.length, 1, "exactly one (the prior-cycle) rollover close is audited");
+    const completed = (await events.auditEventsByRun(res.runId)).find((a) => a.eventType === "RUN_COMPLETED");
+    const rollover = (completed?.payload as { rollover?: { ms: number } }).rollover;
+    assert.deepEqual(rollover && { ...rollover, ms: 0 }, { closed: 1, failed: 0, auditGaps: 0, unreadMeasures: [], ms: 0 }, "#854: the run records what it rolled over");
+    assert.ok(
+      (await runStore.listLogs(res.runId)).some((l) => l.level === "INFO" && /^Closed 1 case\(s\) from an earlier cycle as rolled over in \d+\.\d s\.$/.test(l.message)),
+      "#854: and says so in its log",
+    );
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("#854: a rollover close that fails, and one whose audit fails, are counted and logged as a warning; a run with nothing to roll over records nothing", async () => {
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  try {
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2020-01-01T00:00:00.000Z", measurementPeriodEnd: "2020-12-31T00:00:00.000Z" });
+    const stuck = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2020-01-01", outcomeStatus: "OVERDUE" });
+    await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2020-01-01", outcomeStatus: "OVERDUE" });
+    const failingCases = Object.create(caseStore) as typeof caseStore;
+    failingCases.patchCase = async (id, patch) => (id === stuck!.id ? Promise.reject(new Error("write lost")) : caseStore.patchCase(id, patch));
+    const failingEvents = Object.create(events) as typeof events;
+    failingEvents.appendAudit = async (input) =>
+      input.eventType === "CASE_RESOLVED" ? Promise.reject(new Error("ledger down")) : events.appendAudit(input);
+    const employees = [employeeById("emp-007")!, employeeById("emp-008")!];
+
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore: failingCases, events: failingEvents, engine: overdueEngine, employees, segments: [] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+    const completed = (await events.auditEventsByRun(res.runId)).find((a) => a.eventType === "RUN_COMPLETED");
+    const rollover = (completed?.payload as { rollover?: { ms: number } }).rollover;
+    assert.deepEqual(rollover && { ...rollover, ms: 0 }, { closed: 1, failed: 1, auditGaps: 1, unreadMeasures: [], ms: 0 });
+    assert.ok(
+      (await runStore.listLogs(res.runId)).some(
+        (l) => l.level === "WARN" && /^Closed 1 case\(s\) .*; 1 could not be closed and stay open; 1 closure\(s\) have no audit event\.$/.test(l.message),
+      ),
+    );
+
+    const rolledOverOf = async (runId: string) =>
+      ((await events.auditEventsByRun(runId)).find((a) => a.eventType === "RUN_COMPLETED")?.payload as { rollover?: { ms: number } }).rollover;
+    const retry = await executeManualRun({ ...d, caseStore, events }, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-04" });
+    const retried = await rolledOverOf(retry.runId);
+    assert.deepEqual(retried && { ...retried, ms: 0 }, { closed: 1, failed: 0, auditGaps: 0, unreadMeasures: [], ms: 0 }, "the next run closes the case left open");
+    const quiet = await executeManualRun({ ...d, caseStore, events }, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-05" });
+    assert.equal(await rolledOverOf(quiet.runId), undefined, "with nothing older left open, the payload carries no rollover");
+    assert.ok(!(await runStore.listLogs(quiet.runId)).some((l) => l.message.includes("rolled over")));
+  } finally {
+    try { rmSync(p, { force: true }); } catch { /* best effort */ }
+  }
+});
+
+test("#854: a measure whose open cases cannot be read is named, so a rollover that skipped it does not read as complete", async () => {
+  const { p, runStore, outcomeStore, caseStore, events } = await freshPipelineDb();
+  try {
+    const seedRun = await runStore.createRun({ scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "seed", requestedScope: {}, measurementPeriodStart: "2020-01-01T00:00:00.000Z", measurementPeriodEnd: "2020-12-31T00:00:00.000Z" });
+    const old = await caseStore.upsertFromOutcome({ runId: seedRun.id, subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2020-01-01", outcomeStatus: "OVERDUE" });
+    const unreadable = Object.create(caseStore) as typeof caseStore;
+    unreadable.listCases = async (query) =>
+      query.statuses?.includes("IN_PROGRESS") ? Promise.reject(new Error("statement timeout")) : caseStore.listCases(query);
+    const d: RunPipelineDeps = { runStore, outcomeStore, caseStore: unreadable, events, engine: overdueEngine, employees: [employeeById("emp-007")!], segments: [] };
+    const res = await executeManualRun(d, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2097-03-03" });
+
+    assert.equal((await caseStore.getCase(old!.id))?.status, "OPEN", "the read failed, so nothing was closed");
+    const completed = (await events.auditEventsByRun(res.runId)).find((a) => a.eventType === "RUN_COMPLETED");
+    const rollover = (completed?.payload as { rollover?: { ms: number } }).rollover;
+    assert.deepEqual(rollover && { ...rollover, ms: 0 }, { closed: 0, failed: 0, auditGaps: 0, unreadMeasures: ["audiogram"], ms: 0 });
+    assert.ok(
+      (await runStore.listLogs(res.runId)).some(
+        (l) => l.level === "WARN" && l.message.endsWith("; the open cases of audiogram could not be read, so none of them was rolled over."),
+      ),
+    );
   } finally {
     try { rmSync(p, { force: true }); } catch { /* best effort */ }
   }

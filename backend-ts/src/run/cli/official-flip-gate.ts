@@ -217,8 +217,7 @@ async function defaultMadie(measureId: OfficialMeasureId, contentDir: string): P
     };
   }
   const { summary } = outcome.run;
-  const pass = summary.expectedAgreements + summary.referenceAgreements;
-  return { pass, fail: summary.total - pass, total: summary.total };
+  return { pass: summary.expectedAgreements, fail: summary.total - summary.expectedAgreements, total: summary.total };
 }
 
 /**

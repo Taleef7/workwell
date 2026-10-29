@@ -7,6 +7,7 @@
  * Rollback: delete tagged OUTCOMES first, THEN runs (schema-qualify on the Postgres ceiling) — see the
  * full SQL in the header of ./seed-scale.ts.
  */
+import "../../engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { main } from "./seed-scale.ts";
 
 main(process.argv.slice(2)).then((code) => process.exit(code));

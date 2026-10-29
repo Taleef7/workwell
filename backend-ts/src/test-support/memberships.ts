@@ -26,6 +26,7 @@ export function narrowToMemberships(row: Rowish): MembershipRow {
   const evidence: Record<string, unknown> = {};
   if (full?.official !== undefined && full.official !== null) evidence.official = full.official;
   if (full && "evaluationError" in full) evidence.evaluationError = full.evaluationError;
+  if (full && "dataInsufficient" in full && full.dataInsufficient !== null) evidence.dataInsufficient = full.dataInsufficient;
   return { status: row.status, evidence };
 }
 
@@ -54,4 +55,27 @@ export function withMemberships<
   T extends { listOutcomes: (runId: string, opts?: { measureId?: string }) => Promise<ReadonlyArray<Rowish>> },
 >(fake: T): T & { listOutcomeMembershipsForRun: (runId: string, measureId: string) => Promise<MembershipRow[]> } {
   return { ...fake, listOutcomeMembershipsForRun: membershipsVia(fake.listOutcomes) };
+}
+
+type SubjectRowish = Rowish & Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation">;
+type SubjectMembershipRow = Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">;
+
+/**
+ * Wrap a fake's `listOutcomes` as `listOutcomeSubjectMembershipsForRun` (#852): the membership narrowing
+ * plus the row's identity columns, and nothing more, so a per-subject reader cannot lean on a field the
+ * real projection drops. Reads the fake WITHOUT a page window, as the real statement is unpaged.
+ */
+export function subjectMembershipsVia(
+  listOutcomes: (runId: string, opts?: { measureId?: string }) => Promise<ReadonlyArray<SubjectRowish>>,
+): (runId: string, measureId: string) => Promise<SubjectMembershipRow[]> {
+  return async (runId, measureId) =>
+    (await listOutcomes(runId, { measureId }))
+      .filter((row) => row.measureId === undefined || row.measureId === measureId)
+      .map((row) => ({
+        id: row.id,
+        subjectId: row.subjectId,
+        evaluatedAt: row.evaluatedAt,
+        ...(row.outOfPopulation !== undefined ? { outOfPopulation: row.outOfPopulation } : {}),
+        ...narrowToMemberships(row),
+      }));
 }

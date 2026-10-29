@@ -53,45 +53,57 @@ export interface JwtService {
 const b64url = (data: Buffer | string): string =>
   Buffer.from(data as never).toString("base64url");
 
-const HEADER = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+const LOGIN_TYP = "JWT";
 
-const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+export const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+
+/**
+ * Sign `claims` (plus `iat`/`exp`) as an HS256 token under `key`, with `typ` in the header. The login
+ * tokens below use typ `JWT`; the MCP tokens (`mcp-token.ts`) use a typ and a key per kind.
+ */
+export function issueSigned(key: string | Buffer, typ: string, claims: Record<string, unknown>, ttlSeconds: number): string {
+  const now = nowSeconds();
+  const header = b64url(JSON.stringify({ alg: "HS256", typ }));
+  const payload = b64url(JSON.stringify({ ...claims, iat: now, exp: now + ttlSeconds }));
+  const body = `${header}.${payload}`;
+  return `${body}.${createHmac("sha256", key).update(body).digest("base64url")}`;
+}
+
+/**
+ * Verify an HS256 token under `key`: a constant-time signature check, a numeric `exp` in the future and,
+ * when `typ` is given, that exact header typ. Returns the claims, or null on any failure (never throws).
+ */
+export function verifySigned(key: string | Buffer, token: string, typ?: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [header, payload, signature] = parts as [string, string, string];
+  const expected = createHmac("sha256", key).update(`${header}.${payload}`).digest("base64url");
+  // constant-time compare; length mismatch is an immediate reject
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  let claims: Record<string, unknown>;
+  try {
+    if (typ !== undefined && JSON.parse(Buffer.from(header, "base64url").toString("utf8"))?.typ !== typ) return null;
+    claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!claims || typeof claims !== "object") return null;
+  const exp = claims.exp;
+  if (typeof exp !== "number" || nowSeconds() >= exp) return null;
+  return claims;
+}
 
 export function createJwt(config: JwtConfig): JwtService {
   const secret = config.secret;
   const accessTtl = config.accessTtlSeconds ?? 900;
   const refreshTtl = config.refreshTtlSeconds ?? 28800;
 
-  const sign = (headerAndPayload: string): string =>
-    createHmac("sha256", secret).update(headerAndPayload).digest("base64url");
-
-  const issue = (claims: Record<string, unknown>, ttl: number): string => {
-    const now = nowSeconds();
-    const payload = b64url(JSON.stringify({ ...claims, iat: now, exp: now + ttl }));
-    const body = `${HEADER}.${payload}`;
-    return `${body}.${sign(body)}`;
-  };
+  const issue = (claims: Record<string, unknown>, ttl: number): string => issueSigned(secret, LOGIN_TYP, claims, ttl);
 
   /** Verify signature + structure, returning the decoded payload or null. */
-  const verify = (token: string): Record<string, unknown> | null => {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-    const [header, payload, signature] = parts as [string, string, string];
-    const expected = sign(`${header}.${payload}`);
-    // constant-time compare; length mismatch is an immediate reject
-    const a = Buffer.from(signature);
-    const b = Buffer.from(expected);
-    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-    let claims: Record<string, unknown>;
-    try {
-      claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    } catch {
-      return null;
-    }
-    const exp = claims.exp;
-    if (typeof exp !== "number" || nowSeconds() >= exp) return null;
-    return claims;
-  };
+  const verify = (token: string): Record<string, unknown> | null => verifySigned(secret, token);
 
   return {
     refreshTtlSeconds: refreshTtl,
@@ -111,6 +123,9 @@ export function createJwt(config: JwtConfig): JwtService {
     verifyAccessToken(token) {
       const claims = verify(token);
       if (!claims || claims.refresh === true) return null; // refresh token can't authenticate
+      // An MCP token is signed with its own key and could not reach here; refusing anything that carries
+      // the MCP claims as well means a token minted for one audience never authenticates the API (#704).
+      if ("kind" in claims || "aud" in claims) return null;
       const email = typeof claims.sub === "string" ? claims.sub : "";
       const role = typeof claims.role === "string" ? claims.role : "";
       if (!email || !role) return null;

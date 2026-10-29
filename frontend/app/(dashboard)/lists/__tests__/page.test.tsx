@@ -296,3 +296,29 @@ it("a measure whose run aged out is named, with the reason, beside the ones that
   // The complete measure still shows its numbers, and its unmeasured members beside them.
   expect(screen.getByText("50.0%")).toBeInTheDocument();
 });
+
+it("a measure refused for thin data says so, never that it had no run (#853)", async () => {
+  get.mockImplementation(async (path: string) => {
+    if (path === "/api/subject-lists") return [LIST];
+    if (path.includes("/report")) {
+      return {
+        measurementYear: 2027,
+        generatedAt: "2027-06-01T00:00:00.000Z",
+        members: { matched: 2, notFound: 0, ambiguous: 0, total: 2 },
+        compactedMeasures: [],
+        dataInsufficientMeasures: ["cms165"],
+        measures: [
+          { measureId: "cms165", ecqmId: null, runId: null, measurementPeriod: null, compactionStatus: "data_insufficient", matchedSubjects: 2, distinctSubjectsSeen: 0, missingFromRun: 0, rates: [] },
+        ],
+      };
+    }
+    throw new Error(`unexpected GET ${path}`);
+  });
+  render(<ListsPage />);
+  await screen.findByText("ACO Q3 attribution");
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Compute" }));
+  expect(await screen.findByTestId("list-report-data-insufficient")).toHaveTextContent("cms165 cannot be reported for 2027");
+  expect(screen.getByText("Refused — the run's data was too thin to trust")).toBeInTheDocument();
+  expect(screen.queryByText("No completed population run for this year")).toBeNull();
+});

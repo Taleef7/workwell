@@ -26,7 +26,7 @@ test("exitCodeForRuns distinguishes adjusted agreement from mismatches and error
   assert.ok(module, "official-cases CLI module must exist");
   assert.equal(typeof module.exitCodeForRuns, "function", "exit-code policy must be exported");
   const run = (unexpectedMismatches: number, errors: number) => ({
-    summary: { total: 1, expectedAgreements: 0, referenceAgreements: 0, unexpectedMismatches, errors },
+    summary: { total: 1, expectedAgreements: 0, unexpectedMismatches, errors },
   });
   assert.equal(module.exitCodeForRuns([run(0, 0)]), 0);
   assert.equal(module.exitCodeForRuns([run(1, 0)]), 1);
@@ -49,7 +49,6 @@ test("main loads a selected measure without overwriting the committed combined r
     summary: {
       total: 66,
       expectedAgreements: 66,
-      referenceAgreements: 0,
       unexpectedMismatches: 0,
       errors: 0,
     },
@@ -96,7 +95,7 @@ test("main runs the CMS122 vendored-draft drift stretch after the official batch
   const fakeRun = {
     measure: "cms122",
     supplementedOids: [],
-    summary: { total: 55, expectedAgreements: 55, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
+    summary: { total: 55, expectedAgreements: 55, unexpectedMismatches: 0, errors: 0 },
   };
   // changedCases MUST be 0 now: since PR-5 both sides of this comparison are v1.0.000, so any change
   // means our vendoring reduction altered a population result — which fails the command (see the
@@ -218,7 +217,7 @@ test("--allow-missing-terminology SKIPS a measure this context cannot resolve, a
       return Promise.resolve({
         measure: loaded.measure,
         supplementedOids: [],
-        summary: { total, expectedAgreements: total, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
+        summary: { total, expectedAgreements: total, unexpectedMismatches: 0, errors: 0 },
       } as never);
     },
     render: () => "report",
@@ -259,7 +258,7 @@ test("WITHOUT the flag the same measure still runs — the gate is not quietly w
       return Promise.resolve({
         measure: loaded.measure,
         supplementedOids: [],
-        summary: { total, expectedAgreements: total, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 },
+        summary: { total, expectedAgreements: total, unexpectedMismatches: 0, errors: 0 },
       } as never);
     },
     render: () => "report",
@@ -313,7 +312,6 @@ async function fullRun(overrides: {
         summary: {
           total,
           expectedAgreements: broken ? 0 : total,
-          referenceAgreements: 0,
           unexpectedMismatches: 0,
           errors: broken ? total : 0,
         },

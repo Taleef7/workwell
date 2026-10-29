@@ -14,6 +14,20 @@ const nextConfig: NextConfig = {
   // source, and must also transpile @mieweb/ui so its internal extensionless `datavis/src/*`
   // deep imports go through the project resolver (which appends .ts/.tsx).
   transpilePackages: ["datavis", "@mieweb/ui"],
+  // The MCP consent page may never be framed (clickjacking an Approve click). A <meta> tag cannot set
+  // frame-ancestors, so it is a response header.
+  async headers() {
+    return [
+      {
+        source: "/oauth/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "Cache-Control", value: "no-store" },
+        ],
+      },
+    ];
+  },
   async redirects() {
     return [
       {

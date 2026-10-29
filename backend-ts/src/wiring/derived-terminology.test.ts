@@ -59,6 +59,10 @@ interface ChangedValueSets {
  * `terminology-equivalence` check found changed against the Cypress 2027 export, and an independent read
  * of the release found before the build. Its one LOGIC change (the frailty look-back, `overlaps`) is the
  * translation's edit, not a code change, so it is not here.
+ *
+ * Advanced Illness (…110.12.1082) reads +28/−33 since #851: CMS's side is now the 2025 release's own 2,030
+ * codes (it was 2,000 from the drifting `manifest=` form, read as +25/−0), against the translation's 2,025
+ * from the 2026-05-14 release. The translation's sidecar did not change; only what it is compared with did.
  */
 const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
   // cms125 (ww-2027.1, #782): seven sets the release moved, and two that are the LOGIC edit's, not the
@@ -70,15 +74,15 @@ const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
       "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)
       "2.16.840.1.113883.3.464.1003.101.12.1080", // Telephone Visits (+9)
       "2.16.840.1.113883.3.464.1003.101.12.1089", // Virtual Encounter (+2/−4)
-      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+25)
+      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+28/−33)
       "2.16.840.1.113883.3.464.1003.118.12.1300", // Frailty Device (−12)
       "2.16.840.1.113883.3.464.1003.1285", // Unilateral Mastectomy (+20: the logic edit's new set)
       "2.16.840.1.113883.3.464.1003.198.12.1005", // Bilateral Mastectomy (−1)
       "2.16.840.1.113883.3.464.1003.198.12.1071", // Unilateral Mastectomy, Unspecified Laterality (−2: the set the edit drops)
       "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient (+4)
     ],
-    added: 70,
-    removed: 19,
+    added: 73,
+    removed: 52,
   },
   // cms122 (ww-2027.1, #818): seven sets the release moved. The edits change how the numerator picks a
   // reading, not what is read, so no set is the edit's.
@@ -88,12 +92,12 @@ const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
       "2.16.840.1.113883.3.464.1003.101.12.1001", // Office Visit (+10)
       "2.16.840.1.113883.3.464.1003.101.12.1080", // Telephone Visits (+9)
       "2.16.840.1.113883.3.464.1003.103.12.1001", // Diabetes (+6/−4)
-      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+25)
+      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+28/−33)
       "2.16.840.1.113883.3.464.1003.118.12.1300", // Frailty Device (−12)
       "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient (+4)
     ],
-    added: 55,
-    removed: 16,
+    added: 58,
+    removed: 49,
   },
   // cms165 (ww-2027.1, #816): eight sets the release moved, and two that are the LOGIC edit's: CMS165v15
   // removes the ESRD monthly outpatient encounter exclusion (…109.12.1014, its 25 codes all "removed") and
@@ -108,12 +112,12 @@ const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
       "2.16.840.1.113883.3.464.1003.109.12.1013", // Dialysis Services (+9/−6)
       "2.16.840.1.113883.3.464.1003.109.12.1014", // ESRD Monthly Outpatient Services (−25: the exclusion the edit removes)
       "2.16.840.1.113883.3.464.1003.109.12.1029", // Kidney Transplant Recipient (−1: replaced by the code Z94.0)
-      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+25)
+      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+28/−33)
       "2.16.840.1.113883.3.464.1003.118.12.1300", // Frailty Device (−12)
       "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient (+4)
     ],
-    added: 60,
-    removed: 48,
+    added: 63,
+    removed: 81,
   },
   // cms2 (ww-2027.1, #822): eight sets the release moved, and one the LOGIC edit adds: CMS2v16's Active
   // Depression Management (…1248.413), which CMS's 2026 sidecar does not have (both its codes "added").
@@ -139,14 +143,14 @@ const EXPECTED_CHANGED_SETS: Readonly<Record<string, ChangedValueSets>> = {
       "2.16.840.1.113883.3.464.1003.101.12.1089", // Virtual Encounter (+2/−4)
       "2.16.840.1.113883.3.464.1003.108.12.1001", // Malignant Neoplasm of Colon (+18)
       "2.16.840.1.113883.3.464.1003.108.12.1020", // Colonoscopy (+10)
-      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+25)
+      "2.16.840.1.113883.3.464.1003.110.12.1082", // Advanced Illness (+28/−33)
       "2.16.840.1.113883.3.464.1003.118.12.1300", // Frailty Device (−12)
       "2.16.840.1.113883.3.464.1003.198.12.1011", // Fecal Occult Blood Test (FOBT) (+4)
       "2.16.840.1.113883.3.464.1003.198.12.1019", // Total Colectomy (+2)
       "2.16.840.1.113883.3.666.5.307", // Encounter Inpatient (+4)
     ],
-    added: 84,
-    removed: 16,
+    added: 87,
+    removed: 49,
   },
   cms137: {
     oids: [

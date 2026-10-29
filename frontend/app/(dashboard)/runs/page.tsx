@@ -116,7 +116,30 @@ type Reconciliation = {
    * a run scored by more than one logic or measurement period; none, authored CQL. Absent: an older server.
    */
   scoringLogic?: Array<ScoringLogicEntry>;
+  /**
+   * #853: the measures whose ingested data fell below a floor on this run, and by how much. Their rates are
+   * not reported and their exports are refused. Absent when none did (and on an older server).
+   */
+  dataInsufficient?: Array<{ measureId: string; shortfalls: SufficiencyShortfall[] }>;
 };
+
+type SufficiencyShortfall = {
+  check: "encounterTypeCoded" | "bloodPressureFinal" | "failedFetches";
+  observed: number;
+  floor: number;
+  count: number;
+  of: number;
+};
+
+/** "encounter types coded: 11 of 89 (12.4%), floor 95%" — the server's own wording (`describeShortfall`). */
+function describeShortfall(s: SufficiencyShortfall): string {
+  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const label =
+    s.check === "encounterTypeCoded" ? "encounter types coded"
+    : s.check === "bloodPressureFinal" ? "blood pressures final"
+    : "records that could not be read";
+  return `${label}: ${s.count} of ${s.of} (${pct(s.observed)}), ${s.check === "failedFetches" ? "limit below" : "floor"} ${pct(s.floor)}`;
+}
 
 /**
  * `conflict`: the server says the measure's rows mixed logics or measurement periods (authored rows beside
@@ -1206,15 +1229,41 @@ export default function RunsPage() {
                   {selectedRun.retentionNotice}
                 </p>
               ) : null}
+              {reconciliation?.dataInsufficient?.length ? (
+                // #853: above the counts for the same reason as the retention notice. A measure scored on
+                // data this thin reads low because the data is missing, not because the care is.
+                <div
+                  data-testid="run-data-insufficient"
+                  className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                >
+                  <p className="font-semibold">Data too thin to trust: these measures&apos; rates are not reported, and their exports are refused.</p>
+                  <ul className="mt-1 list-disc pl-4">
+                    {reconciliation.dataInsufficient.map((entry) => (
+                      <li key={entry.measureId}>
+                        {entry.measureId}:{" "}
+                        {/* The rows say the measure was thin; how short it fell lived only in the run's
+                            completion record, which can be lost or aged out. */}
+                        {entry.shortfalls.length > 0
+                          ? entry.shortfalls.map(describeShortfall).join("; ")
+                          : "the record of which check fell short was not kept"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Evaluated: {selectedRun.totalEvaluated}</p>
               {/* Cases whose LATEST run is this one: a later run over the same patients takes them over. */}
               <p className="text-xs text-neutral-600 dark:text-neutral-400">Cases last updated by this run: {selectedRun.totalCases}</p>
               {/* Of every row the run wrote, out-of-population patients included. The CMS measure rate,
                   over the measure's own population, is in the reconciliation below (#668). */}
-              <p className="text-xs text-neutral-600 dark:text-neutral-400">
-                Compliant: {selectedRun.passRate.toFixed(1)}% of everyone evaluated ({selectedRun.compliantCount.toLocaleString()} of{" "}
-                {selectedRun.totalEvaluated.toLocaleString()})
-              </p>
+              {/* #853: not under the thin-data banner. On a single-measure run this line IS that measure's
+                  rate, and on a wider one it pools the thin measure's rows in. */}
+              {reconciliation?.dataInsufficient?.length ? null : (
+                <p data-testid="run-pass-rate" className="text-xs text-neutral-600 dark:text-neutral-400">
+                  Compliant: {selectedRun.passRate.toFixed(1)}% of everyone evaluated ({selectedRun.compliantCount.toLocaleString()} of{" "}
+                  {selectedRun.totalEvaluated.toLocaleString()})
+                </p>
+              )}
               {/* Covers this rate and the CMS measure rate in the reconciliation below. This page lists
                   runs from before and after the routing flip, so it names CMS's FHIR logic only for a
                   run whose reconciliation shows official evidence. */}
@@ -1294,7 +1343,8 @@ export default function RunsPage() {
               {mayExport &&
               normalizeEnumValue(selectedRun.scopeType) === "MEASURE" &&
               isReportableRunStatus(selectedRun.status) &&
-              !reconciliation?.compaction.exposed ? (
+              !reconciliation?.compaction.exposed &&
+              !reconciliation?.dataInsufficient?.length ? (
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Button
                     variant="outline"

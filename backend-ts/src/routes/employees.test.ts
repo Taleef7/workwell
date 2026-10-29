@@ -130,7 +130,8 @@ test("GET /api/employees/:id/profile returns identity + outcomes + open cases + 
   assert.equal(cms125.measureVersion, "2.0.0", "an authored row keeps the authored version");
   assert.equal(audiogramCase.logic, null);
   assert.equal(cmsCase.logic, null);
-  assert.ok(p.recentAuditEvents.some((e) => e.eventType === "CASE_CREATED" && /opened a case/.test(e.summary)));
+  // The case timeline's own words (#865): a bare CASE_CREATED has no sentence, so its label, the measure, who.
+  assert.ok(p.recentAuditEvents.some((e) => e.eventType === "CASE_CREATED" && e.summary === "Created (Audiogram) by cm@workwell.dev"));
 });
 
 test("profile shows what the roster shows: out-of-population MISSING_DATA reads OUT_OF_POPULATION (#671)", async () => {
@@ -355,4 +356,43 @@ test("profile reads each measure's WINNING population run, never a newer single-
   assert.equal(audiogram.length, 1, "one row per measure");
   assert.equal(audiogram[0]!.outcomeStatus, "OVERDUE", "the completed population run's answer, as the table shows it");
   assert.equal(audiogram[0]!.displayStatus, "OVERDUE");
+});
+
+test("each open gap says when its CURRENT assignee got it and how, and Recent Activity reads outreach (#865)", async () => {
+  const db = env.DB as never;
+  const events = new SqliteCaseEventStore(db);
+  const store = new SqliteCaseStore(db);
+  const assign = (id: string, payload: Record<string, unknown>) =>
+    events.appendAudit({ eventType: "CASE_ASSIGNED", entityType: "case", entityId: id, actor: "lead@workwell.dev", refRunId: null, refCaseId: id, refMeasureVersionId: null, payload });
+
+  // The audiogram gap: the newest assignment names the current assignee, so its time and hand stand.
+  await assign(caseId, { assignee: "admin@workwell.dev", previousAssignee: "unassigned" });
+  await assign(caseId, { assignee: "cm@workwell.dev", previousAssignee: "admin@workwell.dev", bulk: true });
+  await store.patchCase(caseId, { assignee: "CM@workwell.dev" }); // spelled differently: still the same person
+  // The cms125 gap: the newest assignment names someone else, so the page must not borrow its time.
+  await assign(cmsCaseId, { assignee: "admin@workwell.dev", previousAssignee: "unassigned" });
+  await store.patchCase(cmsCaseId, { assignee: "cm@workwell.dev" });
+  await events.appendAudit({
+    eventType: "CASE_OUTREACH_SENT", entityType: "case", entityId: caseId, actor: "cm@workwell.dev", refRunId: null, refCaseId: caseId, refMeasureVersionId: null,
+    payload: { caseStatus: "OPEN", action: { autoTriggered: false, channel: "EMAIL", templateName: "Hearing test reminder", deliveryStatus: "SIMULATED" } },
+  });
+
+  const p = (await (await get("/api/employees/emp-006/profile"))!.json()) as {
+    openCases: Array<{ caseId: string; assignedAt: string | null; assignedBy: string | null; assignedVia: string | null }>;
+    recentAuditEvents: Array<{ eventType: string; summary: string }>;
+  };
+  const audiogram = p.openCases.find((c) => c.caseId === caseId)!;
+  assert.equal(audiogram.assignedBy, "lead@workwell.dev");
+  assert.equal(audiogram.assignedVia, "BULK");
+  assert.ok(audiogram.assignedAt && !Number.isNaN(Date.parse(audiogram.assignedAt)), "the assignment's own time");
+  assert.deepEqual(
+    (({ assignedAt, assignedBy, assignedVia }) => ({ assignedAt, assignedBy, assignedVia }))(p.openCases.find((c) => c.caseId === cmsCaseId)!),
+    { assignedAt: null, assignedBy: null, assignedVia: null },
+    "a newest assignment to someone else is not this assignee's",
+  );
+  // Recent Activity looked for OUTREACH_SENT; the ledger writes CASE_OUTREACH_SENT.
+  assert.ok(
+    p.recentAuditEvents.some((e) => e.eventType === "CASE_OUTREACH_SENT" && e.summary === "Hearing test reminder sent by email, delivery simulated (Audiogram) by cm@workwell.dev"),
+    JSON.stringify(p.recentAuditEvents.map((e) => e.summary)),
+  );
 });

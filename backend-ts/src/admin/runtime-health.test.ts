@@ -94,6 +94,14 @@ test("/health gets counts only; the admin view gets what was running", () => {
   assert.equal(d.inFlight.total, 1);
 });
 
+test("#845: /health reports the process's zone and its real current offset", () => {
+  const h = runtimeHealth();
+  assert.equal(h.timezone.tz, process.env.TZ ?? null);
+  assert.equal(h.timezone.utcOffsetMinutes, 0 - new Date().getTimezoneOffset());
+  // Under the pinned runner (`pnpm test`, CI) that is UTC; the pin itself is proven in src/engine/utc.test.ts.
+  if (process.env.TZ === "UTC") assert.equal(h.timezone.utcOffsetMinutes, 0);
+});
+
 test("buildSha reads the baked-in commit, and absence is null rather than a placeholder", () => {
   const prev = process.env.WORKWELL_BUILD_SHA;
   try {

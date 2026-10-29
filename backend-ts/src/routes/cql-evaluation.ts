@@ -30,7 +30,7 @@
  *
  * `/$cql` is outside `/api/`, where `authorize` ends in permitAll (the ADR-067 hazard) — and this
  * endpoint executes caller-supplied CQL, so the explicit rule in `authorize.ts` gates it to the
- * machine-client authority (`/sse`, `/mcp/**`, CDS invoke). On the injection surface, measured
+ * machine-client authority (`/mcp/**`, CDS invoke). On the injection surface, measured
  * rather than assumed (#481 review): injected DECLARATIONS (include/using/valueset) are grammar
  * errors, injected retrieves cannot resolve a model, and the engine runs data-free with no
  * code service — but injected STATEMENTS do compile and evaluate, so the def-count guard below

@@ -166,4 +166,13 @@ export interface CaseEventStore {
    * returns, and the two must not disagree. Empty input returns {} without a query.
    */
   latestOutreachDeliveryStatuses(caseIds: readonly string[]): Promise<Record<string, string | null>>;
+  /**
+   * The newest audit event of ONE type for each of a set of cases, keyed by case id; a case with none
+   * has no key. Newest by `occurred_at`, then the insert id, as every other "latest" read here orders.
+   *
+   * The patient page's "assigned when, and by whom" per open gap (#865) reads `CASE_ASSIGNED` through
+   * it: one statement for a patient's gaps rather than a timeline read per gap. Chunked like
+   * {@link latestOutreachDeliveryStatuses}, one chunk at a time. Empty input returns {} without a query.
+   */
+  latestCaseEventsOfType(caseIds: readonly string[], eventType: string): Promise<Record<string, AuditEventRow>>;
 }

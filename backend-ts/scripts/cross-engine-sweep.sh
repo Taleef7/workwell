@@ -45,7 +45,11 @@ done
 
 CONTAINER="${HAPI_CONTAINER:-hapi-cr}"
 PORT="${HAPI_PORT:-8899}"
-IMAGE="${HAPI_IMAGE:-hapiproject/hapi:latest}"
+# Pinned by digest: v8.12.0-2, clinical-reasoning 4.13.0 (#846). `:latest` changed the engine under every
+# sweep, so two sweeps' numbers were not comparable, and the old image's `convert … to days` bug
+# (cqframework/clinical_quality_language#1682) was read as 22 disagreements about the measures. Moving the
+# pin is a deliberate act: re-sweep every measure on the new digest and record it. HAPI_IMAGE overrides it.
+IMAGE="${HAPI_IMAGE:-hapiproject/hapi@sha256:0ff86aac4c7bd13a1ee226444a70263bb46ed1c28ef543c30a44f865b80ca04e}"
 BASE="http://localhost:${PORT}/fhir"
 CONTENT="${CROSS_ENGINE_CONTENT:-.official-content}"
 
@@ -105,8 +109,9 @@ echo "  container ${CONTAINER} on :${PORT} from ${IMAGE}" >&2
 
 META=""
 LOAD_LOG=""
+SUPPLEMENTED=""
 cleanup() {
-  rm -f "$META" "$LOAD_LOG" 2>/dev/null || true
+  rm -f "$META" "$LOAD_LOG" "$SUPPLEMENTED" 2>/dev/null || true
   if [[ "$KEEP" -eq 0 ]]; then
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   else
@@ -114,6 +119,44 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+# A value set the measure's library declares and the upstream bundle does not ship (CMS138's `…3.526.3.1278`,
+# which the MADiE gate supplements from the sidecar, ADR-053) goes INTO the bundle before it is loaded, from
+# the same sidecar our engine reads. Created on the server after the load, cqf-fhir-cr still reported it as
+# "Unable to locate ValueSet" for every case (#846). Values travel through the environment, as above.
+SIDECAR="measures/official/${MEASURE}/terminology.json"
+if [[ -z "$BUNDLE_OVERRIDE" && -f "$SIDECAR" ]]; then
+  SUPPLEMENTED="$(mktemp)"
+  ADDED="$(SWEEP_BUNDLE="$BUNDLE" SWEEP_SIDECAR="$SIDECAR" SWEEP_OUT="$SUPPLEMENTED" node -e '
+    const fs = require("fs");
+    const bundle = JSON.parse(fs.readFileSync(process.env.SWEEP_BUNDLE, "utf8"));
+    const sidecar = JSON.parse(fs.readFileSync(process.env.SWEEP_SIDECAR, "utf8"));
+    const shipped = new Set(bundle.entry.map((e) => e.resource).filter((r) => r.resourceType === "ValueSet").map((r) => r.url));
+    let added = 0;
+    for (const vs of sidecar.valueSets) {
+      if (shipped.has(vs.url)) continue;
+      const id = vs.url.split("/").pop();
+      if (!/^[A-Za-z0-9\-.]{1,64}$/.test(id)) continue;
+      const systems = [...new Set(vs.codes.map((c) => c.system))];
+      bundle.entry.push({
+        fullUrl: vs.url,
+        resource: {
+          resourceType: "ValueSet", id, url: vs.url, status: "active",
+          compose: { include: systems.map((system) => ({ system, concept: vs.codes.filter((c) => c.system === system).map((c) => ({ code: c.code })) })) },
+          expansion: { timestamp: "2026-01-01T00:00:00Z", total: vs.codes.length, contains: vs.codes.map((c) => ({ system: c.system, code: c.code })) },
+        },
+        request: { method: "PUT", url: `ValueSet/${id}` },
+      });
+      added++;
+    }
+    fs.writeFileSync(process.env.SWEEP_OUT, JSON.stringify(bundle));
+    process.stdout.write(String(added));
+  ')"
+  if [[ "$ADDED" != "0" ]]; then
+    BUNDLE="$SUPPLEMENTED"
+    echo "  supplemented the bundle with ${ADDED} value set(s) it does not ship, from ${SIDECAR}" >&2
+  fi
+fi
 
 # 1. Always destroy first. A reused container is the silent-wrong-answer path.
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true

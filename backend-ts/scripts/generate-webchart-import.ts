@@ -21,6 +21,7 @@
  * seeded charts round-trip through teatea's FHIR API into real CQL outcomes. Synthetic only — never
  * PHI (CLAUDE.md hard rule). Descriptive only (ADR-008): this emits data; CQL decides outcomes.
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

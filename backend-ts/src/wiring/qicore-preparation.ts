@@ -229,7 +229,7 @@ export function loincCodesOf(concept: unknown): string[] {
  * authored engine sees the same bytes it always did (ADR-008). Two reviewers asked; it is written down
  * so the third does not have to.
  */
-function isBloodPressure(resource: Record<string, unknown>): boolean {
+export function isBloodPressure(resource: Record<string, unknown>): boolean {
   if (!loincCodesOf(resource.code).some((c) => LOINC_BP_PANEL.has(c))) return false;
   const components = (resource.component as Array<{ code?: unknown; valueQuantity?: { value?: unknown } }> | undefined) ?? [];
   // Each reading coded in LOINC's own system, the only spelling cms165 reads: it compares a component's

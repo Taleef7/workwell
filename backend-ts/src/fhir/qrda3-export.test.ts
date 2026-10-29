@@ -231,6 +231,22 @@ test("QRDA III: a re-vendored artifact must not relabel a historical run's crite
   assert.ok(xml.includes('root="urn:workwell:measure"'), "measure identity falls back too");
 });
 
+test("QRDA III: a run scored by an EARLIER vendoring with the same logic keeps its criteria and identity (#848)", () => {
+  // cms122's vendoring as main shipped it, retired by a metadata-only re-vendor: same logicSha256 as today's artifact.
+  const earlier = {
+    ...officialOutcome("cms122"),
+    evidence: {
+      official: {
+        ...(officialOutcome("cms122").evidence as { official: Record<string, unknown> }).official,
+        artifactSha256: "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552",
+      },
+    },
+  } as OutcomeRecord;
+  const xml = buildQrda3Document(run, "cms122", [earlier]);
+  assert.ok(xml.includes('extension="InitialPopulation_1"'), "the artifact's criteria still name the counts");
+  assert.ok(!xml.includes('root="urn:workwell:measure"'), "and the measure keeps CMS's identity");
+});
+
 /**
  * ADR-074, the QRDA III half. CMS137 declares two groups over one denominator and three age strata per
  * group. This route refused a multi-rate measure with a 501 until 2026-09-06; the document now carries

@@ -17,6 +17,7 @@
  * §4 prerequisites in docs/archive/superpowers/plans/2026-06-15-issue-109-deploy-cutover.md).
  */
 
+import "./engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { initSchedulerFromEnv, schedulerTick } from "./admin/scheduler.ts";
 
 export {}; // module marker (keeps this a module even though every import below is dynamic)

@@ -35,6 +35,7 @@
  * Requires network (npm resolves `cql-execution` and `cql-exec-fhir` from the registry), which is why
  * this is a separate CI job rather than part of `pnpm test`.
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

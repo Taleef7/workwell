@@ -17,6 +17,7 @@
  * Env: WEBCHART_DEVDB_PASS (required: the dev-wcdb image's published credential), and overrides
  * WEBCHART_DEVDB_CONTAINER (wcdb), _DB (wc_miehr_wctroot), _USER (root).
  */
+import "../src/engine/utc.ts"; // first: pins the process to UTC before anything reads a date (#845)
 import { execFileSync } from "node:child_process";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";

@@ -5,6 +5,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import {
   countPopulations,
   officialMembership,
@@ -15,7 +16,7 @@ import {
   buildIndividualMeasureReport,
   buildMeasureReportBundle,
 } from "./measure-report.ts";
-import { loadOfficialArtifact } from "../wiring/official-artifacts.ts";
+import { loadDerivedArtifact, loadOfficialArtifact } from "../wiring/official-artifacts.ts";
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 
@@ -172,6 +173,50 @@ test("ADR-046: a re-vendored artifact does NOT get the current canonical retroac
   const report = buildSummaryMeasureReport(run, "cms125", [stale], GENERATED_AT);
   assert.equal(report.measure, "urn:workwell:measure:cms125:official:1.0.000");
   assert.ok(!report.measure.includes("madie.cms.gov"), "never claims a canonical this run did not use");
+  // Nor the current artifact's ids: a linkId names an element of the Measure that scored the counts.
+  assert.ok(!JSON.stringify(report).includes("linkId"), "no linkId from an artifact this run did not use");
+});
+
+test("#848: a translated run scored by the translation's EARLIER build, same logic, keeps the linkIds", () => {
+  // cms125's translation as main shipped it (ac15fd1f) before #848's metadata-only rebuild (profile claims,
+  // no empty identifier): the manifest sha its runs recorded.
+  const translation = loadDerivedArtifact("cms125")!;
+  const scoredBy = (artifactSha256: string): OutcomeRecord => ({
+    ...routedOc("cms125", true),
+    evidence: {
+      official: {
+        kind: "derived", url: translation.manifest.url, label: translation.manifest.derived!.label, derivedFrom: "CMS125v15",
+        ecqmId: null, version: translation.manifest.version, artifactSha256,
+        populationResults: [
+          { populationType: "initial-population", result: true },
+          { populationType: "denominator", result: true },
+          { populationType: "denominator-exclusion", result: false },
+          { populationType: "numerator", result: true },
+        ],
+      },
+    },
+  });
+  const earlier = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:f2081fb0092bf0ff86408240966e01c3ab594ceb877b3ed3ec44dde71e98007b")], GENERATED_AT);
+  assert.equal(linkOf("group", earlier.group[0]!), "Group_1", "the translation's group ids still describe the counts");
+  // A build nobody pinned is not assumed to share the logic.
+  const unknown = buildSummaryMeasureReport(run, "cms125", [scoredBy("sha256:not-a-build-of-this-translation")], GENERATED_AT);
+  assert.ok(!JSON.stringify(unknown).includes("linkId"));
+});
+
+test("#848: a run scored by an EARLIER vendoring with the same logic keeps the canonical and the linkIds", () => {
+  // cms125's vendoring as main shipped it (retired by #848's metadata-only re-vendor; still pinned in the lineage
+  // with the same logicSha256 as today's). Byte equality would drop the canonical; the logic is CMS's.
+  const earlier = routedOc("cms125", true);
+  (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =
+    "sha256:97f737fa5262fca1fbb4620e10ce286f612b87b7de4c3fc06fdfe38dfb666ac8";
+  const report = buildSummaryMeasureReport(run, "cms125", [earlier], GENERATED_AT);
+  const current = loadOfficialArtifact("cms125")!.manifest;
+  assert.equal(report.measure, `${current.url}|${current.version}`, "kept CMS's versioned canonical");
+  assert.ok(JSON.stringify(report).includes("linkId"), "the artifact's ids still describe the counts");
+  // cms122's earlier vendoring is not cms125's: another measure's sha never carries an identity across.
+  (earlier.evidence as { official: { artifactSha256: string } }).official.artifactSha256 =
+    "sha256:c0d99a8ebda8941a1912d6938eb2648b42e8954937d46ea3801f3e71cdcb8552";
+  assert.equal(buildSummaryMeasureReport(run, "cms125", [earlier], GENERATED_AT).measure, "urn:workwell:measure:cms125:official:1.0.000");
 });
 
 test("ADR-046: the INDIVIDUAL report derives the trio from its own outcome", () => {
@@ -417,20 +462,16 @@ test("PR-3: the histogram path CANNOT see official evidence - the divergence is 
 });
 
 // ---------------------------------------------------------------------------------------------------
-// DEQM STU5 gap — pinned in TypeScript so the measured gap cannot drift silently (B6, ADR-058).
+// DEQM — pinned in TypeScript so the measured state cannot drift silently (B6, ADR-058).
 //
-// `scripts/deqm-validate.ts` measured our MeasureReports against the DEQM STU5 profiles on 2026-08-04:
-// base R4 clean at 0 errors, and exactly THREE profile errors, identical on every report shape and on
-// both the official and authored paths (`docs/evidence/DEQM_VALIDATION_2026-08-04.md`).
-//
+// `scripts/deqm-validate.ts` measures our MeasureReports against DEQM with the HL7 validator. The target
+// is DEQM 1.0.0 (UV), the owner's choice on 2026-10-19 (#849); Da Vinci DEQM STU5 is measured beside it.
 // That script needs Java and a 187 MB validator jar, so it is not in CI. These assertions are how its
-// findings get a CI-enforced home — the `qrda-schematron-check.py` / `qrda1-export.test.ts` discipline,
-// each assertion citing the constraint it stands for.
+// findings get a CI-enforced home, each citing the constraint it stands for.
 //
-// They pin the CURRENT, NON-CONFORMANT state on purpose. We deliberately do not claim a DEQM
-// `meta.profile`, so these are a record of the distance to it. **When one is fixed, the test should be
-// inverted rather than deleted**, and `deqm-validate.ts` re-run to confirm the error count actually fell
-// — otherwise "we fixed it" is a claim with no measurement behind it.
+// Fixed constraints are asserted as fixed; the gaps that remain are pinned as gaps. We deliberately do not
+// claim a DEQM `meta.profile`. **When a gap is fixed, invert its test rather than deleting it**, and re-run
+// `deqm-validate.ts` to confirm the error count actually fell.
 // ---------------------------------------------------------------------------------------------------
 
 const deqmProbe = () =>
@@ -438,17 +479,27 @@ const deqmProbe = () =>
     run, "cms125", { ipp: 150, denom: 150, denex: 47, numer: 2, denexcep: 0 }, GENERATED_AT,
     { measureUrl: "https://madie.cms.gov/Measure/CMS125FHIRBreastCancerScreen", version: "1.0.000", ecqmId: "125FHIR" } as never,
   );
+const UV_SCORING = "http://hl7.org/fhir/uv/deqm/StructureDefinition/deqm-measureScoring";
+const LINK = (element: string) => `http://hl7.org/fhir/5.0/StructureDefinition/extension-MeasureReport.${element}.linkId`;
+type Ext = { url: string; valueString?: string; valueCodeableConcept?: { coding: Array<{ system: string; code: string }> } };
+const linkOf = (element: string, node: { extension?: Ext[] }) => node.extension?.find((e) => e.url === LINK(element))?.valueString;
 
-test("DEQM gap [deqm-0]: the measure canonical carries NO version — measured, not assumed", () => {
-  // deqm-0: 'Canonical URL SHALL contain a version.' We hold the version in evidence.official.version
-  // and thread it to the QRDA III identity (ADR-046 d4); the MeasureReport canonical omits it.
+test("DEQM [deqm-0]: an official report's canonical carries the version that ran", () => {
+  // deqm-0: 'Canonical URL SHALL contain a version.'
   const mr = deqmProbe();
-  assert.equal(mr.measure, "https://madie.cms.gov/Measure/CMS125FHIRBreastCancerScreen");
-  assert.ok(!mr.measure.includes("|"), "canonical gained a |version — deqm-0 may now pass; re-run deqm-validate.ts");
+  assert.equal(mr.measure, "https://madie.cms.gov/Measure/CMS125FHIRBreastCancerScreen|1.0.000");
+  const individual = buildIndividualMeasureReport(routedOc("cms125", true), run, "cms125", GENERATED_AT);
+  assert.equal(individual.measure, "https://madie.cms.gov/Measure/CMS125FHIRBreastCancerScreen|1.0.000");
 });
 
-test("DEQM gap: the contained reporter cannot satisfy qicore-organization", () => {
-  // QI-Core's constraint reaching us through DEQM: the profile needs more than a name.
+test("DEQM gap [deqm-0]: an AUTHORED report's canonical stays unversioned — no published version exists to carry", () => {
+  const mr = buildSummaryMeasureReport(run, "audiogram", outcomes, GENERATED_AT);
+  assert.equal(mr.measure, "urn:workwell:measure:audiogram");
+});
+
+test("DEQM gap (STU5 only): the contained reporter cannot satisfy qicore-organization", () => {
+  // QI-Core's constraint reaching us through Da Vinci DEQM STU5; DEQM 1.0.0 does not impose it. Meeting it
+  // would mean stating an identifier and address for an organization that has none to give.
   const contained = (deqmProbe() as unknown as { contained?: Array<Record<string, unknown>> }).contained ?? [];
   const org = contained.find((r) => r.resourceType === "Organization");
   assert.ok(org, "no contained Organization");
@@ -457,14 +508,134 @@ test("DEQM gap: the contained reporter cannot satisfy qicore-organization", () =
   assert.equal(org.active, undefined, "reporter gained active — re-run deqm-validate.ts");
 });
 
-test("DEQM gap [deqm-3]: no measure-scoring is emitted, on the root or any group", () => {
-  // deqm-3: scoring is required on the root OR every group and CANNOT be on both — so a naive fix that
-  // sets it in both places would still fail. That asymmetry is why this asserts BOTH are absent.
-  const mr = deqmProbe() as unknown as { extension?: unknown[]; group: Array<{ extension?: unknown[] }> };
-  assert.equal(mr.extension, undefined, "root gained an extension — check it is not scoring-on-both (deqm-3)");
-  for (const g of mr.group) {
-    assert.equal(g.extension, undefined, "group gained an extension — check it is not scoring-on-both (deqm-3)");
+test("DEQM [deqm-3]: scoring is stated once, on the root, in DEQM 1.0.0's extension — never on a group too", () => {
+  // deqm-3: scoring is required on the root OR every group and CANNOT be on both.
+  for (const mr of [deqmProbe(), buildSummaryMeasureReport(run, "audiogram", outcomes, GENERATED_AT), buildIndividualMeasureReport(routedOc("cms125", true), run, "cms125", GENERATED_AT)]) {
+    const scoring = (mr.extension ?? []).filter((e) => e.url === UV_SCORING);
+    assert.equal(scoring.length, 1);
+    assert.deepEqual(scoring[0]!.valueCodeableConcept, { coding: [{ system: "http://terminology.hl7.org/CodeSystem/measure-scoring", code: "proportion" }] });
+    for (const g of mr.group) assert.ok(!(g.extension ?? []).some((e) => e.url.endsWith("measureScoring")), "scoring on a group as well breaks deqm-3");
   }
+});
+
+test("the root scoring claim holds: every vendored artifact, official and derived, is proportion-scored on every group", () => {
+  // The builder computes a proportion score for every measure and says so on the root. A vendored measure
+  // with another scoring would make that extension (and the score) wrong, so it must fail here first.
+  const root = new URL("../../measures/", import.meta.url);
+  let groups = 0;
+  for (const kind of ["official", "derived"]) {
+    for (const id of readdirSync(new URL(`${kind}/`, root))) {
+      const path = new URL(`${kind}/${id}/bundle.json`, root);
+      if (!existsSync(path)) continue;
+      const bundle = JSON.parse(readFileSync(path, "utf8")) as { entry: Array<{ resource: Record<string, unknown> }> };
+      const measure = bundle.entry.map((e) => e.resource).find((r) => r.resourceType === "Measure")!;
+      for (const g of (measure.group as Array<{ extension?: Ext[] }>) ?? []) {
+        const scoring = g.extension?.find((e) => e.url.endsWith("cqfm-scoring"))?.valueCodeableConcept?.coding[0]?.code;
+        assert.equal(scoring, "proportion", `${kind}/${id}`);
+        groups += 1;
+      }
+    }
+  }
+  assert.ok(groups >= 15, `expected every vendored group to be checked, found ${groups}`);
+});
+
+test("DEQM 1.0.0 linkId: every group, population, stratifier and stratum population of an official report links to the artifact's ids", async () => {
+  const module = await import("./measure-report.ts");
+  const rate = (numerator: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "denominator-exclusion", result: false },
+    { populationType: "numerator", result: numerator },
+  ];
+  const strataFor = (group: number) => [1, 2, 3].map((s) => ({ id: `Stratification_${group}_${s}`, result: s === 2 }));
+  const official = (numerator: boolean) => ({
+    ecqmId: "CMS137FHIR", version: "1.0.000", artifactSha256: loadOfficialArtifact("cms137")?.manifest.sha256,
+    populationResults: rate(true), rates: [rate(true), rate(numerator)], strata: [strataFor(1), strataFor(2)],
+  });
+  const outcomes = [{ status: "COMPLIANT", evidence: { official: official(true) } }, { status: "OVERDUE", evidence: { official: official(false) } }] as never[];
+  const cmsRun = { measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-12-31T23:59:59.999Z" } as never;
+  for (const mr of [module.buildSummaryMeasureReport(cmsRun, "cms137", outcomes, GENERATED_AT), module.buildIndividualMeasureReport(outcomes[0] as never, cmsRun, "cms137", GENERATED_AT)]) {
+    assert.equal(mr.measure, "https://madie.cms.gov/Measure/CMS137FHIRSUDTxInitEngagement|1.0.000");
+    for (const [i, g] of mr.group.entries()) {
+      const n = i + 1;
+      assert.equal(linkOf("group", g), `Group_${n}`);
+      assert.deepEqual(
+        g.population.map((p) => [p.code.coding[0]!.code, linkOf("group.population", p)]),
+        [["initial-population", `InitialPopulation_${n}`], ["numerator", `Numerator_${n}`], ["denominator", `Denominator_${n}`], ["denominator-exclusion", `DenominatorExclusion_${n}`]],
+      );
+      assert.equal(g.stratifier!.length, 3);
+      for (const s of g.stratifier!) {
+        assert.equal(linkOf("group.stratifier", s), s.id);
+        for (const stratum of s.stratum) {
+          for (const p of stratum.population) assert.ok(linkOf("group.stratifier.stratum.population", p)?.endsWith(`_${n}`), `${s.id} ${p.code.coding[0]!.code}`);
+        }
+      }
+    }
+  }
+});
+
+test("a translation's report links to its OWN artifact's ids, and only when the evidence names that artifact", () => {
+  const translation = loadDerivedArtifact("cms122");
+  assert.ok(translation, "the cms122 translation is vendored");
+  const derivedOc = (url: string): OutcomeRecord => ({
+    ...routedOc("cms122", true),
+    evidence: {
+      official: {
+        kind: "derived", url, label: "WorkWell translation of CMS122v14", derivedFrom: "CMS122v14", ecqmId: null,
+        version: translation.manifest.version, artifactSha256: translation.manifest.sha256,
+        populationResults: [
+          { populationType: "initial-population", result: true },
+          { populationType: "denominator", result: true },
+          { populationType: "denominator-exclusion", result: false },
+          { populationType: "numerator", result: true },
+        ],
+      },
+    },
+  });
+  const mr = buildSummaryMeasureReport(run, "cms122", [derivedOc(translation.manifest.url)], GENERATED_AT);
+  assert.equal(mr.measure, `${translation.manifest.url}|${translation.manifest.version}`);
+  assert.ok(mr.measure.startsWith("urn:workwell:"), "a translation reports under a WorkWell urn, never CMS's canonical (LOCKED §4.3)");
+  assert.equal(linkOf("group", mr.group[0]!), "Group_1");
+  assert.equal(linkOf("group.population", mr.group[0]!.population[0]!), "InitialPopulation_1");
+  // Evidence naming a different translation (a later year's, say) gets no ids from this one.
+  const other = buildSummaryMeasureReport(run, "cms122", [derivedOc("urn:workwell:measure:cms122:translation-2099")], GENERATED_AT);
+  assert.ok(!JSON.stringify(other).includes("linkId"));
+});
+
+test("DEQM gap [deqm-7]: a stratifier carries no code — owner decision 2026-10-19, not yet", async () => {
+  // deqm-7 wants `stratifier.code` (or stratum components); the artifact has none, and a code would be our
+  // own label on CMS's stratifier. Pinned so supplying one is a decision, not a drift.
+  const module = await import("./measure-report.ts");
+  const strata = [{ id: "Stratification_1_1", inStratum: { ipp: 1, denom: 1, denex: 0, numer: 1, denexcep: 0 }, notInStratum: { ipp: 0, denom: 0, denex: 0, numer: 0, denexcep: 0 } }];
+  const [stratifier] = module.stratifierElements(strata);
+  assert.equal((stratifier as unknown as Record<string, unknown>)["code"], undefined);
+});
+
+test("with the artifact, a report states exactly the populations the measure declares", () => {
+  // CMS68 declares no exclusion and declares an exception: its report states no exclusion at 0, and the
+  // exception at 0 rather than omitting it.
+  const cms68 = (inNumerator: boolean): OutcomeRecord => ({
+    ...routedOc("cms68", inNumerator),
+    evidence: {
+      official: {
+        ecqmId: "CMS68FHIR", version: "1.0.000", artifactSha256: loadOfficialArtifact("cms68")?.manifest.sha256,
+        populationResults: [
+          { populationType: "initial-population", result: true },
+          { populationType: "denominator", result: true },
+          { populationType: "numerator", result: inNumerator },
+          { populationType: "denominator-exception", result: false },
+        ],
+      },
+    },
+  });
+  const mr = buildSummaryMeasureReport(run, "cms68", [cms68(true), cms68(false)], GENERATED_AT);
+  assert.deepEqual(mr.group[0]!.population.map((p) => [p.code.coding[0]!.code, p.count]), [
+    ["initial-population", 2], ["numerator", 1], ["denominator", 2], ["denominator-exception", 0],
+  ]);
+  // Without the artifact (authored), the shape is unchanged: the four, and no exception at 0.
+  const authored = buildSummaryMeasureReport(run, "audiogram", outcomes, GENERATED_AT);
+  assert.deepEqual(authored.group[0]!.population.map((p) => p.code.coding[0]!.code), ["initial-population", "numerator", "denominator", "denominator-exclusion"]);
+  assert.ok(authored.group[0]!.population.every((p) => p.extension === undefined), "no linkId without an artifact to link to");
 });
 
 test("measureScore is emitted at full float precision, unlike the QRDA III exporter's toFixed(4)", () => {

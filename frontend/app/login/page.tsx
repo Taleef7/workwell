@@ -23,6 +23,7 @@ import { fraunces } from "@/app/fonts";
 import { SUBJECT } from "@/lib/terminology";
 import { PUBLIC_DEMO } from "@/lib/public-demo";
 import { homeRouteFor } from "@/lib/rbac";
+import { safeNext } from "@/lib/safe-next";
 
 const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
@@ -48,7 +49,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!token || !user) return;
-    router.replace(homeRouteFor(user.role));
+    // Back to the MCP consent page that sent the user here, when it did; otherwise to the role's home.
+    const next = safeNext(new URLSearchParams(window.location.search).get("next"), window.location.origin);
+    router.replace(next ?? homeRouteFor(user.role));
   }, [router, token, user]);
 
   function fillDemoCredentials() {

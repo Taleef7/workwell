@@ -1,8 +1,6 @@
 /**
- * MCP transport route test (#108) — the HTTP+SSE + JSON-RPC handshake end-to-end:
- * open /sse, read the endpoint event for the sessionId, POST JSON-RPC to /mcp/message,
- * read the response back off the SSE stream. Covers initialize, tools/list, tools/call,
- * unknown session (404), unknown method, and the auth-enforced per-tool role gate.
+ * MCP transport (#108, #704): Streamable HTTP at POST /mcp, both protocol eras, through the SDK v2 handler.
+ * Auth is off here (`enforce: false`); the token gate is `mcp-auth.test.ts`.
  *   node --import tsx --test src/routes/mcp.test.ts
  */
 import { test, before, after } from "node:test";
@@ -14,49 +12,42 @@ import { rmSync } from "node:fs";
 import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL, migrateFloorSchema } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
-import { handleMcp, type McpAuth } from "./mcp.ts";
+import { MCP_TOOLS } from "../mcp/tools.ts";
+import { handleMcp } from "./mcp.ts";
 
 const dbPath = join(tmpdir(), `workwell-mcproute-${crypto.randomUUID()}.sqlite`);
-let env: { DB: unknown };
+let env: { DB: { prepare: (sql: string) => { all: <T>() => Promise<{ results?: T[] }> } } };
 let runId: string;
 
-const PERMISSIVE: McpAuth = { actor: "cm@workwell.dev", role: null, enforce: false };
+const ACCEPT = "application/json, text/event-stream";
+const MODERN_META = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} };
 
-/** Open /sse, return the stream reader + decoder + the sessionId from the endpoint event. */
-async function openSse(): Promise<{ reader: ReadableStreamDefaultReader<Uint8Array>; decode: (u: Uint8Array) => string; sessionId: string }> {
-  const res = await handleMcp(new Request("http://x/sse", { method: "GET" }), env as never, PERMISSIVE);
-  assert.equal(res?.status, 200);
-  assert.match(res!.headers.get("content-type") ?? "", /text\/event-stream/);
-  const reader = res!.body!.getReader();
-  const dec = new TextDecoder();
-  const decode = (u: Uint8Array) => dec.decode(u);
-  const first = await reader.read();
-  const text = decode(first.value!);
-  const m = text.match(/data: \/mcp\/message\?sessionId=([0-9a-f-]+)/);
-  assert.ok(m, `endpoint event present: ${text}`);
-  return { reader, decode, sessionId: m![1]! };
+type Rpc = { result?: Record<string, unknown>; error?: { code: number; message: string } };
+
+async function send(body: unknown, headers: Record<string, string> = {}, method = "POST"): Promise<Response> {
+  const init: RequestInit = { method, headers: { "content-type": "application/json", accept: ACCEPT, ...headers } };
+  if (method === "POST") init.body = JSON.stringify(body);
+  return (await handleMcp(new Request("http://x/mcp", init), env as never, { enforce: false }))!;
 }
 
-/** POST a JSON-RPC message for a session, then read the next SSE message frame's JSON. */
-async function rpc(
-  sessionId: string,
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  decode: (u: Uint8Array) => string,
-  body: unknown,
-  auth: McpAuth = PERMISSIVE,
-): Promise<Record<string, unknown>> {
-  const res = await handleMcp(
-    new Request(`http://x/mcp/message?sessionId=${sessionId}`, { method: "POST", body: JSON.stringify(body) }),
-    env as never,
-    auth,
+/** The JSON-RPC message of a response, plain JSON (2026-07-28) or a one-message event stream (2025 era). */
+async function rpcOf(res: Response): Promise<Rpc> {
+  const text = await res.text();
+  if ((res.headers.get("content-type") ?? "").includes("text/event-stream")) {
+    const data = text.match(/^data: (.*)$/m);
+    assert.ok(data, `an event-stream message: ${text}`);
+    return JSON.parse(data![1]!) as Rpc;
+  }
+  return JSON.parse(text) as Rpc;
+}
+
+const modern = (id: number, method: string, params: Record<string, unknown> = {}, name?: string) =>
+  send(
+    { jsonrpc: "2.0", id, method, params: { ...params, _meta: MODERN_META } },
+    { "mcp-protocol-version": "2026-07-28", "mcp-method": method, ...(name ? { "mcp-name": name } : {}) },
   );
-  assert.equal(res?.status, 202);
-  const chunk = await reader.read();
-  const text = decode(chunk.value!);
-  const m = text.match(/data: (.*)\n\n$/s);
-  assert.ok(m, `message frame present: ${text}`);
-  return JSON.parse(m![1]!) as Record<string, unknown>;
-}
+const legacy = (id: number, method: string, params?: Record<string, unknown>) =>
+  send({ jsonrpc: "2.0", id, method, ...(params ? { params } : {}) }, { "mcp-protocol-version": "2025-11-25" });
 
 before(async () => {
   const db = await createSqliteD1(dbPath);
@@ -81,85 +72,102 @@ after(() => {
   }
 });
 
-test("GET /sse opens an event stream and announces the message endpoint + sessionId", async () => {
-  const { reader, sessionId } = await openSse();
-  assert.match(sessionId, /^[0-9a-f-]{36}$/);
-  await reader.cancel();
+test("only POST /mcp is this route: /sse and /mcp/message (the retired 2024-11-05 transport) are not", async () => {
+  for (const [path, method] of [["/sse", "GET"], ["/mcp/message", "POST"], ["/mcp/", "POST"]] as const) {
+    assert.equal(await handleMcp(new Request(`http://x${path}`, { method }), env as never, { enforce: false }), null, path);
+  }
+  assert.equal((await send(undefined, { accept: "text/event-stream" }, "GET")).status, 405, "GET (a 2025 session stream) is 405");
+  assert.equal((await send(undefined, {}, "DELETE")).status, 405);
 });
 
-test("initialize returns serverInfo + tools capability", async () => {
-  const { reader, decode, sessionId } = await openSse();
-  const resp = await rpc(sessionId, reader, decode, { jsonrpc: "2.0", id: 1, method: "initialize" });
-  const result = resp.result as Record<string, unknown>;
-  assert.equal((result.serverInfo as Record<string, unknown>).name, "workwell-mcp");
-  assert.ok((result.capabilities as Record<string, unknown>).tools);
-  await reader.cancel();
+test("2026-07-28: server/discover names the version, and tools/list carries resultType and private cache hints", async () => {
+  const discover = await rpcOf(await modern(1, "server/discover"));
+  assert.ok((discover.result!.supportedVersions as string[]).includes("2026-07-28"));
+  const list = await modern(2, "tools/list");
+  assert.match(list.headers.get("content-type") ?? "", /application\/json/, "a 2026-07-28 answer is plain JSON");
+  const { result } = await rpcOf(list);
+  assert.equal(result!.resultType, "complete");
+  assert.equal(result!.cacheScope, "private");
+  assert.equal(typeof result!.ttlMs, "number");
+  const tools = result!.tools as Array<{ name: string; title?: string; inputSchema: Record<string, unknown>; annotations?: Record<string, unknown> }>;
+  assert.deepEqual(tools.map((t) => t.name).sort(), MCP_TOOLS.map((t) => t.name).sort(), "all 13 tools");
+  for (const tool of tools) {
+    assert.ok(tool.title && tool.title !== tool.name, `${tool.name} has a title`);
+    assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} is read-only`);
+    assert.equal(tool.annotations?.destructiveHint, false);
+    assert.deepEqual(tool.inputSchema, MCP_TOOLS.find((t) => t.name === tool.name)!.inputSchema, `${tool.name} advertises its own schema`);
+  }
 });
 
-test("tools/list returns all 13 tool schemas", async () => {
-  const { reader, decode, sessionId } = await openSse();
-  const resp = await rpc(sessionId, reader, decode, { jsonrpc: "2.0", id: 2, method: "tools/list" });
-  const tools = (resp.result as { tools: unknown[] }).tools;
-  assert.equal(tools.length, 13);
-  assert.ok((tools[0] as Record<string, unknown>).inputSchema);
-  await reader.cancel();
+test("2025 era: initialize WITHOUT a version header is served, then tools/list and tools/call work", async () => {
+  const init = await send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+  assert.equal(init.status, 200, "the spec says to assume 2025-03-26 when the header is absent");
+  const initResult = (await rpcOf(init)).result!;
+  assert.equal((initResult.serverInfo as { name: string }).name, "workwell-mcp");
+  assert.ok((initResult.capabilities as Record<string, unknown>).tools);
+
+  assert.equal(((await rpcOf(await legacy(2, "tools/list"))).result!.tools as unknown[]).length, MCP_TOOLS.length);
+
+  const call = (await rpcOf(await legacy(3, "tools/call", { name: "get_run_summary", arguments: { runId } }))).result as {
+    content: Array<{ text: string }>;
+    structuredContent?: Record<string, unknown>;
+    isError: boolean;
+  };
+  assert.equal(call.isError, false);
+  assert.equal((JSON.parse(call.content[0]!.text) as Record<string, unknown>).run_id, runId);
+  assert.equal(call.structuredContent?.run_id, runId, "an object payload is also structuredContent");
 });
 
-test("tools/call get_run_summary returns a CallToolResult over the stream", async () => {
-  const { reader, decode, sessionId } = await openSse();
-  const resp = await rpc(sessionId, reader, decode, {
-    jsonrpc: "2.0",
-    id: 3,
-    method: "tools/call",
-    params: { name: "get_run_summary", arguments: { runId } },
-  });
-  const result = resp.result as { content: Array<{ text: string }>; isError: boolean };
-  assert.equal(result.isError, false);
-  const payload = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
-  assert.equal(payload.run_id, runId);
-  await reader.cancel();
-});
+test("2026-07-28: an unknown tool is JSON-RPC -32602; an unsupported version is 400 -32022; a missing Mcp-Method is 400 -32020", async () => {
+  assert.equal((await rpcOf(await modern(1, "tools/call", { name: "no_such_tool", arguments: {} }, "no_such_tool"))).error?.code, -32602);
 
-test("POST to an unknown session is 404", async () => {
-  const res = await handleMcp(
-    new Request("http://x/mcp/message?sessionId=does-not-exist", { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) }),
-    env as never,
-    PERMISSIVE,
+  const unsupported = await send(
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": "2099-01-01" } } },
+    { "mcp-protocol-version": "2099-01-01", "mcp-method": "tools/list" },
   );
-  assert.equal(res?.status, 404);
+  assert.equal(unsupported.status, 400);
+  assert.equal((await rpcOf(unsupported)).error?.code, -32022);
+
+  const noMethodHeader = await send({ jsonrpc: "2.0", id: 3, method: "tools/list", params: { _meta: MODERN_META } }, { "mcp-protocol-version": "2026-07-28" });
+  assert.equal(noMethodHeader.status, 400);
+  assert.equal((await rpcOf(noMethodHeader)).error?.code, -32020);
 });
 
-test("unknown method returns a JSON-RPC -32601 error", async () => {
-  const { reader, decode, sessionId } = await openSse();
-  const resp = await rpc(sessionId, reader, decode, { jsonrpc: "2.0", id: 9, method: "no/such/method" });
-  assert.equal((resp.error as Record<string, unknown>).code, -32601);
-  await reader.cancel();
+test("an invalid tool argument still reaches the tool, which refuses it and audits the call (MCP_TOOL_CALLED)", async () => {
+  const failedCalls = async () =>
+    Number(
+      (
+        await env.DB.prepare(
+          "SELECT count(*) AS n FROM audit_events WHERE event_type = 'MCP_TOOL_CALLED' AND payload_json LIKE '%\"toolName\":\"get_case\"%' AND payload_json LIKE '%\"success\":false%'",
+        ).all<{ n: number }>()
+      ).results![0]!.n,
+    );
+  const before = await failedCalls();
+  const result = (await rpcOf(await modern(1, "tools/call", { name: "get_case", arguments: {} }, "get_case"))).result as { isError: boolean };
+  assert.equal(result.isError, true, "the missing caseId is the tool's own error, not an SDK schema refusal");
+  assert.equal(await failedCalls(), before + 1, "the refused call is audited once");
 });
 
-test("notifications/initialized produces no stream response (next frame is the following request's)", async () => {
-  const { reader, decode, sessionId } = await openSse();
-  // a notification has no id → no SSE frame; the next read should be the ping response
-  const res = await handleMcp(
-    new Request(`http://x/mcp/message?sessionId=${sessionId}`, { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) }),
-    env as never,
-    PERMISSIVE,
+test("the tool list is advertised as unchanging, so a subscriptions/listen request is answered and closed at once", async () => {
+  const discover = await rpcOf(await modern(1, "server/discover"));
+  assert.deepEqual((discover.result!.capabilities as { tools: unknown }).tools, { listChanged: false });
+  const listen = await modern(2, "subscriptions/listen", { notifications: { toolsListChanged: true } });
+  const body = await Promise.race([listen.text(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000))]);
+  assert.notEqual(body, null, "the response completes instead of holding a stream open");
+});
+
+test("an Origin header must be one of the CORS origins exactly; a request without one (a native client) passes", async () => {
+  assert.equal((await modern(1, "tools/list").then((r) => r.status)), 200, "no Origin");
+  const allowed = await send(
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: { _meta: MODERN_META } },
+    { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list", origin: "http://localhost:3000" },
   );
-  assert.equal(res?.status, 202);
-  const resp = await rpc(sessionId, reader, decode, { jsonrpc: "2.0", id: 7, method: "ping" });
-  assert.deepEqual(resp.result, {});
-  await reader.cancel();
-});
-
-test("auth-enforced per-tool role gate: MCP_CLIENT denied, CASE_MANAGER allowed", async () => {
-  const { reader, decode, sessionId } = await openSse();
-  const deniedAuth: McpAuth = { actor: "mcp@x", role: "ROLE_MCP_CLIENT", enforce: true };
-  const denied = await rpc(sessionId, reader, decode, { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "get_run_summary", arguments: { runId } } }, deniedAuth);
-  const deniedPayload = JSON.parse((denied.result as { content: Array<{ text: string }> }).content[0]!.text) as Record<string, unknown>;
-  assert.equal(deniedPayload.code, "ACCESS_DENIED");
-
-  const cmAuth: McpAuth = { actor: "cm@x", role: "ROLE_CASE_MANAGER", enforce: true };
-  const ok = await rpc(sessionId, reader, decode, { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "get_run_summary", arguments: { runId } } }, cmAuth);
-  const okResult = ok.result as { isError: boolean };
-  assert.equal(okResult.isError, false);
-  await reader.cancel();
+  assert.equal(allowed.status, 200, "the default CORS origin");
+  for (const origin of ["https://evil.example", "http://localhost:3001", "https://localhost:3000"]) {
+    const res = await send(
+      { jsonrpc: "2.0", id: 3, method: "tools/list", params: { _meta: MODERN_META } },
+      { "mcp-protocol-version": "2026-07-28", "mcp-method": "tools/list", origin },
+    );
+    assert.equal(res.status, 403, origin);
+  }
 });

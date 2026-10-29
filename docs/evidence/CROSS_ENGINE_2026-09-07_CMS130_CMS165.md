@@ -1,5 +1,7 @@
 # CMS130 and CMS165 through the second engine — the last two measures, and only one of them counts
 
+> **Superseded 2026-10-19 (#846, closes #572): read `CROSS_ENGINE_2026-10-19.md`.** CMS130's one was cqf-fhir-cr 8.10.0's `convert … to days` bug; on the pinned v8.12.0-2 image it is 64/64. CMS165's result was not a harness difference: it is Java's second-precision period end against onsets at `2026-06-30T23:59:59.000` (cqframework/clinical-reasoning#1133), proven by single-variable mutation. On the pinned image CMS165 is 13/68 with the period sent and 67/68 with the library's default, the last case an engine exception (cqframework/clinical-reasoning#1071).
+
 Date: 2026-09-07. Closing the measurable half of issue #532. These are the two measures that had never
 been cross-executed, because their terminology sidecars are VSAC-completed (ADR-041) and an
 uncredentialed machine cannot reproduce them — so the sweep had to run where the credential lives.

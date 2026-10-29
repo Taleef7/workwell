@@ -54,6 +54,7 @@
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
+import { scoredByCurrentLogic } from "../measure/measure-identity.ts";
 import {
   ACT,
   CUSTODIAN_ID_ROOT,
@@ -114,15 +115,16 @@ function publishedGroups(
   if (!official) return [];
   try {
     const artifact = loadOfficialArtifact(measureId);
-    // The SAME sha gate `qrdaMeasureReference` applies to the measure identity (ADR-046 decision 3).
+    // The SAME gate `qrdaMeasureReference` applies to the measure identity (ADR-046 decision 3): the run
+    // was scored by this artifact's logic, its bytes or an earlier vendoring of the same logic (#848).
     // Without it, exporting a historical run after a re-vendor would name criteria out of the CURRENT
     // artifact while the measure identity beside them had already fallen back to a version-qualified
     // local id — one document asserting "these counts are not from the artifact I have" and "these are
     // its criterion names" at the same time. Falling back to the population codes keeps the whole
     // document consistent about which artifact it can and cannot speak for (review, #384).
-    const shaMatches =
-      artifact && (!official.artifactSha256 || artifact.manifest.sha256 === official.artifactSha256);
-    if (!shaMatches) return [];
+    const sameLogic =
+      artifact && (!official.artifactSha256 || scoredByCurrentLogic(artifact.manifest, official.artifactSha256));
+    if (!sameLogic) return [];
     const bundle = artifact.bundle as
       | { entry?: Array<{ resource?: { resourceType?: string; group?: unknown[] } }> }
       | undefined;

@@ -1176,7 +1176,7 @@ export function outcomeStoreContract(
       },
       {
         runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "MISSING_DATA",
-        evidence: { evaluationError: "engine threw", message: "boom" },
+        evidence: { evaluationError: "engine threw", message: "boom", dataInsufficient: { checks: ["encounterTypeCoded"] } },
       },
       // Another measure of the same run: must not appear.
       { runId: run.id, subjectId: "emp-002", measureId: "hazwoper", status: "OVERDUE", evidence: { official: { populationResults } } },
@@ -1199,10 +1199,53 @@ export function outcomeStoreContract(
     );
     assert.equal((errored.evidence as { evaluationError?: unknown }).evaluationError, "engine threw");
     assert.ok(!("official" in (errored.evidence as object)));
+    // #853: a report refuses a thin run's rates from this read, so the flag must survive the projection,
+    // and be absent (not null) where the row carries none.
+    assert.deepEqual((errored.evidence as { dataInsufficient?: unknown }).dataInsufficient, { checks: ["encounterTypeCoded"] });
+    assert.ok(!("dataInsufficient" in (evaluated.evidence as object)), "absent where the row carries no flag");
 
     // An unknown run and an unknown measure are empty, never everything.
     assert.deepEqual(await outcomeStore.listOutcomeMembershipsForRun(run.id, "never-run"), []);
     assert.deepEqual(await outcomeStore.listOutcomeMembershipsForRun("00000000-0000-4000-8000-000000000000", "audiogram"), []);
+  });
+
+  // #852: the per-subject readers (list report, scorecard) take the same narrowing plus the row's
+  // identity columns, so the two projections must narrow identically and the columns must round-trip.
+  test(`[${label}] listOutcomeSubjectMembershipsForRun narrows as the membership read does, with each row's identity`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const populationResults = { ipp: true, denom: true, denex: false, numer: true };
+    await outcomeStore.recordOutcomes([
+      {
+        runId: run.id, subjectId: "emp-006", measureId: "audiogram", status: "COMPLIANT", outOfPopulation: false,
+        evaluatedAt: "2026-06-01T10:00:00.000Z",
+        evidence: { official: { ecqmId: "122FHIR", populationResults }, expressionResults: [{ define: "x", result: true }] },
+      },
+      {
+        runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "MISSING_DATA", outOfPopulation: true,
+        evaluatedAt: "2026-06-01T11:00:00.000Z",
+        evidence: { evaluationError: "engine threw", message: "boom", dataInsufficient: { checks: ["failedFetches"] } },
+      },
+      { runId: run.id, subjectId: "emp-002", measureId: "hazwoper", status: "OVERDUE", evidence: { official: { populationResults } } },
+    ]);
+
+    const rows = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram");
+    const narrow = await outcomeStore.listOutcomeMembershipsForRun(run.id, "audiogram");
+    assert.equal(rows.length, 2, "one measure's rows only");
+    const evaluated = rows.find((r) => r.subjectId === "emp-006")!;
+    const errored = rows.find((r) => r.subjectId === "emp-001")!;
+    assert.equal(Date.parse(evaluated.evaluatedAt), Date.parse("2026-06-01T10:00:00.000Z"));
+    assert.equal(evaluated.outOfPopulation, false);
+    assert.equal(errored.outOfPopulation, true);
+    assert.equal(typeof evaluated.id, "string");
+    for (const r of rows) {
+      const twin = narrow.find((n) => n.status === r.status)!;
+      assert.deepEqual(r.evidence, twin.evidence, "the same narrowing as the membership projection");
+    }
+    assert.ok(!("expressionResults" in (evaluated.evidence as object)));
+    assert.ok(!("evaluationError" in (evaluated.evidence as object)), "absent, not null");
+    assert.deepEqual((errored.evidence as { dataInsufficient?: unknown }).dataInsufficient, { checks: ["failedFetches"] });
+    assert.deepEqual(await outcomeStore.listOutcomeSubjectMembershipsForRun("00000000-0000-4000-8000-000000000000", "audiogram"), []);
   });
 
   /**
@@ -2606,6 +2649,45 @@ export function caseEventStoreContract(
     );
     assert.ok(forCase.every((e) => e.refCaseId === c.id));
     assert.deepEqual(await eventStore.auditEventsForCases([], 10), [], "no ids → []");
+  });
+
+  test(`[${label}] latestCaseEventsOfType answers each case with its NEWEST event of that type only`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const a = (await newCase(caseStore))!;
+    const b = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-007",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "OVERDUE",
+    }))!;
+    const mk = (eventType: string, refCaseId: string | null, payload: Record<string, unknown>) =>
+      eventStore.appendAudit({
+        eventType,
+        entityType: "case",
+        entityId: refCaseId ?? a.id,
+        actor: "lead@x",
+        refRunId: null,
+        refCaseId,
+        refMeasureVersionId: null,
+        payload,
+      });
+    await mk("CASE_ASSIGNED", a.id, { assignee: "first@x" });
+    await mk("CASE_ESCALATED", a.id, { priority: "HIGH" });
+    await mk("CASE_ASSIGNED", a.id, { assignee: "second@x" });
+    await mk("CASE_OUTREACH_SENT", b.id, {}); // b has events, but none of the asked type
+    await mk("CASE_ASSIGNED", null, { assignee: "nobody@x" }); // tied to no case
+
+    const latest = await eventStore.latestCaseEventsOfType([a.id, b.id], "CASE_ASSIGNED");
+    assert.deepEqual(Object.keys(latest), [a.id], "a case with none of the type has no key");
+    assert.equal(latest[a.id]!.eventType, "CASE_ASSIGNED");
+    assert.deepEqual(latest[a.id]!.payload, { assignee: "second@x" }, "the newest of the type, not the first");
+    assert.equal(latest[a.id]!.actor, "lead@x");
+    assert.equal(latest[a.id]!.refCaseId, a.id);
+
+    assert.deepEqual(await eventStore.latestCaseEventsOfType([], "CASE_ASSIGNED"), {}, "no ids → {}");
+    const withJunk = await eventStore.latestCaseEventsOfType(["not-a-uuid", a.id], "CASE_ASSIGNED");
+    assert.deepEqual(withJunk[a.id]!.payload, { assignee: "second@x" }, "a malformed id is a miss, not a failure");
   });
 
   test(`[${label}] insertPacketExport records an export row (idempotent inserts, distinct ids)`, async () => {

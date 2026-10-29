@@ -10,6 +10,7 @@ const MAUI_WRITE_SPECS = [
   "tests/maui/runs.spec.ts",
   "tests/maui/worklist-writes.spec.ts",
   "tests/maui/case-workflow.spec.ts",
+  "tests/maui/mcp-oauth.spec.ts",
 ];
 
 export default defineConfig({

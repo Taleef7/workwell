@@ -533,5 +533,5 @@ export async function main(argv: string[], overrides: Partial<CompiledCasesDeps>
 }
 
 function emptySummary(): OfficialMeasureRun["summary"] {
-  return { total: 0, expectedAgreements: 0, referenceAgreements: 0, unexpectedMismatches: 0, errors: 0 };
+  return { total: 0, expectedAgreements: 0, unexpectedMismatches: 0, errors: 0 };
 }

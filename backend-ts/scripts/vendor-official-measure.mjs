@@ -119,6 +119,7 @@ import {
   oidFromValueSetUrl,
   sortValueSets,
 } from "./vsac-expansion.mjs";
+import { logicSha256Of } from "./artifact-logic.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = resolve(HERE, "..");
@@ -128,6 +129,17 @@ const DEFAULT_REF = "ca4b49516de4cbed9f92bfb7c35d97b1bf1022ab";
 
 const KEPT_RESOURCE_TYPES = ["Measure", "Library"];
 const KEPT_LIBRARY_CONTENT_TYPE = "application/elm+json";
+
+/**
+ * The Library profiles that each assert one content type (CQL IG clb-1, exl-1). The reduction keeps ELM
+ * JSON only, so a CMS Library's claim to either becomes false here, and only here: it is dropped (#848).
+ * Every other claim, the Measure's included, stays exactly as CMS shipped it; one CMS's own artifact fails
+ * (its Measure lacks the narrative `publishable-measure-cqfm` requires) is reported upstream, not fixed.
+ */
+const CONTENT_PROFILES = {
+  "http://hl7.org/fhir/uv/cql/StructureDefinition/cql-library": "text/cql",
+  "http://hl7.org/fhir/uv/cql/StructureDefinition/elm-xml-library": "application/elm+xml",
+};
 
 function parseArgs(argv) {
   const args = {
@@ -292,6 +304,10 @@ function reduceBundle(bundle, { stripElmAnnotations }) {
     delete resource.text;
     if (type === "Library" && Array.isArray(resource.content)) {
       resource.content = resource.content.filter((c) => c.contentType === KEPT_LIBRARY_CONTENT_TYPE);
+      if (Array.isArray(resource.meta?.profile)) {
+        const kept = new Set(resource.content.map((c) => c.contentType));
+        resource.meta.profile = resource.meta.profile.filter((p) => !CONTENT_PROFILES[p] || kept.has(CONTENT_PROFILES[p]));
+      }
       if (stripElmAnnotations) {
         resource.content = resource.content.map((c) => {
           let elm;
@@ -469,6 +485,12 @@ function buildManifest(bundle, args, raw, bundleJson, terminology, terminologyJs
       sha256: sha256(terminologyJson),
     },
     sha256: sha256(bundleJson),
+    /**
+     * What the bundle COMPUTES, hashed apart from what it says about itself (`artifact-logic.mjs`, #848).
+     * `sha256` moves with any byte; this moves only with the ELM or the Measure's groups. The exports keep
+     * CMS's identity on a run scored by an earlier vendoring whose logic this one shares.
+     */
+    logicSha256: logicSha256Of(bundle),
   };
 }
 

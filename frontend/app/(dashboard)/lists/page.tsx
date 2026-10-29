@@ -57,7 +57,8 @@ interface MeasureEntry {
   logic?: ScoringLogic | null;
   runId: string | null;
   measurementPeriod: { start: string; end: string } | null;
-  compactionStatus: "complete" | "compacted" | "no_run";
+  /** `data_insufficient` (#853): the run's data for the measure was too thin to trust, so no rate is stated. */
+  compactionStatus: "complete" | "compacted" | "no_run" | "data_insufficient";
   reason?: string;
   matchedSubjects: number;
   distinctSubjectsSeen: number;
@@ -70,6 +71,8 @@ interface ReportSummary {
   generatedAt: string;
   members: { matched: number; notFound: number; ambiguous: number; total: number };
   compactedMeasures: string[];
+  /** Absent from a server older than #853. */
+  dataInsufficientMeasures?: string[];
   measures: MeasureEntry[];
 }
 
@@ -485,6 +488,13 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
               number wearing the run&apos;s identity.
             </p>
           ) : null}
+          {(report.dataInsufficientMeasures ?? []).length > 0 ? (
+            <p data-testid="list-report-data-insufficient" className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              {report.dataInsufficientMeasures!.join(", ")} cannot be reported for {report.measurementYear}: the
+              run&apos;s data was too thin to trust, so a rate would describe the missing data. The run&apos;s
+              page says which check fell short.
+            </p>
+          ) : null}
           {/* The Measure column stays pinned while the counts scroll under it. Its cells paint the
               region's own background (plus the header's tint) so the scrolled cells do not show through. */}
           <ScrollRegion label="Measurement-year report table" className="rounded-lg border">
@@ -510,7 +520,9 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                       <td className="text-muted-foreground p-3" colSpan={8}>
                         {measure.compactionStatus === "compacted"
                           ? "Refused — the run predates a retention cutoff"
-                          : "No completed population run for this year"}
+                          : measure.compactionStatus === "data_insufficient"
+                            ? "Refused — the run's data was too thin to trust"
+                            : "No completed population run for this year"}
                       </td>
                     </tr>
                   ) : (

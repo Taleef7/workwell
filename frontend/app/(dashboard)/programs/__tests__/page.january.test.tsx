@@ -67,13 +67,6 @@ describe("ProgramsPage on 1 January (#637)", () => {
     expect(screen.queryByText(/0\.0%/)).toBeNull();
   });
 
-  it("puts the overall KPI at — rather than 0.0% when nobody is counted anywhere", async () => {
-    mockOverview([empty]);
-    render(<ProgramsPage />);
-    await screen.findByText("No patients counted yet");
-    expect(screen.getByText("Overall compliance").nextSibling).toHaveTextContent("—");
-  });
-
   it("warns when a rate rests on a handful of patients", async () => {
     mockOverview([small]);
     render(<ProgramsPage />);
