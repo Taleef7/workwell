@@ -12,7 +12,7 @@
 import type { CaseStore } from "../stores/case-store.ts";
 import type { OutcomeRecord, OutcomeStore } from "../stores/outcome-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
-import { employeeById, employees, providerById } from "../config/deployment-profile.ts";
+import { DEPLOYMENT_PROFILE, employeeById, employees, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { DIRECTORY } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
@@ -312,16 +312,50 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   };
 }
 
-/** GET /api/employees/search?q=&limit= — name/externalId/role substring (min 2 chars), + open gaps. */
-export async function searchEmployees(deps: EmployeeProfileDeps, q: string, limit: number): Promise<EmployeeSearchResult[]> {
+/**
+ * How well one directory entry answers a search, best first, or null when it does not.
+ *
+ * Two fields matched everybody on the pilot deployment, so a query of two letters listed the practice
+ * in alphabetical order with the patient being looked for nowhere near the top:
+ * - every patient's role is "Patient", so "pa", "at" or "en" matched them all. The role is searched
+ *   only where it tells people apart (`matchRole`: the employee deployment, where "welder" is a real
+ *   query);
+ * - every corpus id begins "pat-", so "pa" matched them all again. An id is told apart by its number,
+ *   so an id is searched only by a query holding a digit, or typed in full.
+ *
+ * What remains is ranked rather than filtered: a name that starts with the query beats one that merely
+ * contains it, so "son" still finds Johnson, below Sonia.
+ */
+function searchRank(e: { externalId: string; name: string; role: string }, needle: string, matchRole: boolean): number | null {
+  const id = e.externalId.toLowerCase();
+  const name = e.name.toLowerCase();
+  if (id === needle) return 0;
+  if (name.startsWith(needle)) return 1;
+  if (name.split(/\s+/).some((word) => word.startsWith(needle))) return 2;
+  if (/\d/.test(needle) && id.includes(needle)) return 3;
+  if (name.includes(needle)) return 4;
+  if (matchRole && e.role.toLowerCase().includes(needle)) return 5;
+  return null;
+}
+
+/** GET /api/employees/search?q=&limit= — ranked name/id (and role, on the employee deployment) match (min 2 chars), + open gaps. */
+export async function searchEmployees(
+  deps: EmployeeProfileDeps,
+  q: string,
+  limit: number,
+  matchRole: boolean = DEPLOYMENT_PROFILE.subjectTerm === "employee",
+): Promise<EmployeeSearchResult[]> {
   if (!q || q.trim().length < 2) return [];
   const needle = q.trim().toLowerCase();
   const safeLimit = Math.max(1, Math.min(limit, 50));
-  const matches = employees().filter(
-    (e) => e.name.toLowerCase().includes(needle) || e.externalId.toLowerCase().includes(needle) || e.role.toLowerCase().includes(needle),
-  )
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, safeLimit);
+  const matches = employees()
+    .flatMap((e) => {
+      const rank = searchRank(e, needle, matchRole);
+      return rank === null ? [] : [{ e, rank }];
+    })
+    .sort((a, b) => a.rank - b.rank || a.e.name.localeCompare(b.e.name))
+    .slice(0, safeLimit)
+    .map(({ e }) => e);
   if (matches.length === 0) return [];
 
   // ONE read for every match (it was one outcome query per match). Unbounded by design: up to 50
