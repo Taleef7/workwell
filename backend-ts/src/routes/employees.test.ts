@@ -396,3 +396,31 @@ test("each open gap says when its CURRENT assignee got it and how, and Recent Ac
     JSON.stringify(p.recentAuditEvents.map((e) => e.summary)),
   );
 });
+
+test("each open gap carries its newest outreach and the delivery status since; a gap never contacted carries nulls (#868)", async () => {
+  const events = new SqliteCaseEventStore(env.DB as never);
+  const record = (actionType: string, eventType: string, actor: string, payload: Record<string, unknown>) =>
+    events.recordCaseEvent({
+      action: { caseId, actionType, actor, payload },
+      audit: { eventType, entityType: "case", entityId: caseId, actor, refRunId: null, refCaseId: caseId, refMeasureVersionId: null, payload: { action: payload } },
+    });
+  // Newer than the email the test above recorded: an SMS sent by a run, then its delivery marked failed.
+  await new Promise((r) => setTimeout(r, 15));
+  await record("OUTREACH_SENT", "CASE_OUTREACH_SENT", "system", { channel: "SMS", deliveryStatus: "SIMULATED" });
+  await new Promise((r) => setTimeout(r, 15));
+  await record("OUTREACH_DELIVERY_UPDATED", "CASE_OUTREACH_DELIVERY_UPDATED", "cm@workwell.dev", { deliveryStatus: "FAILED" });
+
+  type Gap = { caseId: string; lastOutreachAt: string | null; lastOutreachBy: string | null; lastOutreachChannel: string | null; lastOutreachDeliveryStatus: string | null };
+  const p = (await (await get("/api/employees/emp-006/profile"))!.json()) as { openCases: Gap[] };
+  const audiogram = p.openCases.find((c) => c.caseId === caseId)!;
+  assert.ok(audiogram.lastOutreachAt && !Number.isNaN(Date.parse(audiogram.lastOutreachAt)));
+  assert.equal(audiogram.lastOutreachChannel, "SMS", "the newest send, not the older email");
+  assert.equal(audiogram.lastOutreachBy, null, "a run's \"system\" names nobody");
+  assert.equal(audiogram.lastOutreachDeliveryStatus, "FAILED", "the delivery update after the send wins");
+  const cms = p.openCases.find((c) => c.caseId === cmsCaseId)!;
+  assert.deepEqual(
+    [cms.lastOutreachAt, cms.lastOutreachBy, cms.lastOutreachChannel, cms.lastOutreachDeliveryStatus],
+    [null, null, null, null],
+    "never contacted: nothing is inferred",
+  );
+});
