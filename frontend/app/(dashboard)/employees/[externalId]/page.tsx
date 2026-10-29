@@ -11,7 +11,7 @@ import { emitToast } from '@/lib/toast';
 import { UNASSIGN_VALUE, useAssignableUsers } from '@/features/panel/use-assignable-users';
 import { SUBJECT } from "@/lib/terminology";
 import Link from 'next/link';
-import { useEmployeeProfile } from '@/features/employee/hooks/useEmployeeProfile';
+import { useEmployeeProfile, type OpenCaseSummary } from '@/features/employee/hooks/useEmployeeProfile';
 import { ComplianceSummaryBar, shownStatusOf } from '@/features/employee/components/ComplianceSummaryBar';
 import { IndividualComplianceStatus } from '@/features/employee/components/IndividualComplianceStatus';
 import { SimulateComplianceHistory } from '@/features/employee/components/SimulateComplianceHistory';
@@ -93,6 +93,22 @@ function AssigneeCell({
   );
 }
 
+/**
+ * When and how a gap reached its current assignee (#865), or null when the server could not say.
+ *
+ * The practice's staff asked to see when something was assigned without opening each case's timeline.
+ * The server sends a time only when its ledger backs one, so nothing here infers a date.
+ */
+function assignedLine(c: OpenCaseSummary): string | null {
+  if (!c.assignee || !c.assignedAt) return null;
+  const at = new Date(c.assignedAt);
+  if (Number.isNaN(at.getTime())) return null;
+  const day = at.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  if (c.assignedVia === 'PANEL') return `From the provider's panel, ${day}`;
+  const by = c.assignedBy ? ` by ${c.assignedBy}` : '';
+  return `Assigned ${day}${by}${c.assignedVia === 'BULK' ? ' (bulk)' : ''}`;
+}
+
 export default function EmployeeProfilePage() {
   const { externalId: rawExternalId } = useParams<{ externalId: string }>();
   // useParams returns the segment still percent-encoded; live WebChart ids contain "|" (wc%7Cwc-6),
@@ -107,6 +123,9 @@ export default function EmployeeProfilePage() {
   // form with the full form as its title elsewhere. The simulation is not a result and stays unversioned.
   const { labelFor: measureLabelFor, compactLabelFor, titleFor } = useMeasureIdentities();
   const isPatientTerm = SUBJECT.singular === 'patient';
+  // The evidence and simulation cards open by default only for the engineering seat; staff start from
+  // the gaps and the actions, and open the evidence when they want it.
+  const engineering = canSeeEngineering(user?.role);
 
   // Skeletons on the first load of THIS patient only. A refresh (after Recalculate or any finished run)
   // keeps the page mounted, so a simulation result and the chosen date survive it; a different
@@ -175,12 +194,13 @@ export default function EmployeeProfilePage() {
       {/* Two columns only at xl: at lg the sidebar squeezed the main column's tables into a sideways scroll. */}
       <div className="grid gap-6 xl:grid-cols-3">
       <div className="min-w-0 space-y-6 xl:col-span-2">
-      <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} labelFor={compactLabelFor} titleFor={titleFor} />
-      <SimulateComplianceHistory key={externalId} externalId={externalId} labelFor={(id, name) => measureLabelFor(id, name)} />
-      {/* Open cases */}
-      {profile.openCases.length > 0 && (
-        <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Open Cases</h2>
+      {/* Open cases FIRST (#865): the page is where staff act on one patient, so the gaps and who has
+          them lead, and the evidence and the simulation wait below until someone opens them. */}
+      <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm" data-testid="open-cases">
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Open Cases</h2>
+        {profile.openCases.length === 0 ? (
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">No open cases.</p>
+        ) : (
           <ScrollRegion label="Open cases table">
           <table className="w-full text-sm">
             <thead>
@@ -189,6 +209,7 @@ export default function EmployeeProfilePage() {
                 <th scope="col" className="pb-2 font-medium">Status</th>
                 <th scope="col" className="pb-2 font-medium">Priority</th>
                 <th scope="col" className="pb-2 font-medium">Assignee</th>
+                <th scope="col" className="pb-2 font-medium"><span className="sr-only">Case</span></th>
               </tr>
             </thead>
             <tbody>
@@ -222,14 +243,30 @@ export default function EmployeeProfilePage() {
                       canonicalFor={canonicalFor}
                       onAssigned={refetch}
                     />
+                    {assignedLine(c) ? (
+                      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400 [overflow-wrap:anywhere]" data-testid="assigned-line">
+                        {assignedLine(c)}
+                      </p>
+                    ) : null}
+                  </td>
+                  <td className="py-2 pl-2 text-right">
+                    {/* A button-sized target, not only the measure name: the staff did not read the name
+                        as the way into the case. Its accessible name starts with what it shows. */}
+                    <Link
+                      href={`/cases/${c.caseId}`}
+                      aria-label={`Open case: ${compactLabelFor(c.measureId, c.measureName, c.logic)}`}
+                      className="inline-flex whitespace-nowrap rounded border border-primary-300 dark:border-primary-700 px-2.5 py-1 text-xs font-semibold text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/40"
+                    >
+                      Open case →
+                    </Link>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           </ScrollRegion>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Measure details */}
       <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
@@ -293,6 +330,25 @@ export default function EmployeeProfilePage() {
           ))}
         </div>
       </div>
+
+      {/* Below the work, and closed for staff (#865). Native disclosures: the cards stay mounted, so a
+          simulation result survives being folded away. */}
+      <details className="group" open={engineering} data-testid="evidence-disclosure">
+        <summary className="cursor-pointer select-none text-sm font-semibold text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100">
+          Evidence by measure
+        </summary>
+        <div className="mt-3">
+          <IndividualComplianceStatus externalId={externalId} onRecalculated={refetch} labelFor={compactLabelFor} titleFor={titleFor} />
+        </div>
+      </details>
+      <details className="group" open={engineering} data-testid="simulation-disclosure">
+        <summary className="cursor-pointer select-none text-sm font-semibold text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100">
+          Simulate compliance history
+        </summary>
+        <div className="mt-3">
+          <SimulateComplianceHistory key={externalId} externalId={externalId} labelFor={(id, name) => measureLabelFor(id, name)} />
+        </div>
+      </details>
 
       </div>
 

@@ -5,6 +5,23 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-29
+
+- **The pilot group's sandbox findings, the five that need no new decision (#865).**
+  - **Search:** two letters no longer list every patient. The role is matched on the employee profile only, an
+    id only by a query with a digit, and a name match ranks first. Enter opens the top result.
+  - **Case timeline:** each entry reads in words from one server-side describer (`case/case-event-text.ts`).
+    The stored payload is behind an admin-only Details. Recent Activity on the patient page uses the same
+    describer, so it now shows outreach (it looked for the wrong event type).
+  - **Patient page:** Open Cases first, an Open case button per gap, the evidence and simulation folded for
+    staff. Each gap says when and how its current assignee got it (`CaseEventStore.latestCaseEventsOfType`).
+  - **Scorecard:** a provider picker, with year, panel and provider in the URL, opens on My providers for a
+    panel owner.
+  - **Work list:** "Select all N matching" (up to 500 patients). The bulk-assign endpoint is unchanged.
+  - New read-only Maui e2e spec `staff-feedback.spec.ts`; each finding was also driven in a browser on a
+    local Maui stack.
+- **Next:** the patient page as the place to act (outreach for several gaps at once, inline actions) is PR 2.
+
 ## 2026-10-21
 
 - **The MCP OAuth flow is under Playwright (#863 follow-up).** `e2e/tests/maui/mcp-oauth.spec.ts` (a write spec)

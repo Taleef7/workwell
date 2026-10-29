@@ -32,6 +32,13 @@ export interface OpenCaseSummary {
   outcomeStatus: string;
   priority: string;
   assignee: string | null;
+  /**
+   * When and how the current assignee got the gap (#865); all null when the ledger cannot say. Optional
+   * because a server from before the field sends none.
+   */
+  assignedAt?: string | null;
+  assignedBy?: string | null;
+  assignedVia?: 'PANEL' | 'BULK' | 'OPERATOR' | null;
   slaDueDate: string | null;
   slaRemainingDays: number | null;
   slaBreached: boolean;

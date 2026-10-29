@@ -19,6 +19,7 @@ import { type ImmunizationForecast } from "../engine/immunization/immunization-f
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { multiRateExclusionActive, officialDisplayFor } from "../compliance/official-display.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
+import { describeCaseEvent } from "./case-event-text.ts";
 
 export interface CaseDetail {
   caseId: string;
@@ -62,8 +63,21 @@ export interface CaseDetail {
   outcomeSummary: string;
   outcomeEvaluatedAt: string;
   latestOutreachDeliveryStatus: string | null;
+  /** Oldest-first ledger entries, each carrying the `label` and `summary` a person reads (#865). */
   timeline: unknown[];
   immunizationForecast?: ImmunizationForecast;
+}
+
+/**
+ * One timeline entry with its words added. Added HERE, in the one builder every case route returns
+ * through, so the page keeps readable entries after an assign or an outreach replaces its copy of the
+ * case. The payload stays as it was, for the engineering view.
+ */
+function withEventText(entry: unknown): unknown {
+  const e = entry as { eventType?: unknown; payload?: unknown } | null;
+  if (!e || typeof e.eventType !== "string") return entry;
+  const payload = typeof e.payload === "object" && e.payload !== null ? (e.payload as Record<string, unknown>) : null;
+  return { ...e, ...describeCaseEvent({ eventType: e.eventType, payload }) };
 }
 
 function outcomeSummaryFor(outcome: string): string {
@@ -234,7 +248,7 @@ export function toCaseDetail(
     outcomeSummary: outcomeSummaryFor(c.currentOutcomeStatus),
     outcomeEvaluatedAt: outcome?.evaluatedAt ?? c.updatedAt,
     latestOutreachDeliveryStatus,
-    timeline,
+    timeline: timeline.map(withEventText),
     ...(immunizationForecast ? { immunizationForecast } : {}),
   };
 }

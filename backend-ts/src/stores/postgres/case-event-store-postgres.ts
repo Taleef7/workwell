@@ -293,6 +293,27 @@ export class PgCaseEventStore implements CaseEventStore {
     return out;
   }
 
+  async latestCaseEventsOfType(caseIds: readonly string[], eventType: string): Promise<Record<string, AuditEventRow>> {
+    const ids = caseIds.filter(isUuid); // a non-uuid id is a clean miss, as in the reads above (Fable M14)
+    if (ids.length === 0) return {};
+    const out: Record<string, AuditEventRow> = {};
+    // One chunk at a time, for the reason `latestOutreachDeliveryStatuses` records.
+    for (let start = 0; start < ids.length; start += OUTREACH_STATUS_CHUNK) {
+      const { rows } = await this.pool.query<AuditRow>(
+        `SELECT DISTINCT ON (ref_case_id) occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json
+           FROM ${SPIKE_SCHEMA}.audit_events
+          WHERE ref_case_id = ANY($1) AND event_type = $2
+          ORDER BY ref_case_id, occurred_at DESC, id DESC`,
+        [ids.slice(start, start + OUTREACH_STATUS_CHUNK), eventType],
+      );
+      for (const r of rows) {
+        const row = toAuditEventRow(r);
+        if (row.refCaseId) out[row.refCaseId] = row;
+      }
+    }
+    return out;
+  }
+
   async listAuditEvents(limit = 100000, offset = 0): Promise<AuditEventRow[]> {
     const { rows } = await this.pool.query<AuditRow>(
       `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json

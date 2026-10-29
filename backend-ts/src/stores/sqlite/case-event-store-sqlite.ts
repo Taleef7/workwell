@@ -197,6 +197,28 @@ export class SqliteCaseEventStore implements CaseEventStore {
     return out;
   }
 
+  async latestCaseEventsOfType(caseIds: readonly string[], eventType: string): Promise<Record<string, AuditEventRow>> {
+    if (caseIds.length === 0) return {};
+    const out: Record<string, AuditEventRow> = {};
+    for (const slice of chunked(caseIds)) {
+      const placeholders = slice.map(() => "?").join(", ");
+      // `rn = 1` under the ceiling's DISTINCT ON ordering, so the two stores pick the same row.
+      const { results } = await this.db
+        .prepare(
+          `SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json FROM (
+             SELECT occurred_at, event_type, actor, ref_run_id, ref_case_id, ref_measure_version_id, payload_json,
+                    ROW_NUMBER() OVER (PARTITION BY ref_case_id ORDER BY occurred_at DESC, id DESC) AS rn
+               FROM audit_events
+              WHERE ref_case_id IN (${placeholders}) AND event_type = ?
+           ) WHERE rn = 1`,
+        )
+        .bind(...slice, eventType)
+        .all<AuditRow>();
+      for (const r of results ?? []) if (r.ref_case_id) out[r.ref_case_id] = toAuditEventRow(r);
+    }
+    return out;
+  }
+
   async listAuditEvents(limit = 100000, offset = 0): Promise<AuditEventRow[]> {
     const { results } = await this.db
       .prepare(
