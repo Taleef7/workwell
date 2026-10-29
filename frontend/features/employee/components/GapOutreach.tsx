@@ -58,7 +58,9 @@ export function GapOutreach({
   const [failed, setFailed] = useState<string[]>([]);
 
   const caseIds = cases.map((c) => c.caseId);
-  const key = `${channel}|${caseIds.join(',')}`;
+  // Each gap's status is in the key because the server picks the template from it: a re-check or a run that
+  // turns a missing-record gap overdue changes the message, so the preview of the old status no longer stands.
+  const key = `${channel}|${cases.map((c) => `${c.caseId}:${c.outcomeStatus}`).join(',')}`;
   // Derived, not reset by an effect: a preview of another choice simply is not this choice's preview.
   const previewed = preview !== null && preview.key === key ? preview : null;
   const onePerPatient = SUBJECT.singular === 'patient';

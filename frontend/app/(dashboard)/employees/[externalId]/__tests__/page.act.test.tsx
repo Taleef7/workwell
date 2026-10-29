@@ -199,6 +199,21 @@ describe("the last contact and a re-check, per gap", () => {
     ]);
   });
 
+  it("a re-check that changes a previewed gap's status clears the preview, since the message would change", async () => {
+    let current = profile;
+    get.mockImplementation((url: string) =>
+      Promise.resolve(url === "/api/employees/maui-pat-00001/profile" ? current : []),
+    );
+    render(<EmployeeProfilePage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Preview message" }));
+    await waitFor(() => expect(sendButton()).toBeEnabled());
+
+    current = { ...profile, openCases: profile.openCases.map((c) => (c.caseId === "case-2" ? { ...c, outcomeStatus: "MISSING_DATA" } : c)) };
+    await userEvent.click(screen.getAllByRole("button", { name: /^Re-check:/ })[1]!);
+    await waitFor(() => expect(screen.queryByTestId("gap-outreach-preview")).toBeNull());
+    expect(sendButton()).toBeDisabled();
+  });
+
   it("re-checks THAT gap and re-reads the page; a failure stays on its row", async () => {
     render(<EmployeeProfilePage />);
     const buttons = await screen.findAllByRole("button", { name: /^Re-check:/ });
