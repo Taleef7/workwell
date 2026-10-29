@@ -86,7 +86,10 @@ test("appointments name the practice's zone; an unreadable time is left out, nev
 test("evidence and the AI explanation", () => {
   assert.equal(say("EVIDENCE_UPLOADED", { fileName: "result.pdf", description: "" }).summary, "Uploaded result.pdf");
   assert.equal(say("EVIDENCE_DOWNLOADED", { fileName: "result.pdf" }).summary, "Downloaded result.pdf");
-  assert.match(say("AI_CASE_EXPLANATION_GENERATED", { fallbackUsed: true }).summary!, /changes nothing on the case/);
+  // The writer's real shape (`insertAiAudit`): the surface's fields sit under `payload`, not at the top.
+  const ai = (fallbackUsed: boolean) => ({ timestamp: "2026-10-29T12:00:00.000Z", payload: { provider: fallbackUsed ? "fallback-rules" : "openai", fallbackUsed } });
+  assert.equal(say("AI_CASE_EXPLANATION_GENERATED", ai(true)).summary, "An explanation was written from the evidence rules; it changes nothing on the case");
+  assert.equal(say("AI_CASE_EXPLANATION_GENERATED", ai(false)).summary, "An AI explanation was generated to read; it changes nothing on the case");
 });
 
 test("an unknown event gets a label and no sentence; a missing payload never throws", () => {

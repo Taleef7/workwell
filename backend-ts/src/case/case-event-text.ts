@@ -29,7 +29,7 @@ function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-/** An assignee as a person reads it: the writers record "unassigned" (single) or null (bulk) for nobody. */
+/** An assignee as a person reads it: the writers record "unassigned" for nobody, and an old row may hold null. */
 function person(value: unknown): string | null {
   const s = text(value);
   return s && s.toLowerCase() !== "unassigned" ? s : null;
@@ -181,15 +181,19 @@ export function describeCaseEvent(
       const file = text(p.fileName);
       return { label: "Evidence Downloaded", summary: file ? `Downloaded ${file}` : null };
     }
-    case "AI_CASE_EXPLANATION_GENERATED":
+    case "AI_CASE_EXPLANATION_GENERATED": {
       // Assistive text only (AI_GUARDRAILS §1): the sentence says it changed nothing, because it did not.
+      // `insertAiAudit` (ai/ai-assist.ts) nests the surface's fields one level down, `{ timestamp, payload }`.
+      // Reading `fallbackUsed` at the top called every rules-written explanation an AI one.
+      const surface = typeof p.payload === "object" && p.payload !== null ? (p.payload as Record<string, unknown>) : p;
       return {
         label: "AI Explanation",
         summary:
-          p.fallbackUsed === true
+          surface.fallbackUsed === true
             ? "An explanation was written from the evidence rules; it changes nothing on the case"
             : "An AI explanation was generated to read; it changes nothing on the case",
       };
+    }
     case "CASE_SLA_BREACHED":
       // No longer written (#600); older ledgers still hold it.
       return { label: "SLA Breached", summary: "Priority escalated after the SLA was breached" };
