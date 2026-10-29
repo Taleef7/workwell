@@ -2651,6 +2651,45 @@ export function caseEventStoreContract(
     assert.deepEqual(await eventStore.auditEventsForCases([], 10), [], "no ids → []");
   });
 
+  test(`[${label}] latestCaseEventsOfType answers each case with its NEWEST event of that type only`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const a = (await newCase(caseStore))!;
+    const b = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(),
+      subjectId: "emp-007",
+      measureId: "audiogram",
+      evaluationPeriod: "2026-06-13",
+      outcomeStatus: "OVERDUE",
+    }))!;
+    const mk = (eventType: string, refCaseId: string | null, payload: Record<string, unknown>) =>
+      eventStore.appendAudit({
+        eventType,
+        entityType: "case",
+        entityId: refCaseId ?? a.id,
+        actor: "lead@x",
+        refRunId: null,
+        refCaseId,
+        refMeasureVersionId: null,
+        payload,
+      });
+    await mk("CASE_ASSIGNED", a.id, { assignee: "first@x" });
+    await mk("CASE_ESCALATED", a.id, { priority: "HIGH" });
+    await mk("CASE_ASSIGNED", a.id, { assignee: "second@x" });
+    await mk("CASE_OUTREACH_SENT", b.id, {}); // b has events, but none of the asked type
+    await mk("CASE_ASSIGNED", null, { assignee: "nobody@x" }); // tied to no case
+
+    const latest = await eventStore.latestCaseEventsOfType([a.id, b.id], "CASE_ASSIGNED");
+    assert.deepEqual(Object.keys(latest), [a.id], "a case with none of the type has no key");
+    assert.equal(latest[a.id]!.eventType, "CASE_ASSIGNED");
+    assert.deepEqual(latest[a.id]!.payload, { assignee: "second@x" }, "the newest of the type, not the first");
+    assert.equal(latest[a.id]!.actor, "lead@x");
+    assert.equal(latest[a.id]!.refCaseId, a.id);
+
+    assert.deepEqual(await eventStore.latestCaseEventsOfType([], "CASE_ASSIGNED"), {}, "no ids → {}");
+    const withJunk = await eventStore.latestCaseEventsOfType(["not-a-uuid", a.id], "CASE_ASSIGNED");
+    assert.deepEqual(withJunk[a.id]!.payload, { assignee: "second@x" }, "a malformed id is a miss, not a failure");
+  });
+
   test(`[${label}] insertPacketExport records an export row (idempotent inserts, distinct ids)`, async () => {
     const { eventStore } = await fresh();
     const input = {

@@ -137,13 +137,7 @@ function handlerFor(env: McpEnv, enforce: boolean): McpHttpHandler {
 
 /** Returns a Response if this module owns the route, else null. `enforce` is the worker's auth switch. */
 export async function handleMcp(req: Request, env: McpEnv, opts: { enforce: boolean }): Promise<Response | null> {
-  const { pathname } = new URL(req.url);
-  // No OAuth server answers here yet: a 401 sends MCP clients to these discovery documents, and a clear 404
-  // ends that search where the worker's 501 sent them on to a registration that cannot succeed.
-  if (pathname.startsWith("/.well-known/oauth-")) {
-    return json({ error: "not_found", message: "This server takes an MCP token minted in Admin → MCP access, not OAuth." }, 404);
-  }
-  if (pathname !== MCP_PATH) return null;
+  if (new URL(req.url).pathname !== MCP_PATH) return null;
 
   const origin = req.headers.get("origin");
   if (origin !== null && !parseAllowedOrigins(env.WORKWELL_CORS_ALLOWED_ORIGINS).includes(origin)) {
@@ -155,12 +149,15 @@ export async function handleMcp(req: Request, env: McpEnv, opts: { enforce: bool
     const pub = publicApiUrl(env, req, true);
     if (!pub.ok) return json({ error: "mcp_unavailable", reason: pub.reason }, 503);
     const resource = mcpResourceOf(pub.origin);
+    // A 401 names the Protected Resource Metadata (RFC 9728), so an OAuth-capable client can sign in from it.
+    const challenge = { resourceMetadataUrl: `${pub.origin}/.well-known/oauth-protected-resource/mcp`, requiredScopes: ["mcp"] };
     // Resolved inside the token check, so a store that cannot even initialize fails closed as a 503 like a
     // failed read (`McpStoreUnavailableError`), and a request with no token never reaches the database.
     const families = { currentJti: async (family: string, now: string) => (await getStores(env)).authFamilies.currentJti(family, now) };
     let storeDown = false;
     try {
       authInfo = await verifyBearerToken(req.headers.get("authorization"), {
+        ...challenge,
         expectedResource: new URL(resource),
         verifier: {
           verifyAccessToken: async (token: string) => {
@@ -175,7 +172,7 @@ export async function handleMcp(req: Request, env: McpEnv, opts: { enforce: bool
       });
     } catch (err) {
       if (storeDown) return json({ error: "mcp_unavailable", reason: "token store unavailable" }, 503);
-      return bearerAuthChallengeResponse(err);
+      return bearerAuthChallengeResponse(err, challenge);
     }
   }
   return handlerFor(env, opts.enforce).fetch(req, authInfo ? { authInfo } : undefined);

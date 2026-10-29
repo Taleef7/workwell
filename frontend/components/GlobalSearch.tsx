@@ -107,7 +107,10 @@ export function GlobalSearch() {
             if (e.key === 'Escape') {
               setOpen(false);
             } else if (e.key === 'Enter') {
-              if (open && results.length === 1 && !loading) {
+              // The TOP result, not only a sole one: the server ranks an id typed in full first and a
+              // name that starts with the query above one that merely contains it, so the first row is
+              // the best answer. Never while a newer query is in flight, whose results are not these.
+              if (open && results.length > 0 && !loading) {
                 e.preventDefault();
                 navigate(results[0].externalId);
               }

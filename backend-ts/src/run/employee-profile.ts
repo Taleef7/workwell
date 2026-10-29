@@ -9,10 +9,11 @@
  * checked condition; see `case/case-read-models.ts` for why. The compliance
  * data (outcomes, open cases, audit timeline) is real.
  */
-import type { CaseStore } from "../stores/case-store.ts";
+import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import type { OutcomeRecord, OutcomeStore } from "../stores/outcome-store.ts";
-import type { CaseEventStore } from "../stores/case-event-store.ts";
-import { employeeById, employees, providerById } from "../config/deployment-profile.ts";
+import type { AuditEventRow, CaseEventStore } from "../stores/case-event-store.ts";
+import { describeCaseEvent } from "../case/case-event-text.ts";
+import { DEPLOYMENT_PROFILE, employeeById, employees, providerById } from "../config/deployment-profile.ts";
 import { payerNameOf } from "../engine/synthetic/payer-display.ts";
 import { DIRECTORY } from "../config/deployment-profile.ts";
 import { directoryForRows } from "../engine/ingress/webchart/live-directory.ts";
@@ -67,6 +68,15 @@ export interface OpenCaseSummary {
   logic: ScoringLogic | null;
   priority: string;
   assignee: string | null;
+  /**
+   * When and how the CURRENT assignee got this gap (#865), from the ledger: the newest `CASE_ASSIGNED`
+   * when it names that assignee, else the case's creation for one a provider's panel placed when the
+   * nightly opened it. Null when the ledger cannot say, so the page never states a time it guessed.
+   */
+  assignedAt: string | null;
+  /** Who assigned it; null for the panel placement a run made. */
+  assignedBy: string | null;
+  assignedVia: "PANEL" | "BULK" | "OPERATOR" | null;
   slaDueDate: string | null;
 }
 export interface AuditEventSummary {
@@ -147,23 +157,46 @@ function actualDaysSince(evidence: unknown): number | null {
   return hadExam && typeof daysDef?.result === "number" ? daysDef.result : null;
 }
 
-function humanReadable(eventType: string, actor: string | null, measureName: string | null): string {
-  const who = actor && actor !== "system" ? actor : "System";
+/**
+ * One Recent Activity line: the case timeline's own sentence (`describeCaseEvent`, so the two pages
+ * cannot word one event two ways), the measure it belongs to, and who did it. The run's own events
+ * (actor "system") name nobody.
+ */
+function activityLine(e: AuditEventRow, measureName: string | null): string {
+  const { label, summary } = describeCaseEvent({ eventType: e.eventType, payload: e.payload });
   const measure = measureName ? ` (${measureName})` : "";
-  switch (eventType) {
-    case "CASE_CREATED":
-      return `${who} opened a case${measure}`;
-    case "CASE_UPDATED":
-      return `${who} updated the case${measure}`;
-    case "CASE_RESOLVED":
-      return `${who} resolved the case${measure}`;
-    case "OUTREACH_SENT":
-      return `${who} sent outreach${measure}`;
-    case "CASE_SLA_BREACHED":
-      return `Case SLA breached — priority escalated${measure}`;
-    default:
-      return eventType.replace(/_/g, " ").toLowerCase();
+  const by = e.actor && e.actor !== "system" ? ` by ${e.actor}` : "";
+  return `${summary ?? label}${measure}${by}`;
+}
+
+/**
+ * See `OpenCaseSummary.assignedAt`: the ledger's answer for the case's current assignee, or nulls.
+ *
+ * Known limit: assignments are audited BEFORE their compare-and-set, and the ledger records no
+ * completion. So a write that lost its race and names the same person as the write that won (a bulk
+ * assign landing just after a single assign to the same person) reads as the winner: right person,
+ * the loser's time and actor. Telling them apart needs the intent/completion pair (ADR-073 d4).
+ */
+function assignmentOf(
+  c: CaseRecord,
+  latest: AuditEventRow | undefined,
+): Pick<OpenCaseSummary, "assignedAt" | "assignedBy" | "assignedVia"> {
+  const unknown = { assignedAt: null, assignedBy: null, assignedVia: null };
+  const current = c.assignee?.trim().toLowerCase();
+  if (!current) return unknown;
+  if (latest) {
+    const to = typeof latest.payload.assignee === "string" ? latest.payload.assignee.trim().toLowerCase() : "";
+    // The newest assignment names someone else: the row changed without one (or the ledger has a gap),
+    // and its time would describe a different person's hand-over. Say nothing rather than that.
+    if (to !== current) return unknown;
+    const via = latest.payload.panel ? "PANEL" : latest.payload.bulk === true ? "BULK" : "OPERATOR";
+    // A run's panel reconcile writes as "system", which names no person (as Recent Activity reads it).
+    const by = latest.actor && latest.actor !== "system" ? latest.actor : null;
+    return { assignedAt: latest.occurredAt, assignedBy: by, assignedVia: via };
   }
+  // A panel places a case on INSERT without a CASE_ASSIGNED (ADR-080 d2): the case's creation is the time.
+  if (c.assignmentSource === "PANEL") return { assignedAt: c.createdAt, assignedBy: null, assignedVia: "PANEL" };
+  return unknown;
 }
 
 /** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
@@ -259,6 +292,9 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   }
   if (unread.length > 0) for (const [key, logic] of await scoringLogicForCases(deps.outcomes, unread)) caseLogic.set(key, logic);
 
+  // One read for every open gap's newest assignment, not a timeline per gap.
+  const assignments = await deps.events.latestCaseEventsOfType(openCases.map((c) => c.id), "CASE_ASSIGNED");
+
   const openCaseSummaries: OpenCaseSummary[] = openCases
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((c) => ({
@@ -269,6 +305,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       logic: caseLogic.get(caseLogicKey(c)) ?? null,
       priority: c.priority,
       assignee: c.assignee,
+      ...assignmentOf(c, assignments[c.id]),
       slaDueDate: null, // SLA not modeled on the TS case row
     }));
 
@@ -288,7 +325,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
         occurredAt: e.occurredAt,
         actor: e.actor ?? "system",
         measureName,
-        summary: humanReadable(e.eventType, e.actor, measureName),
+        summary: activityLine(e, measureName),
       };
     });
 
@@ -312,16 +349,53 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   };
 }
 
-/** GET /api/employees/search?q=&limit= — name/externalId/role substring (min 2 chars), + open gaps. */
-export async function searchEmployees(deps: EmployeeProfileDeps, q: string, limit: number): Promise<EmployeeSearchResult[]> {
+/**
+ * How well one directory entry answers a search, best first, or null when it does not.
+ *
+ * Two fields matched everybody on the pilot deployment, so a query of two letters listed the practice
+ * in alphabetical order with the patient being looked for nowhere near the top:
+ * - every patient's role is "Patient", so "pa", "at" or "en" matched them all. The role is searched
+ *   only where it tells people apart (`matchRole`: the employee deployment, where "welder" is a real
+ *   query);
+ * - every corpus id begins "pat-", so "pa" matched them all again. An id is told apart by its number,
+ *   so an id is searched only by a query holding a digit, or typed in full.
+ *
+ * What remains is ranked rather than filtered: a name that starts with the query beats one that merely
+ * contains it, so "son" still finds Johnson, below Sonia. A query of digits alone that IS an id's number
+ * ("12" for pat-012) ranks with the id typed in full: Enter opens the top row, and among every id that
+ * merely contains "12" the alphabetical first would be someone else.
+ */
+function searchRank(e: { externalId: string; name: string; role: string }, needle: string, matchRole: boolean): number | null {
+  const id = e.externalId.toLowerCase();
+  const name = e.name.toLowerCase();
+  const idNumber = /(\d+)$/.exec(id)?.[1];
+  if (id === needle || (/^\d+$/.test(needle) && idNumber !== undefined && Number(idNumber) === Number(needle))) return 0;
+  if (name.startsWith(needle)) return 1;
+  if (name.split(/\s+/).some((word) => word.startsWith(needle))) return 2;
+  if (/\d/.test(needle) && id.includes(needle)) return 3;
+  if (name.includes(needle)) return 4;
+  if (matchRole && e.role.toLowerCase().includes(needle)) return 5;
+  return null;
+}
+
+/** GET /api/employees/search?q=&limit= — ranked name/id (and role, on the employee deployment) match (min 2 chars), + open gaps. */
+export async function searchEmployees(
+  deps: EmployeeProfileDeps,
+  q: string,
+  limit: number,
+  matchRole: boolean = DEPLOYMENT_PROFILE.subjectTerm === "employee",
+): Promise<EmployeeSearchResult[]> {
   if (!q || q.trim().length < 2) return [];
   const needle = q.trim().toLowerCase();
   const safeLimit = Math.max(1, Math.min(limit, 50));
-  const matches = employees().filter(
-    (e) => e.name.toLowerCase().includes(needle) || e.externalId.toLowerCase().includes(needle) || e.role.toLowerCase().includes(needle),
-  )
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, safeLimit);
+  const matches = employees()
+    .flatMap((e) => {
+      const rank = searchRank(e, needle, matchRole);
+      return rank === null ? [] : [{ e, rank }];
+    })
+    .sort((a, b) => a.rank - b.rank || a.e.name.localeCompare(b.e.name))
+    .slice(0, safeLimit)
+    .map(({ e }) => e);
   if (matches.length === 0) return [];
 
   // ONE read for every match (it was one outcome query per match). Unbounded by design: up to 50

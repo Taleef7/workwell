@@ -44,6 +44,10 @@ type AuditEvent = {
   actor: string;
   occurredAt: string;
   payload: Record<string, unknown>;
+  /** The server's wording for the entry (#865); absent from a server that predates it. */
+  label?: string;
+  /** One sentence from the payload's own fields, or null when the event has nothing more to say. */
+  summary?: string | null;
 };
 
 type CaseDetail = {
@@ -1051,6 +1055,12 @@ export default function CaseDetailPage() {
                     <p className="font-semibold text-neutral-900 dark:text-neutral-100">{appointment.appointmentType}</p>
                     <p className="text-neutral-700 dark:text-neutral-300">{new Date(appointment.scheduledAt).toLocaleString()} • {appointment.location}</p>
                     <p className="text-xs text-neutral-600 dark:text-neutral-400">Status: {appointment.status} • Created by: {appointment.createdBy}</p>
+                    {/* The notes staff typed when scheduling: the timeline no longer shows them the payload. */}
+                    {appointment.notes?.trim() ? (
+                      <p data-testid="appointment-notes" className="mt-1 whitespace-pre-wrap break-words text-neutral-700 dark:text-neutral-300">
+                        Notes: {appointment.notes.trim()}
+                      </p>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1171,15 +1181,12 @@ export default function CaseDetailPage() {
                           <div>
                             <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                               <span className="mr-2" aria-hidden>{eventIcon(event.eventType)}</span>
-                              {formatEventType(event.eventType)}
+                              {event.label ?? formatEventType(event.eventType)}
                             </p>
                             <p className="text-xs text-neutral-500 dark:text-neutral-400">{event.actor}</p>
                           </div>
                           <div className="text-right">
                             <p className="text-xs text-neutral-500 dark:text-neutral-400">{new Date(event.occurredAt).toLocaleString()}</p>
-                            <span className="mt-1 inline-block rounded-full border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-neutral-700 dark:text-neutral-300">
-                              {timelineSource(event.eventType)}
-                            </span>
                             {notificationBadge ? (
                               <span className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] ${notificationBadge.className}`}>
                                 {notificationBadge.label}
@@ -1187,9 +1194,25 @@ export default function CaseDetailPage() {
                             ) : null}
                           </div>
                         </div>
-                        <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
-                          {JSON.stringify(event.payload, null, 2)}
-                        </pre>
+                        {event.summary ? (
+                          <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300" data-testid="timeline-summary">{event.summary}</p>
+                        ) : null}
+                        {/* The stored payload is for whoever debugs the ledger, never for the staff working
+                            the case (#865): it read as code on the pilot call. Kept, one click away, for the
+                            engineering seat only. */}
+                        {canEngineering ? (
+                          <details className="mt-3" data-testid="timeline-details">
+                            <summary className="cursor-pointer text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                              Details
+                              <span className="ml-2 inline-block rounded-full border border-neutral-300 bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-neutral-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+                                {timelineSource(event.eventType)}
+                              </span>
+                            </summary>
+                            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
+                              {JSON.stringify(event.payload, null, 2)}
+                            </pre>
+                          </details>
+                        ) : null}
                       </div>
                     );
                   })()
@@ -1204,12 +1227,13 @@ export default function CaseDetailPage() {
   );
 }
 
+/**
+ * The fallback label for an entry the server sent no `label` for. Only a LEADING prefix is stripped: the
+ * old chain of `replace`s also cut "RUN_" out of the middle, so `CASE_RERUN_VERIFIED` read "Reverified".
+ * Kept in step with the server's `fallbackCaseEventLabel` (`case/case-event-text.ts`).
+ */
 function formatEventType(eventType: string) {
-  const compact = eventType
-    .replace("CASE_ACTION_", "")
-    .replace("CASE_", "")
-    .replace("OUTCOME_", "")
-    .replace("RUN_", "");
+  const compact = eventType.replace(/^(CASE_ACTION_|CASE_|OUTCOME_|RUN_)/, "");
   return compact
     .toLowerCase()
     .split("_")

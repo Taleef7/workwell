@@ -5,8 +5,59 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-29
+
+- **The pilot group's sandbox findings, the five that need no new decision (#865).**
+  - **Search:** two letters no longer list every patient. The role is matched on the employee profile only, an
+    id only by a query with a digit, and a name match ranks first. Enter opens the top result.
+  - **Case timeline:** each entry reads in words from one server-side describer (`case/case-event-text.ts`).
+    The stored payload is behind an admin-only Details. Recent Activity on the patient page uses the same
+    describer, so it now shows outreach (it looked for the wrong event type).
+  - **Patient page:** Open Cases first, an Open case button per gap, the evidence and simulation folded for
+    staff. Each gap says when and how its current assignee got it (`CaseEventStore.latestCaseEventsOfType`).
+  - **Scorecard:** a provider picker, with year, panel and provider in the URL, opens on My providers for a
+    panel owner.
+  - **Work list:** "Select all N matching" (up to 500 patients). The bulk-assign endpoint is unchanged.
+  - New read-only Maui e2e spec `staff-feedback.spec.ts`; each finding was also driven in a browser on a
+    local Maui stack.
+- **Next:** the patient page as the place to act (outreach for several gaps at once, inline actions) is PR 2.
+
+## 2026-10-21
+
+- **The MCP OAuth flow is under Playwright (#863 follow-up).** `e2e/tests/maui/mcp-oauth.spec.ts` (a write spec)
+  covers:
+  - a client's authorize link going through sign-in to the consent page;
+  - Approve leading to a code, then tokens, the read-only tools, and a refresh;
+  - a replayed code killing the grant;
+  - an admin's Revoke in Admin → MCP access ending the connection;
+  - a viewer able only to decline;
+  - an off-site `next` never leaving the app.
+
+  CI's Maui stack now sets `WORKWELL_PUBLIC_API_URL`.
+
 ## 2026-10-20
 
+- **MCP clients can sign in with OAuth (MCP 2026-07-28 authorization).** WorkWell is now its own OAuth 2.1
+  authorization server for `/mcp`, so claude.ai connectors, Claude Code and `mcp-remote` connect with the URL
+  alone.
+  - **Flow:** the client opens WorkWell, the user signs in and approves on a consent page, and the tokens
+    refresh themselves.
+  - **Clients:** CIMD documents are fetched behind an SSRF guard, and self-registration is loopback only and
+    marked unverified.
+  - **Rules:** PKCE S256 and the `/mcp` resource are required.
+  - **Codes:** single use, and a replayed code kills the grant.
+  - **Refresh tokens:** they rotate atomically, with a 5-second grace (audited) for concurrent refreshes;
+    any other reuse revokes the grant. The user is re-checked on every refresh.
+  - **Admin:** connected clients appear in Admin → MCP access and can be disconnected.
+  - **Storage:** none new; codes and grants are refresh-family rows.
+  - **Hardened after review:**
+    - metadata documents are fetched only for Claude's two client ids (configurable; a host alone let random
+      paths spend the fetch budget), with global fetch limits, separate caches and a day of stale fallback;
+    - a loopback redirect is never shown as verified, and the page warns;
+    - the login `next` returns only to the consent page (a `/.//host` path escaped the app);
+    - a viewer can decline;
+    - DCR and token bodies are capped; IPv6 fetches go to global unicast only;
+    - `resource` is compared as a URL.
 - **MCP moves to the 2026-07-28 spec, with tokens that last (#704).** `POST /mcp` is served by the official
   TypeScript SDK v2 (`@modelcontextprotocol/server` 2.3.1, owner-approved). It answers 2026-07-28 requests and the
   2025-era ones most clients still send, statelessly. The 2024-11-05 `/sse` transport is retired.

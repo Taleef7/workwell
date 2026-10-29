@@ -43,12 +43,12 @@ export class PgAuthFamilyStore implements AuthFamilyStore {
     return rows.length === 1;
   }
 
-  async listByPrefix(prefix: string, now: string): Promise<Array<{ family: string; expiresAt: string }>> {
-    const { rows } = await this.pool.query<{ family: string; expires_at: Date | string }>(
-      `SELECT family, expires_at FROM ${T} WHERE starts_with(family, $1) AND expires_at > $2::timestamptz ORDER BY family`,
+  async listByPrefix(prefix: string, now: string): Promise<Array<{ family: string; jti: string; expiresAt: string }>> {
+    const { rows } = await this.pool.query<{ family: string; jti: string; expires_at: Date | string }>(
+      `SELECT family, jti, expires_at FROM ${T} WHERE starts_with(family, $1) AND expires_at > $2::timestamptz ORDER BY family`,
       [prefix, now],
     );
-    return rows.map((r) => ({ family: r.family, expiresAt: new Date(r.expires_at).toISOString() }));
+    return rows.map((r) => ({ family: r.family, jti: r.jti, expiresAt: new Date(r.expires_at).toISOString() }));
   }
 
   async rotateIf(family: string, oldJti: string, newJti: string, expiresAt: string, now: string): Promise<boolean> {

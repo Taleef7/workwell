@@ -27,12 +27,13 @@ in `MAUI_E2E_PASSWORD`.
 The suite is split by whether a spec DISTURBS the stack it reads.
 
 Everything in the `maui` project is read-only, so it changes nothing on any
-stack it is pointed at. Three specs mutate and live in the `maui-writes`
+stack it is pointed at. Four specs mutate and live in the `maui-writes`
 project, which Playwright schedules after every read has finished and runs on
 one worker: `runs.spec.ts` (starts a population run), `worklist-writes.spec.ts`
 (maps a provider panel, which reassigns every open case on it, and assigns a
-patient's gaps), and `case-workflow.spec.ts` (assigns a case, moves it to
-IN_PROGRESS, sends outreach).
+patient's gaps), `case-workflow.spec.ts` (assigns a case, moves it to
+IN_PROGRESS, sends outreach), and `mcp-oauth.spec.ts` (connects MCP clients
+through the consent page and revokes them).
 
 **Read-only is not the same as harmless at pilot scale.** One test in the
 `maui` project — the case CSV export in `exports.spec.ts` — currently holds the

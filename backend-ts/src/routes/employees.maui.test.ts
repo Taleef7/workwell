@@ -17,7 +17,15 @@ const testScript = `
   const omarRes = await handleEmployees(new Request("http://x/api/employees/search?q=omar"), env);
   const omar = await omarRes.json();
 
-  console.log(JSON.stringify({ nilo, omar }));
+  const search = async (q) => (await handleEmployees(new Request("http://x/api/employees/search?q=" + encodeURIComponent(q) + "&limit=50"), env)).json();
+  const pa = await search("pa");
+  const en = await search("en");
+  const exactId = await search("PAT-048");
+  const byNumber = await search("048");
+  const typedNumbers = {};
+  for (const n of ["04", "03", "4", "12"]) typedNumbers[n] = (await search(n)).map((h) => h.externalId);
+
+  console.log(JSON.stringify({ nilo, omar, pa, en, exactId, byNumber, typedNumbers }));
 `;
 
 test("scoped profile (Maui) — employees search returns Maui patients and excludes TWH employees", () => {
@@ -29,6 +37,31 @@ test("scoped profile (Maui) — employees search returns Maui patients and exclu
   assert.equal(nilo[0]?.externalId, "pat-048", "returned patient must be pat-048");
   assert.equal(nilo[0]?.name, "Nilo Gray", "returned patient name must be Nilo Gray");
   assert.deepEqual(omar, [], "TWH-only name must return empty array on Maui profile");
+});
+
+test("Maui search: two letters find the patients named that way, not everyone whose role is 'Patient' or id is 'pat-'", () => {
+  const output = runProfileChild("maui", testScript);
+  type Hit = { externalId: string; name: string };
+  // Every corpus role is "Patient" and every id starts "pat-", so either field alone matched all 48. No
+  // corpus name contains "pa", so the answer is nobody.
+  assert.deepEqual(output.pa, [], "'pa' matched every patient through the role and the id prefix");
+
+  // "en" is in "Patient" AND in eight names: exactly those eight, the one whose name word STARTS with it first.
+  const en = output.en as Hit[];
+  assert.ok(en.length > 0 && en.length < 48, `'en' returns the named patients, not the practice (${en.length})`);
+  for (const hit of en) assert.match(hit.name.toLowerCase(), /en/, `${hit.externalId} (${hit.name}) matched only by role`);
+  assert.equal(en[0]?.name, "Ena Briar", "a name starting with the query ranks above one containing it");
+
+  const exactId = output.exactId as Hit[];
+  assert.equal(exactId[0]?.externalId, "pat-048", "an id typed in full (any case) is the top result");
+  assert.ok((output.byNumber as Hit[]).some((h) => h.externalId === "pat-048"), "an id is found by its number");
+
+  // Enter opens the top row, so a typed number must put the patient whose number it IS first, not the
+  // alphabetical first of every id that merely contains those digits ("04" is in pat-004 and pat-040..048).
+  const typed = output.typedNumbers as Record<string, string[]>;
+  assert.equal(typed["04"]?.[0], "pat-004");
+  assert.equal(typed["03"]?.[0], "pat-003");
+  assert.ok(typed["04"]!.length > 1, "the other ids holding the digits are still listed, below it");
 });
 
 const profileScript = `

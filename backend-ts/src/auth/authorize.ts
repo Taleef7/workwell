@@ -73,6 +73,16 @@ const RULES: Rule[] = [
   { pattern: rx("/mcp"), access: "PERMIT" },
   { pattern: rx("/mcp/**"), access: [A, CM, MCP] },
 
+  // The MCP authorization server (`routes/oauth.ts`). Discovery, registration, authorize and token are public
+  // by design (OAuth 2.1): the token endpoint authenticates the code or refresh token itself, and authorize
+  // only sends the browser to the web app's consent page, where the user signs in as usual. The consent API
+  // is not public: reading a request needs any signed-in user (its answer carries the decline redirect, so a
+  // viewer can still send the client `access_denied`), approving one a Case Manager or Admin.
+  { pattern: rx("/.well-known/**"), access: "PERMIT" },
+  { pattern: rx("/oauth/**"), access: "PERMIT" },
+  { method: "GET", pattern: rx("/api/oauth/consent"), access: "AUTHENTICATED" },
+  { method: "POST", pattern: rx("/api/oauth/consent"), access: [A, CM] },
+
   // CDS Hooks (ADR-067). These rules are MANDATORY, not a refinement: `/cds-services` matches no `/api/**`
   // rule, and `authorize` ends with `return { ok: true }` for non-`/api` paths (permitAll, mirroring
   // Spring's anyRequest().permitAll()) — so without them the invoke endpoint would serve per-patient

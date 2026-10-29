@@ -82,6 +82,7 @@ export const AUTH_SESSIONS = [
   { email: QUALITY_LEAD_EMAIL, tag: "measure-detail" },
   { email: QUALITY_LEAD_EMAIL, tag: "worklist" },
   { email: QUALITY_LEAD_EMAIL, tag: "panels" },
+  { email: QUALITY_LEAD_EMAIL, tag: "staff-feedback" },
   { email: ADMIN_EMAIL, tag: "runs" },
   { email: ADMIN_EMAIL, tag: "measures" },
   { email: ADMIN_EMAIL, tag: "terminology-admin" },
@@ -96,6 +97,7 @@ export const AS_QUALITY_LEAD_READINESS = session(QUALITY_LEAD_EMAIL, "readiness"
 export const AS_QUALITY_LEAD_MEASURE = session(QUALITY_LEAD_EMAIL, "measure-detail");
 export const AS_QUALITY_LEAD_WORKLIST = session(QUALITY_LEAD_EMAIL, "worklist");
 export const AS_QUALITY_LEAD_PANELS = session(QUALITY_LEAD_EMAIL, "panels");
+export const AS_QUALITY_LEAD_FEEDBACK = session(QUALITY_LEAD_EMAIL, "staff-feedback");
 export const AS_ADMIN_RUNS = session(ADMIN_EMAIL, "runs");
 export const AS_ADMIN_MEASURES = session(ADMIN_EMAIL, "measures");
 export const AS_ADMIN_TERMS = session(ADMIN_EMAIL, "terminology-admin");

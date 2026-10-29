@@ -51,6 +51,7 @@ import { handleAdmin } from "./routes/admin.ts";
 import { handleAi } from "./routes/ai.ts";
 import { handleMcp } from "./routes/mcp.ts";
 import { handleAdminMcpTokens } from "./routes/admin-mcp-tokens.ts";
+import { handleOAuth } from "./routes/oauth.ts";
 import { handleAuditor } from "./routes/auditor.ts";
 import { createAuthHandler, type AuthAuditEvent, type AuthHandler, type RefreshTokenRevocation } from "./routes/auth.ts";
 import { getStores } from "./stores/factory.ts";
@@ -467,6 +468,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   // text/drafts only (AI never decides compliance); deterministic fallback when no OPENAI_API_KEY.
   const aiResponse = await handleAi(req, env, actor);
   if (aiResponse) return aiResponse;
+
+  // The OAuth 2.1 authorization server for MCP (discovery, register, authorize, token, consent).
+  const oauthResponse = await handleOAuth(req, env, { authEnabled: enforceAuth, actor, actorRole: principalRole });
+  if (oauthResponse) return oauthResponse;
 
   // MCP — read-only tools over Streamable HTTP at POST /mcp (#108, #704). The route matrix PERMITs exactly
   // /mcp: `handleMcp` authenticates it itself, with MCP tokens only (never the login token the gate above
