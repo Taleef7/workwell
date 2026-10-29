@@ -333,6 +333,8 @@ export interface OutcomeStore {
    * report and the provider scorecard): one unordered statement, never paged, where `listOutcomes`' page
    * window re-sorted the measure's whole evidence per page (1.4 s for 20,000 rows on Postgres, against
    * 0.14 s for this). The evidence is narrowed exactly as {@link listOutcomeMembershipsForRun}'s is.
+   * Rows whose narrowed evidence is equal MAY share one object (the ceiling builds each distinct one once):
+   * a caller must not mutate it.
    */
   listOutcomeSubjectMembershipsForRun(
     runId: string,

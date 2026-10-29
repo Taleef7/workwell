@@ -7,6 +7,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-29
 
+- **The scorecard is about twice as fast; the rest of its time needs an owner decision.** Maui answered in 15-20 s.
+  At 20,000 patients on a Postgres capped at a quarter CPU (Maui's Neon compute), the warm median went from 8 s to
+  4 s, with the same response body. Most of the time was Postgres rebuilding the same narrowed evidence on every row.
+  Now it only extracts the evidence, the worker parses each distinct value once, and the rate fold reads each value
+  once (and parses each time once).
+  - What remains is reading `evidence_json` itself: CMS137 takes 2 s, against 0.1 s for the same rows without it.
+    Closing that gap needs either a cache or a schema change, both Taleef's call. The options and the proposed DDL
+    are in the PR.
 - **The pilot group's sandbox findings, the five that need no new decision (#865).**
   - **Search:** two letters no longer list every patient. The role is matched on the employee profile only, an
     id only by a query with a digit, and a name match ranks first. Enter opens the top result.

@@ -3,7 +3,7 @@
  * Same contract as the SQLite floor; `evidence` lives in a native JSONB column
  * (TEXT JSON on the floor). Schema-qualified to avoid the canonical `public.outcomes`.
  */
-import { isUuid, withStatementTimeoutDisabled, type PgPool } from "./pg-database.ts";
+import { JSON_AS_TEXT, isUuid, withStatementTimeoutDisabled, type PgPool } from "./pg-database.ts";
 import { SPIKE_SCHEMA } from "./schema-pg.ts";
 import { LATEST_RUN_PROBE_BUDGET, SCORING_IDENTITY_KEYS, normalizeScoringIdentityRows, scoringIdentityOf } from "../outcome-store.ts";
 import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
@@ -36,6 +36,15 @@ interface OutcomeRow {
 
 /** NULL means the run did not record it (ADR-079) — not the same statement as false. */
 const flagOf = (v: boolean | null | undefined): boolean | undefined => (v === null || v === undefined ? undefined : v);
+
+/** `jsonb_strip_nulls` on a parsed value: drops every object field whose value is null, at any depth. */
+export function stripJsonNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripJsonNulls);
+  if (value === null || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [name, inner] of Object.entries(value)) if (inner !== null) out[name] = stripJsonNulls(inner);
+  return out;
+}
 
 const toRecord = (r: OutcomeRow): OutcomeRecord => ({
   id: r.id,
@@ -236,33 +245,61 @@ export class PgOutcomeStore implements OutcomeStore {
     measureId: string,
   ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>> {
     if (!isUuid(runId)) return [];
-    // The membership projection's narrowing, verbatim, plus four plain columns. No ORDER BY: the caller
-    // keeps the newest row per subject by comparing, and orders what it serves itself.
+    // The membership projection's narrowing, with the build moved out of the statement. Within one
+    // (run, measure) the three extracted values take a handful of distinct values (the artifact identity
+    // and one of a few population vectors: 4 for CMS125, 10 for CMS137 with its strata, on a pilot-shaped
+    // run of 20,000 rows), but `jsonb_build_object` + `jsonb_strip_nulls` per row built, stripped and
+    // serialised the same object 20,000 times, and the driver parsed it 20,000 times again. On Maui's
+    // Neon compute (a quarter of a CPU) that build was most of a 15-20 s scorecard. Here the statement
+    // only extracts (the values come back as jsonb text, `JSON_AS_TEXT`), and each distinct triple is
+    // parsed and narrowed once; its rows share that ONE object, which nothing downstream mutates.
+    // Grouping the rows in SQL instead was measured and is worse under that CPU cap: the planner sorts
+    // the jsonb values to group them.
+    //
+    // Exact: `stripJsonNulls` is `jsonb_strip_nulls` (an object field whose value is null is dropped, at
+    // every depth, inside arrays too; a null array element stays), and an absent or null value leaves its
+    // key out, as the strip did of the built object's. No ORDER BY: the caller keeps the newest row per
+    // subject by comparing, and orders what it serves itself.
     const { rows } = await this.pool.query<{
       id: string;
       subject_id: string;
       evaluated_at: Date | string;
       out_of_population: boolean | null;
       status: string;
-      evidence: unknown;
-    }>(
-      `SELECT id, subject_id, evaluated_at, out_of_population, status,
-              jsonb_strip_nulls(jsonb_build_object(
-                'official', evidence_json -> 'official',
-                'evaluationError', evidence_json -> 'evaluationError',
-                'dataInsufficient', evidence_json -> 'dataInsufficient'
-              )) AS evidence
-         FROM ${T} WHERE run_id = $1 AND measure_id = $2`,
-      [runId, measureId],
-    );
-    return rows.map((r) => ({
-      id: r.id,
-      subjectId: r.subject_id,
-      evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
-      outOfPopulation: flagOf(r.out_of_population),
-      status: r.status,
-      evidence: r.evidence,
-    }));
+      official: string | null;
+      evaluation_error: string | null;
+      data_insufficient: string | null;
+    }>({
+      text: `SELECT id, subject_id, evaluated_at, out_of_population, status,
+                    evidence_json -> 'official' AS official,
+                    evidence_json -> 'evaluationError' AS evaluation_error,
+                    evidence_json -> 'dataInsufficient' AS data_insufficient
+               FROM ${T} WHERE run_id = $1 AND measure_id = $2`,
+      values: [runId, measureId],
+      types: JSON_AS_TEXT,
+    });
+    const narrowed = new Map<string, Record<string, unknown>>();
+    return rows.map((r) => {
+      // jsonb text never holds a raw U+0000 or U+0001 (both are escaped), so the key is unambiguous.
+      const key = `${r.official ?? "\u0001"}\u0000${r.evaluation_error ?? "\u0001"}\u0000${r.data_insufficient ?? "\u0001"}`;
+      let evidence = narrowed.get(key);
+      if (!evidence) {
+        evidence = {};
+        for (const [name, text] of [["official", r.official], ["evaluationError", r.evaluation_error], ["dataInsufficient", r.data_insufficient]] as const) {
+          const value: unknown = text === null ? null : JSON.parse(text);
+          if (value !== null) evidence[name] = stripJsonNulls(value);
+        }
+        narrowed.set(key, evidence);
+      }
+      return {
+        id: r.id,
+        subjectId: r.subject_id,
+        evaluatedAt: r.evaluated_at instanceof Date ? r.evaluated_at.toISOString() : r.evaluated_at,
+        outOfPopulation: flagOf(r.out_of_population),
+        status: r.status,
+        evidence,
+      };
+    });
   }
 
   async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {

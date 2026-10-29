@@ -21,6 +21,18 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const isUuid = (id: string): boolean => UUID_RE.test(id);
 
 /**
+ * A query's `types` that leave `json`/`jsonb` columns as the server's text, and parse every other
+ * type as the pool does. For a read that returns the same JSON value on thousands of rows: the caller
+ * parses each distinct text once instead of the driver parsing every row's.
+ */
+export const JSON_AS_TEXT: pg.CustomTypesConfig = {
+  getTypeParser: ((oid: number, format?: "text" | "binary") =>
+    oid === pg.types.builtins.JSON || oid === pg.types.builtins.JSONB
+      ? (value: string) => value
+      : pg.types.getTypeParser(oid, format)) as typeof pg.types.getTypeParser,
+};
+
+/**
  * Create a `pg` pool for the isolated spike schema.
  *
  * The pool sets NO search_path: the adapters fully-qualify every table (`workwell_spike.*`), so it

@@ -1248,6 +1248,60 @@ export function outcomeStoreContract(
     assert.deepEqual(await outcomeStore.listOutcomeSubjectMembershipsForRun("00000000-0000-4000-8000-000000000000", "audiogram"), []);
   });
 
+  // The ceiling builds each DISTINCT narrowed evidence once and its rows share it (the scorecard's
+  // latency, 2026-10-29), so every row must still carry its own identity, and the narrowing must still be
+  // the membership read's: nulls nested in `official` included, and two evidences that differ only in a
+  // marker kept apart.
+  test(`[${label}] listOutcomeSubjectMembershipsForRun keeps each row's own identity where rows share an evidence`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const met = { ecqmId: "122FHIR", populationResults: { ipp: true, denom: true, numer: true } };
+    const unmet = { ecqmId: "122FHIR", populationResults: { ipp: true, denom: true, numer: false } };
+    const evidences = [
+      { official: met, expressionResults: [{ define: "official:numerator", result: true }] },
+      { official: unmet },
+      { official: unmet, dataInsufficient: { checks: ["failedFetches"] } },
+      { official: { ecqmId: "122FHIR", version: null, populationResults: { ipp: false }, strata: [{ id: "s1", code: null }, null] }, evaluationError: null },
+      { evaluationError: "engine threw", message: "boom" },
+    ];
+    const flags = [false, true, undefined];
+    const statuses = ["COMPLIANT", "OVERDUE", "MISSING_DATA"];
+    // 15 rows: every evidence with every status and every out-of-population flag.
+    const inputs = Array.from({ length: 15 }, (_, i) => ({
+      runId: run.id, subjectId: `emp-${100 + i}`, measureId: "audiogram", status: statuses[i % 3]!,
+      outOfPopulation: flags[i % 3], evaluatedAt: new Date(Date.UTC(2026, 5, 1, 8, i)).toISOString(),
+      evidence: evidences[i % 5]!,
+    }));
+    await outcomeStore.recordOutcomes(inputs);
+
+    const rows = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram");
+    const stored = new Map((await outcomeStore.listOutcomes(run.id, { measureId: "audiogram" })).map((r) => [r.id, r]));
+    assert.equal(rows.length, inputs.length);
+    assert.equal(new Set(rows.map((r) => r.id)).size, inputs.length, "one row per outcome, no id repeated");
+    for (const r of rows) {
+      const input = inputs.find((i) => i.subjectId === r.subjectId)!;
+      assert.equal(stored.get(r.id)?.subjectId, r.subjectId, "the id is that subject's row");
+      assert.equal(r.status, input.status);
+      assert.equal(r.outOfPopulation, input.outOfPopulation);
+      assert.equal(Date.parse(r.evaluatedAt), Date.parse(input.evaluatedAt));
+    }
+    const canonical = (v: unknown): string =>
+      JSON.stringify(v, (_k, x: unknown) =>
+        x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x,
+      );
+    const pairs = (list: Array<{ status: string; evidence: unknown }>) => list.map((r) => `${r.status} ${canonical(r.evidence)}`).sort();
+    assert.deepEqual(
+      pairs(rows),
+      pairs(await outcomeStore.listOutcomeMembershipsForRun(run.id, "audiogram")),
+      "row for row, the membership read's narrowing",
+    );
+    const bySubject = (i: number) => rows.find((r) => r.subjectId === `emp-${100 + i}`)!.evidence as Record<string, unknown>;
+    assert.deepEqual(bySubject(1), { official: unmet });
+    assert.deepEqual(bySubject(2), { official: unmet, dataInsufficient: { checks: ["failedFetches"] } }, "a marker keeps two evidences apart");
+    assert.ok(!("evaluationError" in bySubject(3)), "a null marker is absent, not null");
+    assert.deepEqual(bySubject(4), { evaluationError: "engine threw" });
+  });
+
   /**
    * The run detail's identity-only read (#769): which logics scored each measure's evaluated rows.
    *
