@@ -69,8 +69,9 @@ write; keep the list below in step with it in the SAME change.
 `recover-stuck-runs`, `batch-evaluate-scale` — run-boundary best-effort (`WARN`), so a finished run is
 never stranded. `dispatchOutreach` and `dispatchPatientOutreach` — the payload is `channel.send()`'s
 result; the patient path sends one message, then records each of the patient's cases, each record on its
-own (a failed one is reported, never retried). Needs ADR-073 d4's intent/completion pair (owner call). The
-sweep no longer lists them: the send happens in the caller before `recordDispatch`, whose audit is first. The three identity-link writes — `upsertLink` returns the existing id
+own (a failed one is reported, never retried). Their callers: the single-case send, campaigns, and the
+patient page's `POST /api/cases/patient-outreach` (#868, owner decision 2026-10-29). Needs ADR-073 d4's
+intent/completion pair (owner call). The sweep no longer lists them: the send happens in the caller before `recordDispatch`, whose audit is first. The three identity-link writes — `upsertLink` returns the existing id
 on conflict (owner call). `backfill-scale`, `backfill-quality-history`, `backfill-trend-history` —
 one-shot seeding. `resolve-valuesets` — build-time CLI. `rerunToVerify` — action audit-first,
 `CASE_RESOLVED` after the patch. `uploadEvidence` audits before the bucket write, so a failed upload can
