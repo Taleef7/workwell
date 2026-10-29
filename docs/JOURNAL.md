@@ -15,6 +15,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - What remains is reading `evidence_json` itself: CMS137 takes 2 s, against 0.1 s for the same rows without it.
     Closing that gap needs either a cache or a schema change, both Taleef's call. The options and the proposed DDL
     are in the PR.
+  - Live on Maui after the deploy it is less: warm loads took 14 s (about 18 s before). The first load after the
+    deploy hit the 30 s statement timeout (503), and requests the browser abandoned kept running on the server.
 - **The pilot group's sandbox findings, the five that need no new decision (#865).**
   - **Search:** two letters no longer list every patient. The role is matched on the employee profile only, an
     id only by a query with a digit, and a name match ranks first. Enter opens the top result.
@@ -28,7 +30,14 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - **Work list:** "Select all N matching" (up to 500 patients). The bulk-assign endpoint is unchanged.
   - New read-only Maui e2e spec `staff-feedback.spec.ts`; each finding was also driven in a browser on a
     local Maui stack.
-- **Next:** the patient page as the place to act (outreach for several gaps at once, inline actions) is PR 2.
+- **The patient page is where staff act on a patient (#868).**
+  - **One message for several gaps:** tick the gaps, preview, send. `POST /api/cases/patient-outreach` reuses
+    `dispatchPatientOutreach` (one message on a patient deployment, one per case otherwise) and joins its
+    listed mutate-first exception. A `dryRun` renders the same message and writes nothing.
+  - **CMS2 and CMS137 start unticked** (owner decision): a person may include them, and the message calls them
+    only "a visit with your care team". Campaigns still never send for them.
+  - **Each gap shows its last contact** (when, how, by whom, delivery status), and has a **Re-check**.
+  - New write e2e spec `patient-outreach.spec.ts`.
 
 ## 2026-10-21
 

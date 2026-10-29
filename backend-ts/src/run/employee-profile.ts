@@ -77,6 +77,15 @@ export interface OpenCaseSummary {
   /** Who assigned it; null for the panel placement a run made. */
   assignedBy: string | null;
   assignedVia: "PANEL" | "BULK" | "OPERATOR" | null;
+  /**
+   * The gap's newest outreach (#868), from its newest `CASE_OUTREACH_SENT`: when, by whom (null for a
+   * run's "system"), on which channel, and the newest delivery status recorded since. All null when the
+   * gap was never contacted, so the page says so rather than guessing.
+   */
+  lastOutreachAt: string | null;
+  lastOutreachBy: string | null;
+  lastOutreachChannel: string | null;
+  lastOutreachDeliveryStatus: string | null;
   slaDueDate: string | null;
 }
 export interface AuditEventSummary {
@@ -199,6 +208,21 @@ function assignmentOf(
   return unknown;
 }
 
+/** See `OpenCaseSummary.lastOutreachAt`: the newest send, or nulls when there is none. */
+function outreachOf(
+  latest: AuditEventRow | undefined,
+  deliveryStatus: string | null,
+): Pick<OpenCaseSummary, "lastOutreachAt" | "lastOutreachBy" | "lastOutreachChannel" | "lastOutreachDeliveryStatus"> {
+  if (!latest) return { lastOutreachAt: null, lastOutreachBy: null, lastOutreachChannel: null, lastOutreachDeliveryStatus: null };
+  const action = latest.payload.action as { channel?: unknown } | undefined;
+  return {
+    lastOutreachAt: latest.occurredAt,
+    lastOutreachBy: latest.actor && latest.actor !== "system" ? latest.actor : null,
+    lastOutreachChannel: typeof action?.channel === "string" ? action.channel : null,
+    lastOutreachDeliveryStatus: deliveryStatus,
+  };
+}
+
 /** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
 export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: string): Promise<EmployeeProfileResponse | null> {
   // A configured wc profile rehydrates from persisted outcomes after a worker restart. Requiring at
@@ -292,8 +316,12 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   }
   if (unread.length > 0) for (const [key, logic] of await scoringLogicForCases(deps.outcomes, unread)) caseLogic.set(key, logic);
 
-  // One read for every open gap's newest assignment, not a timeline per gap.
-  const assignments = await deps.events.latestCaseEventsOfType(openCases.map((c) => c.id), "CASE_ASSIGNED");
+  // One read for every open gap's newest assignment, not a timeline per gap; the same for its newest
+  // outreach and the delivery status recorded since.
+  const openIds = openCases.map((c) => c.id);
+  const assignments = await deps.events.latestCaseEventsOfType(openIds, "CASE_ASSIGNED");
+  const outreach = await deps.events.latestCaseEventsOfType(openIds, "CASE_OUTREACH_SENT");
+  const deliveries = openIds.some((id) => outreach[id]) ? await deps.events.latestOutreachDeliveryStatuses(openIds) : {};
 
   const openCaseSummaries: OpenCaseSummary[] = openCases
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -306,6 +334,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
       priority: c.priority,
       assignee: c.assignee,
       ...assignmentOf(c, assignments[c.id]),
+      ...outreachOf(outreach[c.id], deliveries[c.id] ?? null),
       slaDueDate: null, // SLA not modeled on the TS case row
     }));
 

@@ -12,6 +12,8 @@
  *   POST /api/cases/:id/actions/outreach         ?templateId=…  send     → 200 CaseDetail | 404
  *   POST /api/cases/:id/actions/outreach/delivery ?deliveryStatus=…      → 200 CaseDetail | 400 | 404
  *   POST /api/cases/:id/rerun-to-verify    re-evaluate + transition      → 200 CaseDetail | 404
+ *   POST /api/cases/patient-outreach  { caseIds, channel?, templateId?, dryRun? }  one message for one
+ *        patient's gaps (#868)                                            → 200 | 400 | 404 | 409
  *
  * Each mutating action writes a case_action + an audit_event; the detail timeline is
  * the merged ledger. evidence/appointments/ai are later slices.
@@ -29,6 +31,13 @@ import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
 import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
+import {
+  loadPatientOutreachCases,
+  previewPatientOutreachMessages,
+  sendPatientOutreachMessages,
+  PatientOutreachError,
+  PATIENT_OUTREACH_MAX_CASES,
+} from "../case/patient-outreach.ts";
 import { rerunToVerify, UnsupportedCaseRerunError, CaseRerunFailedError, type RerunDeps } from "../case/case-rerun.ts";
 import { resolveChannel, isChannelType, type ChannelType, type OutreachChannel } from "../case/outreach-channel.ts";
 import {
@@ -109,6 +118,51 @@ async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
 const json = (data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...extraHeaders } });
 
+/**
+ * POST /api/cases/patient-outreach `{ caseIds, channel?, templateId?, dryRun? }` (#868). `dryRun` returns
+ * the message(s) and writes nothing; otherwise sends (`case/patient-outreach.ts`). Every field is checked
+ * before a case is read, and an explicit channel that is not one of the three is refused rather than
+ * defaulted, since the person chose it.
+ */
+async function patientOutreach(req: Request, env: CasesEnv, actor: string): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "invalid_request", message: "a JSON body is required" }, 400);
+  }
+  const input = (body ?? {}) as { caseIds?: unknown; channel?: unknown; templateId?: unknown; dryRun?: unknown };
+  const bad = (parameter: string, message: string) => json({ error: "invalid_request", parameter, message }, 400);
+  if (!Array.isArray(input.caseIds) || !input.caseIds.every((id): id is string => typeof id === "string")) {
+    return bad("caseIds", "caseIds must be an array of case ids");
+  }
+  const caseIds = input.caseIds.map((id) => id.trim());
+  if (caseIds.length === 0 || caseIds.includes("")) return bad("caseIds", "caseIds must name at least one case, and no blank one");
+  if (caseIds.length > PATIENT_OUTREACH_MAX_CASES) return bad("caseIds", `one message covers at most ${PATIENT_OUTREACH_MAX_CASES} gaps`);
+  if (new Set(caseIds).size !== caseIds.length) return bad("caseIds", "caseIds names a case more than once");
+  if (input.channel !== undefined && !isChannelType(input.channel)) return bad("channel", "channel must be EMAIL, SMS or PHONE");
+  if (input.templateId !== undefined && input.templateId !== null && typeof input.templateId !== "string") {
+    return bad("templateId", "templateId must be a string");
+  }
+  if (input.dryRun !== undefined && typeof input.dryRun !== "boolean") return bad("dryRun", "dryRun must be true or false");
+  const templateId = typeof input.templateId === "string" && input.templateId.trim() ? input.templateId.trim() : null;
+
+  const deps = await actionDeps(env);
+  try {
+    const cases = await loadPatientOutreachCases(deps, caseIds);
+    if (input.dryRun === true) {
+      return json({ dryRun: true, messages: await previewPatientOutreachMessages(deps, cases, templateId) });
+    }
+    const channel = isChannelType(input.channel) ? input.channel : undefined; // absent → EMAIL
+    return json({ dryRun: false, ...(await sendPatientOutreachMessages(deps, cases, { channel, templateId, actor })) });
+  } catch (err) {
+    if (err instanceof PatientOutreachError) {
+      return json({ error: err.code, message: err.message, ...(err.caseId ? { id: err.caseId } : {}) }, err.status);
+    }
+    throw err;
+  }
+}
+
 
 export async function handleCases(req: Request, env: CasesEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
@@ -118,6 +172,9 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
 
   // Case actions (POST) — assign / escalate / outreach send / outreach delivery.
   if (req.method === "POST") {
+    // One message about several of one patient's gaps (#868). No case-action pattern below matches a single
+    // trailing segment, but it is matched first so that a later `/api/cases/*` action cannot capture it.
+    if (url.pathname === "/api/cases/patient-outreach") return patientOutreach(req, env, actor);
     const assignId = url.pathname.match(/^\/api\/cases\/([^/]+)\/assign$/)?.[1];
     if (assignId) {
       // An absent/blank `assignee` clears the assignment (the unassign path). Anything else must be

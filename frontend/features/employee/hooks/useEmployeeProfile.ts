@@ -39,6 +39,14 @@ export interface OpenCaseSummary {
   assignedAt?: string | null;
   assignedBy?: string | null;
   assignedVia?: 'PANEL' | 'BULK' | 'OPERATOR' | null;
+  /**
+   * The gap's newest outreach (#868): when, by whom, on which channel, and the newest delivery status.
+   * Null when the gap was never contacted; absent from a server from before the fields.
+   */
+  lastOutreachAt?: string | null;
+  lastOutreachBy?: string | null;
+  lastOutreachChannel?: string | null;
+  lastOutreachDeliveryStatus?: string | null;
   slaDueDate: string | null;
   slaRemainingDays: number | null;
   slaBreached: boolean;
