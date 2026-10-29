@@ -252,6 +252,11 @@ export interface DispatchResult {
   status: string;
   messageId: string;
   templateName: string;
+  /**
+   * False only when the message went out but this case's record of it failed (`dispatchPatientOutreach`):
+   * `status` then reads FAILED, as a channel's own failure does, and this is what tells the two apart.
+   */
+  recorded: boolean;
 }
 
 /**
@@ -291,28 +296,71 @@ function sendMessage(deps: OutreachDeps, channelType: ChannelType, employeeId: s
   });
 }
 
+/** One patient's message about several gaps, rendered and not sent. */
+interface PatientMessage {
+  template: OutreachTemplateContent;
+  careItem: string;
+  subject: string;
+  body: string;
+}
+
 /**
- * One message for every open gap of ONE patient (Q1): the care items joined ("a mammogram and an A1c blood
- * test"), sent once, and recorded on each case with the same message id. A patient with three gaps gets
- * one message, not three. The template is the missing-record one only when every gap is MISSING_DATA.
+ * The care items joined ("a mammogram and an A1c blood test") into one message; the template is the
+ * missing-record one only when every gap is MISSING_DATA. The preview and the send both render through
+ * here, so what staff preview is what the patient is sent.
+ */
+async function renderPatientMessage(
+  deps: OutreachDeps,
+  cases: readonly CaseRecord[],
+  templateId: string | null | undefined,
+): Promise<PatientMessage> {
+  const first = cases[0];
+  if (!first || cases.some((c) => c.employeeId !== first.employeeId)) {
+    throw new OutreachError("dispatchPatientOutreach takes one patient's cases");
+  }
+  const { employeeName, measureName, dueDate } = await renderContext(deps, first);
+  const outcome = cases.every((c) => c.currentOutcomeStatus === "MISSING_DATA") ? "MISSING_DATA" : "OVERDUE";
+  const careItem = joinCareItems(cases.map((c) => c.measureId));
+  const template = forCareItem(resolveTemplate(templateId, outcome, measureName), careItem);
+  return {
+    template,
+    careItem,
+    subject: renderTemplate(template.subject, employeeName, measureName, dueDate, outcome, careItem),
+    body: renderTemplate(template.bodyText, employeeName, measureName, dueDate, outcome, careItem),
+  };
+}
+
+export interface PatientOutreachPreview {
+  templateId: string | null;
+  templateName: string;
+  subject: string;
+  bodyText: string;
+  /** What the message calls the gaps, as the patient reads it. */
+  careItems: string;
+}
+
+/** The message `dispatchPatientOutreach` would send for these cases (no state change). */
+export async function previewPatientOutreach(
+  deps: OutreachDeps,
+  cases: readonly CaseRecord[],
+  templateId?: string | null,
+): Promise<PatientOutreachPreview> {
+  const m = await renderPatientMessage(deps, cases, templateId);
+  return { templateId: m.template.id, templateName: m.template.name, subject: m.subject, bodyText: m.body, careItems: m.careItem };
+}
+
+/**
+ * One message for every chosen gap of ONE patient (Q1), sent once, and recorded on each case with the same
+ * message id. A patient with three gaps gets one message, not three.
  */
 export async function dispatchPatientOutreach(
   deps: OutreachDeps,
   cases: readonly CaseRecord[],
   opts: DispatchOptions,
 ): Promise<DispatchResult[]> {
-  const first = cases[0];
-  if (!first || cases.some((c) => c.employeeId !== first.employeeId)) {
-    throw new OutreachError("dispatchPatientOutreach takes one patient's cases");
-  }
   const channelType: ChannelType = opts.channel ?? "EMAIL";
-  const { employeeName, measureName, dueDate } = await renderContext(deps, first);
-  const outcome = cases.every((c) => c.currentOutcomeStatus === "MISSING_DATA") ? "MISSING_DATA" : "OVERDUE";
-  const careItem = joinCareItems(cases.map((c) => c.measureId));
-  const t = forCareItem(resolveTemplate(opts.templateId, outcome, measureName), careItem);
-  const subject = renderTemplate(t.subject, employeeName, measureName, dueDate, outcome, careItem);
-  const body = renderTemplate(t.bodyText, employeeName, measureName, dueDate, outcome, careItem);
-  const delivery = sendMessage(deps, channelType, first.employeeId, subject, body);
+  const { template: t, subject, body } = await renderPatientMessage(deps, cases, opts.templateId);
+  const delivery = sendMessage(deps, channelType, cases[0]!.employeeId, subject, body);
   // The message is out: each case is recorded on its own, so one case's failed record never turns the
   // others (already recorded, already audited) into failures. A case whose record failed comes back FAILED
   // with the message id, so the campaign row says the message went out but this case has no record of it.
@@ -323,7 +371,7 @@ export async function dispatchPatientOutreach(
     } catch {
       results.push({
         caseId: c.id, employeeId: c.employeeId, channel: channelType, toAddress: delivery.to,
-        status: "FAILED", messageId: delivery.messageId, templateName: t.name,
+        status: "FAILED", messageId: delivery.messageId, templateName: t.name, recorded: false,
       });
     }
   }
@@ -386,6 +434,7 @@ async function recordDispatch(
     status: delivery.status,
     messageId: delivery.messageId,
     templateName: t.name,
+    recorded: true,
   };
 }
 
