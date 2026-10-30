@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "@mieweb/ui";
+import { Button, buttonVariants } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
@@ -12,6 +12,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { SkeletonCard } from "@/components/skeleton-loader";
 import { canManageCases, canRunMeasures } from "@/lib/rbac";
+import { useMyProvider } from "@/features/panel/use-my-provider";
 import { GAP_STATUSES, worklistHref } from "@/lib/worklist-links";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -112,6 +113,8 @@ export default function ProgramsPage() {
   const mayRun = canRunMeasures(user?.role) && canSeeEngineering(user?.role);
   // The work list is a case manager's screen; a gap chip opens it only for a role that has it (#698).
   const mayWorkGaps = canManageCases(user?.role);
+  // A clinician whose sign-in is linked to a provider (#870); only a VIEWER seat ever is.
+  const { provider: myProvider } = useMyProvider();
   const { isActive: runActive, startTracking } = useRunStatus();
   // No date range: a card reports measurement-year figures, and scoping only its open cases to a range
   // set "Overdue 1,643" beside "Open cases (364)" (#699). The header hides the range on this page.
@@ -266,6 +269,21 @@ export default function ProgramsPage() {
             >
               Rates by provider
             </Link>
+          ) : myProvider && isPatientTerm ? (
+            // The clinician's toggle (#870): these cards are the whole practice, and their own patients
+            // are the scorecard's row for their provider, beside the practice total.
+            <div role="group" aria-label="Which patients" data-testid="programs-mine-toggle" className="flex gap-1">
+              <Button size="sm" variant="primary" aria-pressed="true">
+                Whole practice
+              </Button>
+              <Link
+                href="/scorecard"
+                aria-label={`My patients: ${myProvider.name}'s rates beside the practice`}
+                className={buttonVariants({ size: "sm", variant: "outline" })}
+              >
+                My patients
+              </Link>
+            </div>
           ) : null}
           {mayRun ? (
             runActive ? (

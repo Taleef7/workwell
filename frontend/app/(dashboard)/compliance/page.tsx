@@ -16,6 +16,7 @@ import { COMPLIANCE_STATUS_LABELS } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
+import { useMyProvider } from "@/features/panel/use-my-provider";
 import { payerFilterLabel, payerGroupButtonLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
 import { Button } from "@mieweb/ui";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
@@ -415,6 +416,11 @@ export default function CompliancePage() {
   // fetched its own. The markup is not shared: this page renders native selects, that one renders the
   // design system's.
   const { providers: providerOptions, nameFor: providerNameFor } = usePanelProviders();
+  // A clinician whose sign-in is linked to a provider (#870) gets a one-click "My patients": the same
+  // PCP filter the select writes. Never applied on its own, so a Programs chip still lands on the
+  // practice-wide count it was clicked for.
+  const { provider: myProvider } = useMyProvider();
+  const showingMine = myProvider !== null && providerId === myProvider.id;
   const { options: payerOptions, groups: payerGroups, available: payersAvailable, nameFor: payerNameFor } = usePanelPayers();
 
   const columns = roster?.columns ?? [];
@@ -647,6 +653,18 @@ export default function CompliancePage() {
               ))}
             </select>
           </label>
+          {myProvider ? (
+            <Button
+              size="sm"
+              variant={showingMine ? "primary" : "outline"}
+              aria-pressed={showingMine}
+              title={`Only ${myProvider.name}'s ${SUBJECT.plural}`}
+              data-testid="roster-my-patients"
+              onClick={() => { if (!showingMine) setSubjectFilter("providerId", myProvider.id); }}
+            >
+              My {SUBJECT.plural}
+            </Button>
+          ) : null}
           <label className="flex flex-col text-xs font-medium">
             <span className="mb-1">Age</span>
             <select
