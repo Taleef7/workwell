@@ -145,14 +145,14 @@ describe("WorklistPage — select all N matching", () => {
 
   it("asks for the first 500 under exactly the page's filters, and the bar then counts every match", async () => {
     navHolder.current.setUrl(
-      "/worklist?panel=me&providerId=maui-prov-012&measureId=cms125&outcome=OVERDUE&assignee=unassigned&search=Patient&payer=1&payer=11",
+      "/worklist?panel=me&listId=list-q3&providerId=maui-prov-012&measureId=cms125&outcome=OVERDUE&assignee=unassigned&search=Patient&payer=1&payer=11",
     );
     render(<WorklistPage />);
     await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
     const pageUrl = listCalls().at(-1)!;
     // The page load's own query, so the comparison below is not against a URL nobody filtered.
     expect(pageUrl).toContain("limit=25&offset=0");
-    for (const part of ["panel=me", "providerId=maui-prov-012", "measureId=cms125", "outcome=OVERDUE", "assignee=unassigned", "search=Patient", "payer=1&payer=11", "from=2026-01-01", "to=2026-12-31"]) {
+    for (const part of ["panel=me", "listId=list-q3", "providerId=maui-prov-012", "measureId=cms125", "outcome=OVERDUE", "assignee=unassigned", "search=Patient", "payer=1&payer=11", "from=2026-01-01", "to=2026-12-31"]) {
       expect(pageUrl).toContain(part);
     }
 

@@ -112,6 +112,7 @@ function programDeps(rows: OutcomeWithRun[], counters: { rowReads: number }) {
       listLatestPopulationRuns: latestRunsFromRows(() => rows),
       listOutcomesWithRun: async () => { counters.rowReads++; return rows; },
       listOutcomes: async () => [],
+      anyOutcomeForMeasure: async () => null,
       // No evidence in this fixture, so no memberships. Stated rather than inherited: since the #610
       // review `aggregateOfficialRun` reads THIS and not `listOutcomes`.
       listOutcomeMembershipsForRun: async () => [],
@@ -216,6 +217,7 @@ test("the trend widens its window until ten displayable points exist, so a filte
       return rows.filter((r) => (!filter.runIds || filter.runIds.includes(r.runId)) && (!filter.measureId || r.measureId === filter.measureId));
     },
     listOutcomes: async () => [],
+    anyOutcomeForMeasure: async () => null,
     listOutcomeMembershipsForRun: async () => [],
     aggregateScaleRun: async () => [],
   } as unknown as OutcomeStore;

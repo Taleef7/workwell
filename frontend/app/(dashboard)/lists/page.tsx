@@ -16,6 +16,7 @@
  * first nightly the moment January arrives — and it would look right. The select is the only way in.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Badge, Button, Input } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
 import { SUBJECT } from "@/lib/terminology";
@@ -27,6 +28,9 @@ import { ScrollRegion } from "@/components/scroll-region";
 import { useSubjectLists, type SubjectListRow } from "@/features/subject-list/use-subject-lists";
 import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { RateEstimateNote } from "@/components/rate-estimate-note";
+import { casesHref, worklistHref } from "@/lib/worklist-links";
+import { usePanelProviders } from "@/features/panel/use-panel-providers";
+import { usePanelPayers } from "@/features/panel/use-panel-payers";
 
 type Resolution = "MATCHED" | "NOT_FOUND" | "AMBIGUOUS";
 
@@ -84,6 +88,7 @@ const RESOLUTION_LABEL: Record<Resolution, string> = {
 };
 
 const pct = (score: number | null): string => (score === null ? "—" : `${(score * 100).toFixed(1)}%`);
+const LINK_CLASS = "font-medium text-primary-700 hover:underline dark:text-primary-300";
 
 export default function ListsPage() {
   const api = useApi();
@@ -149,8 +154,27 @@ export default function ListsPage() {
 
       {selected ? (
         <>
+          {/* The list's patients on the screens where their gaps are worked (#874). The work list opens
+              the whole practice (`panel=all`): a staff member who owns a panel would otherwise see only
+              the list members on it. */}
+          {mayManage ? (
+            <nav aria-label="Open this list on" className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Open {selected.name} on</span>
+              <Link href={worklistHref({ listId: selected.id, wholePractice: true })} className={LINK_CLASS}>
+                Work list
+              </Link>
+              <span aria-hidden="true">·</span>
+              <Link href={`/compliance?${new URLSearchParams({ listId: selected.id })}`} className={LINK_CLASS}>
+                Roster
+              </Link>
+              <span aria-hidden="true">·</span>
+              <Link href={casesHref({ listId: selected.id })} className={LINK_CLASS}>
+                Cases
+              </Link>
+            </nav>
+          ) : null}
           <MembersTable key={`members-${selected.id}`} list={selected} api={api} />
-          <ReportPanel key={`report-${selected.id}`} list={selected} api={api} />
+          <ReportPanel key={`report-${selected.id}`} list={selected} api={api} linkGaps={mayManage} />
         </>
       ) : null}
     </div>
@@ -259,6 +283,10 @@ function ImportForm({ onImported }: { onImported: () => Promise<void> }) {
 }
 
 function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typeof useApi> }) {
+  // The PCP and the insurance by name, as the work list shows them: `maui-prov-029` and a typology
+  // code `11` told a reader nothing (#874). The raw value stays as the cell's title.
+  const { nameFor: providerNameFor } = usePanelProviders();
+  const { nameFor: payerNameFor } = usePanelPayers();
   const [resolution, setResolution] = useState<"" | Resolution>("");
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<MemberRow[]>([]);
@@ -355,8 +383,12 @@ function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typ
                     </Badge>
                   </td>
                   <td className="p-3">{row.subjectName ?? "—"}</td>
-                  <td className="p-3">{row.providerId ?? "—"}</td>
-                  <td className="p-3">{row.payer ?? "—"}</td>
+                  <td className="p-3" title={row.providerId ?? undefined}>
+                    {row.providerId ? (providerNameFor(row.providerId) ?? row.providerId) : "—"}
+                  </td>
+                  <td className="p-3" title={row.payer ?? undefined}>
+                    {row.payer ? (payerNameFor(row.payer) ?? row.payer) : "—"}
+                  </td>
                 </tr>
               ))
             )}
@@ -380,7 +412,16 @@ function MembersTable({ list, api }: { list: SubjectListRow; api: ReturnType<typ
   );
 }
 
-function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<typeof useApi> }) {
+function ReportPanel({
+  list,
+  api,
+  linkGaps,
+}: {
+  list: SubjectListRow;
+  api: ReturnType<typeof useApi>;
+  /** Link each measure to this list's open gaps on the work list (a seat that may filter by list). */
+  linkGaps: boolean;
+}) {
   // The measure's name, as every other page shows it, not its id ("cms122"), after the logic that scored
   // the report's run (#769): the chip form, the full form as its title.
   const { measures: catalog, compactLabelFor, titleFor } = useMeasureIdentities();
@@ -389,6 +430,20 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
     title: titleFor(measure.measureId, nameOf(measure.measureId), measure.logic),
     label: compactLabelFor(measure.measureId, nameOf(measure.measureId), measure.logic),
   });
+  // The report counts the selected YEAR; the work list holds today's open gaps, which the note under the
+  // table says, rather than the link promising the rows behind this year's numerator.
+  const measureLabel = (measure: MeasureEntry) =>
+    linkGaps ? (
+      <Link
+        href={worklistHref({ listId: list.id, measureId: measure.measureId, wholePractice: true })}
+        title={measureCell(measure).title}
+        className={LINK_CLASS}
+      >
+        {measureCell(measure).label}
+      </Link>
+    ) : (
+      measureCell(measure).label
+    );
   const thisYear = new Date().getUTCFullYear();
   // The NEXT year is offered too. The pilot's target is PY2027 while the clock says 2026, and a run
   // can already be created with a 2027 evaluation date — so a list offering only past years would
@@ -516,7 +571,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                 {report.measures.map((measure) =>
                   measure.rates.length === 0 ? (
                     <tr key={measure.measureId}>
-                      <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium" title={measureCell(measure).title}>{measureCell(measure).label}</td>
+                      <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium" title={measureCell(measure).title}>{measureLabel(measure)}</td>
                       <td className="text-muted-foreground p-3" colSpan={8}>
                         {measure.compactionStatus === "compacted"
                           ? "Refused — the run predates a retention cutoff"
@@ -529,7 +584,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
                     measure.rates.map((rate, i) => (
                       <tr key={`${measure.measureId}-${rate.label ?? i}`}>
                         <td className="sticky left-0 bg-[color:var(--scroll-cue-bg)] p-3 font-medium" title={i === 0 ? measureCell(measure).title : undefined}>
-                          {i === 0 ? measureCell(measure).label : ""}
+                          {i === 0 ? measureLabel(measure) : ""}
                         </td>
                         <td className="p-3">{rate.label ?? "—"}</td>
                         <td className="p-3">{rate.ipp.toLocaleString()}</td>
@@ -550,6 +605,7 @@ function ReportPanel({ list, api }: { list: SubjectListRow; api: ReturnType<type
             &ldquo;Not measured&rdquo; counts list members this run never evaluated. They are reported
             beside the rates and never subtracted from a denominator — a smaller run must not produce a
             higher score. The score divides by denominator minus exclusions minus exceptions.
+            {linkGaps ? " A measure's name opens this list's open gaps on the work list: today's gaps, not this year's counts." : null}
           </p>
           <RateEstimateNote />
         </>

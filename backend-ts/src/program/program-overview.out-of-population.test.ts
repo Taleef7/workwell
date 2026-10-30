@@ -49,6 +49,7 @@ const makeDeps = (rows: OutcomeWithRun[] = ROWS) => ({
     listOutcomesWithRun: async () => rows,
     listLatestPopulationRuns: latestRunsFromRows(rows),
     listOutcomes: async () => [],
+    anyOutcomeForMeasure: async () => null,
     // Nothing to aggregate in this fixture, so the membership read is empty too - stated rather than
     // inherited, because `aggregateOfficialRun` reads it and not `listOutcomes` (review of #610).
     listOutcomeMembershipsForRun: async () => [],
@@ -153,6 +154,7 @@ test("the risk outlook's site table is on the same basis, and the streak that mi
       listOutcomesWithRun: async () => ROWS,
       listLatestPopulationRuns: latestRunsFromRows(ROWS),
       listOutcomes: async () => [],
+      anyOutcomeForMeasure: async () => null,
       // Nothing to aggregate in this fixture, so the membership read is empty too - stated rather than
       // inherited, because `aggregateOfficialRun` reads it and not `listOutcomes` (review of #610).
       listOutcomeMembershipsForRun: async () => [],

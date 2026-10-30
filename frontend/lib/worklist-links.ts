@@ -2,8 +2,8 @@
  * Links between the three screens that list patients and gaps (#698). The work list is the case
  * manager's daily screen: one row per patient with every open gap. Cases is the same gaps one row per
  * gap, the open ones by default with the closed ones behind its tabs; Compliance is everyone, compliant
- * and excluded included. A link between them carries the measure, the gap status, the site, the PCP
- * and the search, so moving across never drops the question.
+ * and excluded included. A link between them carries the attributed list, the measure, the gap status,
+ * the site, the PCP and the search, so moving across never drops the question.
  */
 
 /** The statuses that are open gaps: the only ones the work list lists. */
@@ -21,10 +21,13 @@ export interface ListScope {
   assignee?: string | null;
   /** The closed-by-staff view, which both lists have (`status=staff_closed`). */
   staffClosed?: boolean;
+  /** An ACO's attributed list (`listId`, #874): moving between the screens keeps the narrowing. */
+  listId?: string | null;
 }
 
 function params(scope: ListScope): URLSearchParams {
   const p = new URLSearchParams();
+  if (scope.listId) p.set("listId", scope.listId);
   if (scope.measureId) p.set("measureId", scope.measureId);
   const outcome = scope.outcome?.trim().toUpperCase();
   if (outcome && GAP_STATUSES.has(outcome)) p.set("outcome", outcome);

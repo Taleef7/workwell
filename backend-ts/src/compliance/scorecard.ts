@@ -54,7 +54,7 @@ export const SMALL_NUMBER_THRESHOLD = 20;
 const OTHER = "__other__";
 
 export interface ScorecardDeps {
-  outcomes: Pick<OutcomeStore, "listOutcomes" | "listOutcomeSubjectMembershipsForRun">;
+  outcomes: Pick<OutcomeStore, "anyOutcomeForMeasure" | "listOutcomeSubjectMembershipsForRun">;
   runs: Pick<RunStore, "listPopulationRunsForPeriod">;
   events: Pick<CaseEventStore, "recentAuditEventsByType">;
   cases: Pick<CaseStore, "listCases">;

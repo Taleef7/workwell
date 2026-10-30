@@ -52,17 +52,28 @@ export const isSubjectListRow = (value: unknown): value is SubjectListRow => {
   );
 };
 
-export function useSubjectLists(): {
+/**
+ * `enabled: false` fetches nothing: the work screens pass `canManageCases`, because the endpoint is
+ * CASE_MANAGER/ADMIN and a VIEWER would only meet a 403 (#874).
+ */
+export function useSubjectLists({ enabled = true }: { enabled?: boolean } = {}): {
   lists: SubjectListRow[];
   loading: boolean;
+  /** The fetch failed. Kept apart from "no lists", so a screen filtered by one can say it cannot name it. */
+  failed: boolean;
   reload: () => Promise<void>;
 } {
   const api = useApi();
   const [lists, setLists] = useState<SubjectListRow[]>([]);
+  // Loading until the first fetch settles, even while disabled (masked below). A screen mounts before
+  // the session names the seat, so `enabled` turns true one render before the fetch starts; starting at
+  // `enabled` read that render as "fetched, no lists" and flashed "No attributed list has the id".
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFailed(false);
     try {
       const data = await api.get<unknown>("/api/subject-lists");
       const rows = Array.isArray(data) ? data : [];
@@ -72,21 +83,26 @@ export function useSubjectLists(): {
       }
       setLists(usable);
     } catch {
-      // A failed fetch and a malformed one both mean "no list picker", never a broken page.
+      // A failed fetch costs the picker, never the page behind it.
       setLists([]);
+      setFailed(true);
     } finally {
       setLoading(false);
     }
   }, [api]);
 
   useEffect(() => {
+    if (!enabled) return;
     // Deferred out of the synchronous effect body (the idiom compliance/page.tsx and cases/page.tsx
     // use) so `load`'s setState calls do not trip react-hooks/set-state-in-effect.
     const timer = setTimeout(() => {
       void load();
     }, 0);
     return () => clearTimeout(timer);
-  }, [load]);
+  }, [enabled, load]);
 
-  return useMemo(() => ({ lists, loading, reload: load }), [lists, loading, load]);
+  return useMemo(
+    () => ({ lists, loading: enabled && loading, failed, reload: load }),
+    [enabled, lists, loading, failed, load],
+  );
 }

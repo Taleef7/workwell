@@ -7,6 +7,20 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-30
 
+- **The ACO's attributed list on the work screens, and its report no longer times out live (#874).**
+  - **The timeout:** on Maui the report ran past the 30 s statement limit. Measured locally at 2.4M rows, most
+    of its time was choosing each measure's run: a one-row read that still sorted by time, so Postgres walked
+    every earlier run's rows of that measure (5-6 s of a 7 s report). It is now an unsorted probe
+    (`anyOutcomeForMeasure`: 4 buffers instead of 382,632), and the report reads only its members' rows. The
+    local report went from about 7 s to 0.1-0.3 s; the live check is after the deploy. The scorecard's run
+    choice used the same probe (six measures: 4.5 s warm to 8 ms locally, the same runs chosen), as did the
+    Programs trend's thin-run check and a run's thin-measure check.
+  - **The screens:** an "Attributed list" picker on the work list, the roster and Cases, for case managers and
+    admins (a viewer's link is not applied, and the screen says so). Links between the screens and the Cases
+    CSV keep the list. `/lists` links each list to the three screens and each report row to its open gaps,
+    and its members table names the PCP and the insurance.
+  - New localhost-only e2e `lists-writes.spec.ts`: an import cannot be undone, so it never runs against a
+    deployed stack.
 - **A clinician sees their own patients beside the practice (#870)**, the last open ask from the pilot group's
   sandbox call. The clinician seat is linked to one provider on the account (`DemoUser.providerId`; no schema).
   - **Scorecard:** a linked VIEWER gets that provider's row and the practice total, nothing of any colleague; an

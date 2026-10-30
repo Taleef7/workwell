@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildScorecard, type ScorecardDeps, type ScorecardRequest } from "./scorecard.ts";
-import { subjectMembershipsVia } from "../test-support/memberships.ts";
+import { anyOutcomeVia, subjectMembershipsVia } from "../test-support/memberships.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { CaseRecord } from "../stores/case-store.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
@@ -48,13 +48,10 @@ const row = (subjectId: string, measureId: string, evidence: unknown, over: Part
 
 function deps(f: Fixture): ScorecardDeps {
   let compacted = f.compacted ?? false;
-  const listOutcomes = (async (runId: string, opts?: { measureId?: string; limit?: number; offset?: number }) => {
-    const all = (f.rows ?? []).filter((r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId));
-    const offset = opts?.offset ?? 0;
-    return all.slice(offset, offset + (opts?.limit ?? all.length));
-  }) as ScorecardDeps["outcomes"]["listOutcomes"];
+  const listOutcomes = async (runId: string, opts?: { measureId?: string }) =>
+    (f.rows ?? []).filter((r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId));
   return {
-    outcomes: { listOutcomes, listOutcomeSubjectMembershipsForRun: subjectMembershipsVia(listOutcomes) },
+    outcomes: { anyOutcomeForMeasure: anyOutcomeVia(listOutcomes), listOutcomeSubjectMembershipsForRun: subjectMembershipsVia(listOutcomes) },
     runs: {
       listPopulationRunsForPeriod: async () =>
         (f.runs ?? [{ id: "run-1" }]).map((r) => ({

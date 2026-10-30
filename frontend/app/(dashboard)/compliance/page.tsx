@@ -27,6 +27,7 @@ import { usePanelCache } from "@/features/compliance/usePanelCache";
 import { SLOW_LOAD_HINT, useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { BELOW_MD, useMediaQuery } from "@/lib/use-media-query";
+import { LIST_FILTER_LABEL, ListFilterNote, listParam, useListFilter } from "@/features/subject-list/list-filter";
 import { COLUMN_MIXED_LOGICS, PANEL_OPTIONS, columnLogic, columnTitle, type DisplayState, type PanelId, type Roster, type TenantOption } from "@/features/compliance/types";
 
 const STATUS_FILTER_OPTIONS = Object.keys(COMPLIANCE_STATUS_LABELS);
@@ -109,6 +110,11 @@ export default function CompliancePage() {
     () => searchParams.getAll("payer").flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean),
     [searchParams],
   );
+  // The ACO's attributed list (#874): URL-derived like the panel filters, and sent only by a seat the
+  // server accepts it from.
+  const mayUseLists = canManageCases(user?.role);
+  const { listId, refused: listRefused } = listParam(searchParams, user?.role);
+  const listFilter = useListFilter(listId, mayUseLists);
   /**
    * Assigning from the roster (#567).
    *
@@ -129,8 +135,8 @@ export default function CompliancePage() {
    * returns to the selection and would be POSTed. And ticking ten rows on page 1, paging to page 2 and
    * pressing Assign posted only page 2's, discarding ten deliberate ticks without a word.
    *
-   * Scoping to the full view answers both: any change to the measure, panel, status, site, panel
-   * filters, insurance, search, segment, tenant or page empties the selection, and the bar says
+   * Scoping to the full view answers both: any change to the measure, panel, status, site, attributed
+   * list, panel filters, insurance, search, segment, tenant or page empties the selection, and the bar says
    * "Select patients…" again rather than holding rows nobody can see. Selection is per view, which is
    * the only version of this that never assigns something the operator is not looking at.
    *
@@ -172,8 +178,8 @@ export default function CompliancePage() {
   // not only through their selects — the same render-adjust reset covers both paths.
   const [prevPanel, setPrevPanel] = useState(panel);
   const [prevStatus, setPrevStatus] = useState(status);
-  const [prevSubjectFilters, setPrevSubjectFilters] = useState(`${providerId}|${ageBand}|${sex}|${payerFilter.join(",")}`);
-  const subjectFilterKey = `${providerId}|${ageBand}|${sex}|${payerFilter.join(",")}`;
+  const [prevSubjectFilters, setPrevSubjectFilters] = useState(`${listId}|${providerId}|${ageBand}|${sex}|${payerFilter.join(",")}`);
+  const subjectFilterKey = `${listId}|${providerId}|${ageBand}|${sex}|${payerFilter.join(",")}`;
   if (panel !== prevPanel || status !== prevStatus || subjectFilterKey !== prevSubjectFilters) {
     setPrevPanel(panel);
     setPrevStatus(status);
@@ -212,6 +218,7 @@ export default function CompliancePage() {
     if (status) params.set("status", status);
     if (measureId.trim()) params.set("measureId", measureId.trim());
     if (siteId.trim()) params.set("site", siteId.trim());
+    if (listId) params.set("listId", listId);
     if (providerId) params.set("providerId", providerId);
     if (ageBand) params.set("ageBand", ageBand);
     if (sex) params.set("sex", sex);
@@ -257,7 +264,7 @@ export default function CompliancePage() {
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [api, cache, panel, status, measureId, siteId, providerId, ageBand, sex, payerFilter, debouncedQ, segment, tenant, page, pageSize]);
+  }, [api, cache, panel, status, measureId, siteId, listId, providerId, ageBand, sex, payerFilter, debouncedQ, segment, tenant, page, pageSize]);
 
   useEffect(() => {
     // Defer out of the synchronous effect body (matches cases/page.tsx) so the load's setState calls
@@ -360,8 +367,8 @@ export default function CompliancePage() {
     router.push(query ? `${pathname}?${query}` : pathname);
   }, [pathname, router, searchParams]);
 
-  /** One writer for the three panel filters — the same shape `setStatusAndUrl` uses. */
-  const setSubjectFilter = useCallback((key: "providerId" | "ageBand" | "sex", value: string) => {
+  /** One writer for the panel filters and the attributed list — the same shape `setStatusAndUrl` uses. */
+  const setSubjectFilter = useCallback((key: "listId" | "providerId" | "ageBand" | "sex", value: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (value) {
       params.set(key, value);
@@ -405,7 +412,7 @@ export default function CompliancePage() {
 
   const clearSubjectFilters = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
-    for (const key of ["providerId", "ageBand", "sex", "payer"]) params.delete(key);
+    for (const key of ["listId", "providerId", "ageBand", "sex", "payer"]) params.delete(key);
     payerParamsRef.current = params.toString();
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
@@ -440,7 +447,7 @@ export default function CompliancePage() {
    * 40 at size 50, switch to 25, switch back, and the tick returns — because only `selectedHere` was
    * filtering it out meanwhile. Every pagination control has to invalidate, not just the page number.
    */
-  const selectionScopeKey = [assignMeasureId, panel, status, siteId, providerId, ageBand, sex, payerFilter.join(","), debouncedQ, segment, tenant, page, pageSize].join("|");
+  const selectionScopeKey = [assignMeasureId, panel, status, siteId, listId, providerId, ageBand, sex, payerFilter.join(","), debouncedQ, segment, tenant, page, pageSize].join("|");
   /** One measure in scope, a seat that may assign, and a list of accounts to assign to. */
   // `hasAccounts`, never `assignableOptions.length` — that is always at least two (a placeholder and
   // "Unassign"), so the length test was a guard that could not fire, and with the endpoint returning
@@ -560,7 +567,7 @@ export default function CompliancePage() {
               <>
                 {" "}
                 {/* The open gaps to work are on the work list (#698); the measure and a gap status carry over. */}
-                <Link href={worklistHref({ measureId, outcome: status, site: siteId, providerId, wholePractice: true })} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
+                <Link href={worklistHref({ listId, measureId, outcome: status, site: siteId, providerId, wholePractice: true })} className="font-medium text-primary-700 hover:underline dark:text-primary-300">
                   Work the open gaps on the work list →
                 </Link>
               </>
@@ -587,6 +594,19 @@ export default function CompliancePage() {
       ) : (
         <>
           <div className="flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+            {mayUseLists ? (
+              <label className="flex flex-col text-xs font-medium">
+                <span className="mb-1">{LIST_FILTER_LABEL}</span>
+                <select
+                  aria-label={LIST_FILTER_LABEL}
+                  value={listId}
+                  onChange={(e) => setSubjectFilter("listId", e.target.value)}
+                  className="max-w-xs rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm dark:border-neutral-700"
+                >
+                  {listFilter.options.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                </select>
+              </label>
+            ) : null}
             <label className="flex flex-col text-xs font-medium">
               <span className="mb-1">Panel</span>
               <select
@@ -755,9 +775,21 @@ export default function CompliancePage() {
           </fieldset>
         ) : null}
 
-        {providerId || ageBand || sex || payerFilter.length > 0 ? (
+        <ListFilterNote
+          listId={listId}
+          refused={listRefused}
+          filter={listFilter}
+          onChange={(v) => setSubjectFilter("listId", v)}
+        />
+
+        {listId || providerId || ageBand || sex || payerFilter.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
             <span>Filtered to</span>
+            {listId ? (
+              <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
+                {LIST_FILTER_LABEL}: {listFilter.chipName}
+              </span>
+            ) : null}
             {providerId ? (
               <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-medium text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100">
                 {providerNameFor(providerId) ?? providerId}

@@ -28,6 +28,7 @@ import { dueSoonPossible, useMeasureIdentities, type ScoringLogic } from "@/lib/
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
+import { LIST_FILTER_LABEL, ListFilterNote, listParam, useListFilter } from "@/features/subject-list/list-filter";
 
 type CaseSummary = {
   caseId: string;
@@ -232,6 +233,10 @@ export default function CasesPage() {
   const view = searchParams.get("view") ?? "all";
   const { user } = useAuth();
   const canManage = canManageCases(user?.role);
+  // The ACO's attributed list (#874): in the URL like the PCP, and sent only by a seat the server
+  // accepts it from. One of `caseFilterParams`' filters, so the list, "load more" and the CSV all carry it.
+  const { listId, refused: listRefused } = listParam(searchParams, user?.role);
+  const listFilter = useListFilter(listId, canManage);
   const mayExport = canExportData(user?.role);
   const mayExportAudit = canExportAudit(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
@@ -313,7 +318,7 @@ export default function CasesPage() {
   }, [api, setMeasures]);
 
   /**
-   * The nine filters this screen is showing, as query params — built ONCE, for the list, the
+   * The filters this screen is showing, as query params — built ONCE, for the list, the
    * "load more" page AND the export.
    *
    * The export button used to spell its own URL with three of them (status, measureId, providerId),
@@ -326,6 +331,7 @@ export default function CasesPage() {
   const caseFilterParams = useCallback(() => {
     const params = new URLSearchParams();
     params.set("status", statusFilter);
+    if (listId) params.set("listId", listId);
     if (measureFilter) params.set("measureId", measureFilter);
     if (providerFilter) params.set("providerId", providerFilter);
     if (priorityFilter) params.set("priority", priorityFilter);
@@ -354,7 +360,7 @@ export default function CasesPage() {
     // the parity test reads.
     if (CYCLE_SCOPED_STATUSES.has(statusFilter)) params.set("period", "current");
     return params;
-  }, [statusFilter, measureFilter, providerFilter, priorityFilter, view, user, assigneeFilter, siteFilter, siteId, from, to, outcomeFilter, urlSearch]);
+  }, [statusFilter, listId, measureFilter, providerFilter, priorityFilter, view, user, assigneeFilter, siteFilter, siteId, from, to, outcomeFilter, urlSearch]);
 
   // Stale-fetch guard (Fable M20): a slow response for one filter set must not overwrite a newer one's
   // rows (or clobber the selection). Only the latest loadCases applies its result.
@@ -501,6 +507,17 @@ export default function CasesPage() {
       params.set("providerId", nextProvider);
     } else {
       params.delete("providerId");
+    }
+    const query = params.toString();
+    router.push(query ? `${pathname}?${query}` : pathname);
+  }, [pathname, router, searchParams]);
+
+  const setListAndUrl = useCallback((nextList: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextList) {
+      params.set("listId", nextList);
+    } else {
+      params.delete("listId");
     }
     const query = params.toString();
     router.push(query ? `${pathname}?${query}` : pathname);
@@ -659,6 +676,7 @@ export default function CasesPage() {
             Cases" is an assignee filter, which the work list has too. */}
         <Link
           href={worklistHref({
+            listId,
             measureId: measureFilter,
             outcome: outcomeFilter,
             site: siteFilter || siteId,
@@ -768,6 +786,16 @@ export default function CasesPage() {
             {`Cases closed as excluded (${isPatientTerm ? "a documented exclusion, such as hospice or a mastectomy" : "an active waiver or exemption"}), whether by a run or by a staff rerun, from every measurement year. A case stays here after the ${SUBJECT.singular} becomes compliant or leaves the measure's population, so this list differs from the “Excluded” count on Programs, which counts the ${SUBJECT.plural} the latest run excludes.`}
           </p>
         ) : null}
+        {canManage ? (
+          <Select
+            label={LIST_FILTER_LABEL}
+            size="sm"
+            className="w-80"
+            value={listId}
+            onValueChange={setListAndUrl}
+            options={listFilter.options}
+          />
+        ) : null}
         <Select
           label="Measure"
           size="sm"
@@ -854,6 +882,8 @@ export default function CasesPage() {
           </div>
         </div>
       </div>
+
+      <ListFilterNote listId={listId} refused={listRefused} filter={listFilter} onChange={setListAndUrl} />
 
       {/*
         The staff-closed tab's header (#569). The three numbers describe the whole filtered list and
