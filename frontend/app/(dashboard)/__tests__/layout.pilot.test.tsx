@@ -1,11 +1,15 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// Imported before the layout: the mock below reads `subject` while the layout's imports load.
+import { setSubject, subject } from "@/test/mocks/terminology";
 import DashboardLayout from "../layout";
 
 import { setPublicDemo } from "@/test/mocks/public-demo";
 
 vi.mock("@/lib/public-demo", () => import("@/test/mocks/public-demo"));
+// The employee deployment unless a test says otherwise: the Scorecard is a patient-deployment item.
+vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 
 let currentRole = "ROLE_CASE_MANAGER";
 // One user object per role, as the real provider yields: a fresh object per render would re-fire
@@ -54,6 +58,7 @@ beforeEach(() => {
 
 beforeEach(() => {
   getWithHeaders.mockReset().mockResolvedValue({ data: [], headers: new Headers({ "X-Total-Count": "0" }) });
+  apiMock.get.mockReset().mockResolvedValue([]);
 });
 
 describe("DashboardLayout Worklist badge", () => {
@@ -143,6 +148,78 @@ describe("DashboardLayout pilot mode", () => {
     expect(screen.getByText("Runs")).toBeInTheDocument();
     expect(screen.getByText("API")).toBeInTheDocument();
     expect(screen.getByLabelText("Brand theme")).toBeInTheDocument();
+  });
+});
+
+// The real MyProviderProvider runs here (DashboardLayout mounts it); only the API answer is stubbed.
+describe("DashboardLayout — a clinician's own scorecard (#870)", () => {
+  const SILVA = { id: "maui-prov-011", name: "Dr. Ana Silva", location: "Wailuku" };
+  const answerMine = (answer: () => Promise<unknown>) =>
+    apiMock.get.mockImplementation((url: string) => (url === "/api/providers/mine" ? answer() : Promise.resolve([])));
+  const mineCalls = () => apiMock.get.mock.calls.filter((c) => c[0] === "/api/providers/mine").length;
+  const renderShell = () =>
+    render(
+      <DashboardLayout>
+        <div>Content</div>
+      </DashboardLayout>,
+    );
+
+  beforeEach(() => {
+    setPublicDemo(false);
+    setSubject("patient");
+    currentRole = "ROLE_VIEWER";
+  });
+  afterEach(() => setSubject("employee"));
+
+  it("shows a linked viewer My scorecard, and their provider on the user card", async () => {
+    answerMine(() => Promise.resolve({ provider: SILVA }));
+    renderShell();
+    const item = await screen.findByTestId("nav-scorecard");
+    expect(item).toHaveTextContent("My scorecard");
+    const roleLine = screen.getByText("Viewer · Dr. Ana Silva");
+    expect(roleLine).toHaveAttribute("title", "Viewer · Dr. Ana Silva");
+    expect(roleLine).toHaveClass("truncate");
+    expect(mineCalls()).toBe(1);
+  });
+
+  it("shows an unlinked viewer no Scorecard and a plain role line", async () => {
+    answerMine(() => Promise.resolve({ provider: null }));
+    renderShell();
+    await waitFor(() => expect(mineCalls()).toBe(1));
+    await act(async () => {});
+    expect(screen.queryByTestId("nav-scorecard")).toBeNull();
+    expect(screen.getByText("Viewer")).not.toHaveAttribute("title");
+  });
+
+  it("shows no Scorecard while the read is pending or after it failed", async () => {
+    let fail: (e: Error) => void = () => {};
+    answerMine(() => new Promise((_, reject) => { fail = reject; }));
+    renderShell();
+    await waitFor(() => expect(mineCalls()).toBe(1));
+    expect(screen.queryByTestId("nav-scorecard")).toBeNull();
+    await act(async () => fail(new Error("502")));
+    expect(screen.queryByTestId("nav-scorecard")).toBeNull();
+    expect(screen.getByText("Viewer")).toBeInTheDocument();
+  });
+
+  it("shows a viewer nothing on the occupational deployment, and never asks who they are linked to", async () => {
+    setSubject("employee");
+    answerMine(() => Promise.resolve({ provider: SILVA }));
+    renderShell();
+    await act(async () => {});
+    expect(mineCalls()).toBe(0);
+    expect(screen.queryByTestId("nav-scorecard")).toBeNull();
+  });
+
+  it("keeps a case manager's Scorecard as it was, and never asks who they are linked to", async () => {
+    currentRole = "ROLE_CASE_MANAGER";
+    answerMine(() => Promise.resolve({ provider: SILVA }));
+    renderShell();
+    const item = screen.getByTestId("nav-scorecard");
+    await act(async () => {});
+    expect(item.textContent?.trim()).toBe("Scorecard");
+    expect(screen.getByText("Case Manager")).not.toHaveAttribute("title");
+    expect(mineCalls()).toBe(0);
   });
 });
 

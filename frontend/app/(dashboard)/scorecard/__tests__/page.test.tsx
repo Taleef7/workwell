@@ -12,6 +12,9 @@ vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 const auth = vi.hoisted(() => ({ role: "ROLE_CASE_MANAGER", email: "quality-staff@maui.workwell.dev" }));
 vi.mock("@/components/auth-provider", () => ({ useAuth: () => ({ user: { role: auth.role, email: auth.email } }) }));
 const VIEWER_EMAIL = auth.email;
+// The clinician's link (#870). Read only by the VIEWER's scorecard; the clinician's own suite is page.viewer.test.tsx.
+const myProvider = vi.hoisted(() => ({ provider: null, loaded: true, error: false, retry: () => {} }));
+vi.mock("@/features/panel/use-my-provider", () => ({ useMyProvider: () => myProvider }));
 
 const navHolder = vi.hoisted(() => ({ current: undefined as unknown as ReturnType<typeof createNavMock> }));
 vi.mock("next/navigation", async () => {
@@ -194,12 +197,33 @@ describe("ScorecardPage", () => {
   });
 
   it("refuses a role that cannot read it, without asking the server", async () => {
-    auth.role = "ROLE_VIEWER";
+    auth.role = "ROLE_AUTHOR";
     serve(scorecard());
     render(<ScorecardPage />);
     expect(screen.getByText(/your role doesn.t have access/)).toBeInTheDocument();
     // Both reads are deferred a tick, so an assertion made straight after render would pass whether or
     // not they were gated. Let the timers run first.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(get).not.toHaveBeenCalledWith(expect.stringContaining("/api/scorecard"));
+    expect(get).not.toHaveBeenCalledWith("/api/panels");
+  });
+
+  it("refuses a VIEWER on the occupational deployment by role, as before, not as an unlinked clinician", async () => {
+    setSubject("employee");
+    auth.role = "ROLE_VIEWER";
+    serve(scorecard());
+    render(<ScorecardPage />);
+    expect(screen.getByText(/your role doesn.t have access/)).toBeInTheDocument();
+    expect(screen.queryByText(/isn.t linked to a provider/)).not.toBeInTheDocument();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(get).not.toHaveBeenCalledWith(expect.stringContaining("/api/scorecard"));
+  });
+
+  it("refuses a clinician whose sign-in is linked to no provider, without asking the server", async () => {
+    auth.role = "ROLE_VIEWER";
+    serve(scorecard());
+    render(<ScorecardPage />);
+    expect(await screen.findByText(/isn.t linked to a provider in this practice.s directory/)).toBeInTheDocument();
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(get).not.toHaveBeenCalledWith(expect.stringContaining("/api/scorecard"));
     expect(get).not.toHaveBeenCalledWith("/api/panels");

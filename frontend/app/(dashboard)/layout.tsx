@@ -35,11 +35,12 @@ import {
   useSidebar,
 } from "@mieweb/ui";
 import { useAuth } from "@/components/auth-provider";
-import { ROLES, canManageCases, hasAnyRole } from "@/lib/rbac";
+import { ROLES, canManageCases, hasAnyRole, normRole } from "@/lib/rbac";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
 import { GlobalFilterGroup } from "@/components/global-filter-group";
 import { RunStatusProvider, useRunStatus } from "@/components/run-status-provider";
+import { MyProviderProvider, useMyProvider } from "@/features/panel/use-my-provider";
 import { ROLE_LABELS, labelFor } from "@/lib/status";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ThemeBrandSwitcher } from "@/components/theme-brand-switcher";
@@ -57,8 +58,10 @@ const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 const nav = [
   { href: "/programs", label: "Programs", icon: BarChart3 },
   // Each provider's rates by location (#852). CM/ADMIN, as /api/scorecard is, and on the patient
-  // deployment only: the occupational deployment's "providers" are clinicians assigned round-robin.
-  { href: "/scorecard", label: "Scorecard", icon: Table2, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN], patientOnly: true },
+  // deployment only: the occupational deployment's "providers" are clinicians assigned round-robin. A
+  // VIEWER whose sign-in is linked to a provider gets it too, under `linkedViewerLabel` (#870): the
+  // server answers them with their own row beside the practice total, and an unlinked one with a 403.
+  { href: "/scorecard", label: "Scorecard", icon: Table2, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN], patientOnly: true, linkedViewerLabel: "My scorecard" },
   // The work list is the case manager's daily screen, so it comes first; Cases is the same gaps one
   // row per gap (#698).
   { href: "/worklist", label: "Worklist", icon: ClipboardList, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
@@ -218,7 +221,12 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const { token, user, logout, reconnecting } = useAuth();
   const api = useApi();
   const { siteId, setSiteId, datePreset, setDatePreset, from, to } = useGlobalFilters();
+  // The provider a VIEWER's sign-in is linked to (#870). Null for every other role, and until the read
+  // succeeds, so a pending or failed read shows the Scorecard to nobody it was not already shown to.
+  const { provider: myProvider } = useMyProvider();
+  const linkedProvider = normRole(user?.role) === ROLES.VIEWER ? myProvider : null;
   const roleLabel = user ? labelFor(ROLE_LABELS, user.role) : null;
+  const roleLine = linkedProvider ? `${roleLabel} · ${linkedProvider.name}` : roleLabel;
   const [sites, setSites] = useState<string[]>([]);
   const [worklistGapCount, setWorklistGapCount] = useState(0);
 
@@ -289,8 +297,11 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
       return false;
     }
     if ("patientOnly" in item && item.patientOnly && SUBJECT.singular !== "patient") return false;
+    if ("linkedViewerLabel" in item && linkedProvider) return true;
     return !("roles" in item && item.roles) || hasAnyRole(user?.role, item.roles);
   });
+  const navLabel = (item: (typeof nav)[number]) =>
+    "linkedViewerLabel" in item && linkedProvider ? item.linkedViewerLabel : item.label;
 
   // The library's nav items carry no `aria-current` and forward no attributes, so a screen reader could
   // not tell which page is open; mark the active one after each render (#700). Cheap: a dozen nodes.
@@ -364,7 +375,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 return (
                   <SidebarNavItem
                     key={item.href}
-                    label={item.label}
+                    label={navLabel(item)}
                     icon={<Icon className="h-5 w-5" />}
                     isActive={active}
                     // The badge counts open GAPS no one has contacted yet, while the page counts PATIENTS
@@ -395,7 +406,13 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 </div>
                 <div className="min-w-0 flex-1 group-data-[rail=collapsed]/shell:hidden">
                   <p className="truncate text-xs font-medium text-neutral-900 dark:text-neutral-100">{user.email}</p>
-                  <p className="text-[10px] text-neutral-500 dark:text-neutral-400">{roleLabel}</p>
+                  {/* A linked clinician's provider name can outrun the card: cut it, and keep it whole in the title. */}
+                  <p
+                    className="truncate text-[10px] text-neutral-500 dark:text-neutral-400"
+                    title={linkedProvider ? (roleLine ?? undefined) : undefined}
+                  >
+                    {roleLine}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -489,7 +506,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <Suspense fallback={<div className="min-h-dvh bg-neutral-50 dark:bg-neutral-950" />}>
       <GlobalFilterProvider>
         <RunStatusProvider>
-          <DashboardShell>{children}</DashboardShell>
+          <MyProviderProvider>
+            <DashboardShell>{children}</DashboardShell>
+          </MyProviderProvider>
         </RunStatusProvider>
       </GlobalFilterProvider>
     </Suspense>

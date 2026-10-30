@@ -153,6 +153,75 @@ test("My providers shows only the caller's providers, with totals over them and 
   assert.equal(card.total.cells.cms125!.rates![0]!.denom, 1);
 });
 
+test("a clinician's card is their provider's row and the practice total, with no location, Other or colleague (#870)", async () => {
+  const rows = [
+    row("s1", "cms125", one(true)),
+    row("s2", "cms125", one(false)),
+    row("s3", "cms125", one(true)),
+    row("s4", "cms125", one(false)),
+    row("s5", "cms125", one(true)),
+  ];
+  const fixture = {
+    rows,
+    pcp: { s1: "p-a", s2: "p-a", s3: "p-b", s4: "p-c", s5: "p-unlisted" },
+    cases: [
+      { employeeId: "s2", measureId: "cms125", evaluationPeriod: CYCLE, status: "OPEN" as const },
+      { employeeId: "s4", measureId: "cms125", evaluationPeriod: CYCLE, status: "OPEN" as const },
+    ],
+  };
+  const practice = await buildScorecard(deps(fixture), request());
+  const card = await buildScorecard(deps(fixture), request({ onlyProvider: "p-a" }));
+
+  assert.deepEqual(card.locations, [], "no location row, so no subtotal of p-b's figures beside p-a's");
+  assert.equal(card.other, null);
+  assert.deepEqual(card.panel, { requested: "all", ownsPanel: false });
+  assert.deepEqual(
+    { providerId: card.scope!.providerId, name: card.scope!.name, location: card.scope!.location },
+    { providerId: "p-a", name: "Dr. A", location: "North" },
+  );
+  assert.deepEqual(card.scope!.row, practice.locations[0]!.providers[0], "the row the practice card gives p-a");
+  // The total is the whole practice's, Other and every location included, open gaps too.
+  assert.deepEqual(card.total, practice.total);
+  assert.equal(card.total.cells.cms125!.rates![0]!.denom, 5);
+  assert.equal(card.total.cells.cms125!.openGaps, 2);
+  assert.equal(card.scope!.row.cells.cms125!.openGaps, 1);
+  // Nothing names a colleague.
+  const text = JSON.stringify(card);
+  for (const colleague of ["p-b", "p-c", "Dr. B", "Dr. C", "South"]) {
+    assert.equal(text.includes(colleague), false, `the card names ${colleague}`);
+  }
+  assert.equal("scope" in practice, false, "the practice card carries no scope");
+});
+
+test("a clinician whose provider has nobody counted still gets their row, so the total is never shown alone", async () => {
+  const thin = { ...one(true), dataInsufficient: { checks: ["encounterTypeCoded"] } };
+  const card = await buildScorecard(
+    deps({ rows: [row("s3", "cms125", one(true)), row("s4", "cms137", thin)], pcp: { s3: "p-b", s4: "p-b" } }),
+    request({
+      onlyProvider: "p-a",
+      measures: [
+        { id: "cms125", name: "Breast Cancer Screening", policyRef: "CMS125" },
+        { id: "cms137", name: "Initiation and Engagement", policyRef: "CMS137" },
+      ],
+    }),
+  );
+  const mine = card.scope!.row;
+  assert.equal(mine.providerId, "p-a");
+  // A complete column: zero counts, no rate. A refused column: null, as on every row.
+  const [rate] = mine.cells.cms125!.rates!;
+  assert.deepEqual([rate!.numer, rate!.denom, rate!.effectiveDenominator, rate!.score], [0, 0, 0, null]);
+  assert.equal(mine.cells.cms137!.rates, null);
+  assert.equal(card.total.cells.cms125!.rates![0]!.denom, 1, "the practice still counts p-b's patient");
+});
+
+test("a clinician's card refuses to be built with My providers, or for a provider the directory does not list", async () => {
+  await assert.rejects(
+    buildScorecard(deps({ pcp: {} }), request({ onlyProvider: "p-a", providerIds: new Set(["p-a"]) })),
+    /exclusive/,
+  );
+  await assert.rejects(buildScorecard(deps({ pcp: {} }), request({ onlyProvider: "p-unlisted" })), /not in the directory/);
+});
+
 test("a thin column shows no rate but still states this year's open gaps", async () => {
   const thin = { ...one(true), dataInsufficient: { checks: ["encounterTypeCoded"] } };
   const card = await buildScorecard(

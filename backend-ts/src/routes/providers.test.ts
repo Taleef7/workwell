@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { handleProviders } from "./providers.ts";
+import { handleProviders, linkedProviderOf } from "./providers.ts";
 import { providers } from "../config/deployment-profile.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
@@ -25,10 +25,54 @@ test("the list is sorted by location then name, so the select does not reshuffle
   assert.deepEqual(rows, sorted);
 });
 
-test("the route declines anything that is not GET /api/providers", async () => {
+test("the route declines anything that is not GET /api/providers or /api/providers/mine", async () => {
   assert.equal(await handleProviders(new Request("http://localhost/api/providers", { method: "POST" })), null);
+  assert.equal(await handleProviders(new Request("http://localhost/api/providers/mine", { method: "POST" })), null);
   assert.equal(await get("http://localhost/api/providers/maui-prov-001"), null);
+  assert.equal(await get("http://localhost/api/providers/mine/x"), null);
   assert.equal(await get("http://localhost/api/tenants"), null);
+});
+
+test("/mine on the default profile: no account is linked, the public viewer included (#870)", async () => {
+  for (const actor of ["viewer@workwell.dev", "cm@workwell.dev", "clinician@maui.workwell.dev", undefined]) {
+    const res = (await handleProviders(new Request("http://localhost/api/providers/mine"), undefined, actor))!;
+    assert.equal(res.status, 200);
+    // The clinician seat is refused off its own profile, so its link resolves to nothing here.
+    assert.deepEqual(await res.json(), { provider: null }, String(actor));
+  }
+});
+
+test("a link counts only on a VIEWER record, whatever else carries a providerId (#870)", () => {
+  const users = [
+    { email: "lead@x.dev", role: "ROLE_CASE_MANAGER", passwordHash: "x", providerId: providers()[0]!.id },
+    { email: "seat@x.dev", role: "ROLE_VIEWER", passwordHash: "x", providerId: providers()[0]!.id },
+    { email: "gone@x.dev", role: "ROLE_VIEWER", passwordHash: "x", providerId: "no-such-provider" },
+  ];
+  assert.equal(linkedProviderOf("lead@x.dev", undefined, users), null, "a case manager's 'mine' is their panels");
+  assert.deepEqual(Object.keys(linkedProviderOf("SEAT@x.dev ", undefined, users)!).sort(), ["id", "location", "name"]);
+  assert.equal(linkedProviderOf("gone@x.dev", undefined, users), null, "a provider the directory no longer lists");
+  assert.equal(linkedProviderOf("nobody@x.dev", undefined, users), null);
+});
+
+test("on the Maui profile the clinician seat is linked to a listed provider, and no other account is (#870)", () => {
+  const out = runProfileChild("maui", `
+    const { handleProviders, linkedProviderOf } = await import("./src/routes/providers.ts");
+    const { DEMO_USERS } = await import("./src/auth/demo-users.ts");
+    const { providerById } = await import("./src/config/deployment-profile.ts");
+    const mine = async (actor) => (await handleProviders(new Request("http://localhost/api/providers/mine"), undefined, actor)).json();
+    console.log(JSON.stringify({
+      clinician: await mine("clinician@maui.workwell.dev"),
+      staff: await mine("quality-staff@maui.workwell.dev"),
+      lead: await mine("quality-lead@maui.workwell.dev"),
+      admin: await mine("admin@maui.workwell.dev"),
+      everyLinkResolves: DEMO_USERS.filter((u) => u.providerId).every((u) => providerById(u.providerId) !== null),
+      linked: DEMO_USERS.filter((u) => linkedProviderOf(u.email)).map((u) => u.email),
+    }));
+  `);
+  assert.deepEqual(out.clinician, { provider: { id: "maui-prov-011", name: "Dr. Ana Silva", location: "Wailuku Clinic" } });
+  for (const seat of ["staff", "lead", "admin"]) assert.deepEqual(out[seat], { provider: null }, seat);
+  assert.equal(out.everyLinkResolves, true, "a seat linked to a provider the directory does not list");
+  assert.deepEqual(out.linked, ["clinician@maui.workwell.dev"]);
 });
 
 test("on the Maui profile it returns the pilot's forty PCPs, and every filterable id resolves", () => {
