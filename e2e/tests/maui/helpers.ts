@@ -61,6 +61,7 @@ export function storageStatePath(email: string, tag: string): string {
 // initializer has run (the first version of this table did exactly that and failed to load).
 const QUALITY_LEAD_EMAIL = "quality-lead@maui.workwell.dev";
 const ADMIN_EMAIL = "admin@maui.workwell.dev";
+const CLINICIAN_EMAIL = "clinician@maui.workwell.dev";
 
 const MAUI = process.env.PLAYWRIGHT_PROFILE === "maui";
 function session(email: string, tag: string) {
@@ -88,6 +89,7 @@ export const AUTH_SESSIONS = [
   { email: ADMIN_EMAIL, tag: "terminology-admin" },
   { email: ADMIN_EMAIL, tag: "readiness-catalog" },
   { email: ADMIN_EMAIL, tag: "responsive" },
+  { email: CLINICIAN_EMAIL, tag: "clinician" },
 ] as const;
 
 export const AS_QUALITY_LEAD_ROSTER = session(QUALITY_LEAD_EMAIL, "roster");
@@ -103,6 +105,7 @@ export const AS_ADMIN_MEASURES = session(ADMIN_EMAIL, "measures");
 export const AS_ADMIN_TERMS = session(ADMIN_EMAIL, "terminology-admin");
 export const AS_ADMIN_READINESS = session(ADMIN_EMAIL, "readiness-catalog");
 export const AS_ADMIN_RESPONSIVE = session(ADMIN_EMAIL, "responsive");
+export const AS_CLINICIAN = session(CLINICIAN_EMAIL, "clinician");
 
 /**
  * The ACO's whole computable set, which the Maui stack has ROUTED since ADR-078 — in CI too, since the

@@ -29,7 +29,8 @@ export default async function globalSetup() {
     // One sign-in per (role, spec file). Sharing ONE state across parallel workers would share one
     // refresh-token family, and presenting an already-rotated token revokes the family — so a refresh
     // on one worker would sign the others out. The clinician and quality-staff sign-ins are themselves
-    // under test in auth.spec.ts, so they stay explicit there.
+    // under test in auth.spec.ts, so they stay explicit there; the clinician's session here is for
+    // clinician.spec.ts, which is about what the seat sees once signed in.
     for (const s of AUTH_SESSIONS) {
       const page = await browser.newPage({ baseURL });
       await page.goto("/login");
