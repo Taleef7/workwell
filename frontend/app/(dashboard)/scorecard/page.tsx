@@ -1,4 +1,4 @@
-"use client" && unanswered === 0;
+"use client";
 
 /**
  * The provider × measure quality scorecard (#852).
@@ -897,7 +897,7 @@ function MyCell({
   // A patient whose evaluation failed, or who was evaluated without a rate, is in no population either, but is
   // not "none": their measure was never answered.
   const unanswered = (cell?.buckets?.evaluationErrors ?? 0) + (cell?.buckets?.unmeasured ?? 0);
-  const noneCounted = mine && measure.state === "complete" && rates !== null && rates.every((r) => r.ipp === 0);
+  const noneCounted = mine && measure.state === "complete" && rates !== null && rates.every((r) => r.ipp === 0) && unanswered === 0;
   return (
     <div className="space-y-1">
       {noneCounted ? (
