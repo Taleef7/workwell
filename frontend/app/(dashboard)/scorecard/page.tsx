@@ -610,6 +610,12 @@ const UNLINKED = "Your sign-in isn't linked to a provider in this practice's dir
 const SLOW_SCORECARD_HINT = "Still working — the practice total reads the whole practice's year, which can take about 15 seconds.";
 
 /**
+ * A scorecard read the server never answered, or answered with a 5xx (a deploy restarting it, a proxy's
+ * timeout page), is said in words and offered again, never shown as the browser's or the proxy's own text.
+ */
+const SCORECARD_UNAVAILABLE = "The scorecard didn't load. It can take a minute just after an update; try again.";
+
+/**
  * A clinician's own scorecard (#870): each measure's rate for the patients whose PCP on file is them,
  * beside the practice total over every site and every provider.
  *
@@ -668,7 +674,8 @@ function MyScorecard() {
       if (request !== requestRef.current) return;
       setCard(null);
       if (err instanceof ApiError && err.status === 403) setForbidden(true);
-      else setError(err instanceof Error ? err.message : "The scorecard could not be loaded.");
+      else if (err instanceof ApiError && !err.isServerError) setError(err.message);
+      else setError(SCORECARD_UNAVAILABLE);
     } finally {
       if (request === requestRef.current) setLoading(false);
     }
@@ -770,7 +777,14 @@ function MyScorecard() {
         <RateEstimateNote />
       </div>
 
-      {error ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">{error}</p> : null}
+      {error ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <span>{error}</span>
+          <Button size="sm" variant="outline" onClick={() => void load()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
       {slow && loading ? (
         <p role="status" className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
           <span aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />

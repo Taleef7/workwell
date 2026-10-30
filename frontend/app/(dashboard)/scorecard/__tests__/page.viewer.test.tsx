@@ -372,4 +372,34 @@ describe("before and without a link", () => {
     expect(screen.queryByText(/permission to perform/)).toBeNull();
     expect(screen.queryByTestId("scorecard-table")).toBeNull();
   });
+
+  const UNAVAILABLE = "The scorecard didn't load. It can take a minute just after an update; try again.";
+
+  it("says in words when the scorecard never answered, and Retry asks again", async () => {
+    const card = viewerCard();
+    let failures = 1;
+    get.mockReset().mockImplementation((url: string) => {
+      if (!url.startsWith("/api/scorecard")) return Promise.resolve([]);
+      return failures-- > 0 ? Promise.reject(new TypeError("Failed to fetch")) : Promise.resolve(card);
+    });
+    render(<ScorecardPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(UNAVAILABLE);
+    expect(screen.queryByText("Failed to fetch")).toBeNull();
+    expect(scorecardCalls()).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("scorecard-table")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(scorecardCalls()).toEqual([`/api/scorecard?measurementYear=${thisYear}`, `/api/scorecard?measurementYear=${thisYear}`]);
+  });
+
+  it("never shows a proxy's timeout page as the error", async () => {
+    const page = "<html><head><title>504 Gateway Time-out</title></head></html>";
+    get.mockReset().mockImplementation((url: string) =>
+      url.startsWith("/api/scorecard") ? Promise.reject(new ApiError(504, page, page)) : Promise.resolve([]),
+    );
+    render(<ScorecardPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(UNAVAILABLE);
+    expect(screen.queryByText(/Gateway Time-out/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
 });
