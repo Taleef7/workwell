@@ -5,6 +5,18 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-10-30
+
+- **A clinician sees their own patients beside the practice (#870)**, the last open ask from the pilot group's
+  sandbox call. The clinician seat is linked to one provider on the account (`DemoUser.providerId`; no schema).
+  - **Scorecard:** a linked VIEWER gets that provider's row and the practice total, nothing of any colleague; an
+    unlinked one (the public sandbox seat included) gets 403. Decided before any parameter or store is read.
+  - **Programs:** a "Whole practice | My patients" toggle; My patients opens the scorecard ("My scorecard" in
+    the nav). **Roster:** a My patients button that sets the PCP filter. Nothing narrows by default.
+  - **Owner decisions:** the guarantee is the scorecard's only, so the roster, Cases and the hierarchy rollup stay
+    practice-wide for every signed-in role, as before. Changing the seat's provider is a deploy.
+  - New read-only Maui e2e spec `clinician.spec.ts`.
+
 ## 2026-10-29
 
 - **The scorecard is about twice as fast; the rest of its time needs an owner decision.** Maui answered in 15-20 s.

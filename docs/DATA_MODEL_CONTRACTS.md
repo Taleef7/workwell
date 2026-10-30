@@ -278,8 +278,10 @@ never selected (#852).
 evaluated takes the run's (every subject's newest row), so it still reports every rate (CMS137's two). A
 superseded duplicate never sets it. The provider scorecard (`GET /api/scorecard`, CM/ADMIN) selects, reads
 and counts through the same code (`compliance/measure-year-rates.ts`, one unordered narrowed read), so a
-provider's cell is this report's rate for a list of exactly that provider's patients. Rows are served in
-(`evaluatedAt`, id) order.
+provider's cell is this report's rate for a list of exactly that provider's patients. A VIEWER whose sign-in
+is linked to a provider (#870, `DemoUser.providerId`) gets only that provider's row (`scope`) and the
+practice `total`; an unlinked one gets 403 `no_linked_provider`. The guarantee is the scorecard's alone: the
+roster and Cases stay practice-wide. Rows are served in (`evaluatedAt`, id) order.
 - `rowStatus`: `EVALUATED`, one row per (measure, rate); `MISSING_FROM_RUN`, a matched member the run never
 evaluated, one row per measure, patient/provider/payer filled, population/status/rate columns empty
 (never `0`/`false`); `NOT_MATCHED` (NOT_FOUND/AMBIGUOUS), exactly ONE row per unmatched member (never

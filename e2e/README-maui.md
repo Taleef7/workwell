@@ -19,7 +19,7 @@ in `MAUI_E2E_PASSWORD`.
 |---|---|
 | `quality-lead@maui.workwell.dev` | case manager |
 | `quality-staff@maui.workwell.dev` | case manager |
-| `clinician@maui.workwell.dev` | viewer (read-only) |
+| `clinician@maui.workwell.dev` | viewer (read-only), linked to provider `maui-prov-011` |
 | `admin@maui.workwell.dev` | admin |
 
 ## Reads, writes, and the stack you are pointed at
