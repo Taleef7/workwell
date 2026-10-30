@@ -372,7 +372,8 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const tenantsResponse = await handleTenants(req, env);
   if (tenantsResponse) return tenantsResponse;
 
-  const providersResponse = await handleProviders(req);
+  // With the caller, for `/api/providers/mine`: the provider a clinician seat is linked to (#870).
+  const providersResponse = await handleProviders(req, env, actor);
   if (providersResponse) return providersResponse;
 
   // Panels — which staff account works which provider's patients (MM-2 PR 2, ADR-080). Reads are
@@ -386,8 +387,10 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const subjectListsResponse = await handleSubjectLists(req, env, actor);
   if (subjectListsResponse) return subjectListsResponse;
 
-  // The provider × measure scorecard (#852): CM/ADMIN, aggregates only, counted as the list report counts.
-  const scorecardResponse = await handleScorecard(req, env, actor);
+  // The provider × measure scorecard (#852): CM/ADMIN, and a linked clinician seat's own row (#870);
+  // aggregates only, counted as the list report counts. The role, and whether sign-in is enforced, decide
+  // which card, so both are passed.
+  const scorecardResponse = await handleScorecard(req, env, actor, principalRole, enforceAuth);
   if (scorecardResponse) return scorecardResponse;
 
   // Payers — the insurance list the panel filters are populated from (MM-2). Profile-scoped and

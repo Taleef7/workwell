@@ -478,7 +478,7 @@ measures.
 | Identifier | Role |
 |---|---|
 | `quality-lead@maui.workwell.dev`, `quality-staff@maui.workwell.dev` | `ROLE_CASE_MANAGER` |
-| `clinician@maui.workwell.dev` | `ROLE_VIEWER` |
+| `clinician@maui.workwell.dev` | `ROLE_VIEWER`, linked to provider `maui-prov-011` (its scorecard row, #870) |
 | `admin@maui.workwell.dev` | `ROLE_ADMIN` |
 
 ### Staging environment — live WebChart against teatea (separate stack; NOT the demo)

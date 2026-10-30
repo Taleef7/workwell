@@ -15,21 +15,28 @@
  * sent to a colleague opens on the same year and provider. "My providers" is always the viewer's own, so it
  * travels as a choice, not as someone else's panel. Choosing a provider narrows what is drawn and asks the
  * server for nothing new: the card already holds every row.
+ *
+ * A clinician's read-only seat (a VIEWER linked to a provider, #870) gets a scorecard of its own: their
+ * patients' rates beside the whole practice's, and nothing about any other provider. The server decides
+ * that from the sign-in; the page only draws what it is given.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Button, Select } from "@mieweb/ui";
+import { Button, Select, buttonVariants } from "@mieweb/ui";
 import { useApi } from "@/lib/api/hooks";
+import { ApiError } from "@/lib/api/errors";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases } from "@/lib/rbac";
+import { canManageCases, normRole, ROLES } from "@/lib/rbac";
 import { SUBJECT } from "@/lib/terminology";
 import { AccessDenied } from "@/components/access-denied";
 import { ScrollRegion } from "@/components/scroll-region";
 import { RateEstimateNote } from "@/components/rate-estimate-note";
 import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { worklistHref } from "@/lib/worklist-links";
+import { useSlowLoadHint } from "@/lib/useSlowLoadHint";
 import { usePanelAssignments } from "@/features/panel/use-panel-assignments";
+import { useMyProvider } from "@/features/panel/use-my-provider";
 
 type ColumnState = "complete" | "no_run" | "compacted" | "data_insufficient" | "mixed_logic" | "period_mismatch";
 
@@ -45,6 +52,8 @@ interface ScorecardMeasure {
 
 interface ScorecardRate {
   label: string | null;
+  /** The patients the measure applies to (its initial population), before any exclusion. */
+  ipp: number;
   numer: number;
   effectiveDenominator: number;
   score: number | null;
@@ -53,6 +62,8 @@ interface ScorecardRate {
 
 interface ScorecardCell {
   rates: ScorecardRate[] | null;
+  /** How the patients counted here split: only the clinician's view reads it, to tell "none" from "not scored". */
+  buckets?: { scored: number; unmeasured: number; evaluationErrors: number; outOfPopulation: number } | null;
   openGaps: number | null;
 }
 
@@ -72,6 +83,12 @@ interface Scorecard {
   locations: Array<{ location: string; providers: ScorecardRow[]; subtotal: ScorecardRow }>;
   other: ScorecardRow | null;
   total: ScorecardRow;
+  /**
+   * Only on a linked VIEWER's card: their provider and that provider's row, present even when none of their
+   * patients counted. Such a card carries no locations and no "Other", and its `total` is still the whole
+   * practice's.
+   */
+  scope?: { providerId: string; name: string; location: string; row: ScorecardRow };
 }
 
 /** Why a column states no rate, in the practice's words. */
@@ -128,7 +145,20 @@ function yearFrom(raw: string | null, thisYear: number): number {
   return /^[1-9]\d{3}$/.test(value) && Number(value) <= thisYear ? Number(value) : thisYear;
 }
 
+/**
+ * Which scorecard the signed-in role reads. Two components rather than one with a branch inside, so neither
+ * calls the other's hooks (the clinician never asks for panel mappings) and the practice scorecard is
+ * exactly what it was. Every role but VIEWER reads the practice scorecard, which still refuses anyone who
+ * is not a Case Manager or an Admin, and so does a VIEWER on the occupational deployment, where no seat is
+ * linked to a provider and the refusal is the role's.
+ */
 export default function ScorecardPage() {
+  const { user } = useAuth();
+  const clinician = normRole(user?.role) === ROLES.VIEWER && SUBJECT.singular === "patient";
+  return clinician ? <MyScorecard /> : <PracticeScorecard />;
+}
+
+function PracticeScorecard() {
   const api = useApi();
   const router = useRouter();
   const pathname = usePathname();
@@ -538,16 +568,7 @@ function CellBody({
   return (
     <div className="space-y-1">
       {cell?.rates ? (
-        cell.rates.map((r, i) => (
-          <div key={r.label ?? i} className={r.smallNumber ? "text-neutral-400 dark:text-neutral-500" : undefined}>
-            {r.label ? <span className="mr-1 text-[10px] uppercase text-neutral-500">{r.label}</span> : null}
-            <span className="font-medium">{pct(r.score)}</span>{" "}
-            <span className="text-xs">({r.numer} / {r.effectiveDenominator})</span>
-            {r.smallNumber && r.effectiveDenominator > 0 ? (
-              <span className="block text-[10px]">fewer than {threshold} {SUBJECT.plural}</span>
-            ) : null}
-          </div>
-        ))
+        cell.rates.map((r, i) => <RateLine key={r.label ?? i} rate={r} threshold={threshold} />)
       ) : (
         <span className="text-neutral-400" title={measure.state !== "complete" ? REFUSED[measure.state] : undefined}>—</span>
       )}
@@ -559,6 +580,337 @@ function CellBody({
         ) : (
           <span className="block text-xs text-neutral-500">{gaps} open</span>
         )
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One rate as both views state it: the percentage, the counts behind it, and dimmed with a word of why on
+ * fewer than the threshold. `prefix` names what the rate counts where a high one is the bad one (the
+ * clinician's phone cards, which have no column header to say "Lower is better").
+ */
+function RateLine({ rate: r, threshold, prefix }: { rate: ScorecardRate; threshold: number; prefix?: string }) {
+  return (
+    <div className={r.smallNumber ? "text-neutral-400 dark:text-neutral-500" : undefined}>
+      {prefix ? <span className="text-xs">{prefix} </span> : null}
+      {r.label ? <span className="mr-1 text-[10px] uppercase text-neutral-500">{r.label}</span> : null}
+      <span className="font-medium">{pct(r.score)}</span>{" "}
+      <span className="text-xs">({r.numer} / {r.effectiveDenominator})</span>
+      {r.smallNumber && r.effectiveDenominator > 0 ? (
+        <span className="block text-[10px]">fewer than {threshold} {SUBJECT.plural}</span>
+      ) : null}
+    </div>
+  );
+}
+
+/** One refusal for both ways a clinician can be unlinked: no link on the account, or the server says so. */
+const UNLINKED = "Your sign-in isn't linked to a provider in this practice's directory. Ask an administrator.";
+
+const SLOW_SCORECARD_HINT = "Still working — the practice total reads the whole practice's year, which can take about 15 seconds.";
+
+/**
+ * A clinician's own scorecard (#870): each measure's rate for the patients whose PCP on file is them,
+ * beside the practice total over every site and every provider.
+ *
+ * The server scopes the card from the sign-in, so the request names the year and nothing else: no panel and
+ * no provider, and `?provider=` or `?panel=` in the address mean nothing here. Only the server's own row for
+ * this clinician and its total are drawn, never a location or another provider's row, whatever the card
+ * holds. Nothing links to the work list, which a VIEWER cannot open, so an open-gap count is plain text.
+ *
+ * Until the link is known nothing is refused: a slow or failed read of it is a wait or a retry, never "not
+ * linked", and an unlinked clinician is refused without a scorecard request.
+ */
+function MyScorecard() {
+  const api = useApi();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { provider, loaded, error: linkFailed, retry } = useMyProvider();
+  const { compactLabelFor, titleFor } = useMeasureIdentities();
+  const thisYear = new Date().getUTCFullYear();
+  const year = yearFrom(searchParams.get("year"), thisYear);
+  const yearOptions = [thisYear, thisYear - 1];
+  if (!yearOptions.includes(year)) yearOptions.push(year);
+  const providerId = provider?.id ?? null;
+  const [card, setCard] = useState<Scorecard | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
+  const [loading, setLoading] = useState(true);
+  // The practice total is read over the whole practice's year, which on the live data takes seconds.
+  const slow = useSlowLoadHint(loading && providerId !== null);
+
+  /** The address for another year. The year is this view's only parameter; anything else is left as it is. */
+  const yearHref = (y: number): string => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("year", String(y));
+    return `${pathname}?${params.toString()}`;
+  };
+
+  // Only the newest request may write, as on the practice scorecard.
+  const requestRef = useRef(0);
+  const load = useCallback(async () => {
+    if (!providerId) return;
+    const request = ++requestRef.current;
+    setLoading(true);
+    setError(null);
+    setForbidden(false);
+    try {
+      const next = await api.get<Scorecard>(`/api/scorecard?measurementYear=${year}`);
+      if (request !== requestRef.current) return;
+      // A clinician's card always states their own row. One without it is not this view's to draw.
+      if (next.scope) setCard(next);
+      else {
+        setCard(null);
+        setError("The scorecard came back without your row.");
+      }
+    } catch (err) {
+      if (request !== requestRef.current) return;
+      setCard(null);
+      if (err instanceof ApiError && err.status === 403) setForbidden(true);
+      else setError(err instanceof Error ? err.message : "The scorecard could not be loaded.");
+    } finally {
+      if (request === requestRef.current) setLoading(false);
+    }
+  }, [api, year, providerId]);
+
+  useEffect(() => {
+    if (!providerId) return;
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
+  }, [load, providerId]);
+
+  if (!loaded) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Quality scorecard</h2>
+        <p className="text-sm text-neutral-500" role="status">Loading…</p>
+      </section>
+    );
+  }
+  if (linkFailed) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">Quality scorecard</h2>
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <span>Couldn&apos;t check which provider your sign-in is linked to.</span>
+          <Button size="sm" variant="outline" onClick={retry}>
+            Retry
+          </Button>
+        </div>
+      </section>
+    );
+  }
+  if (!provider || forbidden) return <AccessDenied title="Quality scorecard" message={UNLINKED} />;
+
+  const header = (m: ScorecardMeasure) => ({
+    label: compactLabelFor(m.measureId, m.name, m.logic),
+    title: titleFor(m.measureId, m.name, m.logic),
+  });
+  const runDate = card ? runDateOf(card) : null;
+  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", timeZone: "UTC" }) : "";
+  // A year no run has scored yet (January, before the first run of the new year) has nothing to put in a
+  // table; it says so and offers the year before.
+  const noRun = card !== null && card.measures.length > 0 && card.measures.every((m) => m.state === "no_run");
+  const rows =
+    card?.scope
+      ? [
+          { kind: "mine" as const, name: `${card.scope.name} (you)`, line: "You", row: card.scope.row },
+          { kind: "total" as const, name: "Practice total (all sites)", line: "Practice", row: card.total },
+        ]
+      : [];
+
+  return (
+    <section className="scorecard space-y-4">
+      <p className="print-only text-lg font-semibold">Quality scorecard — {provider.name} — {printedMonth}</p>
+      <div className="flex flex-wrap items-end justify-between gap-3 print:hidden">
+        <div className="max-w-3xl">
+          <h2 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
+            Your {SUBJECT.plural} — {provider.name}
+          </h2>
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+            CMS measure rates for {SUBJECT.plural} whose PCP on file is {provider.name}, beside the whole practice (all
+            sites). Programs cards show the work-list rate, so the practice figure here can differ.
+          </p>
+          {loading && card ? <p className="text-xs text-neutral-500" role="status">Loading {year}…</p> : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-sm">
+            Year
+            <select
+              aria-label="Measurement year"
+              className="rounded-md border border-neutral-300 bg-white px-2 py-1 dark:border-neutral-700 dark:bg-neutral-900"
+              value={year}
+              onChange={(e) => router.replace(yearHref(Number(e.target.value)), { scroll: false })}
+            >
+              {yearOptions.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </label>
+          {/* The same two choices Programs offers, from this side: the whole practice is Programs. */}
+          <div role="group" aria-label={`Which ${SUBJECT.plural}`} className="flex gap-1">
+            <Link href="/programs" className={buttonVariants({ variant: "outline", size: "sm" })}>
+              Whole practice
+            </Link>
+            <Button size="sm" variant="primary" aria-pressed={true}>
+              My {SUBJECT.plural}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-1 text-xs text-neutral-600 dark:text-neutral-400" data-testid="scorecard-note">
+        <p>
+          {runDate ? `From WorkWell's run of ${runDate}. ` : ""}
+          A rate is the numerator over the denominator less its exclusions and exceptions; the practice total adds
+          the counts, never the percentages. A rate on fewer than {card?.smallNumberThreshold ?? 20} {SUBJECT.plural} is
+          dimmed.
+        </p>
+        <RateEstimateNote />
+      </div>
+
+      {error ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">{error}</p> : null}
+      {slow && loading ? (
+        <p role="status" className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+          <span aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+          {SLOW_SCORECARD_HINT}
+        </p>
+      ) : loading && !card ? (
+        <p className="text-sm text-neutral-500">Loading…</p>
+      ) : null}
+
+      {card && rows.length > 0 ? (
+        noRun ? (
+          <div className="space-y-2 text-sm text-neutral-500" data-testid="scorecard-empty">
+            <p>No run has scored {card.measurementYear} yet.</p>
+            <ul className="list-disc pl-5" data-testid="scorecard-empty-reasons">
+              {card.measures.map((m) => (
+                <li key={m.measureId}>
+                  {header(m).label}: {REFUSED.no_run}
+                </li>
+              ))}
+            </ul>
+            <Link href={yearHref(card.measurementYear - 1)} className="font-medium text-primary-700 hover:underline dark:text-primary-400">
+              See {card.measurementYear - 1}
+            </Link>
+          </div>
+        ) : (
+          <>
+            <ScrollRegion label="Quality scorecard table" className="hidden rounded-lg border border-neutral-200 md:block print:block dark:border-neutral-800 dark:[--scroll-cue-bg:var(--color-neutral-950)]">
+              <table className="min-w-full border-collapse text-sm" data-testid="scorecard-table">
+                <thead className="bg-neutral-50 dark:bg-neutral-900/60">
+                  <tr>
+                    <th scope="col" className="sticky left-0 z-10 bg-neutral-50 px-3 py-2 text-left font-semibold dark:bg-neutral-900">
+                      Provider
+                    </th>
+                    {card.measures.map((m) => (
+                      <th key={m.measureId} scope="col" className="px-3 py-2 text-left align-bottom font-semibold" title={header(m).title}>
+                        {header(m).label}
+                        {m.executedLogic ? <span className="block text-[10px] font-normal text-neutral-500">{m.executedLogic}</span> : null}
+                        {m.numeratorMeansCompliant === false ? (
+                          <span className="block text-[10px] font-normal text-neutral-500">Lower is better</span>
+                        ) : null}
+                        {m.state !== "complete" ? (
+                          <span data-testid={`scorecard-refused-${m.measureId}`} className="block text-[10px] font-normal text-amber-700 dark:text-amber-400">
+                            {REFUSED[m.state]}
+                          </span>
+                        ) : null}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(({ kind, name, row }) => (
+                    <tr key={kind} data-testid={`scorecard-row-${kind}`} className={`border-t border-neutral-200 dark:border-neutral-800 ${kind === "total" ? "border-t-2" : ""}`}>
+                      <th scope="row" className={`sticky left-0 z-10 bg-white px-3 py-2 text-left dark:bg-neutral-950 ${kind === "total" ? "font-semibold" : "font-normal"}`}>
+                        {name}
+                      </th>
+                      {card.measures.map((m) => (
+                        <td key={m.measureId} className="px-3 py-2 align-top">
+                          <MyCell cell={row.cells[m.measureId]} measure={m} mine={kind === "mine"} openGapsShown={card.openGapsShown} threshold={card.smallNumberThreshold} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollRegion>
+            {/* The phone turns the table: a card per measure, the clinician's line above the practice's. */}
+            <div className="space-y-3 md:hidden print:hidden" data-testid="scorecard-cards">
+              {card.measures.map((m) => (
+                <article key={m.measureId} data-testid="scorecard-card-measure" className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+                  <h3 className="font-medium" title={header(m).title}>{header(m).label}</h3>
+                  {m.state !== "complete" ? (
+                    <p className="text-[10px] text-amber-700 dark:text-amber-400">{REFUSED[m.state]}</p>
+                  ) : null}
+                  <dl className="mt-2 space-y-2 text-sm">
+                    {rows.map(({ kind, line, row }) => (
+                      <div key={kind} className="flex items-start justify-between gap-3">
+                        <dt className="text-neutral-600 dark:text-neutral-400">{line}</dt>
+                        <dd className="text-right">
+                          <MyCell
+                            cell={row.cells[m.measureId]}
+                            measure={m}
+                            mine={kind === "mine"}
+                            openGapsShown={card.openGapsShown}
+                            threshold={card.smallNumberThreshold}
+                            prefix={m.numeratorMeansCompliant === false ? "Poor control" : undefined}
+                          />
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </article>
+              ))}
+            </div>
+          </>
+        )
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * A cell of the clinician's scorecard: the practice scorecard's rate lines, with open gaps as a count rather
+ * than a work-list link. A complete column whose measure applies to none of the clinician's patients says so,
+ * where "— (0 / 0)" would read as a rate. Patients who are all excluded are still theirs, so that cell keeps
+ * its counts.
+ */
+function MyCell({
+  cell,
+  measure,
+  mine,
+  openGapsShown,
+  threshold,
+  prefix,
+}: {
+  cell: ScorecardCell | undefined;
+  measure: ScorecardMeasure;
+  mine: boolean;
+  openGapsShown: boolean;
+  threshold: number;
+  prefix?: string;
+}) {
+  const gaps = cell?.openGaps ?? null;
+  const rates = cell?.rates ?? null;
+  // A patient whose evaluation failed, or who was evaluated without a rate, is in no population either, but is
+  // not "none": their measure was never answered.
+  const unanswered = (cell?.buckets?.evaluationErrors ?? 0) + (cell?.buckets?.unmeasured ?? 0);
+  const noneCounted = mine && measure.state === "complete" && rates !== null && rates.every((r) => r.ipp === 0) && unanswered === 0;
+  return (
+    <div className="space-y-1">
+      {noneCounted ? (
+        <span className="text-neutral-500">None of yours</span>
+      ) : rates ? (
+        rates.map((r, i) => <RateLine key={r.label ?? i} rate={r} threshold={threshold} prefix={prefix} />)
+      ) : (
+        <span className="text-neutral-400" title={measure.state !== "complete" ? REFUSED[measure.state] : undefined}>—</span>
+      )}
+      {openGapsShown && gaps !== null && gaps > 0 ? (
+        <span className="block text-xs text-neutral-500">
+          {gaps} open {gaps === 1 ? "gap" : "gaps"}
+        </span>
       ) : null}
     </div>
   );

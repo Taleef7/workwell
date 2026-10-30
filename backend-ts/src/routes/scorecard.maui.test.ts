@@ -87,8 +87,28 @@ const script = `
   await stores.runs.finalizeRun(run.id, "COMPLETED");
   await stores.runs.finalizeRun(scale.id, "COMPLETED");
 
-  const card = await (await handleScorecard(new Request("http://x/api/scorecard?measurementYear=" + year), env, actor)).json();
+  const card = await (await handleScorecard(new Request("http://x/api/scorecard?measurementYear=" + year), env, actor, "ROLE_CASE_MANAGER", true)).json();
   const out = { year, card, perProvider: [] };
+
+  // The clinician seat's card (#870), the refusals, and what each must not say.
+  const ask = async (query, who, role, e = env, authEnforced = true) => {
+    const res = await handleScorecard(new Request("http://x/api/scorecard?" + query), e, who, role, authEnforced);
+    return { status: res.status, body: await res.json() };
+  };
+  const clinician = "clinician@maui.workwell.dev";
+  out.mine = await ask("measurementYear=" + year, clinician, "ROLE_VIEWER");
+  out.mineMe = await ask("measurementYear=" + year + "&panel=me", clinician, "ROLE_VIEWER");
+  out.mineAll = await ask("measurementYear=" + year + "&panel=all", clinician, "ROLE_VIEWER");
+  // Refused before any store is touched: every DB access throws, so reading one would fail the call.
+  const noStores = { DB: new Proxy({}, { get() { throw new Error("a store was read"); } }) };
+  out.unlinked = await ask("measurementYear=" + year, "quality-staff@maui.workwell.dev", "ROLE_VIEWER", noStores);
+  out.unlinkedBadYear = await ask("measurementYear=20x6", "nobody@maui.workwell.dev", "ROLE_VIEWER", noStores);
+  out.author = await ask("measurementYear=" + year, clinician, "ROLE_AUTHOR", noStores);
+  // No role where sign-in is enforced is no one, never "auth is off".
+  out.anonymous = await ask("measurementYear=" + year, "system", null, noStores);
+  // Where auth is off there is no principal, and the card is the practice's, as before.
+  out.authOff = await ask("measurementYear=" + year, "system", null, env, false);
+  out.colleagues = providers().filter((p) => p.id !== "maui-prov-011").map((p) => ({ id: p.id, name: p.name }));
   for (const [providerId, ids] of chosen) {
     const created = await (await handleSubjectLists(new Request("http://x/api/subject-lists", {
       method: "POST",
@@ -111,15 +131,21 @@ const script = `
   console.log(JSON.stringify(out));
 `;
 
-test("each provider's cell equals the list report's rate for that provider's patients, and its open gaps equal the work list's count", () => {
-  const out = runProfileChild("maui", script, {
+type Rate = { numer: number; denom: number; denex: number; denexcep: number; effectiveDenominator: number; score: number | null };
+type Row = { providerId: string | null; name: string; cells: Record<string, { rates: Rate[] | null; openGaps: number | null }> };
+
+// One child process for both tests: seeding a run of every patient is the slow part.
+let fixture: Record<string, unknown> | undefined;
+const seeded = () =>
+  (fixture ??= runProfileChild("maui", script, {
     WORKWELL_MAUI_CORPUS_SIZE: "100",
     // Routed as the pilot stack routes it; no evaluation happens here, so no terminology is needed.
     WORKWELL_OFFICIAL_MEASURES: "cms122",
     WORKWELL_VSAC_API_KEY: undefined,
-  });
-  type Rate = { numer: number; denom: number; denex: number; denexcep: number; effectiveDenominator: number; score: number | null };
-  type Row = { providerId: string | null; cells: Record<string, { rates: Rate[] | null; openGaps: number | null }> };
+  }));
+
+test("each provider's cell equals the list report's rate for that provider's patients, and its open gaps equal the work list's count", () => {
+  const out = seeded();
   const card = out.card as {
     measures: { measureId: string; state: string; runId: string }[];
     locations: { providers: Row[]; subtotal: Row }[];
@@ -150,4 +176,60 @@ test("each provider's cell equals the list report's rate for that provider's pat
   assert.equal(total.openGaps, out.practiceOpen, "the practice's open gaps equal the work list's total");
   assert.ok(gaps < (out.practiceOpen as number));
   assert.ok(total.rates![0]!.numer > 0, "the seeded scale run (numerator 0) was never the one read");
+  // The practice card carries no clinician scope.
+  assert.equal("scope" in card, false);
+});
+
+test("a clinician seat reads its own provider's row and the practice total, and nothing of any colleague (#870)", () => {
+  const out = seeded();
+  type Card = {
+    panel: { requested: string; ownsPanel: boolean };
+    locations: unknown[];
+    other: Row | null;
+    total: Row;
+    scope?: { providerId: string; name: string; location: string; row: Row };
+  };
+  type Answer = { status: number; body: Card & { error?: string; reason?: string } };
+  const practice = out.card as Omit<Card, "locations"> & { locations: { providers: Row[] }[] };
+  const mine = out.mine as Answer;
+  assert.equal(mine.status, 200);
+  assert.deepEqual(mine.body.locations, [], "no location, so no subtotal of the colleagues");
+  assert.equal(mine.body.other, null);
+  assert.equal(mine.body.scope!.providerId, "maui-prov-011");
+  assert.equal(mine.body.scope!.location, "Wailuku Clinic");
+
+  // Their row is exactly the practice card's row for the same provider, and the total is the practice's.
+  const theirs = practice.locations.flatMap((l) => l.providers).find((r) => r.providerId === "maui-prov-011");
+  assert.ok(theirs, "the clinician's provider has patients in the fixture");
+  assert.deepEqual(mine.body.scope!.row, theirs);
+  assert.deepEqual(mine.body.total, practice.total);
+
+  // `panel` is still a parameter, but neither value widens the card or trips the "both set" guard.
+  const card = ({ body }: Answer) => ({ ...body, generatedAt: undefined });
+  for (const variant of [out.mineMe, out.mineAll] as Answer[]) {
+    assert.equal(variant.status, 200);
+    assert.deepEqual(card(variant), card(mine));
+  }
+
+  // No colleague's id or name anywhere in the answer.
+  const text = JSON.stringify(mine.body);
+  for (const colleague of out.colleagues as { id: string; name: string }[]) {
+    assert.equal(text.includes(colleague.id), false, `names ${colleague.id}`);
+    assert.equal(text.includes(colleague.name), false, `names ${colleague.name}`);
+  }
+
+  // Refused before any store is read (the env's DB throws on access), whatever the parameters.
+  for (const [label, refused] of [
+    ["a viewer seat with no link", out.unlinked],
+    ["an unknown account with a malformed year", out.unlinkedBadYear],
+    ["a role that is neither practice nor viewer", out.author],
+    ["no role at all where sign-in is enforced", out.anonymous],
+  ] as const) {
+    const answer = refused as Answer;
+    assert.equal(answer.status, 403, label);
+    assert.equal(answer.body.reason, "no_linked_provider", label);
+  }
+  const authOff = out.authOff as Answer;
+  assert.equal(authOff.status, 200);
+  assert.deepEqual({ ...authOff.body, generatedAt: undefined }, { ...practice, generatedAt: undefined }, "auth off reads the practice card");
 });

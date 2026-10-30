@@ -31,7 +31,7 @@ const script = `
     { runId: run.id, subjectId: "wc|101", measureId: "cms122", status: "OVERDUE", evidence: evidence(true) },
     { runId: run.id, subjectId: "wc|102", measureId: "cms122", status: "COMPLIANT", evidence: evidence(false) },
   ]);
-  const card = await (await handleScorecard(new Request("http://x/api/scorecard?measurementYear=" + year), env, "admin@workwell.dev")).json();
+  const card = await (await handleScorecard(new Request("http://x/api/scorecard?measurementYear=" + year), env, "admin@workwell.dev", "ROLE_ADMIN", true)).json();
   console.log(JSON.stringify({ card }));
 `;
 

@@ -197,7 +197,13 @@ const RULES: Rule[] = [
   // identity routes are restricted for exactly this reason. Must precede the catch-alls below.
   { pattern: rx("/api/subject-lists/**"), access: [CM, A] },
   // The provider scorecard (#852): every provider's rates are the practice's own performance figures, so
-  // the VIEWER seat (the public /sandbox, the Maui clinician seat) does not read them. Before the catch-alls.
+  // only CM/ADMIN read the practice card. A VIEWER may GET the exact path, because the route itself answers
+  // a clinician seat linked to a provider with that provider's row and the practice total only, and every
+  // other VIEWER (the public /sandbox) with 403 (#870). That guarantee is the scorecard's alone: the roster,
+  // the case list and the hierarchy rollup stay practice-wide for every signed-in role, as before (owner
+  // decision, 2026-10-30). Any sub-path stays CM/ADMIN, so a later `/api/scorecard/…` read never opens to the
+  // VIEWER by accident. Before the catch-alls.
+  { method: "GET", pattern: rx("/api/scorecard"), access: [CM, A, VIEWER] },
   { pattern: rx("/api/scorecard/**"), access: [CM, A] },
   // Bulk downloads (production-readiness review 2026-10-15, owner decision D5). Every patient's rows in one
   // file is a minimum-necessary question, so the CSV exports, the per-patient QRDA I documents, the QRDA III

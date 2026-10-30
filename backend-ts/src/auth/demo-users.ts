@@ -19,6 +19,12 @@ export interface DemoUser {
   role: string;
   /** PBKDF2 stored string for `Workwell123!`. */
   passwordHash: string;
+  /**
+   * The directory provider a clinician seat stands for (#870): its scorecard shows that provider's row
+   * beside the practice total. It narrows a ROLE_VIEWER only (`linkedProviderOf`); a case manager's
+   * "mine" is the panels they own, never this.
+   */
+  providerId?: string;
 }
 
 // PBKDF2(Workwell123!) — all four demo accounts share the documented demo password,
@@ -75,7 +81,9 @@ export const DEMO_USERS: readonly DemoUser[] = [
   // refuses them everywhere except the maui profile, and refuses every other account there (#520).
   { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: PILOT_PASSWORD_HASH },
   { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: PILOT_PASSWORD_HASH },
-  { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER", passwordHash: PILOT_PASSWORD_HASH },
+  // Linked to one synthetic provider (Dr. Ana Silva, Wailuku), so the seat can show "my patients"; a
+  // different provider is a deploy, by owner decision (2026-10-30).
+  { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER", passwordHash: PILOT_PASSWORD_HASH, providerId: "maui-prov-011" },
   { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN", passwordHash: PILOT_PASSWORD_HASH },
 ];
 

@@ -13,7 +13,10 @@
  *    directory counts nowhere, as on the work list.
  * 2. **Every total is the sum of the rows shown above it**, its counts added and its rate recomputed from
  *    them, never averaged: a location's rate is its patients' numerator over their effective denominator,
- *    as CMS computes any rate. With "My providers" the totals cover only the shown rows.
+ *    as CMS computes any rate. With "My providers" the totals cover only the shown rows. The one exception
+ *    is a clinician's card (#870, `onlyProvider`): it carries that provider's row alone, in `scope`, and
+ *    the practice total over every patient, with no location or "Other" row, since a location subtotal
+ *    beside one provider's row would state their colleagues' combined figures.
  * 3. **Only a complete column shows rates.** A measure with no run for the year, a compacted run, thin
  *    data (#853), rows scored by two logics or rows of another year says so and shows none.
  * 4. **A rate on fewer than 20 patients is marked small** (MIPS's case minimum for most quality measures),
@@ -70,6 +73,11 @@ export interface ScorecardRequest {
   measures: readonly { id: string; name: string; policyRef: string }[];
   /** "My providers": only these providers' rows, and totals over them. Null for the whole practice. */
   providerIds: ReadonlySet<string> | null;
+  /**
+   * A clinician's card (#870): this provider's row alone, in `scope`, beside the practice total. Never
+   * with `providerIds`.
+   */
+  onlyProvider?: string | null;
   ownsPanel: boolean;
   /** UTC `YYYY-MM-DD`, the work list's own "today". */
   today: string;
@@ -129,6 +137,12 @@ export interface Scorecard {
   /** Patients whose PCP the directory does not list; null when there are none (always with "My providers"). */
   other: ScorecardRow | null;
   total: ScorecardRow;
+  /**
+   * A clinician's card only (#870): their provider and its row, which is present even when nobody is
+   * counted under it, so the practice total is never shown alone. `locations` is then empty and `other`
+   * null. Absent from every other card.
+   */
+  scope?: { providerId: string; name: string; location: string; row: ScorecardRow };
 }
 
 interface Column {
@@ -148,6 +162,9 @@ export async function buildScorecard(deps: ScorecardDeps, request: ScorecardRequ
     if (!resolved.has(id)) resolved.set(id, deps.providerOf(id));
     return resolved.get(id)!;
   };
+  const only = request.onlyProvider ? providerOf(request.onlyProvider) : null;
+  if (request.onlyProvider && request.providerIds) throw new Error("buildScorecard: onlyProvider and providerIds are exclusive");
+  if (request.onlyProvider && !only) throw new Error(`buildScorecard: provider ${request.onlyProvider} is not in the directory`);
   const openGapsShown = request.measurementYear === Number(request.today.slice(0, 4));
 
   // A subject's row key: their PCP, "Other" for a PCP the directory does not list, null when they are no
@@ -189,6 +206,22 @@ export async function buildScorecard(deps: ScorecardDeps, request: ScorecardRequ
     byLocation.set(location, [...(byLocation.get(location) ?? []), key]);
   }
   const nameOf = (id: string): string => providerOf(id)!.name;
+  const total = rowOf("Total", null, [...keys]);
+  if (only) {
+    // Keyed over the whole practice like any card, so `total` is the practice's; only the one row is said.
+    return {
+      measurementYear: request.measurementYear,
+      generatedAt: request.now,
+      smallNumberThreshold: SMALL_NUMBER_THRESHOLD,
+      openGapsShown,
+      panel: { requested: "all", ownsPanel: request.ownsPanel },
+      measures: columns.map((c) => c.measure),
+      locations: [],
+      other: null,
+      total,
+      scope: { providerId: only.id, name: only.name, location: only.location, row: rowOf(only.name, only.id, [only.id]) },
+    };
+  }
   const locations = [...byLocation.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([location, ids]) => {
@@ -209,7 +242,7 @@ export async function buildScorecard(deps: ScorecardDeps, request: ScorecardRequ
     measures: columns.map((c) => c.measure),
     locations,
     other: keys.has(OTHER) ? rowOf("Other", null, [OTHER]) : null,
-    total: rowOf("Total", null, [...keys]),
+    total,
   };
 }
 

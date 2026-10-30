@@ -260,11 +260,20 @@ test("subject lists: EVERY method is CM/ADMIN, metadata included — the reads a
   }
 });
 
-test("scorecard: CM/ADMIN only — per-provider rates are not the VIEWER seat's to browse (#852)", () => {
+test("scorecard: CM/ADMIN, and the VIEWER on the exact path only — the route narrows or refuses it (#852, #870)", () => {
   const path = "/api/scorecard";
   assert.equal(authorize("GET", path, cm).ok, true, "cm");
   assert.equal(authorize("GET", path, admin).ok, true, "admin");
-  assert.deepEqual(authorize("GET", path, viewer), { ok: false, status: 403 }, "viewer");
+  // Let through to the route, which answers a linked clinician seat with its own row and every other
+  // VIEWER with 403 (routes/scorecard.ts).
+  assert.equal(authorize("GET", path, viewer).ok, true, "viewer");
   assert.deepEqual(authorize("GET", path, author), { ok: false, status: 403 }, "author");
   assert.deepEqual(authorize("GET", path, null), { ok: false, status: 401 }, "anonymous");
+  // Only the exact path: a later sub-path, or a trailing slash, stays CM/ADMIN.
+  for (const sub of ["/api/scorecard/", "/api/scorecard/x", "/api/scorecard/export"]) {
+    assert.deepEqual(authorize("GET", sub, viewer), { ok: false, status: 403 }, `viewer ${sub}`);
+    assert.equal(authorize("GET", sub, cm).ok, true, `cm ${sub}`);
+  }
+  // And GET only: the VIEWER's write guard is unchanged.
+  assert.deepEqual(authorize("POST", path, viewer), { ok: false, status: 403 }, "viewer POST");
 });
