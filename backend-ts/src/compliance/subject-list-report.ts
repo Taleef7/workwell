@@ -442,7 +442,8 @@ async function readMeasure(
    */
   rawIdentifierOf: (subjectId: string) => string,
 ): Promise<MeasureRead> {
-  const read = await readMeasureYearRows(deps.outcomes, runId, measureId, measurementYear, (subjectId) => matchedIds.has(subjectId));
+  // The member SET, so the store reads only the members' rows (#874).
+  const read = await readMeasureYearRows(deps.outcomes, runId, measureId, measurementYear, matchedIds);
   // The run's declared rate count, not the list's: a list whose rows all errored still reports every
   // rate the run declares (two zero rates for CMS137), and a member with fewer rates is unmeasured here
   // exactly as it is in the run's own MeasureReport.

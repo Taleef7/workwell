@@ -36,6 +36,10 @@ function deps(
       if (options.calls) options.calls.byRun++;
       return options.byRun?.[runId] ?? [];
     },
+    anyOutcomeForMeasure: async (runId: string, measureId: string) => {
+      if (options.calls) options.calls.byRun++;
+      return (options.byRun?.[runId] ?? []).find((r) => r.measureId === measureId) ?? null;
+    },
     // Derived from the SAME fixture as `listOutcomes`, narrowed the way both stores narrow (#610
     // review): `aggregateOfficialRun` reads memberships, not whole evidence rows, so a fake that
     // handed back full records would be gentler than the shipped query.
@@ -454,6 +458,8 @@ test("scoped profile (Maui) — isolates data by excluding foreign and unresolve
           );
           return typeof opts.limit === "number" ? matched.slice(0, opts.limit) : matched;
         },
+        anyOutcomeForMeasure: async (runId, measureId) =>
+          riskRows.find((r) => r.runId === runId && r.measureId === measureId) ?? null,
         // The measure rate's read since the #610 review: memberships only, same fixture. Narrowed
         // inline because this block is inside the template literal above and cannot import — and no
         // backticks, for the same reason.
@@ -533,6 +539,7 @@ test("foldScaleCounts — completed seed:scale run skipped on Maui profile and f
         listOutcomesWithRun: async () => [mauiRow],
         listLatestPopulationRuns: latestRunsFromRows([mauiRow]),
         listOutcomes: async () => [],
+        anyOutcomeForMeasure: async () => null,
         // Empty here too: aggregateOfficialRun reads this and not listOutcomes (#610 review).
         // NOTE no backticks in this block — it is inside the template literal above, which holds the
         // source this test runs in a subprocess, and a backtick here closes it.
@@ -602,6 +609,7 @@ test("programTrend — monthly snapshot scope fallback on Maui profile and snaps
         listLatestPopulationRuns: latestRunsFromRows([mauiRow]),
         // The trend's thin-run probe (#853): no row carries the flag here.
         listOutcomes: async () => [],
+        anyOutcomeForMeasure: async () => null,
       },
       runStore: { listRuns: async () => [] },
       caseStore: { listCases: async () => [] },

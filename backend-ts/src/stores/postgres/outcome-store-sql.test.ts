@@ -24,9 +24,12 @@ const RUN = "11111111-2222-3333-4444-555555555555";
 function recordingPool(rowsFor: (sql: string) => unknown[] = () => []): { pool: PgPool; sql: string[]; binds: unknown[][] } {
   const sql: string[] = [];
   const binds: unknown[][] = [];
-  const query = async (text: string, values?: unknown[]) => {
+  // A statement arrives as text plus values, or as one config object (`{ text, values, types }`) where
+  // the read sets its own type parsers.
+  const query = async (statement: string | { text: string; values?: unknown[] }, values?: unknown[]) => {
+    const text = typeof statement === "string" ? statement : statement.text;
     sql.push(text);
-    binds.push(values ?? []);
+    binds.push((typeof statement === "string" ? values : statement.values) ?? []);
     const rows = rowsFor(text);
     return { rows, rowCount: rows.length };
   };
@@ -228,4 +231,36 @@ test("listScoringIdentities: ONE statement, one array bind, the identity keys on
   assert.deepEqual(await store.listScoringIdentities(RUN, { measureId: "cms125", subjectIds: [] }), []);
   assert.deepEqual(await store.listScoringIdentities("not-a-run", { measureId: "cms125", subjectIds: ["p-1"] }), []);
   assert.equal(sql.length, 1);
+});
+
+test("anyOutcomeForMeasure: no ORDER BY, so (run_id, measure_id) answers it in one lookup (#874)", async () => {
+  // With `ORDER BY evaluated_at, id LIMIT 1` the planner walked (measure_id, evaluated_at) from the
+  // measure's oldest row through every earlier run: 382,632 buffers to return one row at 20 runs.
+  const { pool, sql, binds } = recordingPool();
+  const store = new PgOutcomeStore(pool);
+  assert.equal(await store.anyOutcomeForMeasure(RUN, "cms122"), null);
+  const text = flat(sql[0]!);
+  assert.match(text, /WHERE run_id = \$1 AND measure_id = \$2 LIMIT 1$/);
+  assert.doesNotMatch(text, /ORDER BY/);
+  assert.deepEqual(binds[0], [RUN, "cms122"]);
+  assert.equal(await store.anyOutcomeForMeasure("not-a-run", "cms122"), null);
+  assert.equal(sql.length, 1, "a malformed run id never touches the database");
+});
+
+test("listOutcomeSubjectMembershipsForRun: a subject set is ONE array bind, never an IN list (#874)", async () => {
+  const { pool, sql, binds } = recordingPool();
+  const store = new PgOutcomeStore(pool);
+  await store.listOutcomeSubjectMembershipsForRun(RUN, "cms122");
+  assert.match(flat(sql[0]!), /WHERE run_id = \$1 AND measure_id = \$2$/, "unnarrowed: unchanged");
+  assert.deepEqual(binds[0], [RUN, "cms122"]);
+
+  const ids = Array.from({ length: 2000 }, (_, i) => `p-${i}`);
+  await store.listOutcomeSubjectMembershipsForRun(RUN, "cms122", ids);
+  const text = flat(sql[1]!);
+  assert.match(text, /WHERE run_id = \$1 AND measure_id = \$2 AND subject_id = ANY\(\$3::text\[\]\)$/);
+  assert.doesNotMatch(text, /ORDER BY|\bIN \(/);
+  assert.deepEqual(binds[1], [RUN, "cms122", ids]);
+
+  assert.deepEqual(await store.listOutcomeSubjectMembershipsForRun(RUN, "cms122", []), []);
+  assert.equal(sql.length, 2, "an empty set never touches the database");
 });

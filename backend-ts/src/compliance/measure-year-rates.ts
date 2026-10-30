@@ -75,7 +75,7 @@ export interface SelectedRun {
  * imported documents' patients) are skipped: until #852 a seeded run could be picked here.
  */
 export async function selectRunForYear(
-  deps: { runs: Pick<RunStore, "listPopulationRunsForPeriod">; outcomes: Pick<OutcomeStore, "listOutcomes"> },
+  deps: { runs: Pick<RunStore, "listPopulationRunsForPeriod">; outcomes: Pick<OutcomeStore, "anyOutcomeForMeasure"> },
   measureId: string,
   measurementYear: number,
 ): Promise<SelectedRun | null> {
@@ -93,9 +93,9 @@ export async function selectRunForYear(
     if (run.requestedScope?.importDriven === true) continue;
     // Newest-first, so the FIRST run that holds this measure's rows is the answer. An ALL_PROGRAMS run
     // holds every routed measure, so this is one probe in the common case; a measure routed later than
-    // the newest run is found further down rather than reported as absent.
-    const probe = await deps.outcomes.listOutcomes(run.id, { measureId, limit: 1, offset: 0 });
-    if (probe.length === 0) continue;
+    // the newest run is found further down rather than reported as absent. Any row answers it, and an
+    // ordered one-row read walked every earlier run's rows of the measure (#874).
+    if ((await deps.outcomes.anyOutcomeForMeasure(run.id, measureId)) === null) continue;
     return {
       runId: run.id,
       startedAt: run.startedAt,
@@ -155,14 +155,21 @@ export interface MeasureYearRows {
  *
  * Newest (evaluatedAt, id) per subject wins, deterministically: a run can hold more than one row for a
  * subject, and the read is unordered. The kept rows are served in (evaluatedAt, id) order.
+ *
+ * `keep` as a SET (the attributed-list report's members) also narrows the store read to those subjects
+ * (#874), so a list of a few hundred costs its members' rows rather than the run's 20,000. The answer is
+ * the same either way: every kept row is read, and `declaredRates`' run-wide fallback, the one value read
+ * off non-kept rows, takes a second, full read in exactly the case that needs it.
  */
 export async function readMeasureYearRows(
   outcomes: Pick<OutcomeStore, "listOutcomeSubjectMembershipsForRun">,
   runId: string,
   measureId: string,
   measurementYear: number,
-  keep: (subjectId: string) => boolean = () => true,
+  keep: ((subjectId: string) => boolean) | ReadonlySet<string> = () => true,
 ): Promise<MeasureYearRows> {
+  const members = typeof keep === "function" ? null : keep;
+  const isKept = typeof keep === "function" ? keep : (subjectId: string) => keep.has(subjectId);
   // The newest kept row per subject, with its `evaluatedAt` parsed once: comparing re-parsed both
   // timestamps on every call, and as the sort's comparator that was most of the read's time at 20,000 rows.
   const newest = new Map<string, { row: LeanRow; at: number }>();
@@ -222,14 +229,14 @@ export async function readMeasureYearRows(
     return derived.kept;
   };
 
-  for (const row of await outcomes.listOutcomeSubjectMembershipsForRun(runId, measureId)) {
+  for (const row of await outcomes.listOutcomeSubjectMembershipsForRun(runId, measureId, members ? [...members] : undefined)) {
     const derived = derive(row.evidence);
     const at = Date.parse(row.evaluatedAt);
     const seenInRun = runNewest.get(row.subjectId);
     if (!seenInRun || isNewerAt(at, row.id, seenInRun.at, seenInRun.id)) {
       runNewest.set(row.subjectId, { id: row.id, at, rates: derived.rates });
     }
-    if (!keep(row.subjectId)) continue;
+    if (!isKept(row.subjectId)) continue;
     const kept = keptOf(derived, row.evidence);
     if (kept.otherYear) periodMismatch = true;
     const held = newest.get(row.subjectId);
@@ -266,6 +273,19 @@ export async function readMeasureYearRows(
     .map((held) => held.row);
   let keptRates = 0;
   for (const row of rows) if (!row.errored) keptRates = Math.max(keptRates, row.memberships.length);
+  // The run's own count is read only where no kept row was evaluated. A narrowed read saw only members,
+  // so that one case reads the run's rows again, in full: the cost the report paid before #874, only
+  // when it is needed.
+  if (keptRates === 0 && members) {
+    runNewest.clear();
+    for (const row of await outcomes.listOutcomeSubjectMembershipsForRun(runId, measureId)) {
+      const at = Date.parse(row.evaluatedAt);
+      const seenInRun = runNewest.get(row.subjectId);
+      if (!seenInRun || isNewerAt(at, row.id, seenInRun.at, seenInRun.id)) {
+        runNewest.set(row.subjectId, { id: row.id, at, rates: derive(row.evidence).rates });
+      }
+    }
+  }
   let runRates = 0;
   for (const subject of runNewest.values()) runRates = Math.max(runRates, subject.rates);
   const declaredRates = keptRates > 0 ? keptRates : runRates;

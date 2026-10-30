@@ -63,14 +63,16 @@ type SubjectMembershipRow = Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedA
 /**
  * Wrap a fake's `listOutcomes` as `listOutcomeSubjectMembershipsForRun` (#852): the membership narrowing
  * plus the row's identity columns, and nothing more, so a per-subject reader cannot lean on a field the
- * real projection drops. Reads the fake WITHOUT a page window, as the real statement is unpaged.
+ * real projection drops. Reads the fake WITHOUT a page window, as the real statement is unpaged, and
+ * narrows to `subjectIds` when given one (#874), as the real statement does: an empty set reads nothing.
  */
 export function subjectMembershipsVia(
   listOutcomes: (runId: string, opts?: { measureId?: string }) => Promise<ReadonlyArray<SubjectRowish>>,
-): (runId: string, measureId: string) => Promise<SubjectMembershipRow[]> {
-  return async (runId, measureId) =>
+): (runId: string, measureId: string, subjectIds?: readonly string[]) => Promise<SubjectMembershipRow[]> {
+  return async (runId, measureId, subjectIds) =>
     (await listOutcomes(runId, { measureId }))
       .filter((row) => row.measureId === undefined || row.measureId === measureId)
+      .filter((row) => subjectIds === undefined || subjectIds.includes(row.subjectId))
       .map((row) => ({
         id: row.id,
         subjectId: row.subjectId,
@@ -78,4 +80,16 @@ export function subjectMembershipsVia(
         ...(row.outOfPopulation !== undefined ? { outOfPopulation: row.outOfPopulation } : {}),
         ...narrowToMemberships(row),
       }));
+}
+
+/**
+ * Wrap a fake's `listOutcomes` as `anyOutcomeForMeasure` (#874): one row of the run's rows for the
+ * measure, or null. Which row is unspecified in the real stores, so a reader that depended on getting a
+ * particular one would be wrong against them however this fake chose.
+ */
+export function anyOutcomeVia<R extends { measureId?: string }>(
+  listOutcomes: (runId: string, opts?: { measureId?: string }) => Promise<ReadonlyArray<R>>,
+): (runId: string, measureId: string) => Promise<R | null> {
+  return async (runId, measureId) =>
+    (await listOutcomes(runId, { measureId })).find((row) => row.measureId === undefined || row.measureId === measureId) ?? null;
 }

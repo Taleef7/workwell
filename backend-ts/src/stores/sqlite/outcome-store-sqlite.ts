@@ -250,6 +250,19 @@ export class SqliteOutcomeStore implements OutcomeStore {
     return (results ?? []).map(toRecord);
   }
 
+  async anyOutcomeForMeasure(runId: string, measureId: string): Promise<OutcomeRecord | null> {
+    // No ORDER BY, as on the ceiling (see the interface).
+    const { results } = await this.db
+      .prepare(
+        `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population
+           FROM outcomes WHERE run_id = ? AND measure_id = ? LIMIT 1`,
+      )
+      .bind(runId, measureId)
+      .all<OutcomeRow>();
+    const row = (results ?? [])[0];
+    return row ? toRecord(row) : null;
+  }
+
   async listOutcomeMembershipsForRun(
     runId: string,
     measureId: string,
@@ -268,12 +281,29 @@ export class SqliteOutcomeStore implements OutcomeStore {
   async listOutcomeSubjectMembershipsForRun(
     runId: string,
     measureId: string,
+    subjectIds?: readonly string[],
   ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>> {
-    const { results } = await this.db
-      .prepare(`SELECT id, subject_id, evaluated_at, out_of_population, status, evidence_json FROM outcomes WHERE run_id = ? AND measure_id = ?`)
-      .bind(runId, measureId)
-      .all<{ id: string; subject_id: string; evaluated_at: string; out_of_population: number | null; status: string; evidence_json: string }>();
-    return (results ?? []).map((r) => ({
+    type Row = { id: string; subject_id: string; evaluated_at: string; out_of_population: number | null; status: string; evidence_json: string };
+    const select = `SELECT id, subject_id, evaluated_at, out_of_population, status, evidence_json FROM outcomes WHERE run_id = ? AND measure_id = ?`;
+    let results: Row[] = [];
+    if (subjectIds === undefined) {
+      results = (await this.db.prepare(select).bind(runId, measureId).all<Row>()).results ?? [];
+    } else {
+      // A subject set is sliced to the floor's bind budget (a list holds up to 50,000 members). The read
+      // is unordered, so the slices' rows are simply concatenated. An empty set reads nothing. De-duplicated
+      // first: an id repeated across two slices would return its rows twice, where `= ANY` returns them once.
+      const distinct = [...new Set(subjectIds)];
+      for (let start = 0; start < distinct.length; start += SQLITE_ID_CHUNK) {
+        const slice = distinct.slice(start, start + SQLITE_ID_CHUNK);
+        const { results: sliced } = await this.db
+          .prepare(`${select} AND subject_id IN (${slice.map(() => "?").join(", ")})`)
+          .bind(runId, measureId, ...slice)
+          .all<Row>();
+        // Concatenated, never spread into one push: a call's argument count is bounded.
+        results = results.concat(sliced ?? []);
+      }
+    }
+    return results.map((r) => ({
       id: r.id,
       subjectId: r.subject_id,
       evaluatedAt: r.evaluated_at,

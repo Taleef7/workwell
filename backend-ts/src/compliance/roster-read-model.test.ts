@@ -36,6 +36,7 @@ function fakeStore(withRun: OutcomeWithRun[], byRun: Record<string, OutcomeRecor
     listLatestPopulationOutcomes: async () => { throw new Error("unused: the roster resolves winners via listLatestPopulationRuns"); },
     listLatestPopulationRuns: latestRunsFromRows(withRun),
     listOutcomes: async (runId: string) => byRun[runId] ?? [],
+    anyOutcomeForMeasure: async () => { throw new Error("unused: the roster probes no run for a measure"); },
     // The roster never aggregates rates, so this is the honest "unused" rather than a second reader
     // of the same fixture that could silently drift from the one above.
     listOutcomeMembershipsForRun: async () => { throw new Error("unused: the roster does not aggregate rates"); },

@@ -106,9 +106,9 @@ function fakeDeps(opts: { snaps?: QualitySnapshotRow[]; perRun?: OutcomeWithRun[
     outcomeStore: {
       listOutcomesWithRun: async () => opts.perRun ?? [],
       // The thin-run probe (#853) reads one row's evidence per run: a thin run's rows all carry the flag.
-      listOutcomes: async (runId: string) => [
-        { evidence: opts.thinRuns?.includes(runId) ? { dataInsufficient: { checks: ["encounterTypeCoded"] } } : {} },
-      ],
+      anyOutcomeForMeasure: async (runId: string) => ({
+        evidence: opts.thinRuns?.includes(runId) ? { dataInsufficient: { checks: ["encounterTypeCoded"] } } : {},
+      }),
       listLatestPopulationRuns: latestRunsFromRows(() => opts.perRun ?? []),
     } as unknown as ProgramDeps["outcomeStore"],
   } as ProgramDeps;
@@ -303,7 +303,7 @@ function countingDeps(rows: OutcomeWithRun[]): { deps: ProgramDeps; reads: () =>
     } as unknown as ProgramDeps["runStore"],
     caseStore: {} as ProgramDeps["caseStore"],
     outcomeStore: {
-      listOutcomes: async () => [],
+      anyOutcomeForMeasure: async () => null,
       listOutcomesWithRun: async () => {
         reads++;
         return rows;

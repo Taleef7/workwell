@@ -9,7 +9,7 @@ import { foldGroups, readMeasureYearRows, selectRunForYear } from "./measure-yea
 import { scoringOfRows } from "../fhir/run-aggregate.ts";
 import type { OutcomeRecord, OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
-import { subjectMembershipsVia } from "../test-support/memberships.ts";
+import { anyOutcomeVia, subjectMembershipsVia } from "../test-support/memberships.ts";
 
 const pr = (ipp: boolean, denom: boolean, numer: boolean) => ({ ipp, denom, denex: false, numer, denexcep: false });
 const oneRate = (numer: boolean) => ({ official: { populationResults: pr(true, true, numer) } });
@@ -31,13 +31,10 @@ const row = (subjectId: string, evidence: unknown, over: Partial<OutcomeRecord> 
   ...over,
 });
 
-const store = (rows: OutcomeRecord[]): Pick<OutcomeStore, "listOutcomes" | "listOutcomeSubjectMembershipsForRun"> => {
-  const listOutcomes = (async (runId: string, opts?: { measureId?: string; limit?: number; offset?: number }) => {
-    const all = rows.filter((r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId));
-    const offset = opts?.offset ?? 0;
-    return all.slice(offset, offset + (opts?.limit ?? all.length));
-  }) as OutcomeStore["listOutcomes"];
-  return { listOutcomes, listOutcomeSubjectMembershipsForRun: subjectMembershipsVia(listOutcomes) };
+const store = (rows: OutcomeRecord[]): Pick<OutcomeStore, "anyOutcomeForMeasure" | "listOutcomeSubjectMembershipsForRun"> => {
+  const listOutcomes = async (runId: string, opts?: { measureId?: string }) =>
+    rows.filter((r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId));
+  return { anyOutcomeForMeasure: anyOutcomeVia(listOutcomes), listOutcomeSubjectMembershipsForRun: subjectMembershipsVia(listOutcomes) };
 };
 
 test("a group whose rows all errored still reports every rate the RUN declares", async () => {
@@ -77,6 +74,43 @@ test("the counted rows declare the rate count; a set of errors takes the run's, 
     (id) => id === "b",
   );
   assert.equal(superseded.declaredRates, 1, "the run's newest rows carry one rate");
+});
+
+/** The fake store, recording each membership read's subject set (undefined = every row). */
+const countingStore = (rows: OutcomeRecord[]) => {
+  const base = store(rows);
+  const reads: Array<readonly string[] | undefined> = [];
+  const outcomes: Pick<OutcomeStore, "listOutcomeSubjectMembershipsForRun"> = {
+    listOutcomeSubjectMembershipsForRun: async (runId, measureId, subjectIds) => {
+      reads.push(subjectIds);
+      return base.listOutcomeSubjectMembershipsForRun(runId, measureId, subjectIds);
+    },
+  };
+  return { base, outcomes, reads };
+};
+
+test("a member SET reads only the members' rows, and answers exactly as the same predicate does (#874)", async () => {
+  const rows = [
+    row("a", twoRates(true, false)),
+    row("b", oneRate(true), { evaluatedAt: "2027-06-01T00:00:00.000Z" }),
+    row("b", oneRate(false), { evaluatedAt: "2027-06-02T00:00:00.000Z" }),
+    row("c", errored),
+    row("d", oneRate(true)),
+  ];
+  const { base, outcomes, reads } = countingStore(rows);
+  const viaSet = await readMeasureYearRows(outcomes, "run-1", "cms137", 2027, new Set(["b", "c"]));
+  const viaPredicate = await readMeasureYearRows(base, "run-1", "cms137", 2027, (id) => id === "b" || id === "c");
+  assert.deepEqual(viaSet, viaPredicate);
+  assert.deepEqual(reads, [["b", "c"]], "one read, narrowed to the members: a member was evaluated, so no run-wide read");
+});
+
+test("where no member was evaluated, a narrowed read still declares the RUN's rates, from one full read (#874)", async () => {
+  const rows = [row("a", twoRates(true, true)), row("b", errored), row("c", oneRate(true))];
+  const { base, outcomes, reads } = countingStore(rows);
+  const viaSet = await readMeasureYearRows(outcomes, "run-1", "cms137", 2027, new Set(["b"]));
+  assert.equal(viaSet.declaredRates, 2, "CMS137's two rates, read off the run's own rows");
+  assert.deepEqual(viaSet, await readMeasureYearRows(base, "run-1", "cms137", 2027, (id) => id === "b"));
+  assert.deepEqual(reads, [["b"], undefined], "the members, then the run in full for its rate count");
 });
 
 test("two rows whose blocks differ only where the trimmed identity cannot see are still a mix", async () => {

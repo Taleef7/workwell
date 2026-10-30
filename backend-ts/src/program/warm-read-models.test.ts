@@ -24,6 +24,7 @@ const makeDeps = (overrides: Partial<OutcomeStore> = {}) => ({
     listOutcomesWithRun: async () => rows,
     listLatestPopulationRuns: latestRunsFromRows(rows),
     listOutcomes: async () => [],
+    anyOutcomeForMeasure: async () => null,
     // Nothing to aggregate in this fixture, so the membership read is empty too — stated rather than
     // inherited, because `aggregateOfficialRun` reads it and not `listOutcomes` (review of #610).
     listOutcomeMembershipsForRun: async () => [],

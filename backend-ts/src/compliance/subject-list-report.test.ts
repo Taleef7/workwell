@@ -14,7 +14,7 @@ import { subjectListReportCsv, reportCsvHeaders } from "./subject-list-report-cs
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { SubjectList, SubjectListMember } from "../stores/subject-list-store.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
-import { subjectMembershipsVia } from "../test-support/memberships.ts";
+import { anyOutcomeVia, subjectMembershipsVia } from "../test-support/memberships.ts";
 
 const LIST: SubjectList = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -59,7 +59,10 @@ interface FakeOptions {
   measureIds?: string[];
 }
 
-function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureIds: string[] } {
+/** One membership read: which measure, and the subject set it was narrowed to (null = every row). */
+type MembershipRead = { measureId: string; subjectIds: string[] | null };
+
+function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureIds: string[]; membershipReads: MembershipRead[] } {
   const members = options.members ?? [
     { rawIdentifier: "pat-001", subjectId: "pat-001", resolution: "MATCHED" },
     { rawIdentifier: "pat-002", subjectId: "pat-002", resolution: "MATCHED" },
@@ -67,6 +70,7 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
   const runs = options.runs ?? [{ runId: "run-2027", startedAt: "2027-12-31T00:00:00.000Z", year: 2027 }];
   const cutoffs = [...(options.compactionCutoffs ?? [])];
   let pagesRead = 0;
+  const membershipReads: MembershipRead[] = [];
   const listOutcomes = async (runId: string, opts?: { measureId?: string; limit?: number; offset?: number }) => {
     const all = (options.rows ?? []).filter(
       (r) => r.runId === runId && (!opts?.measureId || r.measureId === opts.measureId),
@@ -100,12 +104,14 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
     },
     outcomes: {
       listOutcomes,
+      anyOutcomeForMeasure: anyOutcomeVia(listOutcomes),
       // The rows the report counts come from this read, so the race lands here: after the before-read
       // compaction check, before the after-read one.
-      listOutcomeSubjectMembershipsForRun: async (runId: string, measureId: string) => {
+      listOutcomeSubjectMembershipsForRun: async (runId: string, measureId: string, subjectIds?: readonly string[]) => {
         pagesRead += 1;
         if (options.intentOnFirstPage && pagesRead === 1) cutoffs.push(options.intentOnFirstPage);
-        return subjectMembershipsVia(listOutcomes)(runId, measureId);
+        membershipReads.push({ measureId, subjectIds: subjectIds === undefined ? null : [...subjectIds] });
+        return subjectMembershipsVia(listOutcomes)(runId, measureId, subjectIds);
       },
       listLatestPopulationRuns: async (measureIds: readonly string[]) =>
         runs
@@ -154,7 +160,7 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
         })),
     },
   };
-  return { deps, measureIds: options.measureIds ?? ["cms122"] };
+  return { deps, measureIds: options.measureIds ?? ["cms122"], membershipReads };
 }
 
 const runReport = async (options: FakeOptions, year = 2027) => {
@@ -178,6 +184,22 @@ test("the rates are computed over the LIST'S MEMBERS ONLY — a patient outside 
   assert.equal(entry.rates[0]!.denom, 2, "the non-member is not in the denominator");
   assert.equal(entry.rates[0]!.numer, 1);
   assert.equal(entry.rates[0]!.score, 0.5);
+});
+
+test("the report reads only its MEMBERS' rows from the store (#874)", async () => {
+  // At 20,000 subjects a full read per measure was 20,018 buffers against about 1,040 for the members'.
+  const { deps, measureIds, membershipReads } = fakeDeps({
+    rows: [
+      row("pat-001", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false })),
+      row("pat-999", official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false })),
+    ],
+  });
+  const result = await subjectListReport(deps, LIST.id, 2027, measureIds, () => "2027-01-06T00:00:00.000Z");
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    membershipReads.map((r) => ({ ...r, subjectIds: r.subjectIds && [...r.subjectIds].sort() })),
+    [{ measureId: "cms122", subjectIds: ["pat-001", "pat-002"] }],
+  );
 });
 
 test("a member the run never evaluated is REPORTED, never subtracted — and the counts reconcile", async () => {

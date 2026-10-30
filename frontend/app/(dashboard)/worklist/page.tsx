@@ -40,6 +40,7 @@ import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assigna
 import { payerFilterLabel, payerGroupButtonLabel, usePanelPayers } from "@/features/panel/use-panel-payers";
 import { usePanelAssignments } from "@/features/panel/use-panel-assignments";
 import { PanelsTab } from "@/features/panel/PanelsTab";
+import { LIST_FILTER_LABEL, ListFilterNote, listParam, useListFilter } from "@/features/subject-list/list-filter";
 
 type WorklistGap = {
   caseId: string;
@@ -220,6 +221,9 @@ export default function WorklistPage() {
   const outcomeFilter = searchParams.get("outcome")?.trim() ?? "";
   const measureFilter = searchParams.get("measureId")?.trim() ?? "";
   const searchFilter = searchParams.get("search")?.trim() ?? "";
+  // The ACO's attributed list (#874). Sent only by a seat the server accepts it from.
+  const { listId, refused: listRefused } = listParam(searchParams, user?.role);
+  const listFilter = useListFilter(listId, canManage);
   const payerFilter = useMemo(
     () => searchParams.getAll("payer").flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean),
     [searchParams],
@@ -389,6 +393,7 @@ export default function WorklistPage() {
   const listQuery = useCallback(
     (limit: number, offset: number) => {
       const params = new URLSearchParams({ status: statusView, limit: String(limit), offset: String(offset) });
+      if (listId) params.set("listId", listId);
       if (providerFilter) params.set("providerId", providerFilter);
       if (assigneeFilter) params.set("assignee", assigneeFilter);
       if (outcomeFilter) params.set("outcome", outcomeFilter);
@@ -405,7 +410,7 @@ export default function WorklistPage() {
       if (effectivePanel === "me") params.set("panel", "me");
       return params.toString();
     },
-    [statusView, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, siteId, from, to, payerFilter, effectivePanel],
+    [statusView, listId, providerFilter, assigneeFilter, outcomeFilter, measureFilter, searchFilter, siteId, from, to, payerFilter, effectivePanel],
   );
 
   const load = useCallback(async () => {
@@ -581,6 +586,7 @@ export default function WorklistPage() {
     // Every URL-backed narrowing is named here, because on a phone these chips (and the count on the
     // folded Filters button) are all that says the list is constrained: a link to ?status=staff_closed,
     // ?search= or ?measureId= otherwise opened a filtered list under a plain "Filters" (#700, Codex).
+    if (listId) chips.push(`${LIST_FILTER_LABEL}: ${listFilter.chipName}`);
     if (statusView === "staff_closed") chips.push("Work: Closed by staff");
     if (measureFilter) chips.push(`Measure: ${labelForId(measureFilter)}`);
     if (searchFilter) chips.push(`Search: ${searchFilter}`);
@@ -599,7 +605,7 @@ export default function WorklistPage() {
     if (assigneeFilter) chips.push(`Assignee: ${assigneeFilter}`);
     if (outcomeFilter) chips.push(`Status: ${labelFor(OUTCOME_LABELS, outcomeFilter)}`);
     return chips;
-  }, [statusView, measureFilter, labelForId, searchFilter, effectivePanel, myPanels, providerFilter, providerNameFor, payerFilter, payerNameFor, assigneeFilter, outcomeFilter]);
+  }, [listId, listFilter.chipName, statusView, measureFilter, labelForId, searchFilter, effectivePanel, myPanels, providerFilter, providerNameFor, payerFilter, payerNameFor, assigneeFilter, outcomeFilter]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -633,7 +639,7 @@ export default function WorklistPage() {
             work list resolves a staff member's panel on the server), so from My panel the link says it
             widens to the whole practice rather than silently doing so (#742 review). */}
         <Link
-          href={casesHref({ measureId: measureFilter, outcome: outcomeFilter, site: siteId, providerId: providerFilter, search: searchFilter, staffClosed: statusView === "staff_closed" })}
+          href={casesHref({ listId, measureId: measureFilter, outcome: outcomeFilter, site: siteId, providerId: providerFilter, search: searchFilter, staffClosed: statusView === "staff_closed" })}
           className="text-sm font-medium text-primary-700 hover:underline dark:text-primary-300"
         >
           {effectivePanel === "me" ? "View the whole practice by gap →" : "View by gap instead →"}
@@ -693,6 +699,16 @@ export default function WorklistPage() {
       </button>
       <div id="worklist-filters" className={`${filtersOpen ? "flex" : "hidden"} flex-col gap-3 md:flex`}>
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+        {canManage ? (
+          <Select
+            label={LIST_FILTER_LABEL}
+            size="sm"
+            className="w-80"
+            value={listId}
+            onValueChange={(v) => setParams((p) => (v ? p.set("listId", v) : p.delete("listId")))}
+            options={listFilter.options}
+          />
+        ) : null}
         <Select
           label="View"
           size="sm"
@@ -828,6 +844,13 @@ export default function WorklistPage() {
         </fieldset>
       ) : null}
       </div>
+
+      <ListFilterNote
+        listId={listId}
+        refused={listRefused}
+        filter={listFilter}
+        onChange={(v) => setParams((p) => (v ? p.set("listId", v) : p.delete("listId")))}
+      />
 
       {activeChips.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 text-xs">

@@ -291,7 +291,9 @@ export interface OutcomeStore {
        *
        * Unordered is only correct where the ANSWER does not depend on order, which is why this is an
        * opt-in on the read rather than a change to the default. A caller that pages MUST keep the
-       * ordering: paging an unordered relation may repeat or skip rows between pages.
+       * ordering: paging an unordered relation may repeat or skip rows between pages. So the stores
+       * IGNORE this option on any read with a `limit` or `offset` — and a one-row probe is such a read,
+       * which is why "any row of this measure" is {@link anyOutcomeForMeasure}, not `limit: 1` here.
        *
        * A test double that ignores this option returns the same rows in some order and every folded
        * answer is unchanged — so the option cannot make a fake disagree with the stores.
@@ -299,6 +301,19 @@ export interface OutcomeStore {
       order?: "none";
     },
   ): Promise<OutcomeRecord[]>;
+  /**
+   * Any ONE of the run's rows for this measure, or null when the run holds none. No particular one.
+   *
+   * For the readers that ask "does this run hold this measure?" or read a value that every row of a
+   * (run, measure) carries (#853's flag). `listOutcomes(run, { measureId, limit: 1 })` is not that read:
+   * a paged read keeps its `(evaluated_at, id)` ordering, and with `LIMIT 1` the Postgres planner walks
+   * `(measure_id, evaluated_at)` from the measure's OLDEST row through every earlier run, filtering on
+   * the run (#874). At 20 nightly runs of 20,000 subjects it discarded 380,000 rows to return one
+   * (382,632 buffers, about 1 s warm), and the attributed-list report's six probes were 5-6 s of its 7 s;
+   * on Maui the report ran past the 30 s statement timeout. Unordered, `(run_id, measure_id)` answers in
+   * one index lookup (4 buffers).
+   */
+  anyOutcomeForMeasure(runId: string, measureId: string): Promise<OutcomeRecord | null>;
   /**
    * One measure's rows of one run, carrying ONLY what a rate aggregation reads — the population
    * memberships and the evaluation-error marker. One unordered statement, never paged.
@@ -335,10 +350,16 @@ export interface OutcomeStore {
    * 0.14 s for this). The evidence is narrowed exactly as {@link listOutcomeMembershipsForRun}'s is.
    * Rows whose narrowed evidence is equal MAY share one object (the ceiling builds each distinct one once):
    * a caller must not mutate it.
+   *
+   * `subjectIds` narrows the read to those subjects (#874): the attributed-list report counts a few hundred
+   * members of a 20,000-subject run, and reading only theirs took 1,040 buffers where every row took
+   * 20,018. One array bind on the ceiling; slices of the floor's bind budget on the floor. An EMPTY set
+   * matches nobody, as `listOutcomes`' does.
    */
   listOutcomeSubjectMembershipsForRun(
     runId: string,
     measureId: string,
+    subjectIds?: readonly string[],
   ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**

@@ -969,16 +969,17 @@ export async function programTrend(
  * a trend-memo miss: the computed points are what the memo keeps.
  */
 async function trustedRunPoints(
-  outcomes: Pick<OutcomeStore, "listOutcomes">,
+  outcomes: Pick<OutcomeStore, "anyOutcomeForMeasure">,
   measureId: string,
   groups: RunGroup[],
 ): Promise<ProgramTrendPoint[]> {
   const trusted: ProgramTrendPoint[] = [];
   // One at a time: a window can hold dozens of runs, and fanning the probes out at once is how a request
-  // drains the connection pool.
+  // drains the connection pool. Any row of the run answers; a `limit: 1` read kept its ordering, which
+  // walked every earlier run's rows of the measure to return one (#874).
   for (const point of runPointsOf(groups)) {
-    const [row] = await outcomes.listOutcomes(point.runId, { measureId, limit: 1, offset: 0, order: "none" });
-    if (row === undefined || dataInsufficientChecks(row.evidence) === null) trusted.push(point);
+    const row = await outcomes.anyOutcomeForMeasure(point.runId, measureId);
+    if (row === null || dataInsufficientChecks(row.evidence) === null) trusted.push(point);
   }
   return trusted;
 }

@@ -214,6 +214,17 @@ export class PgOutcomeStore implements OutcomeStore {
     return rows.map(toRecord);
   }
 
+  async anyOutcomeForMeasure(runId: string, measureId: string): Promise<OutcomeRecord | null> {
+    if (!isUuid(runId)) return null;
+    // No ORDER BY, deliberately: see the interface for the index walk an ordered LIMIT 1 takes.
+    const { rows } = await this.pool.query<OutcomeRow>(
+      `SELECT id, run_id, subject_id, measure_id, evaluation_period, status, evidence_json, evaluated_at, out_of_population
+         FROM ${T} WHERE run_id = $1 AND measure_id = $2 LIMIT 1`,
+      [runId, measureId],
+    );
+    return rows[0] ? toRecord(rows[0]) : null;
+  }
+
   async listOutcomeMembershipsForRun(
     runId: string,
     measureId: string,
@@ -243,8 +254,9 @@ export class PgOutcomeStore implements OutcomeStore {
   async listOutcomeSubjectMembershipsForRun(
     runId: string,
     measureId: string,
+    subjectIds?: readonly string[],
   ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>> {
-    if (!isUuid(runId)) return [];
+    if (!isUuid(runId) || subjectIds?.length === 0) return [];
     // The membership projection's narrowing, with the build moved out of the statement. Within one
     // (run, measure) the three extracted values take a handful of distinct values (the artifact identity
     // and one of a few population vectors: 4 for CMS125, 10 for CMS137 with its strata, on a pilot-shaped
@@ -260,6 +272,10 @@ export class PgOutcomeStore implements OutcomeStore {
     // every depth, inside arrays too; a null array element stays), and an absent or null value leaves its
     // key out, as the strip did of the built object's. No ORDER BY: the caller keeps the newest row per
     // subject by comparing, and orders what it serves itself.
+    //
+    // A subject set is ONE array bind, as `listOutcomes`' is: the planner ANDs the subject index with
+    // `(run_id, measure_id)` (#874). `= ANY('{}')` is false for every row, so an empty set matches nobody.
+    const members = subjectIds !== undefined ? ` AND subject_id = ANY($3::text[])` : "";
     const { rows } = await this.pool.query<{
       id: string;
       subject_id: string;
@@ -274,8 +290,8 @@ export class PgOutcomeStore implements OutcomeStore {
                     evidence_json -> 'official' AS official,
                     evidence_json -> 'evaluationError' AS evaluation_error,
                     evidence_json -> 'dataInsufficient' AS data_insufficient
-               FROM ${T} WHERE run_id = $1 AND measure_id = $2`,
-      values: [runId, measureId],
+               FROM ${T} WHERE run_id = $1 AND measure_id = $2${members}`,
+      values: subjectIds !== undefined ? [runId, measureId, [...subjectIds]] : [runId, measureId],
       types: JSON_AS_TEXT,
     });
     const narrowed = new Map<string, Record<string, unknown>>();

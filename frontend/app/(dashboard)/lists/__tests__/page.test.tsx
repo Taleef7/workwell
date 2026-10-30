@@ -7,7 +7,7 @@
  * and the report cannot be asked for without a measurement year.
  */
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { setSubject, subject } from "@/test/mocks/terminology";
@@ -321,4 +321,64 @@ it("a measure refused for thin data says so, never that it had no run (#853)", a
   expect(await screen.findByTestId("list-report-data-insufficient")).toHaveTextContent("cms165 cannot be reported for 2027");
   expect(screen.getByText("Refused — the run's data was too thin to trust")).toBeInTheDocument();
   expect(screen.queryByText("No completed population run for this year")).toBeNull();
+});
+
+it("an opened list links to the three screens that work its gaps, and its report rows to each measure's (#874)", async () => {
+  get.mockImplementation(async (path: string) => {
+    if (path === "/api/subject-lists") return [LIST];
+    if (path === "/api/measures") return [];
+    if (path.includes("/report")) {
+      return {
+        measurementYear: 2027,
+        generatedAt: "2027-06-01T00:00:00.000Z",
+        members: { matched: 2, notFound: 0, ambiguous: 0, total: 2 },
+        compactedMeasures: [],
+        measures: [{
+          measureId: "cms125", ecqmId: "CMS125FHIR", runId: "run-1",
+          measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+          compactionStatus: "complete", matchedSubjects: 2, distinctSubjectsSeen: 2, missingFromRun: 0,
+          rates: [{ label: null, ipp: 2, denom: 2, denex: 0, denexcep: 0, numer: 1, effectiveDenominator: 2, score: 0.5 }],
+        }],
+      };
+    }
+    return [];
+  });
+  render(<ListsPage />);
+  await screen.findByText("ACO Q3 attribution");
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  const nav = await screen.findByRole("navigation", { name: "Open this list on" });
+  const href = (name: string) => within(nav).getByRole("link", { name }).getAttribute("href");
+  // The work list opens the whole practice: "My panel" would show only the members on it.
+  expect(href("Work list")).toBe(`/worklist?listId=${LIST.id}&panel=all`);
+  expect(href("Roster")).toBe(`/compliance?listId=${LIST.id}`);
+  expect(href("Cases")).toBe(`/cases?listId=${LIST.id}`);
+
+  await userEvent.click(screen.getByRole("button", { name: "Compute" }));
+  const measure = await screen.findByRole("link", { name: "cms125" });
+  expect(measure).toHaveAttribute("href", `/worklist?listId=${LIST.id}&measureId=cms125&panel=all`);
+});
+
+it("the members table names the PCP and the insurance, never a raw id or typology code (#874)", async () => {
+  get.mockImplementation(async (path: string) => {
+    if (path === "/api/subject-lists") return [LIST];
+    if (path === "/api/providers") return [{ id: "maui-prov-029", name: "Dr. Ana Kealoha", location: "Kahului" }];
+    if (path === "/api/payers") return [{ code: "11", name: "Medicare Advantage", group: "1", groupName: "Medicare", subjectCount: 2900 }];
+    return [];
+  });
+  getWithHeaders.mockResolvedValue({
+    data: [
+      { rawIdentifier: "pat-00079", subjectId: "pat-00079", resolution: "MATCHED", subjectName: "Lisa Carter", providerId: "maui-prov-029", payer: "11" },
+      // An id the directory does not name keeps its raw value rather than a blank.
+      { rawIdentifier: "pat-00158", subjectId: "pat-00158", resolution: "MATCHED", subjectName: "Omar Reyes", providerId: "maui-prov-999", payer: "99" },
+    ],
+    headers: new Headers({ "X-Total-Count": "2" }),
+  });
+  render(<ListsPage />);
+  await screen.findByText("ACO Q3 attribution");
+  await userEvent.click(screen.getByRole("button", { name: "Open" }));
+  const named = await screen.findByText("Dr. Ana Kealoha");
+  expect(named).toHaveAttribute("title", "maui-prov-029");
+  expect(screen.getByText("Medicare Advantage")).toHaveAttribute("title", "11");
+  expect(screen.getByText("maui-prov-999")).toBeInTheDocument();
+  expect(screen.getByText("99")).toBeInTheDocument();
 });

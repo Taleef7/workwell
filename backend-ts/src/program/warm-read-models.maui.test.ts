@@ -28,6 +28,7 @@ const script = `
       listOutcomesWithRun: async () => { reads++; return rows; },
       listLatestPopulationRuns: latestRunsFromRows(rows),
       listOutcomes: async () => [],
+      anyOutcomeForMeasure: async () => null,
       listOutcomeMembershipsForRun: async () => [],
       aggregateScaleRun: async () => [],
     },

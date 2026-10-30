@@ -57,7 +57,7 @@ describe("cases export carries the filters the list is showing", () => {
   it("sends every list filter, minus paging", async () => {
     globals.current = { siteId: "plant-a", from: "2026-01-01", to: "2026-06-30" };
     navHolder.current.setUrl(
-      "/cases?status=open&measureId=cms125&outcome=OVERDUE&providerId=maui-prov-012&search=omar",
+      "/cases?status=open&listId=list-q3&measureId=cms125&outcome=OVERDUE&providerId=maui-prov-012&search=omar",
     );
     render(<CasesPage />);
     await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
@@ -74,9 +74,9 @@ describe("cases export carries the filters the list is showing", () => {
     const exportedFilters = [...exported.entries()].filter(([k]) => k !== "format").sort();
     expect(exportedFilters).toEqual(listedFilters);
 
-    // Not vacuous: the six that used to be dropped are actually present.
+    // Not vacuous: the six that used to be dropped are actually present, and the attributed list (#874).
     for (const key of ["priority", "assignee"]) expect(exported.has(key)).toBe(false); // unset in this test
-    for (const key of ["site", "from", "to", "outcome", "search", "status", "measureId", "providerId"]) {
+    for (const key of ["site", "from", "to", "outcome", "search", "status", "measureId", "providerId", "listId"]) {
       expect(exported.has(key)).toBe(true);
     }
     // And the period SCOPE, which used to be a server-side default present in neither string and was

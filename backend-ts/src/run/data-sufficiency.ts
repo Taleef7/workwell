@@ -268,13 +268,14 @@ export function dataInsufficientChecks(evidence: unknown): SufficiencyCheck[] | 
  * read. One measure at a time, one row each: the flag is on every row of a thin measure.
  */
 export async function thinMeasuresOfRun(
-  outcomes: Pick<OutcomeStore, "distinctMeasuresForRun" | "listOutcomes">,
+  outcomes: Pick<OutcomeStore, "distinctMeasuresForRun" | "anyOutcomeForMeasure">,
   run: { id: string; status: string },
 ): Promise<string[]> {
   if (run.status !== "PARTIAL_FAILURE") return [];
   const thin: string[] = [];
   for (const measureId of await outcomes.distinctMeasuresForRun(run.id, 50)) {
-    const [row] = await outcomes.listOutcomes(run.id, { measureId, limit: 1, offset: 0, order: "none" });
+    // Any row: an ordered one-row read walked every earlier run's rows of the measure (#874).
+    const row = await outcomes.anyOutcomeForMeasure(run.id, measureId);
     if (row && dataInsufficientChecks(row.evidence) !== null) thin.push(measureId);
   }
   return thin.sort();

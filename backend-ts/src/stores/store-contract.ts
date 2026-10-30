@@ -1302,6 +1302,64 @@ export function outcomeStoreContract(
     assert.deepEqual(bySubject(4), { evaluationError: "engine threw" });
   });
 
+  // #874: the attributed-list report reads only its members' rows. Narrowed, the read is the full read
+  // restricted to those subjects, row for row; an empty set and an absent id read nothing; and a set past
+  // the floor's bind budget (500) is read whole.
+  test(`[${label}] listOutcomeSubjectMembershipsForRun narrows to a subject set, exactly`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const other = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const official = (numer: boolean) => ({ official: { ecqmId: "122FHIR", populationResults: { ipp: true, denom: true, numer } } });
+    const subjects = Array.from({ length: 620 }, (_, i) => `emp-${String(i).padStart(4, "0")}`);
+    await outcomeStore.recordOutcomes([
+      ...subjects.map((subjectId, i) => ({
+        runId: run.id, subjectId, measureId: "audiogram", status: i % 2 ? "COMPLIANT" : "OVERDUE",
+        evaluatedAt: new Date(Date.UTC(2026, 5, 1, 8, 0, i)).toISOString(), evidence: official(i % 2 === 1),
+      })),
+      // A second row for one member (a run can hold two), another measure's row and another run's row.
+      { runId: run.id, subjectId: "emp-0003", measureId: "audiogram", status: "OVERDUE", evaluatedAt: "2026-06-02T08:00:00.000Z", evidence: official(false) },
+      { runId: run.id, subjectId: "emp-0003", measureId: "hazwoper", status: "COMPLIANT", evidence: official(true) },
+      { runId: other.id, subjectId: "emp-0003", measureId: "audiogram", status: "COMPLIANT", evidence: official(true) },
+    ]);
+    const full = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram");
+    const key = (r: { id: string; subjectId: string; status: string; evidence: unknown }) => `${r.id} ${r.subjectId} ${r.status} ${JSON.stringify(r.evidence)}`;
+    const restricted = (ids: readonly string[]) => full.filter((r) => ids.includes(r.subjectId)).map(key).sort();
+
+    const few = ["emp-0003", "emp-0010", "nobody-here"];
+    const narrowed = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram", few);
+    assert.deepEqual(narrowed.map(key).sort(), restricted(few), "members' rows only, both of a member's rows, nothing for an absent id");
+    assert.equal(narrowed.length, 3);
+
+    // Past the floor's 500-id slice, and with an id repeated across slices: still each row once.
+    const many = [...subjects.slice(0, 560), "emp-0003"];
+    const wide = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram", many);
+    assert.deepEqual(wide.map(key).sort(), restricted(many));
+    assert.equal(wide.length, 561, "560 members, one with a second row");
+
+    assert.deepEqual(await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram", []), [], "an empty set matches nobody");
+    assert.equal(full.length, 621, "the unnarrowed read is unchanged");
+  });
+
+  // #874: "does this run hold this measure?" reads one row, any row, of that run and that measure.
+  test(`[${label}] anyOutcomeForMeasure returns a row of that run and measure, or null`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const older = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    await outcomeStore.recordOutcomes([
+      { runId: older.id, subjectId: "emp-001", measureId: "audiogram", status: "COMPLIANT", evidence: { official: { ecqmId: "older" } } },
+      { runId: run.id, subjectId: "emp-001", measureId: "audiogram", status: "OVERDUE", evidence: { official: { ecqmId: "this" } } },
+      { runId: run.id, subjectId: "emp-002", measureId: "audiogram", status: "OVERDUE", evidence: { official: { ecqmId: "this" } } },
+      { runId: run.id, subjectId: "emp-001", measureId: "hazwoper", status: "COMPLIANT", evidence: { official: { ecqmId: "other measure" } } },
+    ]);
+    const row = await outcomeStore.anyOutcomeForMeasure(run.id, "audiogram");
+    assert.ok(row, "the run holds the measure");
+    assert.equal(row.runId, run.id);
+    assert.equal(row.measureId, "audiogram");
+    assert.deepEqual(row.evidence, { official: { ecqmId: "this" } }, "the whole evidence, as listOutcomes returns it");
+    assert.equal(await outcomeStore.anyOutcomeForMeasure(run.id, "never-run"), null);
+    assert.equal(await outcomeStore.anyOutcomeForMeasure("00000000-0000-4000-8000-000000000000", "audiogram"), null);
+  });
+
   /**
    * The run detail's identity-only read (#769): which logics scored each measure's evaluated rows.
    *
