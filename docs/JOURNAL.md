@@ -16,6 +16,9 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   - **Owner decisions:** the guarantee is the scorecard's only, so the roster, Cases and the hierarchy rollup stay
     practice-wide for every signed-in role, as before. Changing the seat's provider is a deploy.
   - New read-only Maui e2e spec `clinician.spec.ts`.
+  - Live, the first scorecard load after the deploy timed out at 60 s and showed the browser's "Failed to fetch"
+    with no way back but a reload. The clinician's scorecard now says it didn't load (no answer, or a 5xx such as
+    a proxy's timeout page) and offers Retry; a 4xx still shows the server's message.
 
 ## 2026-10-29
 
