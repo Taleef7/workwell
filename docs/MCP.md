@@ -211,6 +211,8 @@ WorkWell is also an OAuth 2.1 authorization server for its MCP endpoint, as MCP 
   or `null` for authored CQL, an errored row or no row. Their `measureVersion` / `measure_version` /
   `version` is that row's version: `""` for an errored or missing row, never the authored library's for a
   row CMS's artifact scored. On a `staff_closed` row `logic` describes the frozen status, not `live_*`.
+- **No tool returns an outcome's `cqlFacts`** (#875, the recorded CQL define values): `get_case` drops
+  them from `evidenceJson` and `evidence_payload`, and no other tool returns raw evidence (AI_GUARDRAILS §6).
 - `list_runs` `measure_version` is the run read model's, as on the run detail and the runs CSV.
 
 ## Tool inventory (server 3.0.0)

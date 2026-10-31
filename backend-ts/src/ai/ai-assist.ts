@@ -12,6 +12,7 @@
 import type { AppendAuditInput, CaseEventStore } from "../stores/case-event-store.ts";
 import { DEPLOYMENT_PROFILE, subjectNoun, type SubjectTerm } from "../config/deployment-profile.ts";
 import type { ChatFn } from "./openai-chat.ts";
+import { withoutCqlFacts } from "../wiring/official-facts.ts";
 
 export interface AiDeps {
   /** OpenAI chat call (throws on failure → deterministic fallback). */
@@ -191,7 +192,8 @@ export function buildExplainUserPrompt(currentOutcomeStatus: string, evidenceJso
   const nonce = crypto.randomUUID();
   const begin = `-----BEGIN EVIDENCE JSON ${nonce}-----`;
   const end = `-----END EVIDENCE JSON ${nonce}-----`;
-  let evidence = JSON.stringify(evidenceJson ?? {});
+  // Never the recorded CQL define values (#875): chart values reach no AI client without an owner decision.
+  let evidence = JSON.stringify(withoutCqlFacts(evidenceJson ?? {}));
   if (evidence.length > MAX_EVIDENCE_CHARS) {
     evidence = `${evidence.slice(0, MAX_EVIDENCE_CHARS)}…[truncated ${evidence.length - MAX_EVIDENCE_CHARS} chars]`;
   }

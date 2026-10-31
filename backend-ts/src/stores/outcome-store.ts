@@ -53,6 +53,14 @@ export interface OutcomeRecord {
 }
 
 /**
+ * A row of `listOutcomeSubjectMembershipsForRun`: identity, status and the NARROWED evidence, plus the
+ * row's `evidence_json.cqlFacts` when the caller asked for it and the row has any.
+ */
+export type OutcomeSubjectMembership = Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence"> & {
+  cqlFacts?: unknown;
+};
+
+/**
  * Per-subject outcome history row for a measure: status + period + evidence.
  *
  * The only consumer since 2026-09-22 is `run/backfill-trend-history.ts`, a tool path. The risk outlook
@@ -355,12 +363,17 @@ export interface OutcomeStore {
    * members of a 20,000-subject run, and reading only theirs took 1,040 buffers where every row took
    * 20,018. One array bind on the ceiling; slices of the floor's bind budget on the floor. An EMPTY set
    * matches nobody, as `listOutcomes`' does.
+   *
+   * `opts.cqlFacts` also returns each row's `evidence_json.cqlFacts` (#875) as its own `cqlFacts` field,
+   * ABSENT when the row has none, and never inside `evidence`: every row's facts differ, so folding them in
+   * would give each row its own narrowed object. Only the report's CSV asks for it.
    */
   listOutcomeSubjectMembershipsForRun(
     runId: string,
     measureId: string,
     subjectIds?: readonly string[],
-  ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>>;
+    opts?: { cqlFacts?: boolean },
+  ): Promise<OutcomeSubjectMembership[]>;
   getOutcomeById(id: string): Promise<OutcomeRecord | null>;
   /**
    * Delete outcome rows older than `cutoff`, KEEPING four things (ADR-073, amended by ADR-077 d3):

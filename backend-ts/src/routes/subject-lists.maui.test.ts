@@ -99,7 +99,8 @@ const refusalScript = `
     { runId: older.id, subjectId: "pat-001", measureId: "cms125", status: "COMPLIANT", evidence: evidence() },
     { runId: newer.id, subjectId: "pat-001", measureId: "cms122", status: "COMPLIANT",
       evidence: evidence({ dataInsufficient: { checks: ["encounterTypeCoded"] } }) },
-    { runId: newer.id, subjectId: "pat-001", measureId: "cms130", status: "COMPLIANT", evidence: evidence() },
+    { runId: newer.id, subjectId: "pat-001", measureId: "cms130", status: "COMPLIANT",
+      evidence: evidence({ cqlFacts: { spec: 1, values: [{ define: "Colonoscopy Performed", value: "Procedure/col-1" }] } }) },
   ]);
   // A compaction pass whose cutoff falls between the two runs: the older run's rows may be incomplete.
   await stores.events.appendAudit({ eventType: COMPACTION_INTENT_EVENT, entityType: "outcomes", entityId: "pass-1",
@@ -132,4 +133,9 @@ test("Maui profile — the report CSV names its compacted and its thin measures 
   const measureCol = lines[0]!.split(",").indexOf("measureId");
   const measures = new Set(lines.slice(1).map((l) => l.split(",")[measureCol]));
   assert.deepEqual([...measures], ["cms130"], "no rows for a refused measure");
+  // #875: the route asks its read for the recorded define values on a CSV, so the row reads what CQL found.
+  const header = lines[0]!.split(",");
+  const row = lines[1]!.split(",");
+  assert.equal(row[header.indexOf("evidenceStatus")], "NUMERATOR_EVIDENCE");
+  assert.equal(row[header.indexOf("evidenceDetail")], "Colonoscopy Performed: Procedure/col-1");
 });

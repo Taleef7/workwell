@@ -146,7 +146,12 @@ no single window (#650), so no screen, card, CSV or AI fallback states one.
 `official:<population>` or multi-rate `official:<Rate label>:<population>`); `official` when
 official-routed (`populationResults`, read by MeasureReport/QRDA; multi-rate adds `rates`, stratified adds
 `strata` of `{ id, code, result, appliesResult }` keyed by `Measure.group.stratifier.id`, both otherwise
-absent); `qrda1Import` on QRDA-I imports (finalize requires it on every outcome). An outcome scored by a
+absent); `qrda1Import` on QRDA-I imports (finalize requires it on every outcome); `cqlFacts: { spec,
+values: [{ define, value }] }` (#875) on an official outcome scored on some rate (initial population and
+denominator, no exclusion or exception; never an errored row): the non-null values of the defines
+`wiring/official-facts.ts` names for its logic, as CQL computed them, rendered as text (≤600 bytes each; a
+FHIR resource without its References, notes or identifiers), and `values: []` when CQL found nothing. Top-level, never in `official`; the AI explain prompt and MCP never see
+it (`withoutCqlFacts`). An outcome scored by a
 WorkWell translation (decision 3) adds `official.kind: "derived"`, `label`, `url` and `derivedFrom`, and its
 `ecqmId` is `null`: read `kind` before falling back to any CMS identity. QRDA I/III refuse such a run
 (422 `derived_logic_not_reportable`); a run whose evaluated rows were scored by more than one logic (CMS's
@@ -268,7 +273,8 @@ Columns (pinned by a test; subject pair per `subjectHeaders`, TWH `employeeExter
 `listId, listRevision, generatedAt, rawIdentifier, patientExternalId, patientName, resolution,
 rowStatus, measureId, ecqmId, measureVersion, runId, measurementPeriodStart, measurementPeriodEnd,
 evaluatedAt, rate, initialPopulation, denominator, denominatorExclusion, denominatorException,
-numerator, status, outOfPopulation, evaluationError, providerId, payer, executedLogic`
+numerator, status, outOfPopulation, evaluationError, providerId, payer, executedLogic, evidenceStatus,
+evidenceDate, evidenceDateSource, evidenceDetail`
 
 - `measurementYear` is REQUIRED. Per measure: the newest reportable population run whose own measurement
 period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date. A seeded run
@@ -305,6 +311,17 @@ never a truncated 200. A data-insufficient measure (#853) is refused the same wa
 translation's label (its `ecqmId` empty) otherwise; filled wherever the measure columns are. A selected
 run whose counted rows were scored by more than one logic answers **409 `mixed_logic`**, as a run mixing
 periods answers 409 `period_mismatch`.
+- The four `evidence*` columns were appended (#875), per rate, from that rate's flags and the row's
+`cqlFacts` only (`evidenceOf`); empty on `MISSING_FROM_RUN` and `NOT_MATCHED` rows. `evidenceStatus`, first
+rule that applies: not scored on the rate, or out of population, `NOT_APPLICABLE`; the logic names no define
+for the rate (CMS125; CMS137's Engagement rate) `NOT_EXPOSED_BY_LOGIC`; no `cqlFacts`, another spec version, or
+no recorded logic (a run before #875) `NOT_RECORDED_BY_RUN`; CMS122 (inverse): "Has No Record Of Glycemic Status
+Assessment" true `NONE_FOUND`, else numerator met `NUMERATOR_EVIDENCE`, else `LATEST_NOT_QUALIFYING`; every
+other measure: a value found is `NUMERATOR_EVIDENCE` (numerator met) or `LATEST_NOT_QUALIFYING`, none found
+`NONE_FOUND`, and a numerator met with none `NOT_EXPOSED_BY_LOGIC`. `evidenceDate` is the spec's one Date
+define (CMS122, CMS165), only on the two found statuses; `evidenceDateSource` is `<define> (<executedLogic>)`;
+`evidenceDetail` is every recorded value as `define: value`, joined ` || `, on the found and `NONE_FOUND`
+statuses. Source and detail pass through `csvTextCell`. The report's JSON never carries the facts; only its CSV reads them.
 
 ### 6.7 `?listId=` on the filtered surfaces (ADR-082)
 Restricts the roster, cases route, work list, §6.2/§6.3 CSVs and MCP `list_noncompliant` to a list's

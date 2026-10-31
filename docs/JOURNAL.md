@@ -7,6 +7,22 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-10-30
 
+- **The list report says what CQL found for each patient: the result and its date (#875).** fqm already
+  computes every define. A run now keeps the values of a few named ones per measure as
+  `evidence_json.cqlFacts`, rendered as text where they are computed, for patients the measure scores. The
+  report CSV gains `evidenceStatus`, `evidenceDate`, `evidenceDateSource` and `evidenceDetail` (§6.6). The
+  date comes from CMS122's and CMS165's own date defines. CMS2, CMS130 and CMS137 show their values verbatim.
+  CMS125 says its logic exposes no such define (#876 adds one for 2027). Rows recorded before this say
+  `NOT_RECORDED_BY_RUN`.
+  - **Gate:** on a local 20k run, the facts add about 100-400 bytes per fact-bearing row. The scorecard, run
+    aggregate and scoring-logic reads stay within 2-7%, against an A/A noise floor of about 2%. A first
+    measurement showed 15-30% only because the loader copied pre-compressed values, a measurement artifact.
+    A 500-patient batch evaluates within noise of a batch that records nothing (−5% to +1.4%), since fqm
+    computes every define either way; only patients in an initial population are rendered.
+  - The renderer leaves out References however stated (an identifier or a name alone), and writes
+    well-formed, one-line text. The report CSV's file name carries the day it was generated.
+  - Kept out of the AI explain prompt and MCP (AI_GUARDRAILS §6). The MADiE end-to-end test checks the
+    status of every deck patient's rates.
 - **The ACO's attributed list on the work screens, and its report no longer times out live (#874).**
   - **The timeout:** on Maui the report ran past the 30 s statement limit. Measured locally at 2.4M rows, most
     of its time was choosing each measure's run: a one-row read that still sorted by time, so Postgres walked
