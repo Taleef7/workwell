@@ -17,6 +17,7 @@ import type {
   OutcomeStatusCount,
   MeasureScanOptions,
   ScoringIdentityRow,
+  OutcomeSubjectMembership,
 } from "../outcome-store.ts";
 import { LATEST_RUN_PROBE_BUDGET, SCORING_IDENTITY_KEYS, normalizeScoringIdentityRows, scoringIdentityOf } from "../outcome-store.ts";
 import { probeCacheFor, type ProbeCache } from "../probe-cache.ts";
@@ -282,7 +283,8 @@ export class SqliteOutcomeStore implements OutcomeStore {
     runId: string,
     measureId: string,
     subjectIds?: readonly string[],
-  ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>> {
+    opts?: { cqlFacts?: boolean },
+  ): Promise<OutcomeSubjectMembership[]> {
     type Row = { id: string; subject_id: string; evaluated_at: string; out_of_population: number | null; status: string; evidence_json: string };
     const select = `SELECT id, subject_id, evaluated_at, out_of_population, status, evidence_json FROM outcomes WHERE run_id = ? AND measure_id = ?`;
     let results: Row[] = [];
@@ -303,14 +305,19 @@ export class SqliteOutcomeStore implements OutcomeStore {
         results = results.concat(sliced ?? []);
       }
     }
-    return results.map((r) => ({
-      id: r.id,
-      subjectId: r.subject_id,
-      evaluatedAt: r.evaluated_at,
-      outOfPopulation: boolOrUndefined(r.out_of_population),
-      status: r.status,
-      evidence: narrowedEvidence(r.evidence_json),
-    }));
+    return results.map((r) => {
+      // The floor parses the whole text either way; the facts ride beside the narrowed evidence, as on the ceiling.
+      const cqlFacts: unknown = opts?.cqlFacts ? ((JSON.parse(r.evidence_json) as { cqlFacts?: unknown } | null)?.cqlFacts ?? null) : null;
+      return {
+        id: r.id,
+        subjectId: r.subject_id,
+        evaluatedAt: r.evaluated_at,
+        outOfPopulation: boolOrUndefined(r.out_of_population),
+        status: r.status,
+        evidence: narrowedEvidence(r.evidence_json),
+        ...(cqlFacts !== null ? { cqlFacts } : {}),
+      };
+    });
   }
 
   async distinctMeasuresForRun(runId: string, limit = 2): Promise<string[]> {

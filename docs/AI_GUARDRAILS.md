@@ -97,6 +97,9 @@ All fallback branches keep core workflows functional and do not mutate complianc
 - Persisted AI data is limited to:
   - user-visible transient response payloads,
   - audit metadata proving invocation and fallback behavior.
+- An official outcome's `evidence_json.cqlFacts` (#875: chart values such as dates, readings and codings)
+  is given to no AI client: the explain prompt and MCP `get_case` drop it (`withoutCqlFacts`). Giving it to
+  one is an owner decision. Staff read it on the case page and in the list report's CSV.
 
 ## 7) Human-in-the-Loop Contract
 The following actions remain explicitly human-controlled:

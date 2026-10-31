@@ -113,6 +113,42 @@ test("where no member was evaluated, a narrowed read still declares the RUN's ra
   assert.deepEqual(reads, [["b"], undefined], "the members, then the run in full for its rate count");
 });
 
+test("#875: facts are read only when asked, held on the newest kept row, and never by the run-wide fallback", async () => {
+  const facts = (date: string) => ({ spec: 1, values: [{ define: "First SUD Episode During Measurement Period", value: date }] });
+  const rows = [
+    row("a", { ...oneRate(true), cqlFacts: facts("old") }, { evaluatedAt: "2027-06-01T00:00:00.000Z" }),
+    row("a", { ...oneRate(false), cqlFacts: facts("new") }, { evaluatedAt: "2027-06-02T00:00:00.000Z" }),
+    row("b", oneRate(true)),
+    row("c", { ...oneRate(true), cqlFacts: { spec: 1, values: [{ define: 7 }] } }),
+  ];
+  const optsSeen: Array<{ cqlFacts?: boolean } | undefined> = [];
+  const base = store(rows);
+  const outcomes: Pick<OutcomeStore, "listOutcomeSubjectMembershipsForRun"> = {
+    listOutcomeSubjectMembershipsForRun: async (runId, measureId, subjectIds, opts) => {
+      optsSeen.push(opts);
+      return base.listOutcomeSubjectMembershipsForRun(runId, measureId, subjectIds, opts);
+    },
+  };
+  const asked = await readMeasureYearRows(outcomes, "run-1", "cms137", 2027, new Set(["a", "b", "c"]), { cqlFacts: true });
+  const of = (id: string) => asked.rows.find((r) => r.subjectId === id)!;
+  assert.deepEqual(of("a").cqlFacts, facts("new"), "the newest row's facts, with its populations");
+  assert.equal(of("b").cqlFacts, null, "a row with none says so");
+  assert.equal(of("c").cqlFacts, null, "an unreadable shape reads as none");
+  const plain = await readMeasureYearRows(outcomes, "run-1", "cms137", 2027, new Set(["a"]));
+  assert.equal("cqlFacts" in plain.rows[0]!, false, "not asked: the field is absent");
+
+  // Every member errored, so the run's rate count takes a second, full read: it never asks for facts.
+  optsSeen.length = 0;
+  await readMeasureYearRows(
+    { listOutcomeSubjectMembershipsForRun: async (runId, measureId, subjectIds, opts) => {
+      optsSeen.push(opts);
+      return store([row("x", errored), row("y", oneRate(true))]).listOutcomeSubjectMembershipsForRun(runId, measureId, subjectIds, opts);
+    } },
+    "run-1", "cms137", 2027, new Set(["x"]), { cqlFacts: true },
+  );
+  assert.deepEqual(optsSeen, [{ cqlFacts: true }, undefined]);
+});
+
 test("two rows whose blocks differ only where the trimmed identity cannot see are still a mix", async () => {
   // `officialReportIdentity` trims the digest; `scoringLogicKeyOf` reads it raw. Keyed on the trimmed form
   // alone, one sample stood for both rows and the mix went unseen.

@@ -69,6 +69,12 @@ export interface FqmSubjectResult {
 
 export interface FqmCalculationResult {
   results?: FqmSubjectResult[];
+  /**
+   * Present only when `enableDebugOutput` was passed. `rawResults` is cql-execution's own result: each
+   * patient's main-library define values keyed by NAME, which the statement results cannot give us
+   * (they find a value by `localId`, and the vendored ELM has none).
+   */
+  debugOutput?: { rawResults?: { patientResults?: Record<string, Record<string, unknown>> } };
 }
 
 /** The `fqm-execution` `Calculator.calculate` signature, injectable so consumers can test without it. */
@@ -407,6 +413,13 @@ export interface OfficialCalculationInput {
   calculate?: FqmCalculate;
   /** Option overrides - notably `trustMetaProfile` for profile-tagged official test-case bundles. */
   options?: CalculationOptionOverrides;
+  /**
+   * Main-library defines whose values to return per subject, rendered as text (`renderCqlValue`).
+   * Which ones are worth keeping is the caller's decision, as with statements. Only a non-empty list
+   * turns on fqm's debug output, which is what holds the values; it computes nothing extra, only keeps
+   * references to what the calculation already produced.
+   */
+  recordDefines?: readonly string[];
 }
 
 /**
@@ -451,7 +464,187 @@ export interface OfficialSubjectResult {
    */
   strata: FqmStratifierResult[][];
   statements: FqmStatementResult[];
+  /**
+   * One entry per `recordDefines` name the main library holds, in the order asked; absent when none
+   * were asked for, and for a subject in no group's initial population. A name the library does not
+   * define is left out rather than reported as null, so a caller can tell "CQL answered null" from "no
+   * such define".
+   */
+  defineValues?: DefineValue[];
 }
+
+/** One define's value for one subject, rendered on the side of the worker thread it was computed on. */
+export interface DefineValue {
+  define: string;
+  /** `null` when CQL's answer is null or an empty list: there is nothing to show. */
+  value: string | null;
+}
+
+/** The most a rendered value may take, in UTF-8 bytes, marker included. */
+export const DEFINE_VALUE_MAX_BYTES = 600;
+const TRUNCATED = "…[truncated]";
+const LIST_ITEMS_SHOWN = 3;
+const MAX_DEPTH = 5;
+
+/**
+ * Elements of a FHIR resource left out of its rendering: bookkeeping (`meta`, the narrative `text`,
+ * `identifier`…), extensions, and free-text notes. A Reference is left out too (`subject`, `requester`):
+ * it points at another resource and states nothing about this one. Everything else the resource states is
+ * shown, by its own element name, in the order the resource states it. Below the resource only extensions
+ * are left out: a `text` there is a CodeableConcept's own, and is what it says.
+ */
+const FHIR_ELEMENT_SKIPPED = new Set(["extension", "modifierExtension"]);
+const FHIR_SKIPPED = new Set([
+  "meta",
+  "text",
+  "contained",
+  "extension",
+  "modifierExtension",
+  "identifier",
+  "implicitRules",
+  "language",
+  "note",
+]);
+
+/** FHIR R4's Reference elements. */
+const REFERENCE_ELEMENTS = new Set(["id", "extension", "reference", "type", "identifier", "display"]);
+
+/**
+ * A Reference, by its shape: a `reference` string, or nothing but Reference elements with at least one that
+ * points somewhere. A Reference stated only by `identifier` (an MRN) or `display` (a person's name) is one
+ * too, and is the reason the shape is read rather than the `reference` string alone.
+ */
+const isReference = (node: unknown): boolean => {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return false;
+  if (typeof (node as { reference?: unknown }).reference === "string") return true;
+  const keys = Object.keys(node).filter((key) => !key.startsWith("_"));
+  return keys.some((key) => key === "identifier" || key === "display") && keys.every((key) => REFERENCE_ELEMENTS.has(key));
+};
+
+function capBytes(text: string, max: number): string {
+  if (Buffer.byteLength(text, "utf8") <= max) return text;
+  const room = max - Buffer.byteLength(TRUNCATED, "utf8");
+  let out = "";
+  for (const ch of text) {
+    if (Buffer.byteLength(out + ch, "utf8") > room) break;
+    out += ch;
+  }
+  return out + TRUNCATED;
+}
+
+function renderList(items: readonly unknown[], one: (item: unknown) => string): string {
+  const shown = items.slice(0, LIST_ITEMS_SHOWN).map(one).join(" | ");
+  return items.length > LIST_ITEMS_SHOWN ? `${shown} | … (${items.length} in all)` : shown;
+}
+
+/** A FHIR element as stated: a Coding as `system|code (display)`, a Quantity as `value unit`, else by name. */
+function renderFhirElement(node: unknown, depth: number): string {
+  if (node === null || node === undefined) return "null";
+  if (typeof node !== "object") return String(node);
+  if (depth > MAX_DEPTH) return Array.isArray(node) ? "[…]" : "{…}";
+  if (Array.isArray(node)) return renderList(node, (item) => renderFhirElement(item, depth + 1));
+  const o = node as Record<string, unknown>;
+  if (Array.isArray(o["coding"]) && (o["coding"] as unknown[]).length > 0) {
+    return (o["coding"] as unknown[]).map((c) => renderFhirElement(c, depth + 1)).join(" / ");
+  }
+  // A CodeableConcept stated only as text (a Dosage's `text` beside its other elements is not one).
+  if (typeof o["text"] === "string" && Object.keys(o).every((key) => key === "text" || key === "coding" || key.startsWith("_"))) {
+    return `"${o["text"]}"`;
+  }
+  if (typeof o["code"] === "string" && ("system" in o || "display" in o) && !("value" in o)) {
+    const coded = `${typeof o["system"] === "string" ? o["system"] : ""}|${o["code"]}`;
+    return typeof o["display"] === "string" ? `${coded} (${o["display"]})` : coded;
+  }
+  if (typeof o["value"] === "number" && ("unit" in o || "code" in o)) {
+    const unit = typeof o["unit"] === "string" ? o["unit"] : typeof o["code"] === "string" ? o["code"] : "";
+    const comparator = typeof o["comparator"] === "string" ? o["comparator"] : "";
+    return `${comparator}${o["value"]}${unit ? ` ${unit}` : ""}`;
+  }
+  return `{${renderFhirElements(o, depth + 1, FHIR_ELEMENT_SKIPPED)}}`;
+}
+
+function renderFhirElements(o: Record<string, unknown>, depth: number, skipped: ReadonlySet<string>): string {
+  const parts: string[] = [];
+  for (const [name, element] of Object.entries(o)) {
+    if (skipped.has(name) || name.startsWith("_") || isReference(element)) continue;
+    // The References in a list are left out too, and a list of nothing but References with them.
+    const shown = Array.isArray(element) ? element.filter((item) => !isReference(item)) : element;
+    if (Array.isArray(shown) && shown.length === 0 && (element as unknown[]).length > 0) continue;
+    parts.push(`${name}=${renderFhirElement(shown, depth)}`);
+  }
+  return parts.join("; ");
+}
+
+/** A resource as `Type/id {element=…; …}`; an element that is not a resource, as the element. */
+function renderFhir(json: unknown, depth: number): string {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return renderFhirElement(json, depth);
+  // A define whose value is itself a Reference: what it points at is not shown, as within a resource.
+  if (isReference(json)) return "(a reference)";
+  const resource = json as Record<string, unknown>;
+  if (typeof resource["resourceType"] !== "string") return renderFhirElement(resource, depth);
+  const { resourceType, id, ...rest } = resource;
+  return `${resourceType}/${typeof id === "string" ? id : "?"} {${renderFhirElements(rest, depth + 1, FHIR_SKIPPED)}}`;
+}
+
+function render(value: unknown, depth: number): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value !== "object") return String(value);
+  if (depth > MAX_DEPTH) return Array.isArray(value) ? "[…]" : "{…}";
+  if (Array.isArray(value)) return renderList(value, (item) => render(item, depth + 1));
+  // cql-exec-fhir keeps the source FHIR JSON of what a retrieve returned in `_json`.
+  if ("_json" in value) return renderFhir((value as { _json: unknown })._json, depth);
+  const v = value as Record<string, unknown> & { constructor?: { name?: string } };
+  // cql-execution's own types answer these getters; their `toString` keeps a date's precision and offset.
+  if (v["isDate"] === true || v["isDateTime"] === true) return String(value);
+  if (v["isInterval"] === true) {
+    return `${v["lowClosed"] === false ? "(" : "["}${render(v["low"], depth + 1)}, ${render(v["high"], depth + 1)}${v["highClosed"] === false ? ")" : "]"}`;
+  }
+  if (v["isQuantity"] === true) return v["unit"] && v["unit"] !== "1" ? `${String(v["value"])} ${String(v["unit"])}` : String(v["value"]);
+  if (v["isRatio"] === true) return `${render(v["numerator"], depth + 1)}:${render(v["denominator"], depth + 1)}`;
+  if (v["isCode"] === true) {
+    const coded = `${v["system"] ?? ""}|${v["code"] ?? ""}`;
+    return typeof v["display"] === "string" ? `${coded} (${v["display"]})` : coded;
+  }
+  if (v["isConcept"] === true) return (Array.isArray(v["codes"]) ? v["codes"] : []).map((c) => render(c, depth + 1)).join(" / ");
+  if (v["isUncertainty"] === true) return `${render(v["low"], depth + 1)}..${render(v["high"], depth + 1)}`;
+  // A CQL Tuple is a plain object: each field by name.
+  const ctor = v.constructor;
+  if (!ctor || ctor === Object) {
+    const fields = Object.entries(v).filter(([, field]) => typeof field !== "function");
+    return `{${fields.map(([name, field]) => `${name}=${render(field, depth + 1)}`).join("; ")}}`;
+  }
+  return `<unrendered ${ctor.name || "object"}>`;
+}
+
+/**
+ * A CQL value as text, without choosing anything from it.
+ *
+ * Dates and DateTimes are CQL's own `toString` (precision and offset as computed); a FHIR resource is
+ * its type, id and every element it states by name, never "the" date picked out of it; a list is its
+ * first three items in CQL's own order and how many there are. Each run of control or line-separator
+ * characters (a newline or tab in a display string, NEL, U+2028/9) becomes one space, so a value is one
+ * line wherever it is shown, and an unpaired surrogate becomes U+FFFD, so the text is well-formed (Postgres
+ * jsonb refuses one, and would fail the chunk the value was written with).
+ * Capped at `DEFINE_VALUE_MAX_BYTES`, with a marker where it was cut. `null` for null and for an empty list.
+ *
+ * Never throws: it runs inside the calculation, and a value it cannot render must not fail the batch the
+ * patient's score came from. Such a value is `<unrendered: error>`.
+ */
+export function renderCqlValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value) && value.length === 0) return null;
+  let text: string;
+  try {
+    text = render(value, 0);
+  } catch {
+    text = "<unrendered: error>";
+  }
+  const oneLine = text.replace(LONE_SURROGATE, "\ufffd").replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ");
+  return capBytes(oneLine, DEFINE_VALUE_MAX_BYTES);
+}
+
+// A high surrogate with no low after it, or a low with no high before it (`toWellFormed` is ES2024).
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
 /**
  * As `calculateOfficial`, but also returns each subject's statement results.
@@ -490,7 +683,11 @@ export async function calculateOfficialWithSignal(
 ): Promise<OfficialBatchResult> {
   const calculate = input.calculate ?? (await loadCalculator());
   const trusted = input.options?.trustedProfiles ?? [];
+  const recordDefines = input.recordDefines ?? [];
   const options: Record<string, unknown> = { ...calculationOptions(input.period, input.options) };
+  // Added here, never in `calculationOptions`, so a caller that records nothing passes fqm exactly the
+  // options it always did.
+  if (recordDefines.length > 0) options["enableDebugOutput"] = true;
   if (trusted.length > 0) {
     // Built here, not by the caller, because this is the side of the worker thread fqm runs on: the
     // input is structured-cloned across it, and a PatientSource does not survive a clone.
@@ -498,11 +695,20 @@ export async function calculateOfficialWithSignal(
     options["patientSource"] = profileNarrowedPatientSource(PatientSource, input.patientBundles, trusted);
   }
   const output = await calculate(input.bundle, input.patientBundles, options, input.valueSetCache);
+  const rawByPatient = recordDefines.length > 0 ? output.debugOutput?.rawResults?.patientResults : undefined;
   const bySubject = new Map<string, OfficialSubjectResult>();
   for (const subject of output.results ?? []) {
     const detailedResults = subject.detailedResults ?? [];
     const detailed = detailedResults[0];
     if (subject.patientId && detailed?.populationResults) {
+      // Rendered only for a subject in some group's initial population: anyone else's values describe a
+      // measure that does not apply to them, and rendering them for the whole batch is the cost (#875).
+      const inSomeInitialPopulation = detailedResults.some(
+        (entry) =>
+          Array.isArray(entry?.populationResults) &&
+          entry.populationResults.some((p) => p.populationType === "initial-population" && p.result === true),
+      );
+      const raw = inSomeInitialPopulation ? rawByPatient?.[subject.patientId] : undefined;
       bySubject.set(subject.patientId, {
         populations: populationMembership(detailed.populationResults),
         populationResults: detailed.populationResults,
@@ -515,6 +721,13 @@ export async function calculateOfficialWithSignal(
           .filter((entry) => Array.isArray(entry?.populationResults))
           .map((entry) => (Array.isArray(entry?.stratifierResults) ? entry.stratifierResults : [])),
         statements: detailed.statementResults ?? [],
+        ...(raw
+          ? {
+              defineValues: recordDefines
+                .filter((define) => Object.prototype.hasOwnProperty.call(raw, define))
+                .map((define) => ({ define, value: renderCqlValue(raw[define]) })),
+            }
+          : {}),
       });
     }
   }

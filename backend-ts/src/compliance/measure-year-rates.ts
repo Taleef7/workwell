@@ -36,6 +36,7 @@ import { isReportableRunStatus } from "../run/reportable.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
 import type { ScoringLogic } from "../measure/measure-identity.ts";
 import { dataInsufficientChecks, type SufficiencyCheck } from "../run/data-sufficiency.ts";
+import { readCqlFacts, type CqlFacts } from "../wiring/official-facts.ts";
 
 /** One page of list members per read (the attributed-list report's member pages). */
 export const PAGE = 2000;
@@ -125,6 +126,11 @@ export interface LeanRow {
   logicKey: string;
   /** Interned, comma-joined data-sufficiency checks the row failed (#853), or null. */
   thin: string | null;
+  /**
+   * The row's recorded CQL define values (#875), only when the read asked for them: null where the row
+   * has none or they are unreadable. Absent from a read that did not ask.
+   */
+  cqlFacts?: CqlFacts | null;
 }
 
 export interface MeasureYearRows {
@@ -160,6 +166,9 @@ export interface MeasureYearRows {
  * (#874), so a list of a few hundred costs its members' rows rather than the run's 20,000. The answer is
  * the same either way: every kept row is read, and `declaredRates`' run-wide fallback, the one value read
  * off non-kept rows, takes a second, full read in exactly the case that needs it.
+ *
+ * `cqlFacts` asks the store for each row's recorded define values as well (#875, the report's CSV only),
+ * held on the kept rows as `readCqlFacts` reads them; the fallback read never asks.
  */
 export async function readMeasureYearRows(
   outcomes: Pick<OutcomeStore, "listOutcomeSubjectMembershipsForRun">,
@@ -167,6 +176,7 @@ export async function readMeasureYearRows(
   measureId: string,
   measurementYear: number,
   keep: ((subjectId: string) => boolean) | ReadonlySet<string> = () => true,
+  opts: { cqlFacts?: boolean } = {},
 ): Promise<MeasureYearRows> {
   const members = typeof keep === "function" ? null : keep;
   const isKept = typeof keep === "function" ? keep : (subjectId: string) => keep.has(subjectId);
@@ -229,7 +239,8 @@ export async function readMeasureYearRows(
     return derived.kept;
   };
 
-  for (const row of await outcomes.listOutcomeSubjectMembershipsForRun(runId, measureId, members ? [...members] : undefined)) {
+  const factsOpt = opts.cqlFacts ? { cqlFacts: true } : undefined;
+  for (const row of await outcomes.listOutcomeSubjectMembershipsForRun(runId, measureId, members ? [...members] : undefined, factsOpt)) {
     const derived = derive(row.evidence);
     const at = Date.parse(row.evaluatedAt);
     const seenInRun = runNewest.get(row.subjectId);
@@ -264,6 +275,7 @@ export async function readMeasureYearRows(
         memberships,
         logicKey: kept.logicKey,
         thin: kept.thin,
+        ...(factsOpt ? { cqlFacts: readCqlFacts(row.cqlFacts) } : {}),
       },
     });
   }

@@ -777,3 +777,38 @@ test("list_runs and get_run_summary state no rate for a run whose data was too t
   const trusted = ((await call("list_runs", { measureId: "audiogram" })).payload.results as JsonRecord[])[0]!;
   assert.deepEqual(trusted.data_insufficient, []);
 });
+
+test("#875: no case or patient tool hands an MCP client the outcome's recorded CQL define values", async () => {
+  // Chart values reach no AI client without an owner decision (AI_GUARDRAILS §6); staff see them on the
+  // case page. get_case carries the evidence twice (evidenceJson and evidence_payload): both are stripped.
+  const run = await deps.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms125",
+    triggeredBy: "test",
+    requestedScope: { measureId: "cms125" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await deps.runStore.finalizeRun(run.id, "COMPLETED");
+  await deps.outcomeStore.recordOutcome({
+    runId: run.id, subjectId: "emp-030", measureId: "cms125", evaluationPeriod: "2026-06-13", status: "OVERDUE",
+    evidence: {
+      expressionResults: [{ define: "official:numerator", result: false }],
+      official: { ecqmId: "125FHIR", version: "1.0.000", populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } },
+      cqlFacts: { spec: 1, values: [{ define: "Some Define", value: "SENTINEL-FACT" }] },
+    },
+  });
+  const c = (await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "emp-030", measureId: "cms125", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }))!;
+  for (const [name, args] of [
+    ["get_case", { caseId: c.id }],
+    ["explain_outcome", { caseId: c.id }],
+    ["get_employee", { employeeExternalId: "emp-030" }],
+    ["check_compliance", { employeeExternalId: "emp-030", measureName: "Breast Cancer Screening" }],
+  ] as const) {
+    const res = await callTool(name, args as JsonRecord, ctx());
+    assert.equal(res.isError, false, `${name} answered`);
+    assert.doesNotMatch(res.content[0]!.text, /SENTINEL-FACT|cqlFacts/, `${name} carries no facts`);
+  }
+  const { payload } = await call("get_case", { caseId: c.id });
+  assert.ok((payload.evidence_payload as JsonRecord).official, "the rest of the evidence is served as before");
+});

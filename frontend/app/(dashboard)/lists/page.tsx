@@ -490,7 +490,10 @@ function ReportPanel({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${list.name.replace(/[^\w.-]+/g, "-")}-v${list.revision}-${year}.csv`;
+    // The day it was generated too: two downloads of one year's report differ once a later run lands,
+    // and both would otherwise carry one name.
+    const generated = new Date().toISOString().slice(0, 10);
+    a.download = `${list.name.replace(/[^\w.-]+/g, "-")}-v${list.revision}-${year}-generated-${generated}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }, [api, list.id, list.name, list.revision, year]);

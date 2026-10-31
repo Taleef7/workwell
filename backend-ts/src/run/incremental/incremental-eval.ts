@@ -219,6 +219,9 @@ export class IncrementalCache {
     // a one-line change instead of a cold cache — but it is only worth paying while the exit is near. If
     // this branch outlives PR-12, skip the commit for official rows too rather than keep buying an option
     // nobody is exercising.
+    //
+    // Re-enabling also needs `CQL_FACTS_SPEC_VERSION` (`wiring/official-facts.ts`, #875) in the
+    // fingerprint: a reused row would carry facts recorded under an older list of defines.
     if (engineDeclaredLogic) return evaluate;
 
     const row = this.byKey.get(key(subjectId, measureId, period));

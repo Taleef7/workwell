@@ -224,6 +224,44 @@ test("calculateOfficial can express trustMetaProfile, so both consumers can shar
   assert.equal(seen["trustMetaProfile"], true);
 });
 
+test("recordDefines (#875): debug output only when asked, values only for a subject in some group's initial population", async () => {
+  const ipp = (result: boolean) => [{ populationType: "initial-population", result }];
+  let seen: Record<string, unknown> = {};
+  const input = {
+    bundle: { resourceType: "Bundle", entry: [] } as unknown as MeasureBundle,
+    patientBundles: [],
+    period: { start: "2026-01-01", end: "2026-12-31" },
+    calculate: async (_b: unknown, _p: unknown, options: unknown) => {
+      seen = options as Record<string, unknown>;
+      return {
+        results: [
+          { patientId: "in", detailedResults: [{ populationResults: ipp(true) }] },
+          // In the second group's initial population only: still one the measure applies to.
+          { patientId: "second", detailedResults: [{ populationResults: ipp(false) }, { populationResults: ipp(true) }] },
+          { patientId: "out", detailedResults: [{ populationResults: ipp(false) }] },
+        ],
+        debugOutput: { rawResults: { patientResults: {
+          in: { "Found Date": "2026-03-01", "Nothing Found": [] },
+          second: { "Found Date": "2026-04-01" },
+          out: { "Found Date": "2026-05-01" },
+        } } },
+      };
+    },
+  };
+  const { bySubject } = await calculateOfficialWithSignal({ ...input, recordDefines: ["Found Date", "Nothing Found", "Not A Define"] });
+  assert.equal(seen["enableDebugOutput"], true);
+  assert.deepEqual(bySubject.get("in")?.defineValues, [
+    { define: "Found Date", value: "2026-03-01" },
+    { define: "Nothing Found", value: null },
+  ], "a define the library lacks is left out, an empty list is null");
+  assert.deepEqual(bySubject.get("second")?.defineValues, [{ define: "Found Date", value: "2026-04-01" }]);
+  assert.equal(bySubject.get("out")?.defineValues, undefined, "outside every initial population: nothing rendered");
+
+  const plain = await calculateOfficialWithSignal(input);
+  assert.equal("enableDebugOutput" in seen, false, "a caller recording nothing passes fqm the options it always did");
+  assert.equal(plain.bySubject.get("in")?.defineValues, undefined);
+});
+
 
 // --------------------------------------------------------------------------------------------------
 // Profile trust narrowed to named profiles (#591), against the real cql-exec-fhir fqm runs on.
