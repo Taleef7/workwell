@@ -948,6 +948,78 @@ test("profile trust is per measure: cms165 retrieves by type except its blood pr
   ]);
 });
 
+// ---- #875: the recorded CQL define values ----------------------------------------------------------
+
+const CMS122_LIBRARY = "CMS122FHIRDiabetesAssessGT9Pct";
+const cms122Artifact = (measureName = CMS122_LIBRARY): OfficialArtifact => {
+  const base = fakeArtifact("cms122", ["2.16.1"]);
+  return { ...base, manifest: { ...base.manifest, catalogId: "cms122", measureName } };
+};
+/** fqm's answer for subjects with the given population flags, and the define values its debug output holds. */
+const factsCalculator = (
+  subjects: Record<string, { flags: Record<string, boolean>; raw: Record<string, unknown> }>,
+): { calculate: FqmCalculate; options: Array<Record<string, unknown>> } => {
+  const options: Array<Record<string, unknown>> = [];
+  const calculate: FqmCalculate = async (_bundle, _patients, opts) => {
+    options.push(opts as Record<string, unknown>);
+    return {
+      results: Object.entries(subjects).map(([patientId, { flags }]) => ({
+        patientId,
+        evaluatedResource: [{ resourceType: "Observation" }],
+        detailedResults: [{ populationResults: Object.entries(flags).map(([populationType, result]) => ({ populationType, result })), statementResults: [] }],
+      })),
+      debugOutput: { rawResults: { patientResults: Object.fromEntries(Object.entries(subjects).map(([id, { raw }]) => [id, raw])) } },
+    };
+  };
+  return { calculate, options };
+};
+const scoredFlags = (numer: boolean, extra: Record<string, boolean> = {}) => ({ [IPP]: true, [DENOM]: true, [DENEX]: false, [NUMER]: numer, ...extra });
+const cms122Raw = (date: unknown, reading: unknown, noRecord: unknown) => ({
+  "Most Recent Glycemic Status Date": date,
+  "Lowest Glycemic Status Assessment Reading on Most Recent Day": reading,
+  "Has No Record Of Glycemic Status Assessment": noRecord,
+  // Evaluated by fqm and never asked for: it must not be recorded.
+  Numerator: true,
+});
+
+test("#875: define values are recorded for the patients the measure scores, and only those", async () => {
+  const { calculate, options } = factsCalculator({
+    met: { flags: scoredFlags(true), raw: cms122Raw("2026-03-01", "9.6 %", false) },
+    nothing: { flags: scoredFlags(true), raw: cms122Raw(null, null, null) },
+    excluded: { flags: scoredFlags(false, { [DENEX]: true }), raw: cms122Raw("2026-03-01", "7 %", false) },
+    outside: { flags: { [IPP]: false, [DENOM]: false, [DENEX]: false, [NUMER]: false }, raw: cms122Raw("2026-03-01", "7 %", false) },
+  });
+  const executor = officialMeasureExecutor({ expand: async () => [{ code: "a", system: "s" }], loadArtifact: () => cms122Artifact(), calculate });
+  const results = await executor.evaluateBatch(
+    "cms122",
+    ["met", "nothing", "excluded", "outside"].map((subjectId) => ({ subjectId, patientBundle: patientBundle(subjectId) })),
+    "2026-07-25",
+  );
+  assert.equal(options[0]!["enableDebugOutput"], true, "asked of fqm only because the spec matched the library");
+  const evidence = (id: string) => results.get(id)!.evidence as Record<string, unknown>;
+  assert.deepEqual(evidence("met")["cqlFacts"], {
+    spec: 1,
+    values: [
+      { define: "Most Recent Glycemic Status Date", value: "2026-03-01" },
+      { define: "Lowest Glycemic Status Assessment Reading on Most Recent Day", value: "9.6 %" },
+      { define: "Has No Record Of Glycemic Status Assessment", value: "false" },
+    ],
+  });
+  assert.deepEqual(Object.keys(evidence("met")), ["expressionResults", "official", "cqlFacts"], "the pinned shape gains only cqlFacts");
+  assert.equal("cqlFacts" in (evidence("met")["official"] as object), false, "never inside `official`, which every rate reader shares");
+  assert.deepEqual(evidence("nothing")["cqlFacts"], { spec: 1, values: [] }, "scored and nothing found still says the run looked");
+  assert.equal("cqlFacts" in evidence("excluded"), false, "a denominator exclusion is not scored");
+  assert.equal("cqlFacts" in evidence("outside"), false, "nor is a patient outside the initial population");
+});
+
+test("#875: an artifact whose library is not the spec's records nothing and never asks fqm for debug output", async () => {
+  const { calculate, options } = factsCalculator({ met: { flags: scoredFlags(true), raw: cms122Raw("2026-03-01", "9.6 %", false) } });
+  const executor = officialMeasureExecutor({ expand: async () => [{ code: "a", system: "s" }], loadArtifact: () => cms122Artifact("FakeMeasure"), calculate });
+  const results = await executor.evaluateBatch("cms122", [{ subjectId: "met", patientBundle: patientBundle("met") }], "2026-07-25");
+  assert.equal("enableDebugOutput" in options[0]!, false);
+  assert.deepEqual(Object.keys(results.get("met")!.evidence as object), ["expressionResults", "official"]);
+});
+
 test("cms165 is the ONLY measure with a trusted profile, and it trusts exactly the blood pressure", () => {
   const trusting = Object.entries(OFFICIAL_MEASURE_SEMANTICS)
     .filter(([, s]) => (s.trustedProfiles?.length ?? 0) > 0)

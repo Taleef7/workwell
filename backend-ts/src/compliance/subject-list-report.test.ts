@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { executedLogicOf, subjectListReport, type SubjectListReportDeps } from "./subject-list-report.ts";
-import { subjectListReportCsv, reportCsvHeaders } from "./subject-list-report-csv.ts";
+import { evidenceOf, subjectListReportCsv, reportCsvHeaders } from "./subject-list-report-csv.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { SubjectList, SubjectListMember } from "../stores/subject-list-store.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
@@ -59,8 +59,8 @@ interface FakeOptions {
   measureIds?: string[];
 }
 
-/** One membership read: which measure, and the subject set it was narrowed to (null = every row). */
-type MembershipRead = { measureId: string; subjectIds: string[] | null };
+/** One membership read: which measure, the subject set it was narrowed to (null = every row), and whether it asked for facts. */
+type MembershipRead = { measureId: string; subjectIds: string[] | null; cqlFacts: boolean };
 
 function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureIds: string[]; membershipReads: MembershipRead[] } {
   const members = options.members ?? [
@@ -107,11 +107,11 @@ function fakeDeps(options: FakeOptions): { deps: SubjectListReportDeps; measureI
       anyOutcomeForMeasure: anyOutcomeVia(listOutcomes),
       // The rows the report counts come from this read, so the race lands here: after the before-read
       // compaction check, before the after-read one.
-      listOutcomeSubjectMembershipsForRun: async (runId: string, measureId: string, subjectIds?: readonly string[]) => {
+      listOutcomeSubjectMembershipsForRun: async (runId: string, measureId: string, subjectIds?: readonly string[], opts?: { cqlFacts?: boolean }) => {
         pagesRead += 1;
         if (options.intentOnFirstPage && pagesRead === 1) cutoffs.push(options.intentOnFirstPage);
-        membershipReads.push({ measureId, subjectIds: subjectIds === undefined ? null : [...subjectIds] });
-        return subjectMembershipsVia(listOutcomes)(runId, measureId, subjectIds);
+        membershipReads.push({ measureId, subjectIds: subjectIds === undefined ? null : [...subjectIds], cqlFacts: opts?.cqlFacts === true });
+        return subjectMembershipsVia(listOutcomes)(runId, measureId, subjectIds, opts);
       },
       listLatestPopulationRuns: async (measureIds: readonly string[]) =>
         runs
@@ -198,7 +198,8 @@ test("the report reads only its MEMBERS' rows from the store (#874)", async () =
   assert.equal(result.ok, true);
   assert.deepEqual(
     membershipReads.map((r) => ({ ...r, subjectIds: r.subjectIds && [...r.subjectIds].sort() })),
-    [{ measureId: "cms122", subjectIds: ["pat-001", "pat-002"] }],
+    [{ measureId: "cms122", subjectIds: ["pat-001", "pat-002"], cqlFacts: false }],
+    "the JSON summary never asks for the facts",
   );
 });
 
@@ -631,6 +632,7 @@ test("the CSV header is pinned exactly — the ACO's tooling reads it by name", 
     "measurementPeriodStart", "measurementPeriodEnd", "evaluatedAt", "rate",
     "initialPopulation", "denominator", "denominatorExclusion", "denominatorException", "numerator",
     "status", "outOfPopulation", "evaluationError", "providerId", "payer", "executedLogic",
+    "evidenceStatus", "evidenceDate", "evidenceDateSource", "evidenceDetail",
   ]);
   // The subject columns follow the deployment's own term, exactly as §6.2/§6.3 do.
   assert.equal(reportCsvHeaders("employee")[4], "employeeExternalId");
@@ -800,4 +802,168 @@ test("a measure with no run has no logic", async () => {
   const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
   assert.equal(report.measures[0]!.logic, null);
   assert.equal(report.measures[0]!.ecqmId, null);
+});
+
+// ---- #875: the evidence columns, from the outcome's recorded CQL define values ----------------
+
+const CMS = {
+  logic: { kind: "cms-artifact", ecqmId: "CMS122FHIR", version: "1.0.000", derivedFrom: null, status: "draft", statusNote: null } as const,
+  executedLogic: "CMS122FHIR v1.0.000",
+};
+const TRANSLATION = {
+  logic: { kind: "workwell-translation", label: "WorkWell translation of CMS165v15", version: "ww-2027.1", url: null, derivedFrom: null } as const,
+  executedLogic: "WorkWell translation of CMS165v15",
+};
+const scored = (numer: boolean) => ({ label: null, ipp: true, denom: true, denex: false, denexcep: false, numer });
+const facts = (values: Record<string, string>, spec = 1) => ({ spec, values: Object.entries(values).map(([define, value]) => ({ define, value })) });
+const inPop = (cqlFacts: ReturnType<typeof facts> | null) => ({ outcome: { status: "COMPLIANT", evaluatedAt: "2026-06-01T00:00:00.000Z" }, cqlFacts });
+
+test("evidenceStatus: a rate the patient is not scored on, or out of population, is NOT_APPLICABLE before anything else", () => {
+  const values = facts({ "Most Recent Glycemic Status Date": "2026-03-01" });
+  for (const rate of [
+    { ...scored(false), ipp: false },
+    { ...scored(false), denom: false },
+    { ...scored(false), denex: true },
+    { ...scored(false), denexcep: true },
+  ]) {
+    assert.equal(evidenceOf("cms122", CMS, 0, rate, inPop(values)).status, "NOT_APPLICABLE");
+  }
+  const out = { outcome: { status: "MISSING_DATA", evaluatedAt: "2026-06-01T00:00:00.000Z", outOfPopulation: true }, cqlFacts: values };
+  assert.deepEqual(evidenceOf("cms122", CMS, 0, scored(true), out), { status: "NOT_APPLICABLE", date: "", dateSource: "", detail: "" });
+});
+
+test("evidenceStatus: a logic with no define for the rate is NOT_EXPOSED_BY_LOGIC, whatever the row recorded", () => {
+  const values = facts({ "First SUD Episode During Measurement Period": "Encounter/e1 {}" });
+  assert.equal(evidenceOf("cms125", CMS, 0, scored(true), inPop(values)).status, "NOT_EXPOSED_BY_LOGIC", "CMS125 names no mammogram define");
+  assert.equal(evidenceOf("cms137", CMS, 1, scored(false), inPop(values)).status, "NOT_EXPOSED_BY_LOGIC", "CMS137's Engagement rate");
+  assert.notEqual(evidenceOf("cms137", CMS, 0, scored(false), inPop(values)).status, "NOT_EXPOSED_BY_LOGIC", "its Initiation rate is exposed");
+});
+
+test("evidenceStatus: a row whose logic was never recorded is NOT_RECORDED_BY_RUN, not a claim about the logic", () => {
+  const values = facts({ "Has No Record Of Glycemic Status Assessment": "true" });
+  assert.equal(evidenceOf("cms122", { logic: null, executedLogic: null }, 0, scored(true), inPop(values)).status, "NOT_RECORDED_BY_RUN");
+  assert.equal(evidenceOf("cms122", undefined, 0, scored(true), inPop(values)).status, "NOT_RECORDED_BY_RUN");
+});
+
+test("evidenceStatus: a row with no facts, or facts under another spec, is NOT_RECORDED_BY_RUN, never NONE_FOUND", () => {
+  assert.equal(evidenceOf("cms165", TRANSLATION, 0, scored(false), inPop(null)).status, "NOT_RECORDED_BY_RUN");
+  assert.equal(evidenceOf("cms165", TRANSLATION, 0, scored(false), inPop(facts({}, 2))).status, "NOT_RECORDED_BY_RUN");
+  assert.equal(evidenceOf("cms165", TRANSLATION, 0, scored(false), inPop(facts({}))).status, "NONE_FOUND", "an empty list under this spec is CQL finding nothing");
+});
+
+test("evidenceStatus on CMS122 (inverse): CQL's own 'no record' is NONE_FOUND even though it meets the numerator", () => {
+  const noRecord = facts({ "Has No Record Of Glycemic Status Assessment": "true" });
+  assert.deepEqual(evidenceOf("cms122", CMS, 0, scored(true), inPop(noRecord)), {
+    status: "NONE_FOUND", date: "", dateSource: "", detail: "Has No Record Of Glycemic Status Assessment: true",
+  });
+  const poor = facts({
+    "Most Recent Glycemic Status Date": "2026-03-01",
+    "Lowest Glycemic Status Assessment Reading on Most Recent Day": "9.6 %",
+    "Has No Record Of Glycemic Status Assessment": "false",
+  });
+  assert.deepEqual(evidenceOf("cms122", CMS, 0, scored(true), inPop(poor)), {
+    status: "NUMERATOR_EVIDENCE",
+    date: "2026-03-01",
+    dateSource: "Most Recent Glycemic Status Date (CMS122FHIR v1.0.000)",
+    detail:
+      "Most Recent Glycemic Status Date: 2026-03-01 || Lowest Glycemic Status Assessment Reading on Most Recent Day: 9.6 % || " +
+      "Has No Record Of Glycemic Status Assessment: false",
+  });
+  const controlled = evidenceOf("cms122", CMS, 0, scored(false), inPop(poor));
+  assert.equal(controlled.status, "LATEST_NOT_QUALIFYING");
+  assert.equal(controlled.date, "2026-03-01", "the reading that did not qualify keeps its date");
+});
+
+test("evidenceStatus elsewhere: a value found is evidence or the latest not qualifying; none found is NONE_FOUND", () => {
+  const bp = facts({
+    "Most Recent Blood Pressure Day": "2027-04-02",
+    "Lowest Systolic Reading on Most Recent Blood Pressure Day": "128 mm[Hg]",
+    "Lowest Diastolic Reading on Most Recent Blood Pressure Day": "82 mm[Hg]",
+  });
+  const met = evidenceOf("cms165", TRANSLATION, 0, scored(true), inPop(bp));
+  assert.equal(met.status, "NUMERATOR_EVIDENCE");
+  assert.equal(met.date, "2027-04-02");
+  assert.equal(met.dateSource, "Most Recent Blood Pressure Day (WorkWell translation of CMS165v15)", "a WorkWell define is never named as CMS's");
+  assert.equal(evidenceOf("cms165", TRANSLATION, 0, scored(false), inPop(bp)).status, "LATEST_NOT_QUALIFYING", "an uncontrolled pressure");
+  assert.deepEqual(evidenceOf("cms165", TRANSLATION, 0, scored(false), inPop(facts({}))), { status: "NONE_FOUND", date: "", dateSource: "", detail: "" });
+  // The logic met the numerator through a define the spec does not name: it says so, rather than NONE_FOUND.
+  assert.equal(evidenceOf("cms165", TRANSLATION, 0, scored(true), inPop(facts({}))).status, "NOT_EXPOSED_BY_LOGIC");
+  // A measure with no date define fills no date, whatever it found.
+  const screened = evidenceOf("cms130", CMS, 0, scored(true), inPop(facts({ "Colonoscopy Performed": "Procedure/p1 {performedDateTime=2020-05-01}" })));
+  assert.equal(screened.status, "NUMERATOR_EVIDENCE");
+  assert.equal(screened.date, "");
+  assert.equal(screened.detail, "Colonoscopy Performed: Procedure/p1 {performedDateTime=2020-05-01}");
+});
+
+test("evidenceStatus: a context define (CMS137's episode) is shown but is not something found", () => {
+  const episodeOnly = facts({ "First SUD Episode During Measurement Period": "Encounter/e1 {period=[2026-02-01, 2026-02-02]}" });
+  const read = evidenceOf("cms137", CMS, 0, scored(false), inPop(episodeOnly));
+  assert.equal(read.status, "NONE_FOUND");
+  assert.equal(read.detail, "First SUD Episode During Measurement Period: Encounter/e1 {period=[2026-02-01, 2026-02-02]}");
+});
+
+const withFacts = (numer: boolean, values: Record<string, string>) => ({
+  official: {
+    ecqmId: "122FHIR", version: "1.0.000", artifactSha256: CMS122_SHA,
+    populationResults: { ipp: true, denom: true, numer, denex: false, denexcep: false },
+    measurementPeriod: { start: "2027-01-01", end: "2027-12-31" },
+  },
+  cqlFacts: facts(values),
+});
+
+test("the CSV carries the evidence per rate, from the facts its read asked for", async () => {
+  const { deps, measureIds, membershipReads } = fakeDeps({
+    members: [
+      { rawIdentifier: "pat-001", subjectId: "pat-001", resolution: "MATCHED" },
+      { rawIdentifier: "pat-002", subjectId: "pat-002", resolution: "MATCHED" },
+      { rawIdentifier: "pat-003", subjectId: "pat-003", resolution: "MATCHED" },
+      { rawIdentifier: "MRN-77", subjectId: null, resolution: "NOT_FOUND" },
+    ],
+    rows: [
+      row("pat-001", withFacts(true, {
+        "Most Recent Glycemic Status Date": "2027-02-03",
+        "Lowest Glycemic Status Assessment Reading on Most Recent Day": "9.8 %",
+        "Has No Record Of Glycemic Status Assessment": "false",
+      })),
+      // Recorded before #875 by the same logic: no facts at all.
+      row("pat-002", { official: withFacts(false, {}).official }),
+    ],
+  });
+  const result = await subjectListReport(deps, LIST.id, 2027, measureIds, () => "2027-01-06T00:00:00.000Z", { cqlFacts: true });
+  assert.equal(membershipReads.length > 0 && membershipReads.every((r) => r.cqlFacts), true, "the CSV's read asks for the facts");
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  const headers = reportCsvHeaders("patient");
+  const lines = subjectListReportCsv(report, profile, "patient").split("\r\n").slice(1).map((l) => l.split(","));
+  for (const line of lines) assert.equal(line.length, headers.length, "every row shape still matches the header");
+  const cell = (subject: string, column: string) => lines.find((l) => l[headers.indexOf("rawIdentifier")] === subject)![headers.indexOf(column)];
+  assert.equal(cell("pat-001", "evidenceStatus"), "NUMERATOR_EVIDENCE");
+  assert.equal(cell("pat-001", "evidenceDate"), "2027-02-03");
+  assert.equal(cell("pat-001", "evidenceDateSource"), "Most Recent Glycemic Status Date (CMS122FHIR v1.0.000)");
+  assert.equal(
+    cell("pat-001", "evidenceDetail"),
+    "Most Recent Glycemic Status Date: 2027-02-03 || Lowest Glycemic Status Assessment Reading on Most Recent Day: 9.8 % || Has No Record Of Glycemic Status Assessment: false",
+  );
+  assert.equal(cell("pat-002", "evidenceStatus"), "NOT_RECORDED_BY_RUN", "an older row never reads as nothing found");
+  assert.equal(cell("pat-003", "evidenceStatus"), "", "a member the run never evaluated has no evidence cells");
+  assert.equal(cell("MRN-77", "evidenceStatus"), "");
+});
+
+test("an evidence detail or source that leads with a formula character is defused like any outside text", async () => {
+  const result = await subjectListReport(
+    fakeDeps({ rows: [row("pat-001", withFacts(true, { "Most Recent Glycemic Status Date": "2027-02-03" }))] }).deps,
+    LIST.id, 2027, ["cms122"], () => "x", { cqlFacts: true },
+  );
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  report.rows[0]!.cqlFacts = facts({ "=cmd|' /C calc'!A0": "1", "Most Recent Glycemic Status Date": "2027-02-03" });
+  const csv = subjectListReportCsv(report, profile, "patient");
+  assert.match(csv, /,'=cmd/, "prefixed with an apostrophe");
+  assert.doesNotMatch(csv, /,=cmd/);
+});
+
+test("the JSON summary's read carries no facts onto its rows", async () => {
+  const result = await runReport({
+    rows: [row("pat-001", { ...official({ ipp: true, denom: true, numer: true, denex: false, denexcep: false }), cqlFacts: facts({ "Most Recent Glycemic Status Date": "2027-02-03" }) })],
+  });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  for (const r of report.rows) assert.equal("cqlFacts" in r, false);
 });

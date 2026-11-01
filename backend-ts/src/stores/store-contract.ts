@@ -1340,6 +1340,44 @@ export function outcomeStoreContract(
     assert.equal(full.length, 621, "the unnarrowed read is unchanged");
   });
 
+  // #875: the list report's CSV asks for each row's recorded CQL define values. They come back BESIDE the
+  // narrowed evidence, only when asked, absent on a row that has none, and never inside `evidence`, so
+  // rows whose evidence differs only in their facts still narrow to the same evidence (and, where the
+  // store shares one object between equal narrowed evidences, to that one object).
+  test(`[${label}] listOutcomeSubjectMembershipsForRun returns cqlFacts beside the evidence, only when asked`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const official = { ecqmId: "122FHIR", populationResults: { ipp: true, denom: true, numer: true } };
+    const factsOf = (date: string) => ({ spec: 1, values: [{ define: "Most Recent Glycemic Status Date", value: date }] });
+    const evidences: Record<string, Record<string, unknown>> = {
+      "emp-001": { official, cqlFacts: factsOf("2026-02-01") },
+      "emp-002": { official, cqlFacts: factsOf("2026-03-01") },
+      "emp-003": { official, cqlFacts: { spec: 1, values: [] } },
+      "emp-004": { official },
+      "emp-005": { official },
+    };
+    await outcomeStore.recordOutcomes(
+      Object.entries(evidences).map(([subjectId, evidence]) => ({ runId: run.id, subjectId, measureId: "audiogram", status: "COMPLIANT", evidence })),
+    );
+
+    const plain = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram");
+    assert.equal(plain.some((r) => "cqlFacts" in r), false, "not asked: no facts on any row");
+    const asked = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram", undefined, { cqlFacts: true });
+    const of = (subjectId: string) => asked.find((r) => r.subjectId === subjectId)!;
+    for (const [subjectId, evidence] of Object.entries(evidences)) {
+      const r = of(subjectId);
+      assert.deepEqual(r.evidence, { official }, `${subjectId}: the narrowed evidence never carries the facts`);
+      if (evidence.cqlFacts) assert.deepEqual(r.cqlFacts, evidence.cqlFacts, `${subjectId}: its own facts`);
+      else assert.equal("cqlFacts" in r, false, `${subjectId}: absent where the row has none, never null`);
+    }
+    if (of("emp-004").evidence === of("emp-005").evidence) {
+      assert.equal(of("emp-001").evidence, of("emp-004").evidence, "facts never split a shared narrowed evidence");
+      assert.equal(of("emp-002").evidence, of("emp-004").evidence);
+    }
+    const narrowed = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram", ["emp-002", "emp-004"], { cqlFacts: true });
+    assert.deepEqual(narrowed.map((r) => [r.subjectId, r.cqlFacts ?? null]).sort(), [["emp-002", factsOf("2026-03-01")], ["emp-004", null]]);
+  });
+
   // #874: "does this run hold this measure?" reads one row, any row, of that run and that measure.
   test(`[${label}] anyOutcomeForMeasure returns a row of that run and measure, or null`, async () => {
     const { runStore, outcomeStore } = await fresh();

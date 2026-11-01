@@ -115,6 +115,7 @@ import type {
 } from "@work-well/measure-engine";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { artifactKey, artifactKind, effectivePeriodCovers, loadOfficialArtifact, type OfficialArtifact } from "./official-artifacts.ts";
+import { cqlFactsFor, factsSpecFor, recordedDefines } from "./official-facts.ts";
 import { officialMeasureSemantics, trustedProfilesOf } from "./official-measure-semantics.ts";
 import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.ts";
 import type { BatchCalculator } from "./fqm-worker.ts";
@@ -298,9 +299,10 @@ export const OFFICIAL_DEFINE_PREFIX = "official:";
  * Names are prefixed `official:` — honest (these are populations, not authored defines) and it keeps
  * them clear of `deriveWhyFlagged`'s anchored `/^most recent .*date$/i` and `/^days since/i` matchers.
  *
- * If per-statement values are ever genuinely wanted, the cost is explicit: vendor that measure
- * unstripped (~10.5MB instead of ~2.4MB) and revisit. PR-8 must not read `expressionResults` on an
- * official outcome expecting statement-level detail.
+ * The values a reader does want, the result and its date (#875), come another way: cql-execution keys
+ * its own results by define NAME, so `official-facts.ts` names a few defines per measure and the
+ * executor renders their values as `evidence_json.cqlFacts`, with no unstripped vendoring needed. Never
+ * read `expressionResults` on an official outcome expecting statement-level detail.
  */
 export function populationExpressionResults(
   populationResults: readonly { populationType: string; result: boolean }[],
@@ -633,11 +635,17 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
       }
       subjectIdByPatientId.set(patientId, s.subjectId);
     }
+    // The defines whose values become `cqlFacts` (#875): only when this logic has an entry, and only when
+    // the artifact is the library that entry names, so a re-vendored library records nothing rather than
+    // values read under someone else's names.
+    const factsSpec = factsSpecFor(measureId, artifactKind(artifact));
+    const recordDefines = factsSpec?.library === artifact.manifest.measureName ? recordedDefines(factsSpec) : [];
     const calculationInput = {
       bundle: artifact.bundle,
       patientBundles,
       period,
       valueSetCache,
+      ...(recordDefines.length > 0 ? { recordDefines } : {}),
       // By resource type, except a measure's own trusted profiles (`OfficialMeasureSemantics.
       // trustedProfiles`, #591). cms165 is the one measure with any, and the field's own note says why:
       // its blood-pressure retrieve carries no code filter, so read by type every final Observation is a
@@ -734,6 +742,9 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
         outcomeFromPopulations(populationMembership(populations), semantics.numeratorMeansCompliant),
       );
       const { outcome, inInitialPopulation } = worstOutcome(perRate);
+      const cqlFacts = recordDefines.length > 0
+        ? cqlFactsFor(result.rates?.length ? result.rates : [result.populationResults], result.defineValues)
+        : undefined;
       outcomes.set(subjectId, {
         subjectId,
         // The catalog's display name, matching the authored path — not the artifact's machine name
@@ -770,6 +781,9 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
               : {}),
             measurementPeriod: period,
           },
+          // What CQL found, per `official-facts.ts`: top-level, never inside `official`, which is the
+          // regulatory record MeasureReport and QRDA read.
+          ...(cqlFacts ? { cqlFacts } : {}),
         },
       });
     }

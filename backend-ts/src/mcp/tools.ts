@@ -42,6 +42,7 @@ import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { latestPopulationSnapshot } from "../program/latest-population.ts";
 import type { SubjectListStore } from "../stores/subject-list-store.ts";
 import { resolveListFilter } from "../compliance/subject-list-filter.ts";
+import { withoutCqlFacts } from "../wiring/official-facts.ts";
 
 export interface McpToolDeps {
   caseStore: CaseStore;
@@ -231,10 +232,12 @@ async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
   const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
-  const evidence = detail.evidenceJson ?? {};
+  // Without the recorded CQL define values (#875), in both places the evidence appears: chart values
+  // reach no AI client without an owner decision (AI_GUARDRAILS §6). The case page shows them to staff.
+  const evidence = withoutCqlFacts(detail.evidenceJson ?? {});
   const whyFlagged = (evidence as JsonRecord).why_flagged ?? {};
   // `detail` carries the cited row's `measureVersion` and `logic` (#769), as the case page does.
-  return { ...detail, evidence_payload: evidence, why_flagged: whyFlagged };
+  return { ...detail, evidenceJson: evidence, evidence_payload: evidence, why_flagged: whyFlagged };
 }
 
 async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {

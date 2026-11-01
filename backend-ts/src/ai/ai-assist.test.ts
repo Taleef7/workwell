@@ -157,6 +157,27 @@ test("buildExplainUserPrompt: size-caps oversized evidence (bounds token use)", 
   assert.match(prompt, /truncated/i);
 });
 
+test("explainCase: the prompt never carries the outcome's recorded CQL define values (#875)", async () => {
+  // Chart values (dates, readings, codings) reach no AI client without an owner decision.
+  let captured = "";
+  const r = recorder();
+  const chat: StubChat = async (_system, user) => { captured = user; return "ok"; };
+  const evidenceJson = {
+    why_flagged: { note: "kept" },
+    official: { populationResults: { ipp: true } },
+    cqlFacts: { spec: 1, values: [{ define: "Most Recent Glycemic Status Date", value: "SENTINEL-2026-03-01" }] },
+  };
+  await explainCase(
+    r.deps(chat),
+    { caseId: "c1", measureName: "Diabetes", measureVersion: "v1.0", currentOutcomeStatus: "OVERDUE", lastRunId: "run1", employeeName: "Omar", evidenceJson },
+    "cm@x",
+  );
+  assert.doesNotMatch(captured, /SENTINEL|cqlFacts/);
+  assert.match(captured, /kept/, "the rest of the evidence is still there");
+  assert.match(captured, /populationResults/);
+  assert.ok("cqlFacts" in evidenceJson, "the caller's evidence is not mutated");
+});
+
 test("explainCase: an injection string inside evidence stays inside the fence, not a bare instruction", async () => {
   let captured = "";
   const r = recorder();

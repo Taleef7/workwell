@@ -38,7 +38,9 @@ off), `locator` (so fqm error text can no longer point at a position in the ELM)
 `NA | UNHIT | FALSE`: measured over six CMS122 MADiE cases, **0 of 96 root statements ever read `TRUE`**,
 including for subjects the measure puts in the numerator. Statement **names and count** survive; statement
 **values** do not. The reduction check's per-measure count (CMS122 419, CMS125 423) verifies the former
-and is invariant under stripping — it must not be read as proving the latter.
+and is invariant under stripping — it must not be read as proving the latter. (Define values by NAME do
+survive: cql-execution keys its own results by define name, which is how `evidence_json.cqlFacts` records
+a few per measure, #875, `src/wiring/official-facts.ts`.)
 
 What it keeps, and what the claim actually rests on: `populationResults` — which is what the reduction
 check compares (0/55 and 0/66 cases changed) and what `evidence_json.official` persists.

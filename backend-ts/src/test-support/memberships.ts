@@ -15,7 +15,7 @@
  * `isEvaluationErrorEvidence` tests key PRESENCE, so a key carrying null reads as a failed evaluation
  * and reports every rate as zero.
  */
-import type { OutcomeRecord } from "../stores/outcome-store.ts";
+import type { OutcomeRecord, OutcomeSubjectMembership } from "../stores/outcome-store.ts";
 
 type Rowish = { measureId?: string; status: string; evidence: unknown };
 type MembershipRow = Pick<OutcomeRecord, "status" | "evidence">;
@@ -58,28 +58,33 @@ export function withMemberships<
 }
 
 type SubjectRowish = Rowish & Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation">;
-type SubjectMembershipRow = Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">;
+type SubjectMembershipRow = OutcomeSubjectMembership;
 
 /**
  * Wrap a fake's `listOutcomes` as `listOutcomeSubjectMembershipsForRun` (#852): the membership narrowing
  * plus the row's identity columns, and nothing more, so a per-subject reader cannot lean on a field the
  * real projection drops. Reads the fake WITHOUT a page window, as the real statement is unpaged, and
  * narrows to `subjectIds` when given one (#874), as the real statement does: an empty set reads nothing.
+ * `cqlFacts` (#875) only when asked for, beside the narrowed evidence and absent where the row has none.
  */
 export function subjectMembershipsVia(
   listOutcomes: (runId: string, opts?: { measureId?: string }) => Promise<ReadonlyArray<SubjectRowish>>,
-): (runId: string, measureId: string, subjectIds?: readonly string[]) => Promise<SubjectMembershipRow[]> {
-  return async (runId, measureId, subjectIds) =>
+): (runId: string, measureId: string, subjectIds?: readonly string[], opts?: { cqlFacts?: boolean }) => Promise<SubjectMembershipRow[]> {
+  return async (runId, measureId, subjectIds, opts) =>
     (await listOutcomes(runId, { measureId }))
       .filter((row) => row.measureId === undefined || row.measureId === measureId)
       .filter((row) => subjectIds === undefined || subjectIds.includes(row.subjectId))
-      .map((row) => ({
-        id: row.id,
-        subjectId: row.subjectId,
-        evaluatedAt: row.evaluatedAt,
-        ...(row.outOfPopulation !== undefined ? { outOfPopulation: row.outOfPopulation } : {}),
-        ...narrowToMemberships(row),
-      }));
+      .map((row) => {
+        const cqlFacts = opts?.cqlFacts ? ((row.evidence as { cqlFacts?: unknown } | null)?.cqlFacts ?? null) : null;
+        return {
+          id: row.id,
+          subjectId: row.subjectId,
+          evaluatedAt: row.evaluatedAt,
+          ...(row.outOfPopulation !== undefined ? { outOfPopulation: row.outOfPopulation } : {}),
+          ...narrowToMemberships(row),
+          ...(cqlFacts !== null ? { cqlFacts } : {}),
+        };
+      });
 }
 
 /**
