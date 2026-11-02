@@ -251,8 +251,8 @@ describe("CasesPage crosswalk identity rendering", () => {
   });
 
   it.each([
-    ["patient", /including exclusion context when an exclusion applies/],
-    ["employee", /including waiver context when an exclusion applies/],
+    ["patient", /A case is one gap: one measure for one patient\. A patient with three gaps has three cases\./],
+    ["employee", /A case is one gap: one measure for one employee\. An employee with three gaps has three cases\./],
   ] as const)("uses %s terminology in the cases hero", async (term, copy) => {
     setSubject(term);
     render(<CasesPage />);

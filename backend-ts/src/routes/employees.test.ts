@@ -424,3 +424,31 @@ test("each open gap carries its newest outreach and the delivery status since; a
     "never contacted: nothing is inferred",
   );
 });
+
+test("GET /api/employees/:id/open-cases is the profile's Open Cases rows, active only, behind the same directory gate (#880)", async () => {
+  // A third gap, opened and then closed by a run: it is history, never an open gap on either surface.
+  const store = new SqliteCaseStore(env.DB as never);
+  const runs = new SqliteRunStore(env.DB as never);
+  const run = await runs.createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms122",
+    triggeredBy: "test",
+    status: "COMPLETED",
+    requestedScope: { measureId: "cms122" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  const closed = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "cms122", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+  await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-006", measureId: "cms122", evaluationPeriod: "2026-06-13", outcomeStatus: "COMPLIANT" });
+
+  const res = await get("/api/employees/emp-006/open-cases");
+  assert.equal(res?.status, 200);
+  const open = (await res!.json()) as { openCases: Array<{ caseId: string }> };
+  const profile = (await (await get("/api/employees/emp-006/profile"))!.json()) as { openCases: unknown[] };
+  assert.deepEqual(open.openCases, profile.openCases, "one builder: the same rows, order and fields");
+  assert.deepEqual(new Set(open.openCases.map((c) => c.caseId)), new Set([caseId, cmsCaseId]));
+  assert.ok(!open.openCases.some((c) => c.caseId === closed!.id), "a closed gap is not an open one");
+
+  assert.equal((await get("/api/employees/emp-999/open-cases"))?.status, 404, "outside the directory");
+  assert.equal((await get("/api/employees/%E0%A4%A/open-cases"))?.status, 404, "malformed encoding");
+});

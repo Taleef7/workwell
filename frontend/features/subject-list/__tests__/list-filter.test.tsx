@@ -45,7 +45,9 @@ it("a case manager's link keeps its list; any other seat drops it and says so", 
   expect(listParam(params("listId=list-qa"), "ROLE_CASE_MANAGER")).toEqual({ listId: "list-qa", refused: false });
   expect(listParam(params("listId=list-qa"), "ROLE_ADMIN")).toEqual({ listId: "list-qa", refused: false });
   // The worker answers 403 to a VIEWER naming a list, so the screen never sends it.
-  expect(listParam(params("listId=list-qa"), "ROLE_VIEWER")).toEqual({ listId: "", refused: true });
+  expect(listParam(params("listId=list-qa"), "ROLE_VIEWER")).toEqual({ listId: "", refused: "seat" });
+  // The staff seat (#880) is told why, and where the list's gaps reach it instead.
+  expect(listParam(params("listId=list-qa"), "ROLE_QUALITY_STAFF")).toEqual({ listId: "", refused: "staff" });
   // Before the session loads the seat is unknown: nothing sent, and no note flashed at a case manager.
   expect(listParam(params("listId=list-qa"), undefined)).toEqual({ listId: "", refused: false });
   expect(listParam(params(""), "ROLE_VIEWER")).toEqual({ listId: "", refused: false });
@@ -122,11 +124,22 @@ it("a seat that may not filter by list never fetches the lists", async () => {
   expect(result.current.options).toEqual([{ value: "", label: "Not limited to a list" }]);
 
   const onChange = vi.fn();
-  render(<ListFilterNote listId="" refused filter={result.current} onChange={onChange} />);
+  render(<ListFilterNote listId="" refused="seat" filter={result.current} onChange={onChange} />);
   expect(screen.getByTestId("list-filter-note")).toHaveTextContent(
     "Attributed lists are for case managers, so the list in this link was not applied.",
   );
   // The seat has no picker or chip to clear it with, so the note is the way out.
+  await userEvent.click(screen.getByRole("button", { name: "Remove it from the link" }));
+  expect(onChange).toHaveBeenCalledWith("");
+});
+
+it("tells the staff seat its lead assigns the list's gaps, and still offers the way out", async () => {
+  const { result } = renderHook(() => useListFilter("", false));
+  const onChange = vi.fn();
+  render(<ListFilterNote listId="" refused="staff" filter={result.current} onChange={onChange} />);
+  expect(screen.getByTestId("list-filter-note")).toHaveTextContent(
+    "Your seat can't use attributed lists, so this link shows everyone instead. Your lead can assign the list's gaps to you.",
+  );
   await userEvent.click(screen.getByRole("button", { name: "Remove it from the link" }));
   expect(onChange).toHaveBeenCalledWith("");
 });

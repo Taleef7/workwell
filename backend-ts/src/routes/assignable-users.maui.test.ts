@@ -58,7 +58,7 @@ test("GET /api/users/assignable on maui returns only maui CM/ADMIN users, email-
   assert.deepEqual(output.users, [
     { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN" },
     { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
-    { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
+    { email: "quality-staff@maui.workwell.dev", role: "ROLE_QUALITY_STAFF" },
   ]);
   for (const user of output.users) {
     assert.ok(!user.email.endsWith("@workwell.dev"), "a workwell.dev demo account must not appear on maui");

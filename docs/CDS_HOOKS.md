@@ -76,6 +76,11 @@ A successful invoke is `200` with a `cards` array, per the specification.
 }
 ```
 
+The example is an authored measure's card, whose `summary` is the measure and its state. An OVERDUE card on
+an official measure leads with what closes the gap instead (#880, `needFor`): `Needs a blood pressure below
+140/90 this year (CMS165)` for CMS's artifact, and the need alone, with no CMS identity, for a WorkWell
+translation (LOCKED_DECISIONS §4.3). The phrase is fixed per measure (CMS137 per rate) and states no value.
+
 ### An empty `cards` array means something specific
 
 | response | meaning |

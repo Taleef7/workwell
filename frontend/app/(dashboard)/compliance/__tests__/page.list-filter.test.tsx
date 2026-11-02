@@ -136,3 +136,17 @@ it("a VIEWER never fetches the lists, never sends a list, and is told the link's
   await waitFor(() => expect(navHolder.current.params.has("listId")).toBe(false));
   expect(screen.queryByTestId("list-filter-note")).toBeNull();
 });
+
+it("the staff seat (#880) never fetches the lists, and keeps the way to the work list", async () => {
+  auth.role = "ROLE_QUALITY_STAFF";
+  navHolder.current.setUrl("/compliance?panel=wellness&listId=list-q3");
+  render(<CompliancePage />);
+  await waitFor(() => expect(rosterCalls().length).toBeGreaterThan(0));
+  expect(await screen.findByTestId("list-filter-note")).toHaveTextContent(/Your lead can assign the list's gaps to you/);
+  for (const call of rosterCalls()) expect(call).not.toContain("listId");
+  expect(listFetches()).toEqual([]);
+  expect(screen.queryByLabelText("Attributed list")).toBeNull();
+  // Assigning from the roster is a bulk assign, the lead's; working the gaps is not.
+  expect(screen.getByRole("link", { name: /Work the open gaps on the work list/ })).toBeInTheDocument();
+  expect(get.mock.calls.map((c) => String(c[0]))).not.toContain("/api/users/assignable");
+});

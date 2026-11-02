@@ -63,10 +63,23 @@ describe("RunsPage bulk downloads by role", () => {
     expect(gridProps.last?.allowExport).toBe(false);
   });
 
+  it("offers the staff seat the CSVs but not the population files, which are the lead's (#880)", async () => {
+    auth.role = "ROLE_QUALITY_STAFF";
+    render(<RunsPage />);
+    expect(await screen.findByRole("button", { name: "Export outcomes CSV" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export runs CSV" })).toBeInTheDocument();
+    await screen.findByTestId("outcomes-grid");
+    expect(screen.queryByRole("button", { name: "MeasureReport (FHIR)" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "QRDA III (XML)" })).toBeNull();
+    // A run's AI insight is a POST under /api/runs/**, the lead's: no button that would fail silently.
+    expect(screen.queryByRole("button", { name: "Generate AI insight" })).toBeNull();
+  });
+
   it.each(["ROLE_CASE_MANAGER", "ROLE_ADMIN"])("offers every one to %s", async (role) => {
     auth.role = role;
     render(<RunsPage />);
     expect(await screen.findByRole("button", { name: "MeasureReport (FHIR)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate AI insight" })).toBeInTheDocument();
     for (const name of EXPORTS) expect(screen.getByRole("button", { name })).toBeInTheDocument();
     await screen.findByTestId("outcomes-grid");
     expect(gridProps.last?.allowExport).toBe(true);

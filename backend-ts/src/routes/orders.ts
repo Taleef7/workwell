@@ -1,6 +1,6 @@
 /**
  * Order proposals route (#77 E7) — advisory "Action Evaluators → orders" over the latest population
- * run per Active measure. Read-time; no schema. Gated to CASE_MANAGER/ADMIN by the auth matrix
+ * run per Active measure. Read-time; no schema. Gated to CASE_MANAGER/QUALITY_STAFF/ADMIN by the auth matrix
  * (orders are clinical). format=domain (default) → {proposed, suppressed, totals, standingOrdersChecked,
  * measuresWithoutOrder}, optionally windowed
  * by ?limit=1..1000&offset= (both lists, same window; totals are the pre-window counts; proposals are

@@ -8,7 +8,9 @@
  *
  * Role authorities (canonical, with the `ROLE_` prefix the JWT carries):
  *   ROLE_ADMIN          — everything
- *   ROLE_CASE_MANAGER   — case ops, runs, campaigns, orders, evidence
+ *   ROLE_CASE_MANAGER   — the lead: case ops, runs, campaigns, lists, panels, bulk actions, orders, evidence
+ *   ROLE_QUALITY_STAFF  — the staff seat (#880): works one case at a time, exports the CSVs, reads the
+ *                         scorecard; the practice-wide levers stay with the lead
  *   ROLE_AUTHOR         — measure authoring (spec/CQL/tests, create)
  *   ROLE_APPROVER       — measure approve/activate/deprecate, MAT export
  *   ROLE_VIEWER         — read-only
@@ -17,6 +19,7 @@
 export const ROLES = {
   ADMIN: "ROLE_ADMIN",
   CASE_MANAGER: "ROLE_CASE_MANAGER",
+  QUALITY_STAFF: "ROLE_QUALITY_STAFF",
   AUTHOR: "ROLE_AUTHOR",
   APPROVER: "ROLE_APPROVER",
   VIEWER: "ROLE_VIEWER",
@@ -45,27 +48,50 @@ export const isAdmin = (role: string | null | undefined): boolean => normRole(ro
 export const canRunMeasures = (role: string | null | undefined): boolean =>
   hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
 
-/** Work cases: assign/escalate/outreach/rerun (POST /api/cases/**). */
+/** Work one case: assign/escalate/outreach/re-check (POST /api/cases/**) — the lead and the staff seat. */
 export const canManageCases = (role: string | null | undefined): boolean =>
+  hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.QUALITY_STAFF, ROLES.ADMIN]);
+
+/**
+ * Act on many cases at once: the selection checkboxes and the bulk bar (bulk assign, escalate, export
+ * selected). The lead's (#880): `POST /api/cases/bulk-assign` refuses the staff seat.
+ */
+export const canActInBulk = (role: string | null | undefined): boolean =>
+  hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
+
+/** Attributed lists and `?listId=` (/api/subject-lists/**) — the lead's (#880, ADR-082). */
+export const canUseLists = (role: string | null | undefined): boolean =>
+  hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
+
+/** Set who works a provider's panel (PUT/DELETE /api/panels/**) — the lead's (#880). */
+export const canManagePanels = (role: string | null | undefined): boolean =>
   hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
 
 /**
- * Download patient data in bulk: the CSV exports, QRDA and MeasureReport files (/api/exports/**,
- * /api/runs/:id/{qrda1,qrda,measure-report}) — CASE_MANAGER/ADMIN, mirroring the backend gate (D5).
- * Browsing the same rows in the app stays open to every signed-in role.
+ * Download patient data in bulk as CSV (/api/exports/**) — the lead and the staff seat, mirroring the
+ * backend gate (D5; owner decision 2026-11-02). Browsing the same rows in the app stays open to every
+ * signed-in role.
  */
 export const canExportData = (role: string | null | undefined): boolean =>
+  hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.QUALITY_STAFF, ROLES.ADMIN]);
+
+/** The files a report is filed from: QRDA I/III and MeasureReport (/api/runs/:id/…) — the lead's (#880). */
+export const canExportReports = (role: string | null | undefined): boolean =>
   hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
 
 /** Download the audit ledger (/api/audit-events/export) — ADMIN only, mirroring the backend gate. */
 export const canExportAudit = (role: string | null | undefined): boolean => isAdmin(role);
 
 /**
- * Where a signed-in user starts: a case manager's day is the work list, everyone else's the Programs
- * overview.
+ * Where a signed-in user starts: the lead's day is the work list, the staff seat's the cases assigned
+ * to it (#880), everyone else's the Programs overview.
  */
-export const homeRouteFor = (role: string | null | undefined): "/worklist" | "/programs" =>
-  normRole(role) === ROLES.CASE_MANAGER ? "/worklist" : "/programs";
+export const homeRouteFor = (role: string | null | undefined): "/worklist" | "/cases?view=mine" | "/programs" => {
+  const r = normRole(role);
+  if (r === ROLES.CASE_MANAGER) return "/worklist";
+  if (r === ROLES.QUALITY_STAFF) return "/cases?view=mine";
+  return "/programs";
+};
 
 /** Launch bulk outreach campaigns + view campaign history (/api/campaigns/**). */
 export const canRunCampaigns = (role: string | null | undefined): boolean =>
@@ -73,7 +99,7 @@ export const canRunCampaigns = (role: string | null | undefined): boolean =>
 
 /** View advisory order proposals (/api/orders/**). */
 export const canViewOrders = (role: string | null | undefined): boolean =>
-  hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.ADMIN]);
+  hasAnyRole(role, [ROLES.CASE_MANAGER, ROLES.QUALITY_STAFF, ROLES.ADMIN]);
 
 /** Author measure content: spec/CQL/tests/create (POST + PUT /api/measures/**). */
 export const canAuthorMeasures = (role: string | null | undefined): boolean =>

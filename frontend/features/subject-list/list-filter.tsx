@@ -16,27 +16,34 @@
  */
 import Link from "next/link";
 import { useMemo } from "react";
-import { canManageCases } from "@/lib/rbac";
+import { canUseLists, normRole, ROLES } from "@/lib/rbac";
 import { SUBJECT } from "@/lib/terminology";
 import { useSubjectLists, type SubjectListRow } from "./use-subject-lists";
 
 export const LIST_FILTER_LABEL = "Attributed list";
 
 /**
+ * Why a link's list was not applied: `"staff"` for the staff seat, which works the gaps its lead
+ * assigns from the list (#880), `"seat"` for any other seat that may not use lists.
+ */
+export type ListRefusal = false | "staff" | "seat";
+
+/**
  * The list id a screen may send, read off its URL.
  *
- * Narrowing by list is CASE_MANAGER/ADMIN at the API (the worker answers 403 to anyone else), so for
- * any other seat the parameter is dropped rather than sent, and `refused` says a link named one. Not
- * refused while the seat is still unknown (`role` undefined before the session loads), which would
- * flash the note at a case manager.
+ * Narrowing by list is the lead's (CASE_MANAGER/ADMIN) at the API (the worker answers 403 to anyone
+ * else), so for any other seat the parameter is dropped rather than sent, and `refused` says a link
+ * named one. Not refused while the seat is still unknown (`role` undefined before the session loads),
+ * which would flash the note at a case manager.
  */
 export function listParam(
   searchParams: { get(name: string): string | null },
   role: string | null | undefined,
-): { listId: string; refused: boolean } {
+): { listId: string; refused: ListRefusal } {
   const raw = searchParams.get("listId")?.trim() ?? "";
-  if (canManageCases(role)) return { listId: raw, refused: false };
-  return { listId: "", refused: raw !== "" && role != null };
+  if (canUseLists(role)) return { listId: raw, refused: false };
+  if (raw === "" || role == null) return { listId: "", refused: false };
+  return { listId: "", refused: normRole(role) === ROLES.QUALITY_STAFF ? "staff" : "seat" };
 }
 
 export type ListFilterState = "none" | "loading" | "found" | "missing" | "failed";
@@ -125,7 +132,7 @@ export function ListFilterNote({
   onChange,
 }: {
   listId: string;
-  refused: boolean;
+  refused: ListRefusal;
   filter: ListFilter;
   onChange: (next: string) => void;
 }) {
@@ -133,7 +140,11 @@ export function ListFilterNote({
     // The way out: this seat has no picker, chip or Clear that would remove the id from the URL.
     return (
       <p data-testid="list-filter-note" className={warnClass}>
-        <span>Attributed lists are for case managers, so the list in this link was not applied.</span>
+        <span>
+          {refused === "staff"
+            ? "Your seat can't use attributed lists, so this link shows everyone instead. Your lead can assign the list's gaps to you."
+            : "Attributed lists are for case managers, so the list in this link was not applied."}
+        </span>
         <button type="button" className={linkClass} onClick={() => onChange("")}>
           Remove it from the link
         </button>

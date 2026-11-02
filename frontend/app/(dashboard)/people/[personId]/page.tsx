@@ -17,7 +17,7 @@ import { COMPLIANCE_STATUS_LABELS, complianceStatusClass, labelFor } from "@/lib
 
 /**
  * The patient page's reading of an outcome (#655, #671): the server's `displayStatus`, so an
- * out-of-population MISSING_DATA reads "Not in population" here as it does there. The stored bucket is
+ * out-of-population MISSING_DATA reads "Not eligible" here as it does there. The stored bucket is
  * the fallback for an older backend.
  */
 function OutcomeChip({ status }: { status: string }) {

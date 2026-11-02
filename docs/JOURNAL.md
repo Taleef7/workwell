@@ -5,6 +5,23 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-02
+
+- **The lead and the staff seat differ (#880, LOCKED_DECISIONS §4A.9).** `quality-staff@` is a new role,
+  `ROLE_QUALITY_STAFF`: it lands on Cases → Assigned to you, works one case at a time, exports the CSVs and
+  reads the scorecard. Bulk assign, campaigns, attributed lists, panel owners, runs, People, QRDA/MeasureReport
+  and MCP stay with the lead; a rule that does not name the role refuses it, so a missed gate is a 403.
+  - **Rollout:** a signed-in staff session keeps its old role for at most one 15-minute access token (a
+    refresh re-reads it, and the browser now stores the new role). An MCP grant the seat holds is refused at
+    once; the admin revokes it at deploy.
+- **The case page says what CQL found and what else is due.** "Why this was flagged" shows the result and
+  its date (`cqlFindings`, the list CSV's own reading; MCP drops it). "Other open gaps" lists the patient's
+  other cases from the new `GET /api/employees/:id/open-cases`, with a way to message about all of them.
+- An OVERDUE card on an official measure leads with what closes the gap (`needFor`, AI_GUARDRAILS §1.1).
+- CMS56 and CMS133 (surgical) are Deprecated: a seeded Draft row retires once, audited, and an edited one is
+  left with a WARN. "Not in population" reads "Not eligible". The site picker shows only where a page reads
+  the site. The screens say what each is for; the practice's own terms are OPEN_QUESTIONS 1.5.
+
 ## 2026-10-30
 
 - **The list report says what CQL found for each patient: the result and its date (#875).** fqm already

@@ -80,3 +80,10 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
    readings, which CMS165 cannot see, and is counted in the import diagnostics. No half-panel is emitted
    and no `Observation.encounter` is inferred. This does not lift the PHI gate: cms165 over real data still
    needs §4A.2's and §4A.5's conditions (#591, #572).
+9. **The lead and the staff seat are different roles** (owner decision, 2026-11-02, #880). The staff seat
+   (`ROLE_QUALITY_STAFF`) works one case at a time (assign, outreach, escalate, resolve, appointment,
+   re-check, the patient's one message), exports the CSVs and reads the scorecard. Bulk assign, campaigns,
+   attributed lists, panel owners, population runs, identity and the People directory, QRDA and
+   MeasureReport files, and MCP stay with the lead (`ROLE_CASE_MANAGER`) and admins. Single assign stays
+   with staff: the split limits the volume of a change, not who may make it. A rule that does not name the
+   staff role refuses it.

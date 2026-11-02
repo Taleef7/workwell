@@ -23,7 +23,7 @@ vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 const emitToast = vi.fn();
 vi.mock("@/lib/toast", () => ({ emitToast: (...args: unknown[]) => emitToast(...args) }));
 
-const ROLE = vi.hoisted(() => ({ current: "ROLE_CASE_MANAGER" }));
+const ROLE = vi.hoisted(() => ({ current: "ROLE_QUALITY_STAFF" }));
 vi.mock("@/components/auth-provider", () => ({
   useAuth: () => ({ user: { role: ROLE.current, email: "quality-staff@maui.workwell.dev" } }),
 }));
@@ -75,7 +75,7 @@ const sendButton = () => screen.getByRole("button", { name: /^Send one message a
 
 beforeEach(() => {
   setSubject("patient");
-  ROLE.current = "ROLE_CASE_MANAGER";
+  ROLE.current = "ROLE_QUALITY_STAFF";
   emitToast.mockReset();
   post.mockReset().mockImplementation((url: string, body?: { dryRun?: boolean; caseIds?: string[] }) => {
     if (url === "/api/cases/patient-outreach") {

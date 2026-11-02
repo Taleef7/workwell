@@ -32,8 +32,8 @@ export interface ScorecardEnv extends DataSourceEnv {
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-/** The roles that read the whole practice's card. */
-const PRACTICE_ROLES: ReadonlySet<string> = new Set(["ROLE_CASE_MANAGER", "ROLE_ADMIN"]);
+/** The roles that read the whole practice's card: the lead, the staff seat (#880) and the admin. */
+const PRACTICE_ROLES: ReadonlySet<string> = new Set(["ROLE_CASE_MANAGER", "ROLE_QUALITY_STAFF", "ROLE_ADMIN"]);
 
 export async function handleScorecard(
   req: Request,

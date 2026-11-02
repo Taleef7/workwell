@@ -16,7 +16,7 @@ const get = vi.fn();
 const apiMock = { get, post: vi.fn() };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
-const ROLE = vi.hoisted(() => ({ current: "ROLE_CASE_MANAGER" }));
+const ROLE = vi.hoisted(() => ({ current: "ROLE_QUALITY_STAFF" }));
 vi.mock("@/components/auth-provider", () => ({
   useAuth: () => ({ user: { role: ROLE.current, email: "quality-staff@maui.workwell.dev" } }),
 }));
@@ -85,7 +85,7 @@ function serve(p: unknown) {
 
 beforeEach(() => {
   setSubject("patient");
-  ROLE.current = "ROLE_CASE_MANAGER";
+  ROLE.current = "ROLE_QUALITY_STAFF";
   serve(profile);
 });
 
@@ -138,5 +138,22 @@ describe("the patient page leads with the work", () => {
     render(<EmployeeProfilePage />);
     const open = await screen.findByTestId("open-cases");
     expect(within(open).getByText("No open cases.")).toBeInTheDocument();
+  });
+});
+
+describe("the way back (#880)", () => {
+  it("takes the staff seat back to its own cases, and the lead to the work list", async () => {
+    const view = render(<EmployeeProfilePage />);
+    expect(await screen.findByRole("link", { name: "← Back to my cases" })).toHaveAttribute("href", "/cases?view=mine");
+    view.unmount();
+
+    ROLE.current = "ROLE_CASE_MANAGER";
+    render(<EmployeeProfilePage />);
+    expect(await screen.findByRole("link", { name: "← Back to the work list" })).toHaveAttribute("href", "/worklist");
+  });
+
+  it("anchors Open Cases, where the case page's one message about every gap lands", async () => {
+    render(<EmployeeProfilePage />);
+    expect(await screen.findByTestId("open-cases")).toHaveAttribute("id", "open-cases");
   });
 });

@@ -57,9 +57,9 @@ describe("Person history (#655)", () => {
     render(<PersonDetailPage />);
     const table = (await screen.findAllByText("Breast Cancer Screening", { selector: "td" }))[0]!.closest("table")!;
     const rows = within(table).getAllByRole("row").slice(1).map((r) => r.textContent ?? "");
-    expect(rows[0]).toContain("Not in population");
+    expect(rows[0]).toContain("Not eligible");
     expect(rows[0]).toContain("Single-patient run");
-    expect(rows[1]).toContain("Not in population");
+    expect(rows[1]).toContain("Not eligible");
     expect(rows[1]).toContain("Nightly");
     expect(rows[2]).toContain("Manual run");
     // Codex on #722: two runs of one kind in one minute are told apart by the run's short id.

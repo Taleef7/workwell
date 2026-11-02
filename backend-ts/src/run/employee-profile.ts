@@ -223,17 +223,94 @@ function outreachOf(
   };
 }
 
-/** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
-export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: string): Promise<EmployeeProfileResponse | null> {
-  // A configured wc profile rehydrates from persisted outcomes after a worker restart. Requiring at
-  // least one row avoids fabricating profiles for arbitrary wc| ids; seam-off continues to resolve only
-  // the static catalog.
+/**
+ * The subject the profile and its open cases are about, or null when it is not in this deployment's
+ * directory (route → 404). A configured wc profile rehydrates from persisted outcomes after a worker
+ * restart. Requiring at least one row avoids fabricating profiles for arbitrary wc| ids; seam-off
+ * continues to resolve only the static catalog.
+ */
+async function directorySubject(deps: EmployeeProfileDeps, externalId: string) {
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});
-  const emp = employeeById(externalId) ?? (
+  return employeeById(externalId) ?? (
     webChartConfigured && (await deps.outcomes.hasOutcomes(externalId))
       ? directoryForRows([{ subjectId: externalId }], true, deps.webChartEnv, DIRECTORY).employeeById(externalId)
       : null
   );
+}
+
+const isActiveCase = (c: CaseRecord): boolean =>
+  (ACTIVE_CASE_STATUSES as readonly string[]).includes((c.status ?? "").toUpperCase());
+
+/** A measure's winning run and this subject's rows in it, as the profile read them (see below). */
+type WinningRunRows = Map<string, { runId: string; rows: OutcomeRecord[] }>;
+
+/**
+ * The Open Cases rows for a subject's ACTIVE cases (every cycle), newest first. One builder for the
+ * patient page and the case page's "other open gaps" (#880), so the two cannot word or order one gap
+ * differently. Reads: each case's logic from its CITED outcome (#769), one bounded read per (run,
+ * measure) except where `winning` (the profile's own winning-run rows) already holds it; then one read
+ * each for the newest assignment and the newest outreach, and the delivery status only when some gap
+ * was contacted. Never a per-measure outcome read.
+ */
+async function openCaseSummariesFor(
+  deps: Pick<EmployeeProfileDeps, "outcomes" | "events">,
+  openCases: CaseRecord[],
+  winning: WinningRunRows = new Map(),
+): Promise<OpenCaseSummary[]> {
+  // Each open case's logic from its CITED outcome (#769). A case citing the winning run reuses the row
+  // read above; the rest (a one-patient rerun, an older cycle's open case) take one bounded read per
+  // (run, measure) through the shared helper — never the winning row, which may be another logic's.
+  const caseLogic = new Map<string, ScoringLogic | null>();
+  const unread: CaseOutcomeRef[] = [];
+  for (const c of openCases) {
+    const won = winning.get(c.measureId);
+    if (won && c.lastRunId && won.runId === c.lastRunId) {
+      caseLogic.set(caseLogicKey(c), scoringLogicOf(citedRow(won.rows, c.evaluationPeriod)?.evidence));
+    } else unread.push(c);
+  }
+  if (unread.length > 0) for (const [key, logic] of await scoringLogicForCases(deps.outcomes, unread)) caseLogic.set(key, logic);
+
+  // One read for every open gap's newest assignment, not a timeline per gap; the same for its newest
+  // outreach and the delivery status recorded since.
+  const openIds = openCases.map((c) => c.id);
+  const assignments = await deps.events.latestCaseEventsOfType(openIds, "CASE_ASSIGNED");
+  const outreach = await deps.events.latestCaseEventsOfType(openIds, "CASE_OUTREACH_SENT");
+  const deliveries = openIds.some((id) => outreach[id]) ? await deps.events.latestOutreachDeliveryStatuses(openIds) : {};
+
+  return [...openCases]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map((c) => ({
+      caseId: c.id,
+      measureId: c.measureId,
+      measureName: measureNameOf(c.measureId),
+      outcomeStatus: c.currentOutcomeStatus,
+      logic: caseLogic.get(caseLogicKey(c)) ?? null,
+      priority: c.priority,
+      assignee: c.assignee,
+      ...assignmentOf(c, assignments[c.id]),
+      ...outreachOf(outreach[c.id], deliveries[c.id] ?? null),
+      slaDueDate: null, // SLA not modeled on the TS case row
+    }));
+}
+
+/**
+ * GET /api/employees/:externalId/open-cases (#880) — the patient page's Open Cases rows alone, for the
+ * case page's "other open gaps". Null when the subject is not in the directory (route → 404), the same
+ * gate as the profile, so a case id's subject can never be probed past it.
+ */
+export async function getEmployeeOpenCases(
+  deps: EmployeeProfileDeps,
+  externalId: string,
+): Promise<{ openCases: OpenCaseSummary[] } | null> {
+  if (!(await directorySubject(deps, externalId))) return null;
+  const openCases = (await deps.cases.listCases({ employeeId: externalId, statuses: [...ACTIVE_CASE_STATUSES], limit: 100000, offset: 0 }))
+    .filter(isActiveCase);
+  return { openCases: await openCaseSummariesFor(deps, openCases) };
+}
+
+/** GET /api/employees/:externalId/profile — null when the employee is unknown (route → 404). */
+export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: string): Promise<EmployeeProfileResponse | null> {
+  const emp = await directorySubject(deps, externalId);
   if (!emp) return null;
 
   // One cases fetch for this employee: derive the open subset AND the full case-id set used by the
@@ -243,9 +320,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   // count. The limit stays high because a subject legitimately has one case per (measure, cycle) and
   // the timeline below wants all of them — but it now bounds this subject's history, not the tenant's.
   const employeeCases = await deps.cases.listCases({ employeeId: externalId, limit: 100000, offset: 0 });
-  const openCases = employeeCases.filter((c) =>
-    (ACTIVE_CASE_STATUSES as readonly string[]).includes((c.status ?? "").toUpperCase()),
-  );
+  const openCases = employeeCases.filter(isActiveCase);
   const openCaseByMeasure = new Map<string, string>();
   for (const c of openCases) openCaseByMeasure.set(c.measureId, c.id);
 
@@ -264,7 +339,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
   // ALL of this subject's rows in each winning run, in order: a case citing that run names one of them
   // (`citedRow`: its period's first row, else the first, as `outcomeForCase` reads), kept so an open case
   // citing the winning run costs no second read for its logic below. Empty records "read, and no row".
-  const citedInWinningRun = new Map<string, { runId: string; rows: OutcomeRecord[] }>();
+  const citedInWinningRun: WinningRunRows = new Map();
   // In turn, not `Promise.all`: one page view must not take a connection per measure at once.
   for (const measureId of measureIds) {
     const runId = runByMeasure.get(measureId);
@@ -303,40 +378,7 @@ export async function getEmployeeProfile(deps: EmployeeProfileDeps, externalId: 
     });
   }
 
-  // Each open case's logic from its CITED outcome (#769). A case citing the winning run reuses the row
-  // read above; the rest (a one-patient rerun, an older cycle's open case) take one bounded read per
-  // (run, measure) through the shared helper — never the winning row, which may be another logic's.
-  const caseLogic = new Map<string, ScoringLogic | null>();
-  const unread: CaseOutcomeRef[] = [];
-  for (const c of openCases) {
-    const winning = citedInWinningRun.get(c.measureId);
-    if (winning && c.lastRunId && winning.runId === c.lastRunId) {
-      caseLogic.set(caseLogicKey(c), scoringLogicOf(citedRow(winning.rows, c.evaluationPeriod)?.evidence));
-    } else unread.push(c);
-  }
-  if (unread.length > 0) for (const [key, logic] of await scoringLogicForCases(deps.outcomes, unread)) caseLogic.set(key, logic);
-
-  // One read for every open gap's newest assignment, not a timeline per gap; the same for its newest
-  // outreach and the delivery status recorded since.
-  const openIds = openCases.map((c) => c.id);
-  const assignments = await deps.events.latestCaseEventsOfType(openIds, "CASE_ASSIGNED");
-  const outreach = await deps.events.latestCaseEventsOfType(openIds, "CASE_OUTREACH_SENT");
-  const deliveries = openIds.some((id) => outreach[id]) ? await deps.events.latestOutreachDeliveryStatuses(openIds) : {};
-
-  const openCaseSummaries: OpenCaseSummary[] = openCases
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .map((c) => ({
-      caseId: c.id,
-      measureId: c.measureId,
-      measureName: measureNameOf(c.measureId),
-      outcomeStatus: c.currentOutcomeStatus,
-      logic: caseLogic.get(caseLogicKey(c)) ?? null,
-      priority: c.priority,
-      assignee: c.assignee,
-      ...assignmentOf(c, assignments[c.id]),
-      ...outreachOf(outreach[c.id], deliveries[c.id] ?? null),
-      slaDueDate: null, // SLA not modeled on the TS case row
-    }));
+  const openCaseSummaries = await openCaseSummariesFor(deps, openCases, citedInWinningRun);
 
   // Recent audit events for this employee's cases (last 20, newest-first) — reuse the single fetch
   // above (open + closed), so the timeline isn't limited to currently-open cases.

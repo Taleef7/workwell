@@ -317,14 +317,15 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
   });
 
   it.each([
-    ["patient", "its exclusion context."],
-    ["employee", "its waiver context."],
+    ["patient", "One gap for one patient: why the measure flagged it and what to do next."],
+    ["employee", "One gap for one employee: why the measure flagged it and what to do next."],
   ] as const)("uses %s terminology in the case-detail hero", async (term, copy) => {
     setSubject(term);
     render(<CaseDetailPage />);
-    const hero = screen.getByRole("heading", { name: "Case detail" }).parentElement;
-    expect(await screen.findByText("Case detail")).toBeInTheDocument();
+    const hero = screen.getByRole("heading", { name: "Case", level: 2 }).parentElement;
     expect(hero).toHaveTextContent(copy);
+    // The raw case id is metadata, not the hero's (#880).
+    expect(hero).not.toHaveTextContent("case-001");
   });
 
   it.each([

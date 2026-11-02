@@ -210,7 +210,7 @@ After the loop: older-cycle cases close as `CYCLE_ROLLED_OVER`, `RUN_COMPLETED` 
 quality snapshot is materialized (`materializeRun`, best-effort).
 
 ### 5.5 Cases -> Actions
-Operators assign (single or `POST /api/cases/bulk-assign`), escalate, send outreach
+Operators assign (single, or `POST /api/cases/bulk-assign`, the lead's: CASE_MANAGER/ADMIN, #880), escalate, send outreach
 (`dispatchOutreach` via the `OutreachChannel` port; simulated by default), record delivery state,
 upload evidence, and rerun-to-verify. A rerun closes the case only on COMPLIANT or EXCLUDED.
 
@@ -273,6 +273,9 @@ Evidence downloads write `EVIDENCE_DOWNLOADED`.
 **Security and config**
 - Actor identity comes from `auth/authorize.ts`. Caller-supplied actor fields are ignored.
 - `ROLE_VIEWER` may GET and HEAD only; any write is 403.
+- `ROLE_QUALITY_STAFF` (the staff seat, #880, LOCKED_DECISIONS §4A.9) works single cases, exports the
+  CSVs and reads the scorecard; bulk assign, campaigns, attributed lists, panel owners, population runs,
+  identity, QRDA/MeasureReport and MCP stay CASE_MANAGER/ADMIN. A role a rule does not name is refused.
 - A production-like config that is unsafe makes every request answer 503 `unsafe_configuration`
   (`config/startup-safety.ts`): auth disabled, a weak JWT secret, an insecure cookie, or
   `WORKWELL_CORS_ALLOWED_ORIGINS` missing, blank, wildcard, localhost or invalid.

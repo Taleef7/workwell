@@ -95,7 +95,8 @@ describe("CasesPage — one row per gap, with the work list as the daily screen 
     const link = await screen.findByRole("link", { name: /on the work list/i });
     expect(link).toHaveAttribute("href", "/worklist?measureId=cms125&outcome=OVERDUE&panel=all");
     expect(screen.queryByText(/your daily worklist/i)).toBeNull();
-    expect(screen.getByText(/one row per gap: the open cases by default/i)).toBeInTheDocument();
+    // Says what a case is, so nobody reads one as a patient (#880, E2).
+    expect(screen.getByText(/a case is one gap: one measure for one/i)).toBeInTheDocument();
   });
 });
 

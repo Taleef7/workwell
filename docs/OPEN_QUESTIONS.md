@@ -83,6 +83,14 @@ nothing regardless of whether it is right.
   status), or as ordinary diagnoses? Read as confirmed, they put patients into denominators they do not
   belong to.
 
+### 1.5 What does the practice call a patient's row, and one gap?
+
+**Raised:** 2026-10-22. **Status:** asked on the call; no answer yet. Blocks renaming the screens.
+
+- WorkWell's work list has one row per patient with every open gap, and Cases has one row per gap (one
+  measure for one patient). Since #880 each screen says so in its heading. If the practice's staff use
+  other words for the two, the screens and their navigation take those words.
+
 ---
 
 ## 2. For the ACO

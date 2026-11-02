@@ -125,15 +125,20 @@ export const ROUTED_MEASURES = [
 
 export const MAUI_ACCOUNTS = {
   qualityLead: { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
-  qualityStaff: { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
+  qualityStaff: { email: "quality-staff@maui.workwell.dev", role: "ROLE_QUALITY_STAFF" },
   clinician: { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER" },
   admin: { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN" },
 } as const;
 
-/** Where an account lands after signing in: a case manager on the work list, everyone else on Programs. */
+/**
+ * Where an account lands after signing in (`frontend/lib/rbac.ts` `homeRouteFor`): the lead on the work
+ * list, the staff seat on the gaps assigned to it (#880), everyone else on Programs.
+ */
 export function homeFor(email: string): RegExp {
   const account = Object.values(MAUI_ACCOUNTS).find((a) => a.email === email);
-  return account?.role === "ROLE_CASE_MANAGER" ? /\/worklist/ : /\/programs/;
+  if (account?.role === "ROLE_CASE_MANAGER") return /\/worklist/;
+  if (account?.role === "ROLE_QUALITY_STAFF") return /\/cases\?view=mine/;
+  return /\/programs/;
 }
 
 export async function loginAs(page: Page, email: string, password: string = MAUI_PASSWORD) {

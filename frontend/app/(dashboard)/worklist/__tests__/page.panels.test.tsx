@@ -25,9 +25,10 @@ vi.mock("@/components/global-filter-context", () => ({
 const emitToast = vi.fn();
 vi.mock("@/lib/toast", () => ({ emitToast: (...args: unknown[]) => emitToast(...args) }));
 
-const VIEWER = vi.hoisted(() => ({ current: "quality-staff@maui.workwell.dev" }));
+// The staffer is the staff seat (#880); the supervisor and the Panels tab's editor are the lead.
+const VIEWER = vi.hoisted(() => ({ current: "quality-staff@maui.workwell.dev", role: "ROLE_QUALITY_STAFF" }));
 vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({ user: { role: "ROLE_CASE_MANAGER", email: VIEWER.current } }),
+  useAuth: () => ({ user: { role: VIEWER.role, email: VIEWER.current } }),
 }));
 
 import WorklistPage from "../page";
@@ -97,6 +98,7 @@ const listCalls = (): string[] =>
 beforeEach(() => {
   navHolder.current.setUrl("/worklist");
   VIEWER.current = "quality-staff@maui.workwell.dev";
+  VIEWER.role = "ROLE_QUALITY_STAFF";
   PANELS.current = MAPPED_PANELS();
   post.mockReset().mockResolvedValue({ assigned: 1, unchanged: 0, conflicted: 0, missing: [], closed: [] });
   put.mockReset().mockResolvedValue({
@@ -137,6 +139,7 @@ describe("the work list's default view", () => {
     // The practice's own split: line staff work their providers, supervisors want to see everything.
     // Defaulting an unmapped supervisor to an empty panel would read as "no work".
     VIEWER.current = "quality-lead@maui.workwell.dev";
+    VIEWER.role = "ROLE_CASE_MANAGER";
     render(<WorklistPage />);
     // Wait for the MAPPINGS, not merely for a first request. An earlier version asserted as soon as
     // any list call existed, which the page always makes without `panel=me` while ownership is still
@@ -166,6 +169,13 @@ describe("the work list's default view", () => {
     expect(listCalls().every((u) => !u.includes("panel=me"))).toBe(true);
   });
 
+  it("gives the staff seat no bulk selection; it works one patient at a time (#880)", async () => {
+    render(<WorklistPage />);
+    expect(await screen.findByText("Lisa Carter")).toBeInTheDocument();
+    expect(screen.queryAllByRole("checkbox")).toEqual([]);
+    expect(get.mock.calls.map((c) => String(c[0]))).not.toContain("/api/subject-lists");
+  });
+
   it("says so when the viewer's panel is empty, rather than looking like a page that found nothing", async () => {
     PANELS.current = [];
     navHolder.current.setUrl("/worklist?panel=me");
@@ -181,6 +191,21 @@ describe("the Panels tab", () => {
     render(<WorklistPage />);
     await userEvent.click(await screen.findByRole("tab", { name: "Panels" }));
   };
+  // Panel owners are the lead's to set (#880).
+  beforeEach(() => {
+    VIEWER.current = "quality-lead@maui.workwell.dev";
+    VIEWER.role = "ROLE_CASE_MANAGER";
+  });
+
+  it("the staff seat reads who works each panel, and is told who sets it", async () => {
+    VIEWER.current = "quality-staff@maui.workwell.dev";
+    VIEWER.role = "ROLE_QUALITY_STAFF";
+    await openPanels();
+    expect(await screen.findByText("Dr Oren Tide")).toBeInTheDocument();
+    expect(screen.getByText("Your lead sets panel owners.")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /worked by/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unassign" })).toBeNull();
+  });
 
   it("loads the panel list ONCE for the page and the tab together", async () => {
     // Two copies of the hook meant two requests and, worse, a save in the tab that left the page's

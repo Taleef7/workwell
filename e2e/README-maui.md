@@ -17,8 +17,8 @@ in `MAUI_E2E_PASSWORD`.
 
 | Email | Role |
 |---|---|
-| `quality-lead@maui.workwell.dev` | case manager |
-| `quality-staff@maui.workwell.dev` | case manager |
+| `quality-lead@maui.workwell.dev` | case manager (the lead) |
+| `quality-staff@maui.workwell.dev` | quality staff: one case at a time, none of the lead's bulk or list tools (#880) |
 | `clinician@maui.workwell.dev` | viewer (read-only), linked to provider `maui-prov-011` |
 | `admin@maui.workwell.dev` | admin |
 

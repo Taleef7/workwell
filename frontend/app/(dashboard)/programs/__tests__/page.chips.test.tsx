@@ -61,7 +61,7 @@ describe("ProgramsPage status chips", () => {
     expect(screen.getByRole("link", { name: /missing data/i })).toHaveAttribute(
       "href", "/worklist?measureId=cms125&outcome=MISSING_DATA&panel=all");
     // Patients outside the measure's population are not the measure's concern and get no chip (#637).
-    expect(screen.queryByRole("link", { name: /not in population/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /not eligible/i })).toBeNull();
   });
 
   it("loads the page in TWO requests, not 1 + 2N — and paints on the first", async () => {

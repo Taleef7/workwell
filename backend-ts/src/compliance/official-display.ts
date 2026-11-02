@@ -14,6 +14,12 @@ export type OfficialDisplay = {
   method: string;
   whyFlagged: string;
   nextAction: string;
+  /**
+   * What closes the gap, as a CDS card's headline (#880): on OVERDUE only, read through `needFor`. It
+   * names what the measure needs and never asserts a current value, since a patient with no reading at
+   * all lands in the same bucket. Absent where one sentence cannot say it (CMS137 without its rates).
+   */
+  need?: string;
 };
 
 const COMPLIANT = {
@@ -57,21 +63,25 @@ const OVERDUE = {
     method: "No glycemic status assessment (HbA1c or GMI) this period, the most recent has no result, or it is above 9%.",
     whyFlagged: "Flagged: this measurement period has no glycemic status assessment (HbA1c or GMI), the most recent one has no result, or the most recent one is above 9%.",
     nextAction: "Draw an HbA1c if there is none this period or the latest has no result; otherwise review glycemic control.",
+    need: "Needs an HbA1c (or GMI) of 9% or less this year",
   },
   cms125: {
     method: "No mammogram in the 27-month window.",
     whyFlagged: "Flagged: no mammogram within the 27-month window for this measurement period.",
     nextAction: "Review breast imaging history; order or document screening if none exists.",
+    need: "Needs a mammogram",
   },
   cms2: {
     method: "No depression screening this period, or a positive screen without a follow-up plan.",
     whyFlagged: "Flagged: no depression screening this period, or a positive screen without a follow-up plan.",
     nextAction: "Review screening history and follow-up plan; complete the gap in the record.",
+    need: "Needs a depression screen, or a follow-up plan after a positive one",
   },
   cms130: {
     method: "No colorectal cancer screening within the accepted interval.",
     whyFlagged: "Flagged: no colorectal cancer screening within the accepted interval for this measurement period.",
     nextAction: "Review screening history; order or document screening if none exists.",
+    need: "Needs colorectal cancer screening",
   },
   // CMS165's numerator needs a qualifying reading this period whose most recent day's lowest systolic is
   // below 140 and lowest diastolic below 90. No qualifying reading also lands here, so the wording names
@@ -80,6 +90,7 @@ const OVERDUE = {
     method: "No blood pressure this period that counts, or the most recent reading day's lowest blood pressure is not below 140/90.",
     whyFlagged: "Flagged: no blood pressure reading this measurement period counts toward the measure, or on the most recent reading day the lowest systolic is 140 or more or the lowest diastolic is 90 or more.",
     nextAction: "Take and record a blood pressure if none counts this period; otherwise review blood pressure management.",
+    need: "Needs a blood pressure below 140/90 this year",
   },
   // Multi-rate (ADR-074): the bucket is the WORST of Initiation and Engagement, so OVERDUE means the
   // episode had no treatment within 14 days OR treatment began and was not engaged within 34 days.
@@ -180,11 +191,13 @@ export const OVERDUE_BY_RATE: Record<string, readonly OfficialDisplay[]> = {
       method: "New substance use disorder episode without treatment initiation within 14 days.",
       whyFlagged: "Flagged: a new substance use disorder episode this measurement period had no treatment initiated within 14 days of the episode.",
       nextAction: "Review the substance use disorder treatment plan: treatment was not initiated within 14 days of the new episode.",
+      need: "Needs SUD treatment started within 14 days of the episode",
     },
     {
       method: "Treatment initiated but not engaged within 34 days of initiation.",
       whyFlagged: "Flagged: substance use disorder treatment was initiated within 14 days of the new episode but not engaged (two further services, or a long-acting medication) within 34 days of initiation.",
       nextAction: "Review follow-up engagement: treatment was initiated, and the measure requires two further services (or a long-acting medication) within 34 days of initiation.",
+      need: "Needs SUD treatment continued within 34 days of starting",
     },
   ],
 };
@@ -284,6 +297,16 @@ function displayFor(measureId: string, status: string, evidence?: unknown): Offi
   return OFFICIAL_DISPLAY[measureId]?.[status] ?? null;
 }
 
+/**
+ * What closes an OVERDUE gap, for a CDS card's headline (#880, AI_GUARDRAILS §1.1): the missed rate's
+ * phrase on a multi-rate measure, the measure's otherwise. Null for every other status, for a measure
+ * with no phrase, and for CMS137 when its evidence names no missed rate.
+ */
+export function needFor(measureId: string, status: string, evidence?: unknown): string | null {
+  if (status !== "OVERDUE") return null;
+  return officialDisplayFor(measureId, status, evidence)?.need ?? null;
+}
+
 /** A WorkWell translation scored the outcome (`evidence_json.official.kind`, DATA_MODEL §5). */
 const translated = (evidence: unknown): boolean =>
   (evidence as { official?: { kind?: unknown } } | null | undefined)?.official?.kind === "derived";
@@ -297,4 +320,5 @@ const withoutOfficialClaim = (display: OfficialDisplay): OfficialDisplay => ({
   method: display.method,
   whyFlagged: display.whyFlagged.replace("by official measure logic", "by the measure logic"),
   nextAction: display.nextAction,
+  ...(display.need ? { need: display.need } : {}),
 });

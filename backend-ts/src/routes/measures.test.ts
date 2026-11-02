@@ -133,7 +133,8 @@ test("GET /api/measures and GET /api/measures/:id include identity field ({cmsId
 
 test("GET /api/measures?status=Draft filters by lifecycle status", async () => {
   const rows = (await get("/api/measures?status=Draft").then((r) => r!.json())) as CatalogRow[];
-  assert.ok(rows.length >= 44, "the remaining CMS eCQM drafts (+ Respirator Fit Test)");
+  // 42 since #880 retired the two surgical measures (CMS56, CMS133) to Deprecated.
+  assert.ok(rows.length >= 42, "the remaining CMS eCQM drafts (+ Respirator Fit Test)");
   assert.ok(rows.every((m) => m.status === "Draft"));
 });
 
