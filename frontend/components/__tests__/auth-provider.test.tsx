@@ -34,9 +34,9 @@ vi.mock("next/navigation", () => ({
 const TOKEN_KEY = "ww_token";
 const USER_KEY = "ww_user";
 
-function buildJwt(exp: number, sub = "admin@workwell.dev"): string {
-  // Minimal 3-part JWT-shaped string with a base64-encoded payload containing exp + sub.
-  const payload = btoa(JSON.stringify({ exp, sub }))
+function buildJwt(exp: number, sub = "admin@workwell.dev", role?: string): string {
+  // Minimal 3-part JWT-shaped string with a base64-encoded payload containing exp + sub (+ role).
+  const payload = btoa(JSON.stringify({ exp, sub, ...(role ? { role } : {}) }))
     .replace(/=/g, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
@@ -449,6 +449,23 @@ describe("AuthProvider — silent refresh on page load", () => {
     const sameAcctToken = buildJwt(Math.floor(Date.now() / 1000) + 1800, "admin@workwell.dev");
     act(() => ctx!.updateToken(sameAcctToken));
     expect(localStorage.getItem(TOKEN_KEY)).toBe(JSON.stringify(sameAcctToken));
+  });
+
+  it("updateToken takes the refreshed token's role, so a changed seat sees its new screens (#880)", async () => {
+    const staff = "quality-staff@maui.workwell.dev";
+    localStorage.setItem(TOKEN_KEY, JSON.stringify(buildJwt(Math.floor(Date.now() / 1000) + 900, staff, "ROLE_CASE_MANAGER")));
+    localStorage.setItem(USER_KEY, JSON.stringify({ email: staff, role: "ROLE_CASE_MANAGER" }));
+    let ctx: ReturnType<typeof useAuth> | null = null;
+    renderProvider((c) => { ctx = c; });
+    await waitFor(() => expect(ctx).not.toBeNull());
+
+    act(() => ctx!.updateToken(buildJwt(Math.floor(Date.now() / 1000) + 1800, staff, "ROLE_QUALITY_STAFF")));
+    expect(JSON.parse(localStorage.getItem(USER_KEY)!)).toEqual({ email: staff, role: "ROLE_QUALITY_STAFF" });
+    await waitFor(() => expect(ctx!.user?.role).toBe("ROLE_QUALITY_STAFF"));
+
+    // A token that names no role leaves the stored one alone.
+    act(() => ctx!.updateToken(buildJwt(Math.floor(Date.now() / 1000) + 2700, staff)));
+    expect(JSON.parse(localStorage.getItem(USER_KEY)!).role).toBe("ROLE_QUALITY_STAFF");
   });
 });
 

@@ -58,7 +58,8 @@ change (an operator can claim a case the panel placed).
 - **`POST /api/cases/bulk-assign`:** `{ assignee, caseIds[] }` or `{ assignee, measureId, subjectIds[] }`,
 resolved in one bounded read to each subject's ACTIVE case in that ONE measure, then the `caseIds` path
 unchanged (500 cap included). `measureId` is required and single; both shapes = 400; nothing found =
-`assigned: 0` in the success shape.
+`assigned: 0` in the success shape. CASE_MANAGER/ADMIN only (#880): the staff seat assigns one case at a
+time (`POST /api/cases/{id}/assign`).
 
 ### Audit ordering (incomplete: see the missing primitive below)
 - **New code audits BEFORE it mutates**; the ledger errs toward an over-claim, never a silent change.
@@ -282,7 +283,7 @@ period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by st
 never selected (#852).
 - The rate count is the widest the list members' newest evaluated rows carry; a list none of whose rows was
 evaluated takes the run's (every subject's newest row), so it still reports every rate (CMS137's two). A
-superseded duplicate never sets it. The provider scorecard (`GET /api/scorecard`, CM/ADMIN) selects, reads
+superseded duplicate never sets it. The provider scorecard (`GET /api/scorecard`, CASE_MANAGER, QUALITY_STAFF, ADMIN) selects, reads
 and counts through the same code (`compliance/measure-year-rates.ts`, one unordered narrowed read), so a
 provider's cell is this report's rate for a list of exactly that provider's patients. A VIEWER whose sign-in
 is linked to a provider (#870, `DemoUser.providerId`) gets only that provider's row (`scope`) and the

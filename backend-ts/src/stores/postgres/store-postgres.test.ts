@@ -249,6 +249,36 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
     assert.equal(await deprecatedEvents(), 1);
   });
 
+  test("[postgres] seedMeasureStore retires a surgical Draft row once, audited (#880)", async () => {
+    await truncate();
+    const store = new PgMeasureStore(pool);
+    const events = new PgCaseEventStore(pool);
+    const catalog = MEASURE_CATALOG.find((m) => m.id === "cms56v14")!;
+    // As the seed wrote it before #880: the catalog entry, Draft.
+    await store.seedMeasure({
+      measureId: catalog.id,
+      name: catalog.name,
+      policyRef: catalog.policyRef,
+      owner: catalog.owner,
+      tags: [...catalog.tags],
+      versionId: `${catalog.id}-${catalog.version}`,
+      version: catalog.version,
+      status: "Draft",
+      spec: catalog.spec,
+      cqlText: "",
+      compileStatus: catalog.compileStatus,
+      createdAt: "2026-02-01T00:00:00.000Z",
+      changeSummary: "Seeded measure version",
+    });
+    await seedMeasureStore(store, () => "", events);
+    assert.equal((await store.getLatest("cms56v14"))?.status, "Deprecated");
+    const retired = async () =>
+      (await events.auditEventsByMeasureVersion("cms56v14-v1.0")).filter((event) => event.eventType === "MEASURE_DEPRECATED").length;
+    assert.equal(await retired(), 1);
+    await seedMeasureStore(store, () => "", events);
+    assert.equal(await retired(), 1);
+  });
+
   evidenceStoreContract("postgres", async () => {
     await truncate();
     return new PgEvidenceStore(pool);

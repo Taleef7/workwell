@@ -22,7 +22,8 @@ import { emitToast } from "@/lib/toast";
 import { SUBJECT } from "@/lib/terminology";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases } from "@/lib/rbac";
+import { canManageCases, canUseLists } from "@/lib/rbac";
+import { AccessDenied } from "@/components/access-denied";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { ScrollRegion } from "@/components/scroll-region";
 import { useSubjectLists, type SubjectListRow } from "@/features/subject-list/use-subject-lists";
@@ -93,10 +94,33 @@ const LINK_CLASS = "font-medium text-primary-700 hover:underline dark:text-prima
 export default function ListsPage() {
   const api = useApi();
   const { user } = useAuth();
-  const mayManage = canManageCases(user?.role);
-  const { lists, loading, reload } = useSubjectLists();
+  // Lists are the lead's (#880). A pasted link from the staff seat mounts no fetch that would only be refused.
+  const mayManage = canUseLists(user?.role);
+  const { lists, loading, reload } = useSubjectLists({ enabled: mayManage });
   const [selectedId, setSelectedId] = useState<string>("");
   const selected = useMemo(() => lists.find((l) => l.id === selectedId) ?? null, [lists, selectedId]);
+
+  if (!mayManage) {
+    // A seat that works cases has somewhere to go instead: the gaps assigned to it.
+    const worksCases = canManageCases(user?.role);
+    return (
+      <AccessDenied
+        title="Attributed lists"
+        message={
+          worksCases
+            ? "Attributed lists are your lead's. Your lead can assign a list's gaps to you, and they show in your cases."
+            : "Attributed lists are managed by Case Managers and Admins — your role doesn’t have access."
+        }
+        action={
+          worksCases ? (
+            <Link href="/cases?view=mine" className={LINK_CLASS}>
+              Your cases →
+            </Link>
+          ) : undefined
+        }
+      />
+    );
+  }
 
   return (
     // No padding of its own: <main> already pads the page, and a second p-6 cost a phone 48px.

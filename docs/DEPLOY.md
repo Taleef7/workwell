@@ -477,7 +477,8 @@ measures.
 
 | Identifier | Role |
 |---|---|
-| `quality-lead@maui.workwell.dev`, `quality-staff@maui.workwell.dev` | `ROLE_CASE_MANAGER` |
+| `quality-lead@maui.workwell.dev` | `ROLE_CASE_MANAGER`: the lead |
+| `quality-staff@maui.workwell.dev` | `ROLE_QUALITY_STAFF`: the staff seat, one case at a time (#880, LOCKED_DECISIONS §4A.9) |
 | `clinician@maui.workwell.dev` | `ROLE_VIEWER`, linked to provider `maui-prov-011` (its scorecard row, #870) |
 | `admin@maui.workwell.dev` | `ROLE_ADMIN` |
 

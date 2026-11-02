@@ -20,6 +20,7 @@ import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { multiRateExclusionActive, officialDisplayFor } from "../compliance/official-display.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { describeCaseEvent } from "./case-event-text.ts";
+import { cqlFindingsOf, type CaseCqlFindings } from "./case-findings.ts";
 
 export interface CaseDetail {
   caseId: string;
@@ -59,6 +60,13 @@ export interface CaseDetail {
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
   evidenceJson: Record<string, unknown>;
+  /**
+   * What the measure's own CQL found for the case's rate (#880): the list report's `evidenceStatus`
+   * and its values, from `evidenceJson.cqlFacts`. Built here, in the one builder every case route
+   * returns through, so an action's response keeps it. Null with no cited outcome. Chart values, so
+   * MCP `get_case` drops it with `cqlFacts` (AI_GUARDRAILS §6).
+   */
+  cqlFindings: CaseCqlFindings | null;
   outcomeStatus: string;
   outcomeSummary: string;
   outcomeEvaluatedAt: string;
@@ -244,6 +252,7 @@ export function toCaseDetail(
       ...evidence,
       why_flagged: deriveWhyFlagged(outcome?.evidence, c.measureId, c.evaluationPeriod, c.currentOutcomeStatus),
     },
+    cqlFindings: cqlFindingsOf(c.measureId, outcome),
     outcomeStatus: c.currentOutcomeStatus,
     outcomeSummary: outcomeSummaryFor(c.currentOutcomeStatus),
     outcomeEvaluatedAt: outcome?.evaluatedAt ?? c.updatedAt,

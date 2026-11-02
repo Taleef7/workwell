@@ -387,7 +387,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const subjectListsResponse = await handleSubjectLists(req, env, actor);
   if (subjectListsResponse) return subjectListsResponse;
 
-  // The provider × measure scorecard (#852): CM/ADMIN, and a linked clinician seat's own row (#870);
+  // The provider × measure scorecard (#852): CM/QS/ADMIN, and a linked clinician seat's own row (#870);
   // aggregates only, counted as the list report counts. The role, and whether sign-in is enforced, decide
   // which card, so both are passed.
   const scorecardResponse = await handleScorecard(req, env, actor, principalRole, enforceAuth);

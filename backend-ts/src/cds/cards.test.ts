@@ -371,3 +371,26 @@ test("a measure whose latest run's data was too thin to trust gets no card; anot
   // The next sufficient run's row carries no flag, and the card is back.
   assert.equal((await buildComplianceCards([row("audiogram", "OVERDUE")], opts())).length, 1);
 });
+
+test("#880: an OVERDUE card's headline says what the patient needs, naming the CMS measure only over CMS's own logic", async () => {
+  const pop = { ipp: true, denom: true, numer: true, denex: false, denexcep: false };
+  // CMS122 is inverse: in the numerator is the miss.
+  const cms = row("cms122", "OVERDUE", {
+    evidence: { expressionResults: [{ define: "official:numerator", result: true }], official: { ecqmId: "122FHIR", version: "1.0.000", populationResults: pop } },
+  });
+  const translation = row("cms122", "OVERDUE", {
+    evidence: {
+      expressionResults: [{ define: "official:numerator", result: true }],
+      official: { kind: "derived", label: "WorkWell translation of CMS122v14", version: "ww-2027.1", populationResults: pop },
+    },
+  });
+  const [cmsCard] = await buildComplianceCards([cms], opts());
+  const [translationCard] = await buildComplianceCards([translation], opts());
+  assert.equal(cmsCard!.summary, "Needs an HbA1c (or GMI) of 9% or less this year (CMS122)");
+  assert.ok(cmsCard!.summary.length <= 140);
+  assert.equal(translationCard!.summary, "Needs an HbA1c (or GMI) of 9% or less this year", "no CMS identity over a WorkWell translation");
+  assert.doesNotMatch(translationCard!.summary, /CMS/);
+  // An authored row keeps "<measure> — <state>".
+  const [authored] = await buildComplianceCards([row("audiogram", "OVERDUE")], opts());
+  assert.match(authored!.summary, / — overdue$/);
+});

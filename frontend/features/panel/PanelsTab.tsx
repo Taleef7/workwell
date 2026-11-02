@@ -32,6 +32,7 @@ export function PanelsTab({
   loading,
   error,
   canManage,
+  readOnlyNote,
   assignableOptions,
   canonicalFor,
   onSave,
@@ -41,6 +42,8 @@ export function PanelsTab({
   loading: boolean;
   error: string | null;
   canManage: boolean;
+  /** Said to a seat that may read the panels but not change them (the staff seat, #880). */
+  readOnlyNote?: string;
   assignableOptions: { value: string; label: string }[];
   canonicalFor: (email: string) => string | undefined;
   onSave: (providerId: string, assignee: string) => Promise<PanelSaveResult>;
@@ -104,6 +107,7 @@ export function PanelsTab({
             {unmapped} {unmapped === 1 ? "panel has" : "panels have"} no owner.
           </span>
         ) : null}
+        {!canManage && readOnlyNote ? <span className="mt-1 block">{readOnlyNote}</span> : null}
       </p>
 
       <div className="overflow-x-auto rounded-xl border border-neutral-200 dark:border-neutral-800">

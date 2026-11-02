@@ -5,7 +5,7 @@
  *   GET /api/auditor/measure-versions/:id/packet?format=json|html     → 200 (attachment) | 404 | 400
  *
  * Role gates are applied centrally by the authorize() matrix (#105): run packets require
- * CASE_MANAGER/ADMIN, measure-version packets require APPROVER/ADMIN. The CASE packet is not
+ * CASE_MANAGER/QUALITY_STAFF/ADMIN, measure-version packets require APPROVER/ADMIN. The CASE packet is not
  * ported yet (depends on evidence/appointments/outreach_records).
  */
 import type { CloudDatabase } from "@mieweb/cloud";

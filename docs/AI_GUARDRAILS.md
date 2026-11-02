@@ -16,7 +16,8 @@ it the surface where the non-negotiable rule matters most. Three consequences, a
 
 - **Every clinical statement in a card is the CQL outcome verbatim** — the status, the display method and the
   next-action line come from `deriveCell` / `deriveWhyFlagged` / `nextActionFor`, the same readers the roster
-  and case detail use. **No AI surface contributes to a card**, and none may: an `AiAssistService` explanation
+  and case detail use. The headline's need (#880, `needFor`) is a fixed per-measure phrase of what closes an
+  OVERDUE gap, chosen by the CQL status and never stating a value. **No AI surface contributes to a card**, and none may: an `AiAssistService` explanation
   is assistive text for an operator reading a case, not something to put in front of a clinician mid-encounter
   as a finding.
 - **`systemActions` is never emitted.** In CDS Hooks it is the array a client auto-applies with no user
@@ -99,7 +100,8 @@ All fallback branches keep core workflows functional and do not mutate complianc
   - audit metadata proving invocation and fallback behavior.
 - An official outcome's `evidence_json.cqlFacts` (#875: chart values such as dates, readings and codings)
   is given to no AI client: the explain prompt and MCP `get_case` drop it (`withoutCqlFacts`). Giving it to
-  one is an owner decision. Staff read it on the case page and in the list report's CSV.
+  one is an owner decision. Staff read it on the case page (`cqlFindings`, #880, which MCP `get_case` drops
+  too) and the lead in the list report's CSV.
 
 ## 7) Human-in-the-Loop Contract
 The following actions remain explicitly human-controlled:

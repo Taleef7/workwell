@@ -12,7 +12,8 @@ WorkWell is one product with several instances. The TWH instance (employees) run
 | Permanent immunization panel — fully evaluated | 3 | Active | Full CQL, runnable (series-completion; MMR, Varicella, Hep B) |
 | CMS eCQM — authored CQL kept beside the official artifact | 2 | Active | WorkWell's own CQL for CMS125 and CMS122; TWH and Maui both run CMS's FHIR drafts for these |
 | CMS eCQM — official-only (no authored CQL) | 4 | Active | CMS2, CMS130, CMS165, CMS137 — the vendored artifact IS the logic (ADR-072) |
-| CMS eCQM catalog (2026 performance period) | 43 | Draft | Catalog entry only — CQL authoring pending |
+| CMS eCQM catalog (2026 performance period) | 41 | Draft | Catalog entry only — CQL authoring pending |
+| CMS eCQM catalog — surgical, not used by primary or occupational care | 2 | Deprecated | CMS56 (hip replacement), CMS133 (cataract surgery); never run (owner decision 2026-11-02, #880) |
 | **Total** | **63** | | |
 
 Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS eCQM. Hepatitis B was promoted from an Approved catalog entry to Active (E10.6).
@@ -435,7 +436,7 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 | What we ship | Count | Relationship to eCQI | How we prove it |
 |---|---|---|---|
 | **Runnable Active CMS CQL** | **2** — CMS122v14, CMS125v14 | Faithful official-subset production CQL: 12-month MP, age/sex/visit, VSAC OIDs, GMI, Oct-1 mammogram window, hospice/palliative/mastectomy. Residual Phase 2: 66+ LTC + frailty/AI. Dual-coded synthetic data. | Structural fidelity both; CMS122 also estimate + subset + literal fqm |
-| **Draft CMS catalog entries** | **47** | Metadata only — correct CMS ID, **v14 = 2026**, MIPS ID, title | Terminology audit 2026-07-08 |
+| **Draft CMS catalog entries** | **41** | Metadata only — correct CMS ID, **v14 = 2026**, MIPS ID, title | Terminology audit 2026-07-08 |
 | **OSHA / HEDIS / permanent vax** | 12 | Not CMS eCQMs | Separate authorities |
 
 **Demo claim that is honest:**
@@ -450,7 +451,7 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 > manifest's bare `catalogId` (`cms2`, `cms130`, `cms165`, like `cms122`/`cms125`); the CMS version
 > lives in `policyRef`. Legacy versioned rows on an existing database are deprecated once by the seed.
 
-**49** official CMS electronic Clinical Quality Measures are seeded as v1.0 catalog entries, of which **43 remain Draft**: CMS125 and CMS122 are Active with full authored CQL (Category 3b), and CMS2, CMS130, CMS165 and CMS137 are Active official-only, where the vendored artifact IS the logic (ADR-072, ADR-078). The counts in the Category table at the top of this file are the same six and forty-three; **49** is also the number §"Terminology & standards currency" and the seeding note below both cite, so all four agree. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
+**49** official CMS electronic Clinical Quality Measures are seeded as v1.0 catalog entries, of which **41 remain Draft**: CMS125 and CMS122 are Active with full authored CQL (Category 3b), CMS2, CMS130, CMS165 and CMS137 are Active official-only, where the vendored artifact IS the logic (ADR-072, ADR-078), and CMS56 and CMS133 are Deprecated: surgical measures no deployment's users perform (owner decision 2026-11-02, #880). A database seeded before then retires the two Draft rows once, audited `MEASURE_DEPRECATED` by `system`, and leaves alone a row someone edited. The counts in the Category table at the top of this file are the same six, forty-one and two; **49** is also the number §"Terminology & standards currency" and the seeding note below both cite, so all four agree. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
 
 The measures page renders CMS IDs as blue mono badges to distinguish them from OSHA CFR citations and HEDIS references. Since #769 every surface that shows a **result** names the logic that scored it, read from that result's own evidence, never from today's routing: in full `MIPS 112 · CMS125FHIR v1.0.000 (from CMS125v14)` (its title adds that it is a CMS draft), as the chip `MIPS 112 · CMS125FHIR (from CMS125v14)`, and for a translated year `MIPS 305 · WorkWell translation of CMS137v15 (ww-2027.1)` (chip `MIPS 305 · WW translation of CMS137v15`), which never carries a CMS id. A result no named logic scored (authored CQL, an errored row) keeps the unversioned crosswalk (`MIPS 112 · CMS125`). Selection surfaces (pickers, filters, the grid's identity column) stay unversioned because a measure spans years; the grid's Version column for a routed measure is the artifact's (`1.0.000`), not the catalog's `v1.0`, which stays in the version ids.
 
@@ -468,8 +469,8 @@ Two new measures added in 2026 vs 2025: CMS146v14 (Appropriate Testing for Phary
 | Pediatric / Immunization | CMS74v15, CMS75v14, CMS117v14 |
 | HIV / Infectious Disease | CMS314v3, CMS349v8, CMS1157v2, CMS1188v3 |
 | Oncology | CMS129v15, CMS157v14, CMS645v9, CMS646v6 |
-| Ophthalmology | CMS133v14, CMS143v14 |
-| Functional Status / Orthopedic | CMS56v14 |
+| Ophthalmology | CMS133v14 (Deprecated), CMS143v14 |
+| Functional Status / Orthopedic | CMS56v14 (Deprecated) |
 | Medication Safety | CMS68v15, CMS156v14 |
 | Care Coordination | CMS50v14 |
 | Urology | CMS771v7 |
@@ -642,7 +643,7 @@ Each outcome evidence payload includes:
   canonical + the required structural elements (#92 / E3.4). Structural alignment (JVM-free), not
   IG/validator-validated — `meta.profile` is metadata, so evaluation outcomes are unchanged. See
   `docs/STANDARDS_CONFORMANCE.md`.
-- All 49 CMS eCQM catalog entries (2026 performance period) are seeded via `ensureCmsEcqmCatalogSeed()` for the same instance values. They are Draft-only and do not participate in CQL evaluation runs until CQL is authored and compiled. On re-seed, existing measures are looked up by CMS ID prefix (`LIKE 'CMSNNNv%'`) and updated in-place so version bumps (e.g., v13→v14) do not create duplicate DB rows.
+- All 49 CMS eCQM catalog entries (2026 performance period) are seeded via `ensureCmsEcqmCatalogSeed()` for the same instance values. They are Draft-only (CMS56 and CMS133 Deprecated, #880) and do not participate in CQL evaluation runs until CQL is authored and compiled. On re-seed, existing measures are looked up by CMS ID prefix (`LIKE 'CMSNNNv%'`) and updated in-place so version bumps (e.g., v13→v14) do not create duplicate DB rows.
 - A headless CLI (`pnpm evaluate --patient <bundle.json> --measure <id>`, `backend-ts/src/engine/cli/`)
   evaluates one FHIR R4 patient bundle against a measure with no server or DB — the same
   `CqlExecutionEngine` the run pipeline uses. Golden regression over `backend-ts/spike/synthetic`

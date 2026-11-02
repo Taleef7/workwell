@@ -62,10 +62,10 @@ test("a clinician's token reads its own row through the worker, and the gate kee
   assert.equal(clinician.body.scope?.providerId, "maui-prov-011");
   assert.deepEqual(clinician.body.locations, []);
   assert.equal(clinician.body.other, null);
-  assert.equal(out.clinicianSub, 403, "the scorecard's sub-paths stay CM/ADMIN");
+  assert.equal(out.clinicianSub, 403, "the scorecard's sub-paths stay CM/QS/ADMIN");
 
   const staff = out.staff as { status: number; body: Card };
   assert.equal(staff.status, 200);
-  assert.equal("scope" in staff.body, false, "a case manager reads the practice card");
+  assert.equal("scope" in staff.body, false, "the staff seat (ROLE_QUALITY_STAFF, #880) reads the practice card");
   assert.equal(out.anonymous, 401);
 });

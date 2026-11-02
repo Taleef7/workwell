@@ -9,7 +9,7 @@ vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
 const get = vi.fn();
 const apiMock = { get };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
-const auth = vi.hoisted(() => ({ role: "ROLE_CASE_MANAGER", email: "quality-staff@maui.workwell.dev" }));
+const auth = vi.hoisted(() => ({ role: "ROLE_QUALITY_STAFF", email: "quality-staff@maui.workwell.dev" }));
 vi.mock("@/components/auth-provider", () => ({ useAuth: () => ({ user: { role: auth.role, email: auth.email } }) }));
 const VIEWER_EMAIL = auth.email;
 // The clinician's link (#870). Read only by the VIEWER's scorecard; the clinician's own suite is page.viewer.test.tsx.
@@ -109,7 +109,7 @@ const cardNames = () => within(screen.getByTestId("scorecard-cards")).getAllByRo
 
 beforeEach(() => {
   setSubject("patient");
-  auth.role = "ROLE_CASE_MANAGER";
+  auth.role = "ROLE_QUALITY_STAFF";
   navHolder.current.setUrl("/scorecard");
   navHolder.current.replace.mockClear();
 });

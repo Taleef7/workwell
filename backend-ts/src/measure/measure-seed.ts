@@ -223,6 +223,46 @@ async function deprecateLegacyOfficialRows(store: MeasureStore, events: CaseEven
 }
 
 /**
+ * Catalog entries no deployment's users work (A30, owner decision 2026-11-02): surgical measures, where
+ * the users are primary and occupational care. The catalog now seeds them Deprecated; this retires the
+ * rows an earlier boot seeded as Draft. Listed by id, not inferred from a tag, so nothing else moves.
+ */
+const RETIRED_UNUSED_IDS = ["cms56v14", "cms133v14"] as const;
+const RETIRED_UNUSED_REASON = "not used by primary or occupational care: a surgical measure (owner decision 2026-11-02)";
+
+/**
+ * Deprecate a still-seeded Draft row of each `RETIRED_UNUSED_IDS` measure, audit first (#880). Only a row
+ * that matches the Draft seed's fingerprint moves: one somebody edited is left alone with a WARN, as
+ * the legacy rows are. A fresh store seeds them Deprecated and writes no audit (the fresh seed's
+ * historical no-audit path); a second boot finds them Deprecated and does nothing.
+ */
+async function retireUnusedCatalogRows(store: MeasureStore, events: CaseEventStore): Promise<void> {
+  for (const id of RETIRED_UNUSED_IDS) {
+    const row = await store.getLatest(id);
+    const catalog = MEASURE_CATALOG.find((m) => m.id === id);
+    if (!row || !catalog || row.status !== "Draft") continue;
+    if (!matchesSeedFingerprint(row, { ...catalog, status: "Draft" })) {
+      console.warn(`[measure-seed] ${id} row was edited; not retired, it stays ${row.status}`);
+      continue;
+    }
+    const audit: AppendAuditInput = {
+      eventType: "MEASURE_DEPRECATED",
+      entityType: "measure_version",
+      entityId: row.versionId,
+      actor: "system",
+      refRunId: null,
+      refCaseId: null,
+      refMeasureVersionId: row.versionId,
+      payload: { measureId: id, version: row.version, reason: RETIRED_UNUSED_REASON, deprecatedBy: "system" },
+    };
+    // Audit before state, for `promoteOfficialOnlyRows`' reason: a failed status change leaves the row
+    // Draft for the next boot to retry, and `hasAuditEvent` keeps that retry from a second event.
+    if (!(await events.hasAuditEvent(audit))) await events.appendAudit(audit);
+    await store.setVersionStatus(id, row.versionId, { status: "Deprecated" });
+  }
+}
+
+/**
  * #749: before the fix every authored "most recent" define sorted by `(… as FHIR.dateTime)` with no
  * `.value`, a key the engine cannot order. Runs use the compiled ELM, but the stored `cqlText` is what
  * the MAT export, the audit packet and the MCP tools hand out, so a stack seeded before the fix kept
@@ -426,6 +466,7 @@ export async function seedMeasureStore(store: MeasureStore, cqlOf: (measureId: s
   }
 
   await deprecateLegacyOfficialRows(store, events);
+  await retireUnusedCatalogRows(store, events);
   await promoteOfficialOnlyRows(store, events);
   // After promotion: a row promoted on this boot already carries today's wording, so this touches only
   // rows seeded or promoted while the description still called the artifact "published".

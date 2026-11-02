@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { authorize, extractPrincipal } from "./authorize.ts";
+import { authorize, extractPrincipal, listFilterAuthorized } from "./authorize.ts";
 import { createJwt } from "./jwt.ts";
 
 const p = (role: string) => ({ email: "u@workwell.dev", role });
@@ -276,4 +276,70 @@ test("scorecard: CM/ADMIN, and the VIEWER on the exact path only — the route n
   }
   // And GET only: the VIEWER's write guard is unchanged.
   assert.deepEqual(authorize("POST", path, viewer), { ok: false, status: 403 }, "viewer POST");
+});
+
+test("the staff seat works single cases; the practice-wide levers stay with the lead (#880, LOCKED §4A.9)", () => {
+  const qs = p("ROLE_QUALITY_STAFF");
+  const allowed: Array<[string, string]> = [
+    // Reads, through the AUTHENTICATED catch-alls.
+    ["GET", "/api/cases"],
+    ["GET", "/api/worklist"],
+    ["GET", "/api/employees/emp-1"],
+    ["GET", "/api/employees/emp-1/open-cases"],
+    ["GET", "/api/compliance/roster"],
+    ["GET", "/api/panels"],
+    // One case's work, under the cases rule.
+    ["POST", "/api/cases/c-1/assign"],
+    ["POST", "/api/cases/c-1/actions/outreach"],
+    ["POST", "/api/cases/c-1/rerun-to-verify"],
+    ["POST", "/api/cases/patient-outreach"],
+    ["POST", "/api/cases/c-1/ai/explain"],
+    ["POST", "/api/cases/c-1/evidence"],
+    ["GET", "/api/cases/c-1/evidence"],
+    ["GET", "/api/evidence/e-1/download"],
+    ["GET", "/api/admin/outreach-templates"],
+    ["GET", "/api/admin/outreach-templates/t-1/preview"],
+    ["GET", "/api/auditor/cases/c-1/packet"],
+    ["GET", "/api/auditor/runs/r-1/packet"],
+    ["GET", "/api/users/assignable"],
+    ["GET", "/api/scorecard"],
+    ["GET", "/api/exports/cases"],
+    ["GET", "/api/exports/outcomes"],
+    ["GET", "/api/orders/proposals"],
+  ];
+  for (const [method, path] of allowed) {
+    assert.equal(authorize(method, path, qs).ok, true, `${method} ${path}`);
+  }
+  const refused: Array<[string, string]> = [
+    ["POST", "/api/cases/bulk-assign"],
+    ["GET", "/api/campaigns"],
+    ["POST", "/api/campaigns"],
+    ["GET", "/api/subject-lists"],
+    ["GET", "/api/subject-lists/l-1/report"],
+    ["PUT", "/api/panels/prov-1"],
+    ["DELETE", "/api/panels/prov-1"],
+    ["POST", "/api/runs/manual"],
+    ["POST", "/api/runs"],
+    ["POST", "/api/runs/r-1/ai/insight"],
+    ["GET", "/api/identity/people"],
+    ["POST", "/api/identity/reconcile"],
+    ["GET", "/api/runs/r-1/qrda1"],
+    ["GET", "/api/runs/r-1/qrda"],
+    ["GET", "/api/runs/r-1/measure-report"],
+    ["GET", "/api/audit-events/export"],
+    ["POST", "/mcp/anything"],
+    ["POST", "/cds-services/workwell-gaps"],
+    ["POST", "/$cql"],
+    ["POST", "/api/oauth/consent"],
+    ["GET", "/api/admin/integrations"],
+  ];
+  for (const [method, path] of refused) {
+    assert.deepEqual(authorize(method, path, qs), { ok: false, status: 403 }, `${method} ${path}`);
+  }
+  // `?listId=` on the AUTHENTICATED surfaces is refused in the worker by this gate, not by a rule.
+  assert.equal(listFilterAuthorized("ROLE_QUALITY_STAFF"), false, "qs listId");
+  assert.equal(listFilterAuthorized("ROLE_CASE_MANAGER"), true, "cm listId");
+  // Bulk assign is still the lead's and the admin's.
+  assert.equal(authorize("POST", "/api/cases/bulk-assign", cm).ok, true, "cm bulk-assign");
+  assert.equal(authorize("POST", "/api/cases/bulk-assign", admin).ok, true, "admin bulk-assign");
 });

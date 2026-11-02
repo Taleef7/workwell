@@ -18,6 +18,8 @@
  * those is the defect class ADR-031 exists to prevent, so there is none here.
  */
 import { deriveCell } from "../compliance/roster-vocabulary.ts";
+import { needFor } from "../compliance/official-display.ts";
+import { measureIdentityFor, scoringLogicOf } from "../measure/measure-identity.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { dispositionFor, nextActionFor, priorityFor } from "../case/case-logic.ts";
 import { outsideEveryRate } from "../fhir/measure-report.ts";
@@ -81,6 +83,20 @@ const isDeprecated = (measureId: string): boolean =>
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
+/**
+ * The card's headline (#880): what closes the gap, where the measure's wording names it (`needFor`), and
+ * otherwise the measure and its state as before. The CMS measure is named only beside a row CMS's own
+ * artifact scored; a WorkWell translation's row names none, so no CMS identity stands over our logic
+ * (LOCKED §4.3). An authored row (TWH) keeps "<measure> — <state>".
+ */
+function headlineFor(row: { measureId: string; evidence: unknown }, status: string, name: string): string {
+  const logic = scoringLogicOf(row.evidence);
+  const need = logic ? needFor(row.measureId, status, row.evidence) : null;
+  if (!need) return `${name} — ${humanState(status)}`;
+  const cmsId = logic?.kind === "cms-artifact" ? measureIdentityFor(row.measureId)?.cmsId : null;
+  return cmsId ? `${need} (${cmsId})` : need;
 }
 
 /** Sentence-case a display state for a card summary: `MISSING_DATA` → `missing data`. */
@@ -307,7 +323,7 @@ export async function buildComplianceCards(
     );
 
     cards.push({
-      summary: truncate(`${name} — ${humanState(cell.status)}`, SUMMARY_MAX),
+      summary: truncate(headlineFor(row, cell.status, name), SUMMARY_MAX),
       // `critical` is unrepresentable in `CdsCard` by design — see types.ts.
       indicator: priorityFor(row.status) === "HIGH" ? "warning" : "info",
       source: {

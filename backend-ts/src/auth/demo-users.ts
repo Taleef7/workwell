@@ -79,8 +79,9 @@ export const DEMO_USERS: readonly DemoUser[] = [
   // Sandbox logins for the Maui pilot deployment (pseudonymous by policy). DEMO_USERS is shared
   // across deployments, so these rows exist on every instance — but `isDemoAccountRefusedOnProfile`
   // refuses them everywhere except the maui profile, and refuses every other account there (#520).
+  // The lead runs the practice-wide work; the staff seat works single cases (#880, LOCKED §4A.9).
   { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: PILOT_PASSWORD_HASH },
-  { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER", passwordHash: PILOT_PASSWORD_HASH },
+  { email: "quality-staff@maui.workwell.dev", role: "ROLE_QUALITY_STAFF", passwordHash: PILOT_PASSWORD_HASH },
   // Linked to one synthetic provider (Dr. Ana Silva, Wailuku), so the seat can show "my patients"; a
   // different provider is a deploy, by owner decision (2026-10-30).
   { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER", passwordHash: PILOT_PASSWORD_HASH, providerId: "maui-prov-011" },
@@ -117,7 +118,8 @@ export function isDemoAccountRefusedOnProfile(
 
 /**
  * The accounts a case may be assigned to on THIS deployment: the roles that can work cases
- * (CASE_MANAGER, ADMIN), minus the accounts the profile refuses (#520), ordered by email.
+ * (CASE_MANAGER, QUALITY_STAFF, ADMIN), minus the accounts the profile refuses (#520), ordered by email.
+ * The staff seat stays assignable (#880): a panel is placed on it, and its cases are its work.
  *
  * One definition, two surfaces: `GET /api/users/assignable` offers this list to the UI and the
  * assign route validates against it. When those were separate, the endpoint's list was a suggestion
@@ -128,7 +130,7 @@ export function assignableUsers(profileId = DEPLOYMENT_PROFILE.id): DemoUser[] {
   return DEMO_USERS
     .filter(
       (user) =>
-        (user.role === "ROLE_CASE_MANAGER" || user.role === "ROLE_ADMIN") &&
+        (user.role === "ROLE_CASE_MANAGER" || user.role === "ROLE_QUALITY_STAFF" || user.role === "ROLE_ADMIN") &&
         !isDemoAccountRefusedOnProfile(user, profileId),
     )
     .sort((a, b) => a.email.localeCompare(b.email));

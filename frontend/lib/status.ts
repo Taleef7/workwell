@@ -14,8 +14,9 @@ export const OUTCOME_LABELS: Record<string, string> = {
   MISSING_DATA: "Missing Data",
   // ADR-078: the logic ran and this patient is not the measure's concern this period. Kept out of
   // Missing Data, which means the patient IS in the population and the result needed to score them
-  // is absent — the difference between a report and a piece of work.
-  OUT_OF_POPULATION: "Not in population",
+  // is absent — the difference between a report and a piece of work. "Not eligible" (#880): the
+  // practice's word; "population" is the measure author's.
+  OUT_OF_POPULATION: "Not eligible",
   EXCLUDED: "Excluded"
 };
 
@@ -38,12 +39,14 @@ export const PRIORITY_LABELS: Record<string, string> = {
 export const ROLE_LABELS: Record<string, string> = {
   ROLE_ADMIN: "Admin",
   ROLE_CASE_MANAGER: "Case Manager",
+  ROLE_QUALITY_STAFF: "Quality staff",
   ROLE_AUTHOR: "Author",
   ROLE_APPROVER: "Approver",
   ROLE_VIEWER: "Viewer",
   ROLE_MCP_CLIENT: "MCP Client",
   ADMIN: "Admin",
   CASE_MANAGER: "Case Manager",
+  QUALITY_STAFF: "Quality staff",
   AUTHOR: "Author",
   APPROVER: "Approver",
   VIEWER: "Viewer",
@@ -154,7 +157,7 @@ export const COMPLIANCE_STATUS_LABELS: Record<string, string> = {
   EXCLUDED: "Excluded",
   DECLINED: "Declined",
   IN_PROGRESS: "In Progress",
-  OUT_OF_POPULATION: "Not in population",
+  OUT_OF_POPULATION: "Not eligible",
   NOT_APPLICABLE: "Not Applicable",
   NA: "N/A"
 };

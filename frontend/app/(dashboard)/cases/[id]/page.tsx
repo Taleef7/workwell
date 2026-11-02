@@ -16,6 +16,8 @@ import { AuditPacketExportButton } from "@/components/audit-packet-export-button
 import { CopyableId } from "@/components/copyable-id";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
+import { CqlFindings, type CaseCqlFindings } from "@/features/evidence/CqlFindings";
+import { OtherOpenGaps } from "@/features/employee/components/OtherOpenGaps";
 import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
 import { LocalOnlyNotice } from "@/features/common/LocalOnlyNotice";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
@@ -96,6 +98,8 @@ type CaseDetail = {
   outcomeSummary: string;
   outcomeEvaluatedAt: string;
   latestOutreachDeliveryStatus: string | null;
+  /** What the measure's CQL found, for the gap this case is about (#880); null with no cited outcome. */
+  cqlFindings?: CaseCqlFindings | null;
   timeline: AuditEvent[];
   immunizationForecast?: {
     subjectId: string;
@@ -168,11 +172,16 @@ type LinkedValueSet = {
 
 export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
-  const caseId = params.id;
+  // Keyed by the case (#880): the other-gaps panel moves between cases of one patient, and a previous
+  // case's outreach preview, AI explanation or typed note must never carry over to the next.
+  return <CaseDetailView key={params.id} caseId={params.id} />;
+}
+
+function CaseDetailView({ caseId }: { caseId: string }) {
   const api = useApi();
   const { user } = useAuth();
-  // Case write actions (outreach/rerun/assign/escalate/delivery/evidence) are CASE_MANAGER/ADMIN on the
-  // backend; read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
+  // Case write actions (outreach/rerun/assign/escalate/delivery/evidence) are CASE_MANAGER, QUALITY_STAFF
+  // and ADMIN on the backend (#880); read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
   // the API gate so those controls simply don't render for read roles.
   const canManage = canManageCases(user?.role);
   // Rerun to Verify and Escalate are case work, so they render wherever the case actions do (`canManage`)
@@ -243,6 +252,8 @@ export default function CaseDetailPage() {
       ? storedAssignee === ""
       : assigneeValue.toLowerCase() === storedAssignee.toLowerCase());
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
+  // An official outcome's evidence is population flags (`official:<population>`), not authored defines.
+  const officialPopulations = (caseDetail?.evidenceJson.expressionResults ?? []).some((row) => String(row.define ?? "").startsWith("official:"));
   // Escalating a finished case would reopen it (the API refuses it too), so neither layout offers it.
   const caseIsFinished = caseStatus === "CLOSED" || caseStatus === "RESOLVED" || caseStatus === "EXCLUDED";
   const deliveryState = caseDetail?.latestOutreachDeliveryStatus ? normalizeEnumValue(caseDetail.latestOutreachDeliveryStatus) : null;
@@ -539,13 +550,10 @@ export default function CaseDetailPage() {
           <Link href="/cases" className="text-sm font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100">
             ← Back to cases
           </Link>
-          <h2 className="mt-2 text-2xl font-semibold sm:text-3xl">Case detail</h2>
-          <p className="mt-2 text-neutral-600 dark:text-neutral-400">Structured Why Flagged evidence for the selected case and its {isPatientTerm ? "exclusion" : "waiver"} context.</p>
+          <h2 className="mt-2 text-2xl font-semibold sm:text-3xl">Case</h2>
+          <p className="mt-2 text-neutral-600 dark:text-neutral-400">One gap for one {SUBJECT.singular}: why the measure flagged it and what to do next.</p>
         </div>
         <div className="flex flex-col items-start gap-2 sm:items-end">
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            Case: <code className="break-all">{caseId}</code>
-          </p>
           <AuditPacketExportButton
             api={api}
             path={`/api/auditor/cases/${caseId}/packet`}
@@ -608,9 +616,19 @@ export default function CaseDetailPage() {
                   value={isPatientTerm ? formatEvaluationPeriod(caseDetail.evaluationPeriod) : caseDetail.evaluationPeriod}
                 />
                 <Info label="Outcome summary" value={caseDetail.outcomeSummary} />
+                {/* When the measure last looked at this gap; the run itself is engineering detail (#880). */}
                 <Info
-                  label="Last run"
-                  value={<CopyableId id={caseDetail.lastRunId} href={`/runs?runId=${encodeURIComponent(caseDetail.lastRunId)}`} label="run id" />}
+                  label="Last checked"
+                  value={
+                    <>
+                      {new Date(caseDetail.outcomeEvaluatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                      {canEngineering ? (
+                        <span className="mt-1 block">
+                          <CopyableId id={caseDetail.lastRunId} href={`/runs?runId=${encodeURIComponent(caseDetail.lastRunId)}`} label="run id" />
+                        </span>
+                      ) : null}
+                    </>
+                  }
                 />
               </dl>
 
@@ -909,9 +927,23 @@ export default function CaseDetailPage() {
 
             <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Why Flagged</p>
-              <h4 className="mt-2 text-xl font-semibold">What the measure found</h4>
-              <div className="mt-4">
-                <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} official={caseDetail.evidenceJson.official} />
+              <h4 className="mt-2 text-xl font-semibold">Why this was flagged</h4>
+              {/* In reading order (#880): the measure's own sentence, then what its CQL found (the result
+                  and its date), then the population flags, folded on an official outcome: they say which
+                  groups the patient is in, which the sentence above already puts in words. */}
+              <div className="mt-4 space-y-4">
+                <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
+                <CqlFindings findings={caseDetail.cqlFindings} />
+                {officialPopulations ? (
+                  <details className="group">
+                    <summary className="cursor-pointer text-sm font-medium text-neutral-700 dark:text-neutral-300">Measure populations</summary>
+                    <div className="mt-3">
+                      <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} official={caseDetail.evidenceJson.official} />
+                    </div>
+                  </details>
+                ) : (
+                  <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} official={caseDetail.evidenceJson.official} />
+                )}
               </div>
 
               {/* Raw value-set OIDs, the raw evidence and the evaluated resource are engineering detail: a
@@ -942,7 +974,6 @@ export default function CaseDetailPage() {
 
               <div className="mt-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
                 <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Evidence details</p>
-                <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
                 {!isPatientTerm ? (
                   <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
                     {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
@@ -1004,6 +1035,7 @@ export default function CaseDetailPage() {
           </div>
 
           <div className="min-w-0 space-y-4 sm:space-y-6">
+            <OtherOpenGaps subjectId={caseDetail.employeeId} caseId={caseId} canMessage={canManage} />
             <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Metadata</p>
               <dl className="mt-4 space-y-3 text-sm">
@@ -1014,6 +1046,7 @@ export default function CaseDetailPage() {
                 <Row label="Closed by" value={caseDetail.closedBy ?? "-"} />
                 <Row label="Assignee" value={caseDetail.assignee ?? "Unassigned"} />
                 <Row label="Outcome evaluated" value={new Date(caseDetail.outcomeEvaluatedAt).toLocaleString()} />
+                <Row label="Case ID" value={caseId} />
               </dl>
             </div>
 
@@ -1066,7 +1099,7 @@ export default function CaseDetailPage() {
               </div>
             </div>
 
-            {/* Evidence list + upload is CASE_MANAGER/ADMIN on the backend; a read role 403s on the list
+            {/* Evidence list + upload is CASE_MANAGER, QUALITY_STAFF and ADMIN on the backend; a read role 403s on the list
                 and would see a misleading "No evidence uploaded" (Fable H9). Gate the whole section. */}
             {canManage && (
             <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">

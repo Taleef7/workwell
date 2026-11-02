@@ -51,7 +51,9 @@ type AuthContextValue = {
   login: (token: string, email: string, role: string) => void;
   logout: () => void;
   /** Propagate a silently-refreshed access token into the session store (Fable M24) — keeps the
-   *  existing user, swaps only the token, and notifies so every `useApi` client rebuilds with it. */
+   *  existing user, swaps the token, and notifies so every `useApi` client rebuilds with it. The new
+   *  token's role replaces the stored one when they differ, so a seat whose role changed (#880) gets the
+   *  screens for its new role within one access token instead of at its next sign-in. */
   updateToken: (token: string) => void;
   /** A page-load refresh has been waiting on the server for a moment (a deploy restarting it). */
   reconnecting: boolean;
@@ -259,14 +261,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // logout-A → login-B, a late refresh from A must not overwrite B's token. The access token's
         // `sub` claim is the account email; only persist when it matches the current stored user.
         let subject: string | null = null;
+        let role: string | null = null;
         try {
           const payload = decodeJwtPayload(nextToken);
           subject = typeof payload?.sub === "string" ? payload.sub : null;
+          role = typeof payload?.role === "string" ? payload.role : null;
         } catch {
           return; // undecodable token — never persist
         }
         if (subject !== storedUser.email) return;
         localStorage.setItem(TOKEN_KEY, JSON.stringify(nextToken));
+        // The server re-reads the account on refresh, so the token's role is the current one.
+        if (role && role !== storedUser.role) localStorage.setItem(USER_KEY, JSON.stringify({ ...storedUser, role }));
         notifySessionChange();
       },
       logout: () => {

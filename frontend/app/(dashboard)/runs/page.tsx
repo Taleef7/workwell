@@ -27,7 +27,7 @@ import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
 import { useRunStatus } from "@/components/run-status-provider";
 import { TERMINAL_RUN_STATUSES, isReportableRunStatus } from "@/lib/run-status";
-import { canExportData, canManageCases, canRunMeasures } from "@/lib/rbac";
+import { canExportData, canExportReports, canManageCases, canRunMeasures } from "@/lib/rbac";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -295,8 +295,10 @@ export default function RunsPage() {
   const router = useRouter();
   const { user } = useAuth();
   const mayRun = canRunMeasures(user?.role);
-  // Bulk downloads (CSV, MeasureReport, QRDA) are CASE_MANAGER/ADMIN, mirroring the backend gate (D5).
+  // The CSVs go to every seat that works cases; the population files (MeasureReport, QRDA) are the lead's
+  // and the admin's (#880). Both mirror the backend gate (D5).
   const mayExport = canExportData(user?.role);
+  const mayExportReports = canExportReports(user?.role);
   const mayManageCases = canManageCases(user?.role);
   const { startTracking } = useRunStatus();
   const [showRunConfirm, setShowRunConfirm] = useState(false);
@@ -1156,8 +1158,10 @@ export default function RunsPage() {
           className="min-w-0 scroll-mt-4 space-y-3 focus:outline-none rounded-md border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3"
         >
           <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Run Detail</h3>
-          {/* AI insight is on-demand (UX-19): viewing a run no longer auto-fires a billed OpenAI call. */}
-          {selectedRun && !runInsight ? (
+          {/* AI insight is on-demand (UX-19): viewing a run no longer auto-fires a billed OpenAI call. It is a
+              POST under /api/runs/**, CASE_MANAGER/ADMIN on the backend, so no other role is offered a button
+              that would fail silently (#880). */}
+          {mayRun && selectedRun && !runInsight ? (
             <Button variant="secondary" size="sm" onClick={() => void loadRunInsight()} disabled={insightLoading}>
               {insightLoading ? "Generating AI insight…" : "Generate AI insight"}
             </Button>
@@ -1340,7 +1344,7 @@ export default function RunsPage() {
               ) : null}
               {/* Standards exports — single-measure runs only (the endpoints 422 on ALL_PROGRAMS), and only
                   REPORTABLE runs: FAILED/CANCELLED are terminal but the backend refuses them with 409 (ADR-077). */}
-              {mayExport &&
+              {mayExportReports &&
               normalizeEnumValue(selectedRun.scopeType) === "MEASURE" &&
               isReportableRunStatus(selectedRun.status) &&
               !reconciliation?.compaction.exposed &&

@@ -305,9 +305,9 @@ describe("EmployeeProfilePage crosswalk identity rendering", () => {
     await waitFor(() => expect(screen.getByText("Compliance Posture")).toBeInTheDocument());
 
     const summaryBar = screen.getByText("Compliance Posture").parentElement!;
-    expect(within(summaryBar).getByText("MIPS 112 · CMS125 · Breast Cancer Screening — Not in population", { exact: true })).toBeInTheDocument();
+    expect(within(summaryBar).getByText("MIPS 112 · CMS125 · Breast Cancer Screening — Not eligible", { exact: true })).toBeInTheDocument();
     const detailRow = document.getElementById("measure-cms125")!;
-    expect(within(detailRow).getByText("Not in population", { exact: true })).toBeInTheDocument();
+    expect(within(detailRow).getByText("Not eligible", { exact: true })).toBeInTheDocument();
     for (const section of [summaryBar, detailRow]) {
       expect(within(section).queryByText(/missing data/i)).not.toBeInTheDocument();
     }

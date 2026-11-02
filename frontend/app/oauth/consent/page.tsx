@@ -28,7 +28,7 @@ export interface ConsentDetails {
   declineRedirect: string;
 }
 
-const ROLE_LABEL: Record<string, string> = { ROLE_CASE_MANAGER: "Case Manager", ROLE_ADMIN: "Admin", ROLE_VIEWER: "Viewer" };
+const ROLE_LABEL: Record<string, string> = { ROLE_CASE_MANAGER: "Case Manager", ROLE_QUALITY_STAFF: "Quality staff", ROLE_ADMIN: "Admin", ROLE_VIEWER: "Viewer" };
 
 export default function ConsentPage() {
   const { token } = useAuth();

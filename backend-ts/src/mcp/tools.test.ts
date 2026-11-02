@@ -807,8 +807,34 @@ test("#875: no case or patient tool hands an MCP client the outcome's recorded C
   ] as const) {
     const res = await callTool(name, args as JsonRecord, ctx());
     assert.equal(res.isError, false, `${name} answered`);
-    assert.doesNotMatch(res.content[0]!.text, /SENTINEL-FACT|cqlFacts/, `${name} carries no facts`);
+    assert.doesNotMatch(res.content[0]!.text, /SENTINEL-FACT|cqlFacts|cqlFindings/, `${name} carries no facts`);
   }
   const { payload } = await call("get_case", { caseId: c.id });
   assert.ok((payload.evidence_payload as JsonRecord).official, "the rest of the evidence is served as before");
+});
+
+test("#880: get_case drops the case page's reading of the facts (`cqlFindings`) as well as the facts", async () => {
+  // CMS165 names its defines, so a case built from these facts reads them back as findings on the page:
+  // the strip must take that copy too, not only `evidenceJson.cqlFacts`.
+  const run = await deps.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms165",
+    triggeredBy: "test",
+    requestedScope: { measureId: "cms165" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await deps.runStore.finalizeRun(run.id, "COMPLETED");
+  await deps.outcomeStore.recordOutcome({
+    runId: run.id, subjectId: "emp-031", measureId: "cms165", evaluationPeriod: "2026-06-13", status: "OVERDUE",
+    evidence: {
+      expressionResults: [{ define: "official:numerator", result: false }],
+      official: { ecqmId: "165FHIR", version: "1.0.000", populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } },
+      cqlFacts: { spec: 1, values: [{ define: "Lowest Systolic Reading on Most Recent Blood Pressure Day", value: "SENTINEL-READING" }] },
+    },
+  });
+  const c = (await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "emp-031", measureId: "cms165", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }))!;
+  const res = await callTool("get_case", { caseId: c.id }, ctx());
+  assert.equal(res.isError, false);
+  assert.doesNotMatch(res.content[0]!.text, /SENTINEL-READING|cqlFacts|cqlFindings/);
 });
