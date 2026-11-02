@@ -42,6 +42,8 @@ const UTC_TODAY = [
   /new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/,
   /new Date\(\)\.getUTCFullYear\(\)/,
   /\bnow\.toISOString\(\)\.slice\(0,\s*10\)/,
+  /\btoday\(\)\.toISOString\(\)\.slice\(0,\s*10\)/,
+  /new Date\(\)\.toISOString\(\)\.split\(\s*"T"\s*\)/,
 ];
 
 /**
@@ -56,6 +58,7 @@ const ALLOWED: Record<string, string> = {
   "run/backfill-quality-history.ts": "a seeding CLI's default as-of",
   "run/cli/seed-scale.ts": "a seeding CLI's default as-of",
   "run/cli/official-cases.ts": "a generated file's date stamp",
+  "run/cli/official-flip-gate.ts": "a build-time gate CLI's default; --evaluation-date sets it",
   "standards/outcome-diff.ts": "a pure default; its callers pass the practice's year",
 };
 

@@ -34,6 +34,7 @@ import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
 import { thinMeasuresOfRun } from "../run/data-sufficiency.ts";
+import { isEarlierCycleRun } from "../run/earlier-cycle.ts";
 import { AGE_BANDS, hasActiveSubjectFilters, isAgeBand, isSex, matchesSubjectFilters, payerCodesOf } from "../compliance/subject-filters.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { JsonRecord } from "./tool-audit.ts";
@@ -303,7 +304,11 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
 async function getRunSummary(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const rawRunId = args.runId != null && String(args.runId).trim() ? String(args.runId).trim() : null;
   if (rawRunId && !UUID_RE.test(rawRunId)) return safeError("INVALID_ARGUMENT", "runId must be a valid UUID");
-  const run = rawRunId ? await deps.runStore.getRun(rawRunId) : (await deps.runStore.listRuns(1))[0] ?? null;
+  // Omitted, it is the newest run that is not a re-score of a cycle that has ended (#882): MCP stays on the
+  // current year. Named, any run is summarized.
+  const run = rawRunId
+    ? await deps.runStore.getRun(rawRunId)
+    : (await deps.runStore.listRuns(200)).find((r) => !isEarlierCycleRun(r)) ?? null;
   if (!run) throw new ToolArgError(rawRunId ? `Run not found: ${rawRunId}` : "No runs found");
   const totalCases = await deps.caseStore.countByLastRun(run.id);
   // Counts-based (bounded GROUP BY) — never materialize a seed:scale run's 120k rows for the summary.
@@ -736,7 +741,7 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: "get_run_summary",
-    description: "Get run metadata and outcome counts by runId. If runId is omitted, returns latest run.",
+    description: "Get run metadata and outcome counts by runId. If runId is omitted, returns the latest run that is not a re-score of an ended year.",
     inputSchema: { type: "object", properties: { runId: { type: "string" } } },
     roles: [CM, ADMIN],
     sensitivity: "internal",

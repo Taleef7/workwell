@@ -20,6 +20,10 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
     only the scorecard's Maui suite runs at a shifted clock, the other two read no date. Two older tests fail
     whenever the clock is in January (the store contract's non-calendar `createdFrom`, the cases-CSV parity
     guard): a follow-up.
+  - From review: MCP `get_run_summary` with no run skips a re-score; a queued planned run holds the button
+    too; the case page takes the year from the server (`cycleYear`), so a half-year starting 1 January is
+    not "2026"; the January list note is Maui's only. On TWH a run is marked when any of its measures' cycles
+    ended, so a backdated run's current-cycle rows are nobody's "latest" either.
 - **The lead and the staff seat differ (#880, LOCKED_DECISIONS §4A.9).** `quality-staff@` is a new role,
   `ROLE_QUALITY_STAFF`: it lands on Cases → Assigned to you, works one case at a time, exports the CSVs and
   reads the scorecard. Bulk assign, campaigns, attributed lists, panel owners, runs, People, QRDA/MeasureReport

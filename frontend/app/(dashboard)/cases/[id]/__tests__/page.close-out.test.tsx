@@ -2,7 +2,8 @@
  * A case of a year that has ended (#882). The year's first nightly closed every open case of the year
  * before (`CYCLE_ROLLED_OVER`, a system closure). Such a case says why it closed, takes no outreach, and
  * a re-check records the year's result without reopening it. A closed case of the current year is
- * unchanged. "Ended" is by the browser's own calendar; the clock is faked for `Date` only.
+ * unchanged. "Ended" and the year are the server's (`cycleEnded`, `cycleYear`); the clock is faked for
+ * `Date` only, for the work list's year.
  */
 import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -53,6 +54,7 @@ const ROLLED_OVER = {
   closedReason: "CYCLE_ROLLED_OVER",
   closedBy: null,
   cycleEnded: true,
+  cycleYear: 2026,
   exclusionReason: null,
   waiverExpiresAt: null,
   waiverExpired: false,
@@ -102,7 +104,7 @@ describe("a case the new year closed (#882)", () => {
   });
 
   it("names the year the work list shows: the current one for an older case, the next one ahead of the calendar", async () => {
-    detail = { ...ROLLED_OVER, evaluationPeriod: "2025-01-01" };
+    detail = { ...ROLLED_OVER, evaluationPeriod: "2025-01-01", cycleYear: 2025 };
     await open();
     expect(screen.getByText(/This patient's 2027 gaps are on the work list\.$/)).toBeInTheDocument();
     cleanup();
@@ -133,10 +135,20 @@ describe("a case the new year closed (#882)", () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith("/api/cases/case-001/rerun-to-verify"));
     await waitFor(() => expect(emitToast).toHaveBeenCalledWith("Re-checked: the 2026 result is recorded; the case stays closed."));
   });
+
+  it("a re-check that resolves an open case of the ended year does not say it stayed closed", async () => {
+    // Opened before the year's first nightly; the re-check found it met, and the server resolved it.
+    detail = { ...ROLLED_OVER, status: "OPEN", closedAt: null, closedReason: null };
+    await open();
+    post.mockImplementation(async () => ({ ...ROLLED_OVER, closedReason: "AUTO_RESOLVED", currentOutcomeStatus: "COMPLIANT" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rerun to verify" }));
+    await waitFor(() => expect(emitToast).toHaveBeenCalledWith("Case rerun verification completed"));
+    expect(emitToast).not.toHaveBeenCalledWith(expect.stringContaining("stays closed"));
+  });
 });
 
 describe("a closed case of the current year is unchanged", () => {
-  const CURRENT = { ...ROLLED_OVER, evaluationPeriod: "2027-01-01", closedReason: "AUTO_RESOLVED", currentOutcomeStatus: "COMPLIANT", cycleEnded: false };
+  const CURRENT = { ...ROLLED_OVER, evaluationPeriod: "2027-01-01", cycleYear: 2027, closedReason: "AUTO_RESOLVED", currentOutcomeStatus: "COMPLIANT", cycleEnded: false };
 
   it("keeps outreach, its own next action and the usual re-check toast", async () => {
     detail = CURRENT;
@@ -167,13 +179,22 @@ describe("a closed case of the current year is unchanged", () => {
 
 describe("a period that is not a calendar year", () => {
   it("is said in words, with no year the period does not have", async () => {
-    detail = { ...ROLLED_OVER, measureId: "flu_vaccine", evaluationPeriod: "2026-07-01" };
+    detail = { ...ROLLED_OVER, measureId: "flu_vaccine", evaluationPeriod: "2026-07-01", cycleYear: null };
     await open();
     expect(
       screen.getByText(
         "This measurement period has ended, so this gap closed when the next one began. A re-check records that period's result here and leaves the case closed. This patient's current gaps are on the work list.",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByTestId("outreach-hint")).toHaveTextContent("Its measurement period has ended and this case is closed, so it takes no outreach.");
+  });
+
+  it("a half-year that starts on 1 January is not read as that year", async () => {
+    // A twice-yearly measure's 2026-01-01 is January to June: the server sends no year for it.
+    detail = { ...ROLLED_OVER, measureId: "diabetes_hba1c", evaluationPeriod: "2026-01-01", cycleYear: null };
+    await open();
+    expect(screen.getByText(/^This measurement period has ended, so this gap closed when the next one began\./)).toBeInTheDocument();
+    expect(screen.queryByText(/2026 has ended/)).toBeNull();
     expect(screen.getByTestId("outreach-hint")).toHaveTextContent("Its measurement period has ended and this case is closed, so it takes no outreach.");
   });
 });

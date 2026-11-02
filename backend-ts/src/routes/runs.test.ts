@@ -1792,9 +1792,9 @@ test("POST /api/runs drops a client's today and marker, and marks the run itself
 
 test("POST /api/runs/manual and rerun refuse a population run while one the pipeline planned is running (#882)", async () => {
   const runStore = new SqliteRunStore(env.DB as never);
-  const seed = (requestedScope: Record<string, unknown>, startedAt = new Date().toISOString()) =>
+  const seed = (requestedScope: Record<string, unknown>, startedAt = new Date().toISOString(), status = "RUNNING") =>
     runStore.createRun({
-      scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler", requestedScope, status: "RUNNING", startedAt,
+      scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler", requestedScope, status, startedAt,
       measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-01-01T00:00:00.000Z",
     } as Parameters<SqliteRunStore["createRun"]>[0]);
   // "Atlantis" is refused as an unknown site (400) once the guard lets the request through, so the
@@ -1820,6 +1820,15 @@ test("POST /api/runs/manual and rerun refuse a population run while one the pipe
       assert.notEqual((await post("/api/runs/manual", { scopeType: "EMPLOYEE", employeeExternalId: "nobody-882" }))?.status, 409);
     } finally {
       await runStore.finalizeRun(nightly.id, "COMPLETED");
+    }
+    // One the pipeline has created but not yet marked RUNNING holds the button too.
+    const queued = await seed({ today: "2026-11-02", evaluationDate: "2026-12-31", earlierCycle: true }, undefined, "QUEUED");
+    try {
+      const refused = await probe();
+      assert.equal(refused.status, 409);
+      assert.equal(((await refused.json()) as { runId: string }).runId, queued.id);
+    } finally {
+      await runStore.finalizeRun(queued.id, "COMPLETED");
     }
   } finally {
     await runStore.finalizeRun(leftover.id, "COMPLETED");

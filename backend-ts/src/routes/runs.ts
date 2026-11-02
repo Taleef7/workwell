@@ -212,13 +212,15 @@ function earlierCycleUnmarked(
 }
 
 const POPULATION_SCOPE_TYPES: ReadonlySet<string> = new Set(["ALL_PROGRAMS", "SITE", "MEASURE"]);
+const IN_FLIGHT_STATUSES: ReadonlySet<string> = new Set(["QUEUED", "RUNNING"]);
 
 /**
  * A population run this process is still evaluating, or null (#882). Two at once exhaust the database pool
  * (DEPLOY.md), and the lead's "Re-score 2026" button is one click from a second. Only a run the pipeline
  * planned counts: it carries the server-only `requestedScope.today`, which a `/evaluate` or import run left
- * RUNNING by a client never does. A run started before this process booted cannot be advanced by it, as the
- * stuck-run sweep reads it, so it is not in flight.
+ * RUNNING by a client never does. One the pipeline has created but not yet marked RUNNING counts too. A run
+ * started before this process booted cannot be advanced by it, as the stuck-run sweep reads it, so it is not
+ * in flight. Two requests checked in the same instant can both pass: this is a guard, not a lock.
  */
 async function populationRunInFlight(runStore: RunStore, scopeType: unknown): Promise<{ id: string } | null> {
   if (typeof scopeType !== "string" || !POPULATION_SCOPE_TYPES.has(scopeType.toUpperCase())) return null;
@@ -226,7 +228,7 @@ async function populationRunInFlight(runStore: RunStore, scopeType: unknown): Pr
   const now = Date.now();
   const busy = (await runStore.listRuns(200)).find(
     (r) =>
-      r.status.toUpperCase() === "RUNNING" &&
+      IN_FLIGHT_STATUSES.has(r.status.toUpperCase()) &&
       POPULATION_SCOPE_TYPES.has(r.scopeType.toUpperCase()) &&
       typeof r.requestedScope?.today === "string" &&
       now - Date.parse(r.startedAt) < live,

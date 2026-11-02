@@ -23,6 +23,15 @@ describe("the close-out window", () => {
     );
     expect(newYearListNote(new Date(2027, 3, 1))).toBeNull();
   });
+
+  it("is a patient deployment's only: an employee deployment's half-years and seasons do not turn on 1 January", () => {
+    setSubject("employee");
+    try {
+      expect(newYearListNote(new Date(2027, 1, 1))).toBeNull();
+    } finally {
+      setSubject("patient");
+    }
+  });
 });
 
 describe("in Hawaii on the evening of 31 December", () => {

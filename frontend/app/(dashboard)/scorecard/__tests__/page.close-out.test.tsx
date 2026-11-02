@@ -220,15 +220,17 @@ describe("Closing out last year (#882)", () => {
     expect(screen.queryByRole("button", { name: "Re-score 2026" })).toBeNull();
   });
 
-  it("while another run is in flight, the button is disabled without claiming to be re-scoring", async () => {
+  it("while another run is in flight, the server decides: an import a client left running holds nothing", async () => {
     localStorage.setItem("ww_rescore_run", "run-rescore");
     runState.isActive = true;
-    runState.activeRunId = "run-nightly";
+    runState.activeRunId = "run-import";
     render(<ScorecardPage />);
-    expect(await screen.findByRole("button", { name: "Re-score 2026" })).toBeDisabled();
-    expect(within(screen.getByTestId("scorecard-close-out")).getByRole("status")).toHaveTextContent(
-      "A run is already in progress; try again when it finishes.",
-    );
+    const button = await screen.findByRole("button", { name: "Re-score 2026" });
+    expect(button).toBeEnabled();
+    expect(within(screen.getByTestId("scorecard-close-out")).queryByRole("status")).toBeNull();
+    fireEvent.click(button);
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Re-score 2026" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/runs/manual", { scopeType: "ALL_PROGRAMS", evaluationDate: "2026-12-31" }));
   });
 
   it("reads the card again when a run finishes", async () => {
@@ -333,5 +335,13 @@ describe("the default year in Hawaii on the evening of 31 December", () => {
     await waitFor(() => expect(scorecardCalls().length).toBeGreaterThan(0));
     expect(scorecardCalls()[0]).toContain("measurementYear=2026");
     expect(screen.getByRole("combobox", { name: "Measurement year" })).toHaveValue("2026");
+  });
+
+  it("prints the month the card was made in, by the practice's calendar", async () => {
+    at(new Date("2027-01-01T05:00:00Z"));
+    serve({ 2026: card(2026, "2027-01-01T05:00:00.000Z") });
+    render(<ScorecardPage />);
+    const december = new Date(2026, 11, 15).toLocaleDateString(undefined, { year: "numeric", month: "long" });
+    expect(await screen.findByText(/^Quality scorecard — /)).toHaveTextContent(`Quality scorecard — ${december}`);
   });
 });

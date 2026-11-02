@@ -313,7 +313,7 @@ function PracticeScorecard() {
     title: titleFor(m.measureId, m.name, m.logic),
   });
   // From the server's clock, after the fetch: never rendered on the server, so it cannot mismatch on hydration.
-  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", timeZone: "UTC" }) : "";
+  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long" }) : "";
   const totalName = card?.panel.requested === "me" ? "My providers" : "Practice total";
   const shown = card ? rowsFor(card, providerParam) : null;
   const closingOut = card !== null && inCloseOutWindow() && card.measurementYear === thisYear - 1;
@@ -679,8 +679,9 @@ function isRunInProgress(err: unknown): boolean {
  * year's, so it opens or reopens no case and is nobody's "latest": the work list, Programs and the cards
  * stay on this year.
  *
- * The button names the re-score only when the run in flight is the one started here; any other run in
- * flight disables it with the server's own sentence, which it would answer anyway.
+ * The button is held only while the re-score started here runs. Whether another run in flight blocks one
+ * is the server's call (409 `run_in_progress`, said in its own sentence): only a population run the server
+ * planned does, and an import a client left running does not, which this page cannot tell apart.
  */
 function CloseOutPanel({ year, currentYear, runDate }: { year: number; currentYear: number; runDate: string | null }) {
   const api = useApi();
@@ -726,14 +727,10 @@ function CloseOutPanel({ year, currentYear, runDate }: { year: number; currentYe
         Re-score {year} to count records of {year} care that arrived since. No {year} case is reopened, and the work
         list stays on {currentYear}.
       </p>
-      <Button size="sm" variant="outline" disabled={isActive || starting} onClick={() => setConfirming(true)}>
+      <Button size="sm" variant="outline" disabled={rescoring || starting} onClick={() => setConfirming(true)}>
         {rescoring ? `Re-scoring ${year}…` : `Re-score ${year}`}
       </Button>
-      {refusal ? (
-        <p role="alert">{refusal}</p>
-      ) : isActive && !rescoring ? (
-        <p role="status">{RUN_IN_PROGRESS}</p>
-      ) : null}
+      {refusal ? <p role="alert">{refusal}</p> : null}
       <ConfirmDialog
         open={confirming}
         title={`Re-score ${year}?`}
@@ -873,7 +870,7 @@ function MyScorecard() {
     label: compactLabelFor(m.measureId, m.name, m.logic),
     title: titleFor(m.measureId, m.name, m.logic),
   });
-  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", timeZone: "UTC" }) : "";
+  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long" }) : "";
   // A year no run has scored yet (January, before the first run of the new year) has nothing to put in a
   // table; it says so and offers the year before.
   const noRun = card !== null && card.measures.length > 0 && card.measures.every((m) => m.state === "no_run");

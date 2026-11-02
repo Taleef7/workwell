@@ -29,10 +29,12 @@ export function inCloseOutWindow(at: Date = new Date()): boolean {
 
 /**
  * Why an open-gap list is empty or short from January to March, or null in the rest of the year: last
- * year's gaps were closed, and this year's open only as patients are seen.
+ * year's gaps were closed, and this year's open only as patients are seen. Only on a patient deployment,
+ * whose measures all run on the calendar year; an employee deployment's half-years and July seasons do
+ * not turn on 1 January.
  */
 export function newYearListNote(at: Date = new Date()): string | null {
-  if (!inCloseOutWindow(at)) return null;
+  if (SUBJECT.singular !== "patient" || !inCloseOutWindow(at)) return null;
   const year = localYear(at);
   return `${year - 1}'s gaps closed when ${year} began. ${year}'s gaps appear as ${SUBJECT.plural} are seen, so this list starts short in January.`;
 }

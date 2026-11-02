@@ -21,7 +21,7 @@ import { multiRateExclusionActive, officialDisplayFor } from "../compliance/offi
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { describeCaseEvent } from "./case-event-text.ts";
 import { cqlFindingsOf, type CaseCqlFindings } from "./case-findings.ts";
-import { isEarlierCycle } from "../run/compliance-period.ts";
+import { cycleCalendarYear, isEarlierCycle } from "../run/compliance-period.ts";
 import { practiceToday } from "../config/practice-date.ts";
 
 export interface CaseDetail {
@@ -65,6 +65,11 @@ export interface CaseDetail {
    * season or a multi-year cycle is not the calendar year.
    */
   cycleEnded: boolean;
+  /**
+   * The calendar year the case's period is, or null when it is a half-year, a season or not a cycle's
+   * first day (#882, `cycleCalendarYear`). The page names a year that has ended only from this.
+   */
+  cycleYear: number | null;
   exclusionReason: string | null;
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
@@ -253,6 +258,7 @@ export function toCaseDetail(
     updatedAt: c.updatedAt,
     closedAt: c.closedAt,
     cycleEnded: isEarlierCycle(c.measureId, c.evaluationPeriod, practiceToday()),
+    cycleYear: cycleCalendarYear(c.measureId, c.evaluationPeriod),
     closedReason: c.closedReason,
     closedBy: c.closedBy,
     exclusionReason: null,

@@ -230,3 +230,15 @@ test("#882: cycleEnded is the server's rule, the period older than its measure's
   t.mock.timers.setTime(Date.parse("2026-12-31T20:00:00.000Z"));
   assert.equal(toCaseDetail({ ...resolved, evaluationPeriod: "2026-01-01" }, null).cycleEnded, false);
 });
+
+test("#882: cycleYear names a calendar year only where the measure's cycle is one", () => {
+  const yearOf = (measureId: string, evaluationPeriod: string) => toCaseDetail({ ...CASE, measureId, evaluationPeriod }, null).cycleYear;
+  assert.equal(yearOf("cms122", "2026-01-01"), 2026);
+  assert.equal(yearOf("audiogram", "2026-01-01"), 2026);
+  // A twice-yearly measure's 2026-01-01 is January to June, and a season starts in July: neither is a year.
+  assert.equal(yearOf("diabetes_hba1c", "2026-01-01"), null);
+  assert.equal(yearOf("diabetes_hba1c", "2026-07-01"), null);
+  assert.equal(yearOf("flu_vaccine", "2026-07-01"), null);
+  // A period from before cycles were bucketed is a run date, not a year.
+  assert.equal(yearOf("audiogram", "2026-06-13"), null);
+});

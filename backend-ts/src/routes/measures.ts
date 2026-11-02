@@ -382,7 +382,8 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
       if (!bundle || typeof bundle !== "object") return json({ error: "invalid_bundle" }, 400);
       try {
         const engine = await routedEngineForEnv(env);
-        const outcome = await engine.evaluate({ measureId: evalId, patientBundle: bundle, evaluationDate: url.searchParams.get("date") ?? undefined });
+        // The practice's date unless one is named (#882), never the engine's UTC default.
+        const outcome = await engine.evaluate({ measureId: evalId, patientBundle: bundle, evaluationDate: url.searchParams.get("date") ?? practiceToday() });
         return json(outcome);
       } catch (err) {
         return json({ error: "evaluation_error", message: String((err as Error)?.message ?? err) }, 500);

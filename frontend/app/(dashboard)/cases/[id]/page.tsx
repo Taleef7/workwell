@@ -80,6 +80,8 @@ type CaseDetail = {
   closedBy: string | null;
   /** The server's answer to "has this case's cycle ended?" (#882): its rule, never the browser's calendar. */
   cycleEnded?: boolean;
+  /** The calendar year the period is, or null for a half-year or a season (#882): the server's, never parsed here. */
+  cycleYear?: number | null;
   exclusionReason: string | null;
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
@@ -359,6 +361,8 @@ function CaseDetailView({ caseId }: { caseId: string }) {
       const qs = params.toString();
       templateQuery = qs ? `?${qs}` : "";
     }
+    // Read before the call: an open case of an ended year that the re-check resolves did not "stay" closed.
+    const wasEndedClosure = caseDetail ? endedClosureOf(caseDetail) : null;
     try {
       const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/${endpoint}${templateQuery}`);
       setCaseDetail(updated);
@@ -367,7 +371,7 @@ function CaseDetailView({ caseId }: { caseId: string }) {
         emitToast("Outreach sent");
       } else {
         // A closed case of an ended year stays closed (#882): the re-check only records the year's result.
-        const ended = endedClosureOf(updated);
+        const ended = wasEndedClosure && endedClosureOf(updated);
         emitToast(
           ended
             ? `Re-checked: the ${ended.year ?? "period's"} result is recorded; the case stays closed.`
@@ -1294,17 +1298,12 @@ const FINISHED_STATUSES = new Set(["CLOSED", "RESOLVED", "EXCLUDED"]);
 /**
  * A finished case whose cycle has ended (#882), or null: the server says which (`cycleEnded`). Such a case
  * takes no outreach (409 `earlier_cycle_closed`), and a re-check records the result without reopening it.
- * `year` names a calendar-year period ("2026"); a season or a longer cycle has none, and is said in words.
+ * `year` names a calendar-year period ("2026"), from the server's `cycleYear`; a half-year or a season has
+ * none, and is said in words.
  */
-function endedClosureOf(detail: Pick<CaseDetail, "status" | "evaluationPeriod" | "cycleEnded">): { year: number | null } | null {
+function endedClosureOf(detail: Pick<CaseDetail, "status" | "cycleEnded" | "cycleYear">): { year: number | null } | null {
   if (detail.cycleEnded !== true || !FINISHED_STATUSES.has(normalizeEnumValue(detail.status))) return null;
-  return { year: calendarYearOf(detail.evaluationPeriod) };
-}
-
-/** The year of a calendar-year period (`2026-01-01` or `2026`), else null. */
-function calendarYearOf(period: string): number | null {
-  const match = /^(\d{4})(?:-01-01)?$/.exec(period.trim());
-  return match ? Number(match[1]) : null;
+  return { year: detail.cycleYear ?? null };
 }
 
 /**
@@ -1313,9 +1312,9 @@ function calendarYearOf(period: string): number | null {
  * which a closed cycle no longer takes. The work list's year is never earlier than the one that began:
  * a rehearsal on a copy rolls the year over before the calendar does.
  */
-function rolledOverLine(detail: Pick<CaseDetail, "closedReason" | "evaluationPeriod">): string | null {
+function rolledOverLine(detail: Pick<CaseDetail, "closedReason" | "cycleYear">): string | null {
   if (normalizeEnumValue(detail.closedReason ?? "") !== "CYCLE_ROLLED_OVER") return null;
-  const year = calendarYearOf(detail.evaluationPeriod);
+  const year = detail.cycleYear ?? null;
   return year !== null
     ? `${year} has ended, so this gap closed when ${year + 1} began. A re-check records the ${year} result here and leaves the case closed. This ${SUBJECT.singular}'s ${Math.max(year + 1, localYear())} gaps are on the work list.`
     : `This measurement period has ended, so this gap closed when the next one began. A re-check records that period's result here and leaves the case closed. This ${SUBJECT.singular}'s current gaps are on the work list.`;
