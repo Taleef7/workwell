@@ -295,3 +295,33 @@ test("materializeRun: a thin run leaves the month's earlier snapshot standing (#
   assert.equal(after.sourceRunId, trusted.id, "the trusted snapshot still stands");
   assert.equal(after.compliant, before.compliant);
 });
+
+test("#882 a January re-score of last year writes no snapshot, and the rebuild still replays January's own nightly", async () => {
+  const s = await freshStores();
+  const nightly = await popRun(s, {
+    requestedScope: { evaluationDate: "2027-01-04", today: "2027-01-04" },
+    measurementPeriodStart: "2027-01-01T00:00:00.000Z", measurementPeriodEnd: "2028-01-01T00:00:00.000Z",
+    startedAt: "2027-01-04T12:00:00.000Z", completedAt: "2027-01-04T12:30:00.000Z",
+  });
+  await s.outcomeStore.recordOutcomes([
+    { runId: nightly.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "OVERDUE", evidence: {} },
+  ]);
+  // Started later the same month, so unfiltered it would be January's pick.
+  const rescore = await popRun(s, {
+    requestedScope: { evaluationDate: "2026-12-31", today: "2027-01-04", earlierCycle: true },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-01-01T00:00:00.000Z",
+    startedAt: "2027-01-04T20:00:00.000Z", completedAt: "2027-01-04T20:30:00.000Z",
+  });
+  await s.outcomeStore.recordOutcomes([
+    { runId: rescore.id, subjectId: twh[0]!.externalId, measureId: "audiogram", status: "COMPLIANT", evidence: {} },
+  ]);
+
+  const skipped = await materializeRun(rescore.id, s);
+  assert.equal(skipped.materialized, false);
+  assert.deepEqual(await s.qualitySnapshots.querySnapshots({}), [], "a past year is not January's figure");
+
+  const result = await rebuildSnapshotHistory(s);
+  assert.deepEqual(result.rebuilt.map((m) => [m.period, m.runId]), [["2027-01", nightly.id]]);
+  const january = (await s.qualitySnapshots.querySnapshots({ measureId: "audiogram", scopeLevel: "all" })).map((r) => [r.period, r.sourceRunId, r.overdue]);
+  assert.deepEqual(january, [["2027-01", nightly.id, 1]]);
+});

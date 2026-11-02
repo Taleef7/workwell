@@ -30,6 +30,20 @@ export const CASE_STATUS_LABELS: Record<string, string> = {
 
 export const STATUS_LABELS = CASE_STATUS_LABELS;
 
+/**
+ * Why a case closed, in the practice's words, where the server's code would not read as a sentence. A code
+ * with no entry is shown as the server wrote it.
+ */
+export const CLOSED_REASON_LABELS: Record<string, string> = {
+  // #882: the first nightly of a year closes every open case of the year before.
+  CYCLE_ROLLED_OVER: "The measurement year ended",
+};
+
+export function closedReasonLabel(reason: string | null | undefined): string {
+  if (!reason) return "-";
+  return CLOSED_REASON_LABELS[normalizeEnumValue(reason)] ?? reason;
+}
+
 export const PRIORITY_LABELS: Record<string, string> = {
   HIGH: "High",
   MEDIUM: "Medium",

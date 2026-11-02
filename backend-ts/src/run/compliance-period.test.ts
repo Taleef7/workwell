@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
-import { cadenceFor, cycleAnchor, cycleKey, bucketPeriodForMeasure } from "./compliance-period.ts";
+import { cadenceFor, cycleAnchor, cycleKey, bucketPeriodForMeasure, isEarlierCycle } from "./compliance-period.ts";
 import { VENDORED_OFFICIAL_MEASURE_IDS, isVendoredOfficialMeasure } from "../config/official-measure-ids.ts";
 const VENDORED_OFFICIAL_TEST_ID = [...VENDORED_OFFICIAL_MEASURE_IDS].find((id) => !MEASURE_BINDINGS[id])!;
 
@@ -71,4 +71,15 @@ test("an official-only measure buckets to the calendar year explicitly, not by t
   assert.ok(isVendoredOfficialMeasure(VENDORED_OFFICIAL_TEST_ID));
   assert.ok(!MEASURE_BINDINGS[VENDORED_OFFICIAL_TEST_ID], "test id must stay unbound; adjust if the binding lands");
   assert.equal(bucketPeriodForMeasure(VENDORED_OFFICIAL_TEST_ID, "2027-08-15"), "2027-01-01");
+});
+
+test("isEarlierCycle (#882): strictly older than the measure's cycle on that day, by cycle order", () => {
+  // An official measure's cycle is the calendar year.
+  assert.equal(isEarlierCycle("cms122", "2026-01-01", "2027-01-04"), true);
+  assert.equal(isEarlierCycle("cms122", "2027-01-01", "2027-01-04"), false);
+  assert.equal(isEarlierCycle("cms122", "2026-01-01", "2026-12-31"), false);
+  // A later cycle (a rehearsal dated ahead of the clock) is not earlier.
+  assert.equal(isEarlierCycle("cms122", "2027-01-01", "2026-11-02"), false);
+  // A period that is not a date is never earlier, as the rollover reads it.
+  assert.equal(isEarlierCycle("cms122", "not-a-date", "2027-01-04"), false);
 });

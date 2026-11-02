@@ -524,6 +524,7 @@ test("#853: thin live data marks the measure data_insufficient, and an out-of-po
       webChartEnv: WEBCHART_ENV,
       webChartClient: fixtureWebChartClient([withEncounter("thin-1", coded), withEncounter("thin-2", coded)]),
       events: { async appendAudit(input) { audits.push(input as never); }, async appendAudits(inputs) { for (const i of inputs) await this.appendAudit(i); }, async recordCaseEvents() {} },
+      today: "2026-06-01", // planned on the day it scores, in any year (#882)
     }, { scopeType: "MEASURE", measureId: "audiogram", evaluationDate: "2026-06-01" });
     return { p, runStore, outcomeStore, caseStore, audits, result, caseId: open!.id };
   };

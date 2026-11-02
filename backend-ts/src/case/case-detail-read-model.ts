@@ -21,6 +21,8 @@ import { multiRateExclusionActive, officialDisplayFor } from "../compliance/offi
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { describeCaseEvent } from "./case-event-text.ts";
 import { cqlFindingsOf, type CaseCqlFindings } from "./case-findings.ts";
+import { isEarlierCycle } from "../run/compliance-period.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 export interface CaseDetail {
   caseId: string;
@@ -56,6 +58,13 @@ export interface CaseDetail {
   closedAt: string | null;
   closedReason: string | null;
   closedBy: string | null;
+  /**
+   * Whether the case's cycle has ended on the practice's date (#882, `isEarlierCycle`, the rollover's own
+   * comparison). A closed case of an ended cycle takes no outreach (409 `earlier_cycle_closed`) and its
+   * re-check never reopens it. Sent so the page asks the server's rule, not a calendar of its own: a
+   * season or a multi-year cycle is not the calendar year.
+   */
+  cycleEnded: boolean;
   exclusionReason: string | null;
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
@@ -243,6 +252,7 @@ export function toCaseDetail(
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     closedAt: c.closedAt,
+    cycleEnded: isEarlierCycle(c.measureId, c.evaluationPeriod, practiceToday()),
     closedReason: c.closedReason,
     closedBy: c.closedBy,
     exclusionReason: null,

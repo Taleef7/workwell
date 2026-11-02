@@ -18,6 +18,9 @@ import { resolveChannel, type ChannelType, type ChannelEnv, type OutreachChannel
 import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 import { outcomeForCase } from "./case-outcome.ts";
 import { NEUTRAL_CARE_ITEM, careItemFor, joinCareItems } from "./care-item.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { ACTIVE_CASE_STATUSES } from "./case-logic.ts";
+import { isEarlierCycle } from "../run/compliance-period.ts";
 
 interface OutreachTemplateContent {
   id: string | null;
@@ -180,7 +183,7 @@ function computeDueDate(evidence: Record<string, unknown>, evaluationPeriod: str
   const due = d.toISOString().slice(0, 10);
   // #150 M13: an OVERDUE case's due date (last_exam + window) is already in the past — never render a
   // past "due by" date in outreach; clamp to today ("due now"). Parity with Java computeDueDate.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   return due < today ? today : due;
 }
 
@@ -220,6 +223,7 @@ export async function previewOutreach(
 ): Promise<OutreachPreview | null> {
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
+  refuseEarlierCycleClosed(c);
   const { employeeName, measureName, dueDate } = await renderContext(deps, c);
   const isPatient = DEPLOYMENT_PROFILE.subjectTerm === "patient";
   const careItem = careItemFor(c.measureId);
@@ -448,6 +452,8 @@ export async function sendOutreach(
 ): Promise<CaseDetail | null> {
   const existing = await deps.cases.getCase(caseId);
   if (!existing) return null;
+  // Before any audit or send: `dispatchOutreach` reopens the case it messages.
+  refuseEarlierCycleClosed(existing);
   await dispatchOutreach(deps, existing, { channel, templateId, actor });
   return buildDetail(deps, caseId);
 }
@@ -502,3 +508,23 @@ export async function updateOutreachDelivery(
 
 /** A bad-request-class outreach failure (the route maps this to HTTP 400). */
 export class OutreachError extends Error {}
+
+/**
+ * A closed case whose cycle has ended (#882, LOCKED_DECISIONS §4A.10): messaging the patient about a year
+ * that is over would reopen it (`dispatchOutreach` sets it OPEN). The routes answer 409 with this code.
+ * The case's current-year gap, if any, is its own case on the work list.
+ */
+export class EarlierCycleClosedError extends Error {
+  readonly status = 409;
+  readonly code = "earlier_cycle_closed";
+  constructor(readonly caseId: string, readonly evaluationPeriod: string) {
+    super(`The case's cycle (${evaluationPeriod}) has ended and the case is closed, so no outreach is sent for it.`);
+    this.name = "EarlierCycleClosedError";
+  }
+}
+
+/** Refuse outreach on a closed case of a cycle that has ended; a closed current-cycle case is unaffected. */
+function refuseEarlierCycleClosed(c: { id: string; status: string; measureId: string; evaluationPeriod: string }): void {
+  if ((ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status)) return;
+  if (isEarlierCycle(c.measureId, c.evaluationPeriod, practiceToday())) throw new EarlierCycleClosedError(c.id, c.evaluationPeriod);
+}

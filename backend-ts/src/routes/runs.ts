@@ -39,7 +39,7 @@ import type { HydratedSegment } from "../stores/segment-store.ts";
 import { ensureSegmentSeed } from "../segment/segment-seed.ts";
 import { isFqmScored, routedEngineForEnv, type RoutedEngine } from "../wiring/executor-router.ts";
 import { toRunListItemFromCounts, toRunSummaryFromCounts, toRunLogEntries, toRunOutcomeRows, runCandidates, type RunFilters } from "../run/read-models.ts";
-import { recoverStuckRuns } from "../run/recover-stuck-runs.ts";
+import { orphanThresholdMs, recoverStuckRuns } from "../run/recover-stuck-runs.ts";
 import { isReportableRunStatus } from "../run/reportable.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
 import { aggregateOfficialRun, scoringIdentityKey, scoringOfRows } from "../fhir/run-aggregate.ts";
@@ -86,6 +86,8 @@ import { DEPLOYMENT_PROFILE, DIRECTORY, profileSubjectMatcher } from "../config/
 import { subjectIdOf } from "../engine/ingress/enrollment/roster.ts";
 import { runOutcomeCountsFor } from "../run/run-counts.ts";
 import { nightlySchedule } from "../admin/scheduler.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { earlierCycleMeasures, earlierCycleScope, isEarlierCycleRun, withoutServerScopeKeys } from "../run/earlier-cycle.ts";
 
 interface RunsEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -182,6 +184,58 @@ async function enabledSegments(env: RunsEnv): Promise<HydratedSegment[]> {
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * 409 when an outcome of a cycle that has ended would go into a run the server did not mark as one
+ * (#882): an unmarked run is a candidate for everyone's "latest", and last year would replace the
+ * current year on the roster, Programs and the cards. Create the run with that `evaluationDate` instead.
+ */
+function earlierCycleUnmarked(
+  run: { id: string; requestedScope: Record<string, unknown> },
+  measureId: string,
+  evaluationDate: string,
+): Response | null {
+  if (isEarlierCycleRun(run) || earlierCycleMeasures([measureId], evaluationDate, practiceToday()).length === 0) return null;
+  return json(
+    {
+      error: "earlier_cycle_unmarked",
+      id: run.id,
+      evaluationDate,
+      message:
+        "This evaluation date scores a cycle that has ended, and this run was not created for one. Create the run " +
+        "with requestedScope.evaluationDate set to that date, so it is marked and never replaces the current year.",
+    },
+    409,
+  );
+}
+
+const POPULATION_SCOPE_TYPES: ReadonlySet<string> = new Set(["ALL_PROGRAMS", "SITE", "MEASURE"]);
+
+/**
+ * A population run this process is still evaluating, or null (#882). Two at once exhaust the database pool
+ * (DEPLOY.md), and the lead's "Re-score 2026" button is one click from a second. Only a run the pipeline
+ * planned counts: it carries the server-only `requestedScope.today`, which a `/evaluate` or import run left
+ * RUNNING by a client never does. A run started before this process booted cannot be advanced by it, as the
+ * stuck-run sweep reads it, so it is not in flight.
+ */
+async function populationRunInFlight(runStore: RunStore, scopeType: unknown): Promise<{ id: string } | null> {
+  if (typeof scopeType !== "string" || !POPULATION_SCOPE_TYPES.has(scopeType.toUpperCase())) return null;
+  const live = orphanThresholdMs();
+  const now = Date.now();
+  const busy = (await runStore.listRuns(200)).find(
+    (r) =>
+      r.status.toUpperCase() === "RUNNING" &&
+      POPULATION_SCOPE_TYPES.has(r.scopeType.toUpperCase()) &&
+      typeof r.requestedScope?.today === "string" &&
+      now - Date.parse(r.startedAt) < live,
+  );
+  return busy ? { id: busy.id } : null;
+}
+
+const runInProgress = (runId: string): Response =>
+  json({ error: "run_in_progress", runId, message: "A run is already in progress; try again when it finishes." }, 409);
 
 /** Cap on subjects for a per-subject (individual/bundle) MeasureReport — a 120k seed:scale run would
  *  otherwise build a 120k-entry document (Fable H4). The summary report is the aggregate above this. */
@@ -714,6 +768,8 @@ export async function handleRuns(
   if (pathname === "/api/runs/manual" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as ManualRunRequest;
     body.triggeredBy = externalTriggeredBy(body.triggeredBy); // Fable M1: no forged seed:*/scheduler labels
+    const busy = await populationRunInFlight(await store(env), body.scopeType);
+    if (busy) return runInProgress(busy.id);
     const engine = await routedEngineForEnv(env);
     const deps = {
       runStore: await store(env),
@@ -771,6 +827,8 @@ export async function handleRuns(
         throw err;
       }
     }
+    const busy = await populationRunInFlight(runStore, prior.scopeType);
+    if (busy) return runInProgress(busy.id);
     const deps = {
       runStore,
       outcomeStore: await outcomes(env),
@@ -804,12 +862,24 @@ export async function handleRuns(
   if (pathname === "/api/runs" && req.method === "POST") {
     const body = (await req.json().catch(() => ({}))) as Partial<CreateRunInput>;
     const now = new Date().toISOString();
+    const scopeType = body.scopeType ?? "ALL_PROGRAMS";
+    // #882: `today` and the earlier-cycle marker are the server's. A client's are dropped, and the marker
+    // is computed here from the scope's evaluation date, over the measure the run is for (any runnable
+    // one where it names none), so an import of last year's documents is never the newest "latest".
+    const requested = withoutServerScopeKeys(isPlainObject(body.requestedScope) ? body.requestedScope : {});
+    const evaluationDate = typeof requested.evaluationDate === "string" && requested.evaluationDate ? requested.evaluationDate : null;
+    const scopeMeasure = (typeof requested.measureId === "string" && requested.measureId) || (scopeType === "MEASURE" ? body.scopeId : undefined);
     const run = await (await store(env)).createRun({
-      scopeType: body.scopeType ?? "ALL_PROGRAMS",
+      scopeType,
       scopeId: body.scopeId,
       triggeredBy: externalTriggeredBy(body.triggeredBy), // Fable M1: no forged seed:*/scheduler labels
 
-      requestedScope: body.requestedScope ?? {},
+      requestedScope: {
+        ...requested,
+        ...(evaluationDate
+          ? earlierCycleScope(scopeMeasure ? [scopeMeasure] : DEPLOYMENT_PROFILE.runnableMeasureIds, evaluationDate, practiceToday())
+          : {}),
+      },
       measurementPeriodStart: body.measurementPeriodStart ?? now,
       measurementPeriodEnd: body.measurementPeriodEnd ?? now,
     });
@@ -887,7 +957,11 @@ export async function handleRuns(
     // Engine default when omitted is today (cql-execution-engine) — prefer the run's persisted
     // period, then today, mirroring that default.
     const evaluationPeriod =
-      body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? new Date().toISOString().slice(0, 10);
+      body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? practiceToday();
+    // #882: an outcome of a cycle that has ended may only go into a run the server marked as one, or the
+    // run would become everyone's "latest" and put last year on the roster, Programs and the cards.
+    const unmarked = earlierCycleUnmarked(run, body.measureId, evaluationPeriod);
+    if (unmarked) return unmarked;
     // Build the engine BEFORE claiming the run. `routedEngineForEnv` validates official-measure
     // configuration and can throw; doing that after markRunning would leave an orphaned RUNNING run for
     // `recoverStuckRuns` to sweep, for a failure that has nothing to do with the run.
@@ -1053,7 +1127,9 @@ export async function handleRuns(
     }
 
     const evaluationPeriod =
-      body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? new Date().toISOString().slice(0, 10);
+      body.evaluationDate ?? (run.requestedScope.evaluationDate as string | undefined) ?? practiceToday();
+    const unmarkedImport = earlierCycleUnmarked(run, body.measureId, evaluationPeriod);
+    if (unmarkedImport) return unmarkedImport;
     const outcomeStore = await outcomes(env);
     // ONE import per run, and that is the idempotency contract (CLAUDE.md's Definition of Done makes it
     // mandatory). `outcomes` has no unique key on `(run_id, subject_id, measure, period)`, so a client

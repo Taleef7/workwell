@@ -333,9 +333,11 @@ writes a `WARN` containing `no segment makes them applicable` when this is owed.
 ### 1 January 2027: the year change (#854)
 
 The scheduler runs Monday to Friday, so Thursday 31 December is the last 2026 nightly and **Friday 1 January,
-12:00 UTC (7:00 AM Eastern)**, the first 2027 one. Rehearsed with `pnpm rehearse:year-change` (2026-10-20, a
-1,000-patient corpus on a local Postgres; the December rehearsal on a copy of Maui adds Maui's own numbers).
-What that nightly does:
+12:00 UTC (2:00 AM in Hawaii)**, the first 2027 one. "Today" is the practice's date (Maui: `Pacific/Honolulu`,
+pending MIE's confirmation, #882), so a run started on the afternoon of 31 December in Hawaii still scores
+2026. Rehearsed with `pnpm rehearse:year-change` (2026-10-20, a 1,000-patient corpus on a local Postgres; the
+December rehearsal on a copy of Maui adds Maui's own numbers, in three steps: `--evaluation-date 2026-12-31`,
+then `2027-01-01`, then `2026-12-31 --today 2027-01-04`, the January re-score). What that nightly does:
 - every routed measure is scored by its 2027 translation (`WorkWell translation of CMS… (ww-2027.1)`);
 - every 2026 case still open for a patient it evaluates closes `RESOLVED` / `CYCLE_ROLLED_OVER`, one
   `CASE_RESOLVED` audit event each: 783 per 1,000 patients rehearsed, about 15,300 on Maui. The closes are
@@ -357,8 +359,19 @@ What that nightly does:
 4. `/health` is UP and its `lastPopulationRun` is that run, with no data-insufficient measure.
 5. Tell MIE the year changed, with N and the run's time.
 
-If the run FAILED, nothing rolled over (the closes come after the last chunk): start one ALL_PROGRAMS run from
-the Runs page (`POST /api/runs/manual`), which rolls over as the nightly does.
+If the run FAILED, nothing rolled over (the closes come after the last chunk): an admin starts one ALL_PROGRAMS
+run from the Runs page (`POST /api/runs/manual`) **that day**, which rolls over as the nightly does. Otherwise
+the work list, which shows 2027 from 1 January, stays empty until Monday's nightly. While a population run is in
+flight a second one is refused (`409 run_in_progress`): wait for it.
+
+**January to March: closing out 2026 (#882).** Records of 2026 care keep arriving after 1 January, and the
+2026 scorecard and attributed-list report read the newest run scored over 2026. The lead (or an admin)
+re-scores 2026 from the scorecard ("Closing out 2026", 2026 selected) when late records have arrived: an
+ALL_PROGRAMS run as of 2026-12-31, about as long as the nightly. The server marks it
+(`requestedScope.earlierCycle`), so it opens and reopens no case, is nobody's "latest" (the work list, roster,
+Programs, the trend, the cards and MCP stay on 2027), and writes no quality snapshot and no `/health`
+`lastPopulationRun`. Its outcomes are recorded and its run is on the Runs page. Re-checking a closed 2026 case
+records the 2026 result on it and leaves it closed; outreach on one is refused (`409 earlier_cycle_closed`).
 
 ### Which run scopes are SCHEDULED, and which answer in the request (ADR-085, #590)
 
@@ -445,7 +458,7 @@ From `backend-ts/`, with `DATABASE_URL` set. Idempotent and resumable. Undo SQL 
 | `pnpm seed:trend-history --weeks N --as-of <date>` | synthetic weekly runs | refuses under retention | `triggered_by='seed:trend-history'` |
 | `pnpm resolve-valuesets --manifest <canonical> [--official <id>]` | VSAC expansions into `value_sets` (descriptive) | TWH: done | `DELETE FROM value_sets WHERE source='VSAC'` |
 | `pnpm outcomes:compact` | one retention pass | also runs after each Maui nightly | none |
-| `pnpm rehearse:year-change --evaluation-date <date> --confirm-host <host> [--out <file.json>]` | the nightly as of that date: runs, outcomes, cases, audit; as of a new year it closes the old year's cases (#854) | a COPY only: refuses unless `--confirm-host` repeats `DATABASE_URL`'s host, and with WebChart configured | discard the copy |
+| `pnpm rehearse:year-change --evaluation-date <date> --confirm-host <host> [--today <date>] [--out <file.json>]` | the nightly as of that date: runs, outcomes, cases, audit; as of a new year it closes the old year's cases (#854); `--today` plans it on another practice date, so December can rehearse the January re-score of the old year, which must open or reopen no case (#882) | a COPY only: refuses unless `--confirm-host` repeats `DATABASE_URL`'s host, and with WebChart configured | discard the copy |
 
 A crashed `seed:scale` leaves RUNNING runs that are not auto-swept — roll back before resuming.
 

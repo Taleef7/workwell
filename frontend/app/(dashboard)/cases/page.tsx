@@ -26,6 +26,7 @@ import { canActInBulk, canExportAudit, canExportData, canManageCases, canRunMeas
 import { worklistHref } from "@/lib/worklist-links";
 import { dueSoonPossible, useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
+import { newYearListNote } from "@/lib/local-date";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { LIST_FILTER_LABEL, ListFilterNote, listParam, useListFilter } from "@/features/subject-list/list-filter";
@@ -243,6 +244,7 @@ export default function CasesPage() {
   const mayExport = canExportData(user?.role);
   const mayExportAudit = canExportAudit(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
+  const newYearNote = newYearListNote();
   // `measureLabelFor` names a measure in the filter (unversioned: a filter spans years); a case row names
   // the logic that scored its own outcome (#769).
   const { labelFor: measureLabelFor, compactLabelFor, titleFor, measures: catalogMeasures } = useMeasureIdentities();
@@ -960,12 +962,15 @@ export default function CasesPage() {
 
       {!loading && !error && filteredCases.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-sm text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
+          {/* January to March (#882) an empty open list is the new year's, not a fault: last year's gaps
+              closed when this year began, so running a measure is not the answer it is the rest of the year. */}
           {urlSearch.trim()
             ? `No results match your search "${urlSearch.trim()}".`
             : mine && statusFilter === "open"
               ? (
                 <>
                   Nothing is assigned to you.{" "}
+                  {newYearNote ? `${newYearNote} ` : null}
                   <Link
                     href={(() => {
                       const params = new URLSearchParams(searchParams.toString());
@@ -984,9 +989,11 @@ export default function CasesPage() {
                 ? "No closed cases yet."
                 : statusFilter === "all"
                   ? "No cases found for the current filters."
-                  : canRunMeasures(user?.role)
-                    ? "No open cases. Run a measure to generate cases."
-                    : "No open cases for the current filters."}
+                  : newYearNote
+                    ? `${canRunMeasures(user?.role) ? "No open cases." : "No open cases for the current filters."} ${newYearNote}`
+                    : canRunMeasures(user?.role)
+                      ? "No open cases. Run a measure to generate cases."
+                      : "No open cases for the current filters."}
         </div>
       ) : null}
 

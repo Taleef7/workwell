@@ -498,6 +498,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
                    SELECT o2.id, ROW_NUMBER() OVER (PARTITION BY o2.measure_id ORDER BY o2.evaluated_at DESC, o2.id DESC) AS rn
                      FROM outcomes o2 JOIN runs r ON r.id = o2.run_id
                     WHERE o2.subject_id = ? AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
+                      AND json_type(r.requested_scope_json, '$.earlierCycle') IS NOT 'true'
                  ) WHERE rn = 1) pick ON pick.id = o.id`,
       )
       .bind(subjectId)
@@ -578,11 +579,12 @@ export class SqliteOutcomeStore implements OutcomeStore {
     const clause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
     const { results } = await this.db
       .prepare(
-        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status, o.out_of_population
+        `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status, o.out_of_population,
+                json_type(r.requested_scope_json, '$.earlierCycle') = 'true' AS run_earlier_cycle
            FROM outcomes o JOIN runs r ON r.id = o.run_id${clause}`,
       )
       .bind(...binds)
-      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; run_triggered_by: string | null; subject_id: string; measure_id: string; status: string; out_of_population: number | null }>();
+      .all<{ run_id: string; run_started_at: string; run_scope_type: string; run_status: string; run_triggered_by: string | null; subject_id: string; measure_id: string; status: string; out_of_population: number | null; run_earlier_cycle: number | null }>();
     return (results ?? []).map((r) => ({
       runId: r.run_id,
       runStartedAt: r.run_started_at,
@@ -593,6 +595,7 @@ export class SqliteOutcomeStore implements OutcomeStore {
       measureId: r.measure_id,
       status: r.status,
       outOfPopulation: boolOrUndefined(r.out_of_population),
+      ...(r.run_earlier_cycle === 1 ? { runEarlierCycle: true } : {}),
     }));
   }
 
@@ -608,6 +611,9 @@ export class SqliteOutcomeStore implements OutcomeStore {
       // COMPLETED SITE run never becomes "the roster" (ADR-077 d4).
       "UPPER(r2.scope_type) IN ('MEASURE','ALL_PROGRAMS')",
       "UPPER(r2.status) IN ('COMPLETED','PARTIAL_FAILURE')",
+      // A re-score of a cycle that has ended is nobody's latest (#882, `run/earlier-cycle.ts`); only the
+      // JSON boolean matches (json_type 'true'), never a string or a number.
+      "json_type(r2.requested_scope_json, '$.earlierCycle') IS NOT 'true'",
     ];
     const binds: unknown[] = [];
     if (filter.measureId) (inner.push("o2.measure_id = ?"), binds.push(filter.measureId));
@@ -657,7 +663,12 @@ export class SqliteOutcomeStore implements OutcomeStore {
     const wanted = [...new Set(measureIds)];
     const per = Number.isFinite(perMeasure) ? Math.max(1, Math.trunc(perMeasure)) : 1;
     if (wanted.length === 0) return [];
-    const runWhere: string[] = ["UPPER(r.scope_type) IN ('MEASURE','ALL_PROGRAMS')", "UPPER(r.status) IN ('COMPLETED','PARTIAL_FAILURE')"];
+    const runWhere: string[] = [
+      "UPPER(r.scope_type) IN ('MEASURE','ALL_PROGRAMS')",
+      "UPPER(r.status) IN ('COMPLETED','PARTIAL_FAILURE')",
+      // A re-score of a cycle that has ended is nobody's latest (#882, `run/earlier-cycle.ts`).
+      "json_type(r.requested_scope_json, '$.earlierCycle') IS NOT 'true'",
+    ];
     const binds: unknown[] = [];
     if (filter.from) (runWhere.push("substr(r.started_at, 1, 10) >= ?"), binds.push(filter.from));
     if (filter.to) (runWhere.push("substr(r.started_at, 1, 10) <= ?"), binds.push(filter.to));

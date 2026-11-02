@@ -51,6 +51,7 @@ import { StoreValueSetResolver, type ValueSetResolver } from "@work-well/measure
 
 import { DEPLOYMENT_PROFILE, employees, isRunnableMeasure } from "../config/deployment-profile.ts";
 import { createWorkwellEngine } from "../engine/cql/workwell-engine.ts";
+import { practiceToday, practiceYear } from "../config/practice-date.ts";
 
 interface MeasuresEnv {
   DB: CloudDatabase;
@@ -551,7 +552,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
         // judged at its own as-of date, not today's (Codex P2 on #674).
         const run = await stores.runs.getRun(latestRows[0]!.runId);
         const periodEnd = run?.measurementPeriodEnd?.slice(0, 10) ?? null;
-        const evalYear = periodEnd ? Number(periodEnd.slice(0, 4)) : new Date().getUTCFullYear();
+        const evalYear = periodEnd ? Number(periodEnd.slice(0, 4)) : practiceYear();
         const estimate = computeOutcomeDiff(ref, latestRows, evalYear);
         return json({
           ...estimate,
@@ -568,7 +569,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
         // run persisted its outcomes at its requested as-of date, so diffing must re-evaluate at that same
         // date (WorkWell's value-based cms122 is date-insensitive, but the official age gate is not) —
         // Codex P2. Anchor the synthetic bundles to the same date so the diff mirrors the run.
-        const today = new Date().toISOString().slice(0, 10);
+        const today = practiceToday();
         const runId = latestRows[0]?.runId;
         const run = runId ? await stores.runs.getRun(runId) : null;
         const asOf = run?.measurementPeriodEnd?.slice(0, 10) ?? latestRows[0]?.runStartedAt?.slice(0, 10) ?? today;
@@ -585,7 +586,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
               `[fidelity/diff] literal tier failed for ${diffId}, degrading to ` +
                 `${diffId === "cms122" ? "subset" : "estimate"}: ${err instanceof Error ? err.message : String(err)}`,
             );
-            if (diffId !== "cms122") return json(computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()));
+            if (diffId !== "cms122") return json(computeOutcomeDiff(ref, latestRows, practiceYear()));
           }
         }
         // Defence in depth, not a reachable hole. `chooseDiffMode` returns "subset" only when
@@ -597,7 +598,7 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
         if (diffId === "cms122") return json(await computeExecutionDiff(ref, latestRows, deps));
       }
     }
-    return json(computeOutcomeDiff(ref, latestRows, new Date().getUTCFullYear()));
+    return json(computeOutcomeDiff(ref, latestRows, practiceYear()));
   }
 
   // Standards fidelity: a documented structural diff of WorkWell's authored measure vs the official

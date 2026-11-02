@@ -11,6 +11,8 @@ import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.t
 import { dispatchOutreach, dispatchPatientOutreach, type DispatchResult, type OutreachDeps } from "./case-outreach.ts";
 import { isSensitiveMeasure } from "./care-item.ts";
 import { isChannelType, type ChannelType, type OutreachChannel } from "./outreach-channel.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { isEarlierCycle } from "../run/compliance-period.ts";
 
 export interface CampaignDeps {
   cases: CaseStore;
@@ -64,8 +66,14 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
   }
 
   const open = await deps.cases.listCases({ statuses: ["OPEN"], measureId, limit: 100000 });
+  // Never a cycle that has ended (#882): an OPEN case of a year that is over (one the rollover has not
+  // reached yet) is not something to message a patient about again. Compared as the rollover compares.
+  const today = practiceToday();
   const matching = open.filter(
-    (c) => (!site || eq(employeeById(c.employeeId)?.site ?? null, site)) && (!outcome || eq(c.currentOutcomeStatus, outcome)),
+    (c) =>
+      !isEarlierCycle(c.measureId, c.evaluationPeriod, today) &&
+      (!site || eq(employeeById(c.employeeId)?.site ?? null, site)) &&
+      (!outcome || eq(c.currentOutcomeStatus, outcome)),
   );
   const eligible = patientDeployment ? matching.filter((c) => !isSensitiveMeasure(c.measureId)) : matching;
   const withheld = matching.length - eligible.length;

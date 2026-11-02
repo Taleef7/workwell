@@ -120,6 +120,7 @@ import { officialMeasureSemantics, trustedProfilesOf } from "./official-measure-
 import { preparedForQiCore, type PreparableBundle } from "./qicore-preparation.ts";
 import type { BatchCalculator } from "./fqm-worker.ts";
 import { calculationFailure, isOfficialCalculationError } from "./official-calculation-error.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 /**
  * Expand one value-set OID to its codes, for the artifact being executed.
@@ -565,7 +566,7 @@ export function officialMeasureExecutor(deps: OfficialExecutorDeps): OfficialMea
     // The PERIOD first, then the artifact: which logic scores a measure depends on the year being scored
     // (CMS's 2026 draft for 2026, a WorkWell translation for 2027 once one is routed). Choosing the
     // artifact before the period is known is how the two could describe different years.
-    const asOf = evaluationDate ?? new Date().toISOString().slice(0, 10);
+    const asOf = evaluationDate ?? practiceToday();
     // Read from the SAME registry the authored path reads, rather than hardcoding 12, and through the
     // SAME helper the shadow diff calls — see `officialMeasurementPeriod`.
     const period = officialMeasurementPeriod(measureId, asOf);

@@ -17,6 +17,7 @@ import { SqliteOutcomeStore } from "../../stores/sqlite/outcome-store-sqlite.ts"
 import { SqliteCaseStore } from "../../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../../stores/sqlite/case-event-store-sqlite.ts";
 import type { Stores } from "../../stores/factory.ts";
+import type { UpsertCaseInput } from "../../stores/case-store.ts";
 import { EMPLOYEES } from "../../engine/synthetic/employee-catalog.ts";
 import { RUNNABLE_MEASURE_IDS } from "../../config/deployment-profile.ts";
 import { parseArgs, refusalFor, rehearse, render, RehearsalUsageError } from "./rehearse-year-change.ts";
@@ -54,7 +55,11 @@ test("the arguments: a date and the host are both required, and nothing else is 
     evaluationDate: "2027-01-01",
     confirmHost: "db.test",
     out: null,
+    today: null,
   });
+  // #882: the January re-score, rehearsed in December.
+  assert.equal(parseArgs(["--evaluation-date", "2026-12-31", "--confirm-host", "db.test", "--today", "2027-01-04"]).today, "2027-01-04");
+  assert.throws(() => parseArgs(["--evaluation-date", "2026-12-31", "--confirm-host", "db.test", "--today", "2027-02-30"]), RehearsalUsageError);
   assert.throws(() => parseArgs(["--confirm-host", "db.test"]), RehearsalUsageError);
   assert.throws(() => parseArgs(["--evaluation-date", "2027-1-1", "--confirm-host", "db.test"]), RehearsalUsageError);
   for (const impossible of ["2027-02-29", "2027-02-30", "2027-13-01", "2027-04-31"]) {
@@ -80,12 +85,13 @@ test("31 December opens the year's cases; 1 January closes each calendar-year on
   const stores = await freshStores();
   const deps = { stores, engine: overdueEngine, segments: [], employees: EMPLOYEES.slice(0, 3) };
 
-  const december = await rehearse(deps, "2026-12-31", RUNNABLE_MEASURE_IDS);
+  // Each step is planned on the day it rehearses, so the test reads the same in any year (#882).
+  const december = await rehearse(deps, "2026-12-31", RUNNABLE_MEASURE_IDS, 1000, "2026-12-31");
   assert.equal(december.rollover, null, "nothing older to close on the old year's last day");
   const openIn = new Map(december.measures.map((m) => [m.measureId, m.activeAfter.current]));
   assert.ok([...openIn.values()].every((n) => n > 0), "the old year's nightly opened every measure's cases");
 
-  const january = await rehearse(deps, "2027-01-01", RUNNABLE_MEASURE_IDS);
+  const january = await rehearse(deps, "2027-01-01", RUNNABLE_MEASURE_IDS, 1000, "2027-01-01");
   assert.equal(january.status, "COMPLETED");
   // A measure whose cycle does not turn on 1 January (a flu season) keeps its cases; every other rolls over.
   const turned = january.measures.filter((m) => m.period !== december.measures.find((d) => d.measureId === m.measureId)!.period);
@@ -102,4 +108,43 @@ test("31 December opens the year's cases; 1 January closes each calendar-year on
   for (const m of kept) assert.equal(m.activeAfter.current, openIn.get(m.measureId), `${m.measureId}: its cycle did not turn`);
   assert.ok(january.checks.every((c) => c.ok), render(january));
   assert.match(render(january), new RegExp(`rollover: ${rolled} closed`));
+
+  // The lead's re-score of 2026 in January (#882): every patient is still in a 2026 gap, and no 2026 case
+  // is opened or reopened; the 2027 cases stay as they were.
+  const rescore = await rehearse(deps, "2026-12-31", RUNNABLE_MEASURE_IDS, 1000, "2027-01-04");
+  assert.equal(rescore.status, "COMPLETED");
+  assert.equal(rescore.today, "2027-01-04");
+  assert.ok(rescore.checks.some((c) => c.check === "no case was opened or reopened in a cycle that had ended" && c.ok), render(rescore));
+  assert.ok(rescore.checks.every((c) => c.ok), render(rescore));
+  for (const m of turned) {
+    const after = rescore.measures.find((r) => r.measureId === m.measureId)!;
+    assert.equal(after.activeAfter.current, 0, `${m.measureId}: no 2026 case is open again`);
+    assert.equal(after.activeAfter.otherCycles, m.activeAfter.current, `${m.measureId}: the 2027 cases are untouched`);
+  }
+  const run = await stores.runs.getRun(rescore.runId!);
+  assert.equal((run!.requestedScope as { earlierCycle?: unknown }).earlierCycle, true, "the re-score run is marked");
+  assert.match(render(rescore), /planned on 2027-01-04/);
+});
+
+test("the re-score's check fails when a case store reopens an ended cycle's cases (#882)", async () => {
+  // A store that drops `earlierCycle`, as a regression would: the January re-score then reopens every
+  // rolled-over 2026 case, and the check must say so.
+  const stores = await freshStores();
+  const real = stores.cases;
+  const blind = <T extends { earlierCycle?: boolean }>({ earlierCycle: _dropped, ...rest }: T) => rest;
+  const cases = new Proxy(real, {
+    get(target, key) {
+      if (key === "upsertFromOutcome") return (input: UpsertCaseInput) => target.upsertFromOutcome(blind(input));
+      if (key === "upsertFromOutcomes") return (inputs: UpsertCaseInput[]) => target.upsertFromOutcomes(inputs.map(blind));
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const deps = { stores: { ...stores, cases } as Stores, engine: overdueEngine, segments: [], employees: EMPLOYEES.slice(0, 3) };
+  await rehearse(deps, "2026-12-31", RUNNABLE_MEASURE_IDS, 1000, "2026-12-31");
+  await rehearse(deps, "2027-01-01", RUNNABLE_MEASURE_IDS, 1000, "2027-01-01");
+  const rescore = await rehearse(deps, "2026-12-31", RUNNABLE_MEASURE_IDS, 1000, "2027-01-04");
+  const check = rescore.checks.find((c) => c.check === "no case was opened or reopened in a cycle that had ended");
+  assert.equal(check?.ok, false, render(rescore));
+  assert.match(check!.detail, /^[1-9]\d* case\(s\) opened or reopened in a cycle that ended before 2027-01-04$/);
 });

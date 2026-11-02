@@ -17,9 +17,13 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
 import { AuditBackedCampaignStore } from "../stores/audit-campaign-store.ts";
 import { runCampaign, listCampaigns, getCampaignDetail, type CampaignDeps } from "./outreach-campaign.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { practiceToday } from "../config/practice-date.ts";
 import type { ChannelType, OutreachChannel } from "./outreach-channel.ts";
 
 const dbPath = join(tmpdir(), `workwell-campeng-${crypto.randomUUID()}.sqlite`);
+const CURRENT = bucketPeriodForMeasure("audiogram", practiceToday());
+const LAST_YEAR = bucketPeriodForMeasure("audiogram", `${Number(CURRENT.slice(0, 4)) - 1}-07-01`);
 let deps: CampaignDeps;
 
 before(async () => {
@@ -34,11 +38,14 @@ before(async () => {
     scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
     measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
   });
-  // OPEN OVERDUE audiogram cases: emp-006 + emp-010 (Plant A), emp-001 (HQ).
+  // OPEN OVERDUE audiogram cases in the current cycle: emp-006 + emp-010 (Plant A), emp-001 (HQ).
   for (const s of ["emp-006", "emp-010", "emp-001"]) {
     await outcomes.recordOutcome({ runId: run.id, subjectId: s, measureId: "audiogram", status: "OVERDUE", evidence: {} });
-    await cases.upsertFromOutcome({ runId: run.id, subjectId: s, measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+    await cases.upsertFromOutcome({ runId: run.id, subjectId: s, measureId: "audiogram", evaluationPeriod: CURRENT, outcomeStatus: "OVERDUE" });
   }
+  // And one still OPEN in last year's cycle, which the rollover has not reached: never a recipient (#882).
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-002", measureId: "audiogram", status: "OVERDUE", evidence: {} });
+  await cases.upsertFromOutcome({ runId: run.id, subjectId: "emp-002", measureId: "audiogram", evaluationPeriod: LAST_YEAR, outcomeStatus: "OVERDUE" });
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });
 
@@ -49,6 +56,12 @@ test("dryRun resolves recipients (measure+outcome filter) and sends nothing", as
   assert.equal(res.total, 3);
   assert.equal(res.recipients.every((r) => r.status === "PREVIEW"), true);
   assert.equal((await listCampaigns(deps)).length, 0, "no campaign persisted on dryRun");
+});
+
+test("an OPEN case of a cycle that has ended is never a recipient (#882)", async () => {
+  const res = await runCampaign(deps, { measureId: "audiogram", channel: "SMS", dryRun: true }, "admin");
+  assert.equal(res.total, 3);
+  assert.equal(res.recipients.some((r) => r.employeeId === "emp-002"), false);
 });
 
 test("site filter narrows recipients (Plant A → 2)", async () => {

@@ -51,11 +51,13 @@ export const day = (s: string): string => s.slice(0, 10);
 export const isCompletedRun = (status: string): boolean =>
   status.toUpperCase() === "COMPLETED" || status.toUpperCase() === "PARTIAL_FAILURE";
 
-/** The rows of the most-recent run (by runStartedAt) among the given rows; [] if none.
+/** The rows of the most-recent run (by runStartedAt) among the given rows; [] if none. A re-score of a
+ *  cycle that has ended is never the most recent (#882).
  *  Shared by the hierarchy rollup and the order-proposal route so "latest population run" can't drift. */
-export function latestRunRows<T extends { runId: string; runStartedAt: string }>(rows: T[]): T[] {
+export function latestRunRows<T extends { runId: string; runStartedAt: string; runEarlierCycle?: true }>(rows: T[]): T[] {
   const byRun = new Map<string, { startedAt: string; rows: T[] }>();
   for (const r of rows) {
+    if (r.runEarlierCycle === true) continue;
     const g = byRun.get(r.runId) ?? byRun.set(r.runId, { startedAt: r.runStartedAt, rows: [] }).get(r.runId)!;
     g.rows.push(r);
   }

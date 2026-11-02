@@ -895,3 +895,21 @@ test("one run holding a patient's 2026 and 2027 rows: the 2027 case's list row a
   assert.equal(detail.logic?.kind, "workwell-translation", "the case page names the same row");
   assert.equal(detail.measureVersion, "ww-2027.1");
 });
+
+test("outreach on a closed case of a cycle that has ended answers 409 earlier_cycle_closed, send and preview alike (#882)", async () => {
+  const db = env.DB as never;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: "2025-01-01T00:00:00.000Z", measurementPeriodEnd: "2025-01-01T00:00:00.000Z",
+  });
+  const store = new SqliteCaseStore(db);
+  const old = await store.upsertFromOutcome({ runId: run.id, subjectId: "emp-003", measureId: "audiogram", evaluationPeriod: "2025-01-01", outcomeStatus: "OVERDUE" });
+  await store.patchCase(old!.id, { status: "RESOLVED", closedAt: new Date().toISOString(), closedReason: "CYCLE_ROLLED_OVER", closedBy: null });
+
+  for (const res of [await post(`/api/cases/${old!.id}/actions/outreach`), await getPath(`/api/cases/${old!.id}/actions/outreach/preview`)]) {
+    assert.equal(res?.status, 409);
+    const body = (await res!.json()) as { error: string; id: string; evaluationPeriod: string };
+    assert.deepEqual([body.error, body.id, body.evaluationPeriod], ["earlier_cycle_closed", old!.id, "2025-01-01"]);
+  }
+  assert.equal((await store.getCase(old!.id))?.status, "RESOLVED", "not reopened");
+});

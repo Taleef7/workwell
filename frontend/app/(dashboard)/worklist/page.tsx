@@ -26,6 +26,7 @@ import { ChevronRight, SlidersHorizontal } from "lucide-react";
 import { emitToast } from "@/lib/toast";
 import { OUTCOME_LABELS, PRIORITY_LABELS, labelFor, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { newYearListNote } from "@/lib/local-date";
 import { subjectPath } from "@/lib/subject-path";
 import { dueSoonPossible, useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { ScrollRegion } from "@/components/scroll-region";
@@ -246,6 +247,8 @@ export default function WorklistPage() {
    */
   // Bulk actions are the lead's (#880): the staff seat works one patient at a time, so it gets no checkboxes.
   const canBulkAct = canActInBulk(user?.role) && statusView === "open";
+  // January to March (#882) the open list is the new year's: last year's gaps closed when it began.
+  const newYearNote = newYearListNote();
   /**
    * Which view the URL asks for: "me", "all", or nothing said yet.
    *
@@ -1045,7 +1048,7 @@ export default function WorklistPage() {
                     ? `Nothing to show: the ${SUBJECT.plural} could not be loaded.`
                     : statusView === "staff_closed"
                     ? `No ${SUBJECT.plural} with gaps closed by staff match these filters.`
-                    : `No ${SUBJECT.plural} with open gaps match these filters.`}
+                    : `No ${SUBJECT.plural} with open gaps match these filters.${newYearNote ? ` ${newYearNote}` : ""}`}
                 </td>
               </tr>
             ) : (

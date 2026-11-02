@@ -7,6 +7,19 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-11-02
 
+- **The year change (#882, LOCKED_DECISIONS §4A.10).** The 1 January rollover stays, and a cycle that has
+  ended now opens nothing: a run, re-check or outreach over it leaves its cases closed (outreach answers 409),
+  and campaigns skip it. A run scoring an ended cycle is marked by the server and is never anyone's "latest";
+  the lead re-scores last year from the scorecard, January to March. "Today" is the practice's date, and
+  Maui's zone is `Pacific/Honolulu` (MIE to confirm, OPEN_QUESTIONS 4.16); the nightly stays at 12:00 UTC,
+  not the "06 UTC" #882 first said. One population run at a time (409 `run_in_progress`). The rehearsal
+  takes `--today`; the exact-time year edges stay UTC (MEASURES.md). Rehearsed in three steps on 1,000
+  patients on a local Postgres: 31 December opened 783 cases, 1 January rolled all 783 over, and the
+  re-score of 2026 planned on 4 January opened and reopened none, while Programs stayed on 1 January's run.
+  - Off the plan: the global date filter keeps UTC days, because the server reads `from`/`to` as UTC days;
+    only the scorecard's Maui suite runs at a shifted clock, the other two read no date. Two older tests fail
+    whenever the clock is in January (the store contract's non-calendar `createdFrom`, the cases-CSV parity
+    guard): a follow-up.
 - **The lead and the staff seat differ (#880, LOCKED_DECISIONS §4A.9).** `quality-staff@` is a new role,
   `ROLE_QUALITY_STAFF`: it lands on Cases → Assigned to you, works one case at a time, exports the CSVs and
   reads the scorecard. Bulk assign, campaigns, attributed lists, panel owners, runs, People, QRDA/MeasureReport

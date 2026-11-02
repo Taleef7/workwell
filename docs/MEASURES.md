@@ -445,6 +445,17 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 
 **Remaining accuracy work:** Phase 2 DENEX (LTC/frailty); optional CMS125 literal ELM; annual roll-forward to v15/2027 when product targets that year.
 
+### The year's edges are UTC (a known limitation, #847, #882)
+
+The measurement period is the calendar year in UTC, and the practice is not: Maui is in Hawaii (UTC−10),
+and WebChart states its times in UTC from a server in US Eastern. Which year a run scores follows the
+practice's date (#882), but the comparisons the logic makes against the year's edges are UTC's. Most read a
+date and are unaffected; four compare an exact time against the year: CMS125's mastectomy, CMS165's ESRD
+and its diagnosis windows, and CMS137's first episode. An event stated within ten hours of midnight on
+31 December can fall in the other year. Converting WebChart's times waits for MIE to confirm both zones
+(OPEN_QUESTIONS 4.16). `fqm-execution` 1.8.5, the version in use, also drops a stated offset (fqm#376); the
+fix is merged on its master (#375) but not released.
+
 ## Category 4 — CMS eCQM Catalog (2026 Performance Period)
 
 > **Id convention (ADR-071, 2026-09-01):** an official-vendored measure's catalog id is the vendored

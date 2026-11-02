@@ -17,7 +17,9 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { sendOutreach, updateOutreachDelivery, previewOutreach, type OutreachDeps } from "./case-outreach.ts";
+import { sendOutreach, updateOutreachDelivery, previewOutreach, EarlierCycleClosedError, type OutreachDeps } from "./case-outreach.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { practiceToday } from "../config/practice-date.ts";
 import { runCampaign } from "./outreach-campaign.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
@@ -324,4 +326,39 @@ test("Q1: when one case's record fails after its patient's message went out, the
   assert.equal(row("c3").status, "SIMULATED");
   assert.equal(result.sent, 2);
   assert.equal(result.failed, 1);
+});
+
+// ---- #882: a closed case whose cycle has ended ---------------------------------------------------
+
+/** A system-closed audiogram case of `period`, as the rollover leaves one. */
+async function closedCase(subjectId: string, period: string): Promise<string> {
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: `${period}T00:00:00.000Z`, measurementPeriodEnd: `${period}T00:00:00.000Z`,
+  });
+  const cases = new SqliteCaseStore(db);
+  const c = await cases.upsertFromOutcome({ runId: run.id, subjectId, measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+  await new SqliteOutcomeStore(db).recordOutcome({
+    runId: run.id, subjectId, measureId: "audiogram", evaluationPeriod: period, status: "OVERDUE", evidence: { expressionResults: [] },
+  });
+  await cases.patchCase(c!.id, { status: "RESOLVED", closedAt: new Date().toISOString(), closedReason: "CYCLE_ROLLED_OVER", closedBy: null });
+  return c!.id;
+}
+
+test("outreach on a closed case of a cycle that has ended is refused before any audit or send (#882)", async () => {
+  const caseId = await closedCase("emp-882", "2025-01-01"); // 2025 has ended in any year this runs
+  await assert.rejects(() => previewOutreach(deps, caseId), (err: unknown) => err instanceof EarlierCycleClosedError && err.code === "earlier_cycle_closed");
+  await assert.rejects(() => sendOutreach(deps, caseId, "cm@workwell.dev"), EarlierCycleClosedError);
+  assert.deepEqual(
+    (await deps.events.caseTimeline(caseId)).filter((t) => t.eventType === "CASE_OUTREACH_SENT"),
+    [],
+    "nothing was sent or recorded",
+  );
+  assert.equal((await deps.cases.getCase(caseId))?.status, "RESOLVED", "and the case was not reopened");
+});
+
+test("a closed case of the CURRENT cycle can still be messaged, as before (#882)", async () => {
+  const caseId = await closedCase("emp-883", bucketPeriodForMeasure("audiogram", practiceToday()));
+  const detail = await sendOutreach(deps, caseId, "cm@workwell.dev");
+  assert.equal(detail?.latestOutreachDeliveryStatus, "SIMULATED");
 });

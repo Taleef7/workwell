@@ -10,7 +10,7 @@
  * Waiver auto-linkage on the EXCLUDED branch is deferred (waivers live in the admin module,
  * #108); the exclusion still closes the case with closed_reason RERUN_EXCLUDED.
  */
-import type { CaseStore } from "../stores/case-store.ts";
+import type { CaseRecord, CaseStore } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { RunStore } from "../stores/run-store.ts";
@@ -23,11 +23,13 @@ import {
 } from "../config/deployment-profile.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
-import { priorityFor, nextActionFor } from "./case-logic.ts";
+import { ACTIVE_CASE_STATUSES, priorityFor, nextActionFor } from "./case-logic.ts";
 import { toCaseDetail, type CaseDetail } from "./case-detail-read-model.ts";
 import { caseRerunEvaluationDate, caseRerunMeasurementPeriod } from "../run/run-period.ts";
 import { isFqmScored, type RoutedEngine } from "../wiring/executor-router.ts";
 import { outcomeForCase } from "./case-outcome.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { isEarlierCycle } from "../run/compliance-period.ts";
 
 export interface RerunDeps {
   cases: CaseStore;
@@ -114,16 +116,24 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   // Mirrors the Java rerunToVerify (`LocalDate evaluationDate = LocalDate.now()`), except that an
   // official measure's case from an earlier year is verified as of that year's last day: the official
   // period and logic follow the evaluation date's year, and the case is that year's.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   const official = routedOfficially(deps.engine, existing.measureId, today);
   const evalDate = caseRerunEvaluationDate(official, existing.evaluationPeriod, today);
   const period = caseRerunMeasurementPeriod(existing.measureId, evalDate, official);
+  // #882 (LOCKED_DECISIONS §4A.10): a case of a cycle that has ended. Its re-check records the result and
+  // never reopens it, and its run is nobody's "latest" (the marker, `run/earlier-cycle.ts`), so a
+  // re-checked 2026 case never becomes the patient's current answer in January.
+  const earlierCycle = isEarlierCycle(existing.measureId, existing.evaluationPeriod, today);
+  const heldClosed = earlierCycle && !(ACTIVE_CASE_STATUSES as readonly string[]).includes(existing.status);
 
   const run = await deps.runStore.createRun({
     scopeType: "CASE",
     scopeId: existing.measureId,
     triggeredBy: actor,
-    requestedScope: { caseId, measureId: existing.measureId, employeeExternalId: existing.employeeId, evaluationDate: evalDate },
+    requestedScope: {
+      caseId, measureId: existing.measureId, employeeExternalId: existing.employeeId, evaluationDate: evalDate, today,
+      ...(earlierCycle ? { earlierCycle: true } : {}),
+    },
     measurementPeriodStart: period.start,
     measurementPeriodEnd: period.end,
   });
@@ -205,6 +215,8 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
     await deps.runStore.finalizeRun(run.id, "PARTIAL_FAILURE");
     throw new CaseRerunFailedError(run.id);
   }
+
+  if (heldClosed) return recordEarlierCycleResult(deps, existing, caseId, actor, run.id, verifiedStatus);
 
   const updatedCaseStatus = outOfPopulation ? "RESOLVED" : verificationCaseStatus(existing.status, verifiedStatus);
   const nextAction = outOfPopulation
@@ -302,6 +314,54 @@ export async function rerunToVerify(deps: RerunDeps, caseId: string, actor: stri
   }
 
   await deps.runStore.finalizeRun(run.id, "COMPLETED");
+  return buildDetail(deps, caseId);
+}
+
+/**
+ * The re-check of a closed case whose cycle has ended (#882): the result is recorded and the case stays
+ * closed. A person's closure is not touched at all: its outcome is frozen at closure (DATA_MODEL §4) and
+ * the timeline row carries the new result. A system closure (rolled over, auto-resolved, excluded, out
+ * of population) shows the new result: only `currentOutcomeStatus` and `lastRunId` move, after the audit.
+ */
+async function recordEarlierCycleResult(
+  deps: RerunDeps,
+  existing: CaseRecord,
+  caseId: string,
+  actor: string,
+  runId: string,
+  verifiedStatus: string,
+): Promise<CaseDetail | null> {
+  const staffClosed = existing.closedBy != null;
+  const payload = {
+    priorOutcomeStatus: existing.currentOutcomeStatus,
+    verifiedStatus,
+    runId,
+    subjectId: existing.employeeId,
+    evaluationPeriod: existing.evaluationPeriod,
+    status: existing.status,
+    earlierCycle: true,
+    ...(staffClosed ? { caseUnchanged: true } : {}),
+  };
+  await deps.events.recordCaseEvent({
+    action: { caseId, actionType: "RERUN_TO_VERIFY", actor, payload },
+    audit: {
+      eventType: "CASE_RERUN_VERIFIED",
+      entityType: "case",
+      entityId: caseId,
+      actor,
+      refRunId: runId,
+      refCaseId: caseId,
+      refMeasureVersionId: existing.measureId,
+      payload,
+    },
+  });
+  if (!staffClosed) await deps.cases.patchCase(caseId, { currentOutcomeStatus: verifiedStatus, lastRunId: runId });
+  await deps.runStore.appendLog(
+    runId,
+    "INFO",
+    `The case's cycle (${existing.evaluationPeriod}) has ended: the result ${verifiedStatus} is recorded and the case stays ${existing.status}.`,
+  );
+  await deps.runStore.finalizeRun(runId, "COMPLETED");
   return buildDetail(deps, caseId);
 }
 

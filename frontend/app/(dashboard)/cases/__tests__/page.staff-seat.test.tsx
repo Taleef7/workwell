@@ -87,13 +87,20 @@ describe("Cases for the staff seat (#880)", () => {
   });
 
   it("the all-cases empty state does not tell a seat that cannot run measures to run one", async () => {
-    navHolder.current.setUrl("/cases?view=all");
-    respond([]);
-    render(<CasesPage />);
-    expect(await screen.findByText("No open cases for the current filters.")).toBeInTheDocument();
-    expect(screen.queryByText(/Run a measure/)).toBeNull();
-    // The Assignee filter is back on All cases.
-    expect(screen.getByRole("combobox", { name: "Assignee" })).toBeInTheDocument();
+    // Outside January to March, whose empty state adds the new year's sentence (page.january.test.tsx).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 15, 10));
+    try {
+      navHolder.current.setUrl("/cases?view=all");
+      respond([]);
+      render(<CasesPage />);
+      expect(await screen.findByText("No open cases for the current filters.")).toBeInTheDocument();
+      expect(screen.queryByText(/Run a measure/)).toBeNull();
+      // The Assignee filter is back on All cases.
+      expect(screen.getByRole("combobox", { name: "Assignee" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("the lead keeps bulk selection on the same list", async () => {

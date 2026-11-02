@@ -1,9 +1,14 @@
 /**
  * CLI: rehearse 1 January (#854). Runs the nightly exactly as the scheduler does (`runNightlyRecompute`),
  * evaluated as of `--evaluation-date`, against the Postgres in DATABASE_URL, then measures and checks it.
- * Run it on a COPY, twice: as of the old year's last day (2026-12-31), then the new year's first (2027-01-01).
+ * Run it on a COPY, three times: as of the old year's last day (2026-12-31), then the new year's first
+ * (2027-01-01), then the lead's January re-score of the old year (`--evaluation-date 2026-12-31 --today
+ * 2027-01-04`, #882), which must record its outcomes and open or reopen no case.
  *
- *   pnpm rehearse:year-change --evaluation-date 2027-01-01 --confirm-host <DATABASE_URL's host> [--out <file.json>]
+ *   pnpm rehearse:year-change --evaluation-date 2027-01-01 --confirm-host <DATABASE_URL's host> [--today YYYY-MM-DD] [--out <file.json>]
+ *
+ * `--today` is the practice's date the run is planned on (default: today's); it decides which cycles have
+ * ended, so it is what lets December rehearse a January re-score.
  *
  * It writes what a real nightly writes: runs, outcomes, cases and audit events. As of 2027-01-01 it closes
  * every open 2026 case of an evaluated patient as rolled over. Hence two refusals: `--confirm-host` must repeat
@@ -20,10 +25,13 @@ import { RUNNABLE_MEASURE_IDS } from "../../config/deployment-profile.ts";
 import { resolveAlertChannels } from "../alert-channel.ts";
 import { isWebChartConfigured } from "../../engine/ingress/data-source.ts";
 import { scoringLogicOf } from "../../measure/measure-identity.ts";
-import { bucketPeriodForMeasure } from "../compliance-period.ts";
+import { bucketPeriodForMeasure, isEarlierCycle } from "../compliance-period.ts";
+import { practiceToday } from "../../config/practice-date.ts";
 
 export const USAGE =
-  "Usage: pnpm rehearse:year-change --evaluation-date YYYY-MM-DD --confirm-host <DATABASE_URL's host> [--out <file.json>]";
+  "Usage: pnpm rehearse:year-change --evaluation-date YYYY-MM-DD --confirm-host <DATABASE_URL's host> [--today YYYY-MM-DD] [--out <file.json>]\n" +
+  "  In December, on a copy: --evaluation-date 2026-12-31, then --evaluation-date 2027-01-01, then\n" +
+  "  --evaluation-date 2026-12-31 --today 2027-01-04 (the January re-score of 2026, #882).";
 
 export class RehearsalUsageError extends Error {}
 
@@ -31,26 +39,34 @@ export interface RehearsalArgs {
   evaluationDate: string;
   confirmHost: string;
   out: string | null;
+  /** The practice's date the run is planned on (#882); null = today's. */
+  today: string | null;
 }
+
+/** A real calendar date, round-tripped, because `Date.parse` rolls an impossible day over (2027-02-30 reads as 2 March). */
+const isCalendarDate = (value: string | undefined): value is string => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !!value && !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
 
 export function parseArgs(argv: readonly string[]): RehearsalArgs {
   const values = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
-    if (!["--evaluation-date", "--confirm-host", "--out"].includes(flag)) throw new RehearsalUsageError(`unknown argument "${flag}"`);
+    if (!["--evaluation-date", "--confirm-host", "--out", "--today"].includes(flag)) throw new RehearsalUsageError(`unknown argument "${flag}"`);
     const value = argv[++i];
     if (value === undefined || value.startsWith("--")) throw new RehearsalUsageError(`${flag} needs a value`);
     values.set(flag, value);
   }
   const evaluationDate = values.get("--evaluation-date");
-  // Round-tripped, because `Date.parse` rolls an impossible day over (2027-02-30 reads as 2 March).
-  const parsed = new Date(`${evaluationDate}T00:00:00Z`);
-  if (!evaluationDate || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== evaluationDate) {
+  if (!isCalendarDate(evaluationDate)) {
     throw new RehearsalUsageError("--evaluation-date YYYY-MM-DD (a real calendar date) is required");
   }
+  const today = values.get("--today");
+  if (today !== undefined && !isCalendarDate(today)) throw new RehearsalUsageError("--today must be a real calendar date, YYYY-MM-DD");
   const confirmHost = values.get("--confirm-host");
   if (!confirmHost) throw new RehearsalUsageError("--confirm-host is required");
-  return { evaluationDate, confirmHost, out: values.get("--out") ?? null };
+  return { evaluationDate, confirmHost, out: values.get("--out") ?? null, today: today ?? null };
 }
 
 /** Why this env may not be rehearsed on, or null. */
@@ -80,6 +96,8 @@ export interface MeasureSummary {
 
 export interface RehearsalSummary {
   evaluationDate: string;
+  /** The practice's date the run was planned on. */
+  today: string;
   runId: string;
   status: string | null;
   runMs: number | null;
@@ -119,7 +137,9 @@ export async function rehearse(
   evaluationDate: string,
   measureIds: readonly string[],
   sampleEveryMs = 1000,
+  today: string | null = null,
 ): Promise<RehearsalSummary> {
+  const plannedOn = today ?? practiceToday();
   const before = await activeCounts(deps, measureIds, evaluationDate);
 
   let peakRss = process.memoryUsage().rss;
@@ -130,7 +150,7 @@ export async function rehearse(
   const startedMs = Date.now();
   let runId: string;
   try {
-    runId = await runNightlyRecompute({ ...deps, evaluationDate });
+    runId = await runNightlyRecompute({ ...deps, evaluationDate, ...(today ? { today } : {}) });
   } finally {
     clearInterval(sampler);
   }
@@ -143,6 +163,14 @@ export async function rehearse(
   const auditEvents: Record<string, number> = {};
   for (const a of audits) auditEvents[a.eventType] = (auditEvents[a.eventType] ?? 0) + 1;
   const rolledOverAudited = audits.filter((a) => a.eventType === "CASE_RESOLVED" && a.payload.reason === "CYCLE_ROLLED_OVER").length;
+  // #882: a case this run opened or reopened in a cycle that had ended when it was planned.
+  const openedInEndedCycle = audits.filter(
+    (a) =>
+      (a.eventType === "CASE_CREATED" || (a.eventType === "CASE_UPDATED" && a.payload.disposition === "REOPENED")) &&
+      typeof a.payload.measureId === "string" &&
+      typeof a.payload.evaluationPeriod === "string" &&
+      isEarlierCycle(a.payload.measureId, a.payload.evaluationPeriod, plannedOn),
+  ).length;
   const executed = Array.isArray(completed.measuresExecuted) ? (completed.measuresExecuted as string[]) : [...measureIds];
   const after = await activeCounts(deps, executed, evaluationDate);
 
@@ -194,6 +222,11 @@ export async function rehearse(
         (rollover?.unreadMeasures.length ? `, unread: ${rollover.unreadMeasures.join(", ")}` : ""),
     },
     {
+      check: "no case was opened or reopened in a cycle that had ended",
+      ok: openedInEndedCycle === 0,
+      detail: `${openedInEndedCycle} case(s) opened or reopened in a cycle that ended before ${plannedOn}`,
+    },
+    {
       check: "the data-sufficiency check stayed silent",
       ok: !Array.isArray(completed.dataInsufficient) || completed.dataInsufficient.length === 0,
       detail: completed.dataSufficiency === undefined ? "not measured (no live WebChart data)" : JSON.stringify(completed.dataInsufficient),
@@ -202,6 +235,7 @@ export async function rehearse(
 
   return {
     evaluationDate,
+    today: plannedOn,
     runId,
     status: run?.status ?? null,
     runMs,
@@ -227,7 +261,7 @@ const seconds = (ms: number | null): string => (ms === null ? "?" : `${(ms / 100
 
 export function render(summary: RehearsalSummary): string {
   const lines = [
-    `Rehearsal as of ${summary.evaluationDate}: run ${summary.runId} ${summary.status}`,
+    `Rehearsal as of ${summary.evaluationDate}, planned on ${summary.today}: run ${summary.runId} ${summary.status}`,
     `  run ${seconds(summary.runMs)}, nightly ${seconds(summary.nightlyMs)} (after the run: ${seconds(summary.afterRunMs)}), peak RSS ${summary.peakRssMb} MB`,
     `  evaluated ${summary.evaluated}, failures ${summary.failures}`,
     `  rollover: ${summary.rollover ? `${summary.rollover.closed} closed in ${seconds(summary.rollover.ms)}, ${summary.rollover.failed} failed, ${summary.rollover.auditGaps} audit gap(s)` : "nothing to close"}`,
@@ -260,7 +294,7 @@ export async function main(argv: readonly string[], env: Record<string, unknown>
     return 2;
   }
   const deps = await nightlyDepsForEnv(env as Parameters<typeof nightlyDepsForEnv>[0], resolveAlertChannels({}));
-  const summary = await rehearse(deps, args.evaluationDate, RUNNABLE_MEASURE_IDS);
+  const summary = await rehearse(deps, args.evaluationDate, RUNNABLE_MEASURE_IDS, 1000, args.today);
   console.log(render(summary));
   if (args.out) writeFileSync(args.out, `${JSON.stringify(summary, null, 2)}\n`);
   return summary.checks.every((c) => c.ok) ? 0 : 1;

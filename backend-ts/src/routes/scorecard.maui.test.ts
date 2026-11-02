@@ -21,13 +21,15 @@ const script = `
   import { handleCases } from "./src/routes/cases.ts";
   import { employees, providers } from "./src/config/deployment-profile.ts";
   import { bucketPeriodForMeasure } from "./src/run/compliance-period.ts";
+  import { practiceToday } from "./src/config/practice-date.ts";
 
   const db = await createSqliteD1(":memory:");
   await db.exec(RUN_STORE_FLOOR_DDL.replace(/\\n/g, " "));
   const env = { DB: db };
   const stores = await getStores(env);
   const actor = "quality-lead@workwell.dev";
-  const today = new Date().toISOString().slice(0, 10);
+  // The practice's date, as the scorecard and the work list read it (#882).
+  const today = practiceToday();
   const year = Number(today.slice(0, 4));
   const measureId = "cms122";
   const period = bucketPeriodForMeasure(measureId, today);
@@ -134,18 +136,25 @@ const script = `
 type Rate = { numer: number; denom: number; denex: number; denexcep: number; effectiveDenominator: number; score: number | null };
 type Row = { providerId: string | null; name: string; cells: Record<string, { rates: Rate[] | null; openGaps: number | null }> };
 
+const childEnv = {
+  WORKWELL_MAUI_CORPUS_SIZE: "100",
+  // Routed as the pilot stack routes it; no evaluation happens here, so no terminology is needed.
+  WORKWELL_OFFICIAL_MEASURES: "cms122",
+  WORKWELL_VSAC_API_KEY: undefined,
+};
 // One child process for both tests: seeding a run of every patient is the slow part.
 let fixture: Record<string, unknown> | undefined;
-const seeded = () =>
-  (fixture ??= runProfileChild("maui", script, {
-    WORKWELL_MAUI_CORPUS_SIZE: "100",
-    // Routed as the pilot stack routes it; no evaluation happens here, so no terminology is needed.
-    WORKWELL_OFFICIAL_MEASURES: "cms122",
-    WORKWELL_VSAC_API_KEY: undefined,
-  }));
+const seeded = () => (fixture ??= runProfileChild("maui", script, childEnv));
 
-test("each provider's cell equals the list report's rate for that provider's patients, and its open gaps equal the work list's count", () => {
-  const out = seeded();
+// 7 PM on 31 December in Hawaii, already 1 January in UTC (#882): the scorecard's default year and the
+// work list's current cycle are the practice's, so they agree with each other and with the run of 2026.
+const lateOnNewYearsEve = "2027-01-01T05:00:00.000Z";
+
+for (const [when, load] of [
+  ["now", seeded],
+  [`at ${lateOnNewYearsEve}, still 2026 in Hawaii`, () => runProfileChild("maui", script, childEnv, { now: lateOnNewYearsEve })],
+] as const) test(`each provider's cell equals the list report's rate for that provider's patients, and its open gaps equal the work list's count (${when})`, () => {
+  const out = load();
   const card = out.card as {
     measures: { measureId: string; state: string; runId: string }[];
     locations: { providers: Row[]; subtotal: Row }[];

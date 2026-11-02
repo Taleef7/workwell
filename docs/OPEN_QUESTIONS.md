@@ -359,6 +359,17 @@ data. WorkWell may not map the text to a code. The dev database holds billed E/M
 
 ---
 
+### 4.16 Which zone is the practice in, and which is WebChart's server in?
+
+**Status:** new 2026-11-02 (#847, #882); to be asked through the pilot's MIE contact.
+
+WorkWell now takes "today" as the practice's date: which year a run scores, which cycle is current, when the
+work list turns to the new year. Maui is set to `Pacific/Honolulu`, read from the pilot's materials; it was
+`America/New_York`, the WebChart server's. Two answers are needed: the practice's own zone (Hawaii, as set?),
+and the zone WebChart's server states times from (US Eastern, with FHIR times sent as UTC?). The second
+decides whether the four exact-time comparisons in MEASURES.md ("The year's edges are UTC") can be fixed by
+converting at ingest. The nightly stays at 12:00 UTC, 2:00 AM in Hawaii.
+
 ## 5. Answered
 
 ### 2.3 Are 837/835 claims files in scope?

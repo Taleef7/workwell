@@ -42,14 +42,14 @@ const script = `
 
   await warmReadModels(deps, "run");
   const afterWarm = reads;
-  const eastern = await programTrend(deps, "cms122", {}, { tz: "America/New_York" });
-  const easternReads = reads - afterWarm;
-  console.log(JSON.stringify({ afterWarm, easternPoints: eastern.length, easternReads }));
+  const hawaii = await programTrend(deps, "cms122", {}, { tz: "Pacific/Honolulu" });
+  const hawaiiReads = reads - afterWarm;
+  console.log(JSON.stringify({ afterWarm, hawaiiPoints: hawaii.length, hawaiiReads }));
 `;
 
-test("Maui's warm asks in the practice's zone by default: its first US Eastern visitor reads nothing (#615)", () => {
+test("Maui's warm asks in the practice's zone by default: its first visitor in Hawaii reads nothing (#615, #882)", () => {
   const out = runProfileChild("maui", script, { WORKWELL_OFFICIAL_MEASURES: "cms122" });
   assert.ok((out.afterWarm as number) > 0, "the warm read the trend");
-  assert.equal(out.easternPoints, 10, "ten Eastern days");
-  assert.equal(out.easternReads, 0, "served from what the warm memoized");
+  assert.equal(out.hawaiiPoints, 10, "ten Hawaii days");
+  assert.equal(out.hawaiiReads, 0, "served from what the warm memoized");
 });

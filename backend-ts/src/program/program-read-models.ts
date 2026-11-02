@@ -26,6 +26,7 @@ import { officialMeasureRateResult, type MeasureRate } from "./measure-rate.ts";
 import { dataInsufficientChecks, type SufficiencyCheck } from "../run/data-sufficiency.ts";
 import { directoryForRows, type DirectorySnapshot } from "../engine/ingress/webchart/live-directory.ts";
 import { DEPLOYMENT_PROFILE, DIRECTORY, isRunnableMeasure, profileSubjectMatcher, tenantById } from "../config/deployment-profile.ts";
+import { dayFormatterFor, practiceToday } from "../config/practice-date.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { loadOfficialManifest, officialLogicVintage, type OfficialLogicVintage } from "../wiring/official-artifacts.ts";
@@ -500,7 +501,7 @@ export async function programOverview(deps: ProgramDeps, filters: ProgramFilters
   // predicates are the same set by construction (a staff closure IS one of these three), so this is a
   // plan hint, not a narrowing — the store contract pins the classification either way.
   const staffClosed = await deps.caseStore.listCases({ closure: "staff", statuses: [...STAFF_CLOSED_STATUSES], limit: 100000 });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   const staffClosedThisCycle = staffClosed.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureId, today));
   // The chip is read from the run EACH CARD's own numbers came from, never from a winner resolved
   // again without the overview's filters. A site- or tenant-scoped card can settle on an older
@@ -827,21 +828,7 @@ function monthlySnapshotScopeIsSafe(
 }
 
 function createDayFormatter(tz?: string): Intl.DateTimeFormat {
-  let timeZone = "UTC";
-  if (tz) {
-    try {
-      new Intl.DateTimeFormat("en-CA", { timeZone: tz });
-      timeZone = tz;
-    } catch {
-      timeZone = "UTC";
-    }
-  }
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
+  return dayFormatterFor(tz);
 }
 
 /** Per-run compliance trend for a measure — outcome-based, newest-first, capped at 10 (Java parity).
@@ -1363,7 +1350,7 @@ export async function programRiskOutlook(
   if (!measure) return null;
   const horizon = Math.max(1, Math.min(Number.isFinite(horizonDays) ? Math.trunc(horizonDays) : 30, 180));
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   const render = (base: OutlookBase): RiskOutlook => renderOutlook(measure.name, base, window, horizon, today);
 
   const webChartConfigured = isWebChartConfigured(deps.webChartEnv ?? {});

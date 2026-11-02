@@ -60,3 +60,13 @@ export function bucketPeriodForMeasure(measureId: string, asOf: string): string 
   const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
   return cycleKey(window, SEASONAL_MEASURE_IDS.has(measureId), asOf);
 }
+
+/**
+ * Whether `period` is a cycle that has already ended on `today` (#882): strictly older than the measure's
+ * current cycle, by cycle order, as the rollover compares (a non-date period is never earlier). An
+ * outcome of such a cycle is recorded but never opens or reopens a case (`planCaseUpsert`), and a run
+ * that scores one is never anyone's "latest" (`run/earlier-cycle.ts`).
+ */
+export function isEarlierCycle(measureId: string, period: string, today: string): boolean {
+  return Date.parse(period) < Date.parse(bucketPeriodForMeasure(measureId, today));
+}

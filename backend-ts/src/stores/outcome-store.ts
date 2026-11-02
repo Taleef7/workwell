@@ -114,6 +114,11 @@ export interface OutcomeWithRun {
   status: string;
   /** See {@link RecordOutcomeInput.outOfPopulation}. Undefined ⇒ the run did not record it. */
   outOfPopulation?: boolean;
+  /**
+   * The run scored a cycle that had ended (#882, `run/earlier-cycle.ts`). Present only when true. The
+   * stores' "latest" reads already skip such a run; the JS reductions over these rows skip it too.
+   */
+  runEarlierCycle?: true;
 }
 
 /** Optional measure + day-granular run-period filter pushed into the store query. */
