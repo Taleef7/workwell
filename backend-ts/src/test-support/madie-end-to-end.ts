@@ -415,6 +415,8 @@ export async function runMadieEndToEnd(env: MadieEnv): Promise<Summary> {
   const segments = (await stores.segments.listSegments()).filter((s) => s.enabled);
   const engine = await routedEngineForEnv(env as never);
   const deps: RunPipelineDeps = {
+    // Planned on the day it scores, so the deck's 2026 runs open cases in any year (#882).
+    today: EVALUATION_DATE,
     runStore: stores.runs,
     outcomeStore: stores.outcomes,
     caseStore: stores.cases,

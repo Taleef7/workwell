@@ -5,7 +5,7 @@ import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useState } 
 import { useParams } from "next/navigation";
 import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, Select, Textarea } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
-import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
+import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, closedReasonLabel, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import { useApi } from "@/lib/api/hooks";
@@ -24,6 +24,8 @@ import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { formatEvaluationPeriod } from "@/lib/format";
+import { localYear } from "@/lib/local-date";
+import { ApiError } from "@/lib/api/errors";
 
 const EMPLOYEE_APPOINTMENT_TYPE_OPTIONS = [
   { value: "Audiogram", label: "Audiogram" },
@@ -76,6 +78,10 @@ type CaseDetail = {
   closedAt: string | null;
   closedReason: string | null;
   closedBy: string | null;
+  /** The server's answer to "has this case's cycle ended?" (#882): its rule, never the browser's calendar. */
+  cycleEnded?: boolean;
+  /** The calendar year the period is, or null for a half-year or a season (#882): the server's, never parsed here. */
+  cycleYear?: number | null;
   exclusionReason: string | null;
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
@@ -256,6 +262,10 @@ function CaseDetailView({ caseId }: { caseId: string }) {
   const officialPopulations = (caseDetail?.evidenceJson.expressionResults ?? []).some((row) => String(row.define ?? "").startsWith("official:"));
   // Escalating a finished case would reopen it (the API refuses it too), so neither layout offers it.
   const caseIsFinished = caseStatus === "CLOSED" || caseStatus === "RESOLVED" || caseStatus === "EXCLUDED";
+  const endedClosure = caseDetail ? endedClosureOf(caseDetail) : null;
+  const noOutreachReason = endedClosure
+    ? `${endedClosure.year ?? "Its measurement period"} has ended and this case is closed, so it takes no outreach.`
+    : null;
   const deliveryState = caseDetail?.latestOutreachDeliveryStatus ? normalizeEnumValue(caseDetail.latestOutreachDeliveryStatus) : null;
 
   // Option lists for @mieweb/ui Select controls.
@@ -351,6 +361,8 @@ function CaseDetailView({ caseId }: { caseId: string }) {
       const qs = params.toString();
       templateQuery = qs ? `?${qs}` : "";
     }
+    // Read before the call: an open case of an ended year that the re-check resolves did not "stay" closed.
+    const wasEndedClosure = caseDetail ? endedClosureOf(caseDetail) : null;
     try {
       const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/${endpoint}${templateQuery}`);
       setCaseDetail(updated);
@@ -358,13 +370,30 @@ function CaseDetailView({ caseId }: { caseId: string }) {
         setOutreachPreview(null);
         emitToast("Outreach sent");
       } else {
-        emitToast("Case rerun verification completed");
+        // A closed case of an ended year stays closed (#882): the re-check only records the year's result.
+        const ended = wasEndedClosure && endedClosureOf(updated);
+        emitToast(
+          ended
+            ? `Re-checked: the ${ended.year ?? "period's"} result is recorded; the case stays closed.`
+            : "Case rerun verification completed",
+        );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      refuse(err);
     } finally {
       setActing(null);
     }
+  }
+
+  /**
+   * An action's failure, said. The server's refusal of outreach on a closed case of an ended year (#882) is
+   * its own sentence, and the case is read again: the page was opened before the year's first nightly
+   * closed it, so its buttons still offered what the case no longer takes.
+   */
+  function refuse(err: unknown) {
+    const refusal = earlierCycleRefusal(err);
+    setError(refusal ?? (err instanceof Error ? err.message : "Unknown error"));
+    if (refusal) void loadCase();
   }
 
   async function previewOutreach() {
@@ -376,7 +405,7 @@ function CaseDetailView({ caseId }: { caseId: string }) {
       const data = await api.get<OutreachPreview>(`/api/cases/${caseId}/actions/outreach/preview${templateQuery}`);
       setOutreachPreview(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      refuse(err);
     } finally {
       setPreviewing(false);
     }
@@ -634,13 +663,14 @@ function CaseDetailView({ caseId }: { caseId: string }) {
 
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">Next action</p>
-                <p className="mt-2 text-sm text-amber-950 dark:text-amber-100">{caseDetail.nextAction}</p>
+                <p className="mt-2 text-sm text-amber-950 dark:text-amber-100">{rolledOverLine(caseDetail) ?? caseDetail.nextAction}</p>
                 {/* Who wrote this line, shown only when the answer is "a person" (ADR-076 d2). Without it
                     the rule is invisible: an operator who escalates cannot tell that their words now
                     outrank the nightly wording, nor that the measure changing its mind hands the line
                     back. A badge on every case would just be furniture, so the system-owned default —
-                    which is nearly every case — says nothing at all. */}
-                {caseDetail.nextActionSource === "OPERATOR" ? (
+                    which is nearly every case — says nothing at all. A rolled-over case's line is the
+                    page's, not the person's, so it says nothing either. */}
+                {caseDetail.nextActionSource === "OPERATOR" && rolledOverLine(caseDetail) === null ? (
                   <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
                     Written by a person. Nightly runs leave it alone until the outcome changes.
                   </p>
@@ -749,7 +779,8 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                     type="button"
                     variant="outline"
                     onClick={() => void previewOutreach()}
-                    disabled={previewing || caseStatus === "EXCLUDED"}
+                    disabled={previewing || caseStatus === "EXCLUDED" || noOutreachReason !== null}
+                    title={noOutreachReason ?? undefined}
                     isLoading={previewing}
                     loadingText="Previewing..."
                   >
@@ -759,8 +790,8 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                     type="button"
                     variant="primary"
                     onClick={() => void runAction("outreach")}
-                    disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null}
-                    title={outreachPreview === null ? "Preview the message before sending" : undefined}
+                    disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null || noOutreachReason !== null}
+                    title={noOutreachReason ?? (outreachPreview === null ? "Preview the message before sending" : undefined)}
                     isLoading={acting === "outreach"}
                     loadingText="Sending outreach..."
                   >
@@ -907,7 +938,9 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                     <p className="mt-2 whitespace-pre-wrap">{outreachPreview.bodyText}</p>
                   </div>
                 ) : canManage ? (
-                  <p className="mt-3 text-xs text-amber-800 dark:text-amber-300">Preview the outreach message before sending.</p>
+                  <p className="mt-3 text-xs text-amber-800 dark:text-amber-300" data-testid="outreach-hint">
+                    {noOutreachReason ?? "Preview the outreach message before sending."}
+                  </p>
                 ) : null}
                 {canManage && canEngineering && (
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1042,7 +1075,7 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                 <Row label="Created" value={new Date(caseDetail.createdAt).toLocaleString()} />
                 <Row label="Updated" value={new Date(caseDetail.updatedAt).toLocaleString()} />
                 <Row label="Closed" value={caseDetail.closedAt ? new Date(caseDetail.closedAt).toLocaleString() : "Open"} />
-                <Row label="Closed reason" value={caseDetail.closedReason ?? "-"} />
+                <Row label="Closed reason" value={closedReasonLabel(caseDetail.closedReason)} />
                 <Row label="Closed by" value={caseDetail.closedBy ?? "-"} />
                 <Row label="Assignee" value={caseDetail.assignee ?? "Unassigned"} />
                 <Row label="Outcome evaluated" value={new Date(caseDetail.outcomeEvaluatedAt).toLocaleString()} />
@@ -1258,6 +1291,45 @@ function CaseDetailView({ caseId }: { caseId: string }) {
       ) : null}
     </section>
   );
+}
+
+const FINISHED_STATUSES = new Set(["CLOSED", "RESOLVED", "EXCLUDED"]);
+
+/**
+ * A finished case whose cycle has ended (#882), or null: the server says which (`cycleEnded`). Such a case
+ * takes no outreach (409 `earlier_cycle_closed`), and a re-check records the result without reopening it.
+ * `year` names a calendar-year period ("2026"), from the server's `cycleYear`; a half-year or a season has
+ * none, and is said in words.
+ */
+function endedClosureOf(detail: Pick<CaseDetail, "status" | "cycleEnded" | "cycleYear">): { year: number | null } | null {
+  if (detail.cycleEnded !== true || !FINISHED_STATUSES.has(normalizeEnumValue(detail.status))) return null;
+  return { year: detail.cycleYear ?? null };
+}
+
+/**
+ * The next action of a case the first run of a new cycle closed because its own ended (#882,
+ * `CYCLE_ROLLED_OVER`), or null for any other case. Its stored next action still names the gap's work,
+ * which a closed cycle no longer takes. The work list's year is never earlier than the one that began:
+ * a rehearsal on a copy rolls the year over before the calendar does.
+ */
+function rolledOverLine(detail: Pick<CaseDetail, "closedReason" | "cycleYear">): string | null {
+  if (normalizeEnumValue(detail.closedReason ?? "") !== "CYCLE_ROLLED_OVER") return null;
+  const year = detail.cycleYear ?? null;
+  return year !== null
+    ? `${year} has ended, so this gap closed when ${year + 1} began. A re-check records the ${year} result here and leaves the case closed. This ${SUBJECT.singular}'s ${Math.max(year + 1, localYear())} gaps are on the work list.`
+    : `This measurement period has ended, so this gap closed when the next one began. A re-check records that period's result here and leaves the case closed. This ${SUBJECT.singular}'s current gaps are on the work list.`;
+}
+
+/** The server's own sentence for outreach refused on a closed case of an ended year (#882), else null. */
+function earlierCycleRefusal(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  try {
+    const body = JSON.parse(err.body) as { error?: unknown; message?: unknown };
+    if (body.error !== "earlier_cycle_closed") return null;
+    return typeof body.message === "string" && body.message ? body.message : err.message;
+  } catch {
+    return null;
+  }
 }
 
 /**

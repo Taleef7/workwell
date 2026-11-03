@@ -43,6 +43,7 @@ import {
   hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters,
 } from "../compliance/subject-filters.ts";
 import { liveAnswerForCase, liveCellsFor, liveFieldsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 /** Every filter the work list understands. `subjects` carries the panel filters (PCP, payer, age, sex). */
 export interface WorklistFilters {
@@ -352,7 +353,7 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
     // Each measure's CURRENT cycle by today + its cadence: exact and cadence-correct, so a stale row
     // at another cadence's anchor cannot appear and a rolled-over cycle with no open cases does not
     // fall back to a prior cycle's opens.
-    const today = (deps.today ?? (() => new Date().toISOString().slice(0, 10)))();
+    const today = (deps.today ?? (() => practiceToday()))();
     summaries = summaries.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureVersionId, today));
   }
   // The post-filters stay authoritative even where the pre-filter ran: they are the same predicate over
@@ -501,7 +502,7 @@ export async function loadWorklistPage(
   if (sqlPageBlockedBy(deps, filters, preFilter) !== null) return slow();
   if (!(await directoryHoldsEveryCaseSubject(deps))) return slow();
 
-  const today = (deps.today ?? (() => new Date().toISOString().slice(0, 10)))();
+  const today = (deps.today ?? (() => practiceToday()))();
   const wantCurrentCycle = isCurrentCycleDefault(filters);
   const query: CaseQuery = {
     ...worklistQueryFor(filters.status, { blank: "active" }),

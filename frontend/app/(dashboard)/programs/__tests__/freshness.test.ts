@@ -52,6 +52,24 @@ describe("freshnessNotice (#623)", () => {
   });
 });
 
+// #882: a January re-score of last year is newer than this year's nightly, and is never the numbers shown.
+describe("freshnessNotice skips a re-score of a year that has ended", () => {
+  const reScore = (status: string, startedAt: string) => ({ status, startedAt, earlierCycle: true as const });
+
+  it("judges the nightly behind a fresh re-score, so a missed nightly is still said", () => {
+    const old = new Date(NOW - OVERDUE_AFTER_MS - 60_000).toISOString();
+    expect(freshnessNotice([reScore("COMPLETED", "2026-09-25T13:00:00Z"), run("COMPLETED", old)], NOW)).toEqual({ kind: "overdue", latestAt: old });
+  });
+
+  it("a re-score that failed says nothing about the numbers shown", () => {
+    expect(freshnessNotice([reScore("FAILED", "2026-09-25T13:00:00Z"), run("COMPLETED", "2026-09-25T12:08:00Z")], NOW)).toBeNull();
+  });
+
+  it("only re-scores listed: claims neither a missed update nor that none ever ran", () => {
+    expect(freshnessNotice([reScore("COMPLETED", "2026-09-25T13:00:00Z")], NOW)).toBeNull();
+  });
+});
+
 // Weekdays only (Maui since 2026-09-30): Friday's nightly is followed by Monday's, so the weekend is
 // not a missed update. 2026-10-02 is a Friday; the anchor is 12:00 UTC.
 describe("freshnessNotice against a weekdays-only schedule", () => {

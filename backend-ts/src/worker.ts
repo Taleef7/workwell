@@ -72,6 +72,7 @@ import { RUNNABLE_MEASURE_IDS, classifyRunnable } from "./config/deployment-prof
 import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
 import { classifyDbFailure } from "./stores/postgres/pg-database.ts";
 import { recordRoutingHealth, runtimeDetail, runtimeHealth, trackRequest } from "./admin/runtime-health.ts";
+import { practiceToday } from "./config/practice-date.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -562,7 +563,7 @@ function logSeamInventoryOnce(env: Env): void {
   // operator sees the vintage gap before the first run reports it.
   // The artifact chosen by the SAME rule a run uses, so the boot line describes the logic this year's
   // runs will execute: CMS's draft, or a WorkWell translation covering the year (decision 3).
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   const derivedIds = derivedMeasureIds(env as unknown as Record<string, unknown>);
   for (const measureId of officialMeasureIds(env as unknown as Record<string, unknown>)) {
     const period = officialMeasurementPeriod(measureId, today);

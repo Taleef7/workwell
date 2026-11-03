@@ -22,6 +22,7 @@ import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { buildScorecard } from "../compliance/scorecard.ts";
 import { linkedProviderOf } from "./providers.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 export interface ScorecardEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -55,7 +56,7 @@ export async function handleScorecard(
   }
   const q = url.searchParams;
   const now = clock();
-  const today = now.toISOString().slice(0, 10);
+  const today = practiceToday(now);
 
   // The year defaults to the current one, unlike the attributed-list report: that report is a file the
   // ACO keeps for a year, while this page opens on what the practice is working now and says which year.

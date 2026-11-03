@@ -30,7 +30,7 @@ import { loadWorklistCases, loadWorklistPage, withLiveStatus, staffClosedCounts,
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
-import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
+import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError, EarlierCycleClosedError } from "../case/case-outreach.ts";
 import {
   loadPatientOutreachCases,
   previewPatientOutreachMessages,
@@ -59,6 +59,7 @@ import { DIRECTORY, employeeById, employees, providerById, profileSubjectMatcher
 import { assignableUsers, resolveAssignable } from "../auth/demo-users.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
 import { caseWindowFrom, calendarDayErrorBody } from "./query-dates.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -117,6 +118,10 @@ async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
 
 const json = (data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...extraHeaders } });
+
+/** 409 for outreach on a closed case whose cycle has ended (#882): sending would reopen it. */
+const earlierCycleClosed = (err: EarlierCycleClosedError): Response =>
+  json({ error: err.code, message: err.message, id: err.caseId, evaluationPeriod: err.evaluationPeriod }, err.status);
 
 /**
  * POST /api/cases/patient-outreach `{ caseIds, channel?, templateId?, dryRun? }` (#868). `dryRun` returns
@@ -234,8 +239,13 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     if (sendId) {
       const channelParam = url.searchParams.get("channel");
       const channel = isChannelType(channelParam) ? channelParam : undefined; // invalid/absent → undefined → EMAIL default
-      const detail = await sendOutreach(await actionDeps(env), sendId, actor, url.searchParams.get("templateId"), channel);
-      return detail ? json(detail) : json({ error: "not_found", id: sendId }, 404);
+      try {
+        const detail = await sendOutreach(await actionDeps(env), sendId, actor, url.searchParams.get("templateId"), channel);
+        return detail ? json(detail) : json({ error: "not_found", id: sendId }, 404);
+      } catch (err) {
+        if (err instanceof EarlierCycleClosedError) return earlierCycleClosed(err);
+        throw err;
+      }
     }
     const rerunId = url.pathname.match(/^\/api\/cases\/([^/]+)\/rerun-to-verify$/)?.[1];
     if (rerunId) {
@@ -347,8 +357,13 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // Outreach preview (GET) — render the default template for the case (no state change).
   const previewId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions\/outreach\/preview$/)?.[1];
   if (previewId && req.method === "GET") {
-    const preview = await previewOutreach(await actionDeps(env), previewId, url.searchParams.get("templateId"));
-    return preview ? json(preview) : json({ error: "not_found", id: previewId }, 404);
+    try {
+      const preview = await previewOutreach(await actionDeps(env), previewId, url.searchParams.get("templateId"));
+      return preview ? json(preview) : json({ error: "not_found", id: previewId }, 404);
+    } catch (err) {
+      if (err instanceof EarlierCycleClosedError) return earlierCycleClosed(err);
+      throw err;
+    }
   }
 
   // Case detail — the case row + its evidence (the outcome from the case's last run) + timeline.
@@ -361,7 +376,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const events = (await getStores(env)).events;
     const timeline = await events.caseTimeline(detailId);
     const latest = await events.latestOutreachDeliveryStatus(detailId);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = practiceToday();
     const immunizationForecast =
       c.measureId === "adult_immunization" ? await resolveForecaster(env).forecast(c.employeeId, today) : undefined;
     return json(toCaseDetail(c, outcome, timeline, latest, immunizationForecast, employeeLookup));

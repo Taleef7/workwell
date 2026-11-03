@@ -19,6 +19,10 @@
  * A clinician's read-only seat (a VIEWER linked to a provider, #870) gets a scorecard of its own: their
  * patients' rates beside the whole practice's, and nothing about any other provider. The server decides
  * that from the sign-in; the page only draws what it is given.
+ *
+ * January to March (#882), every year is the browser's own calendar's: last year's card offers the lead a
+ * re-score, so records of last year's care that arrived late reach it, and this year's card says it rests on
+ * the few patients seen so far.
  */
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -27,9 +31,13 @@ import { Button, Select, buttonVariants } from "@mieweb/ui";
 import { useApi } from "@/lib/api/hooks";
 import { ApiError } from "@/lib/api/errors";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases, normRole, ROLES } from "@/lib/rbac";
+import { useRunStatus } from "@/components/run-status-provider";
+import { canManageCases, canRunMeasures, normRole, ROLES } from "@/lib/rbac";
 import { SUBJECT } from "@/lib/terminology";
+import { emitToast } from "@/lib/toast";
+import { inCloseOutWindow, localLongDate, localYear } from "@/lib/local-date";
 import { AccessDenied } from "@/components/access-denied";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ScrollRegion } from "@/components/scroll-region";
 import { RateEstimateNote } from "@/components/rate-estimate-note";
 import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
@@ -102,11 +110,27 @@ const REFUSED: Record<Exclude<ColumnState, "complete">, string> = {
 
 const pct = (score: number | null): string => (score === null ? "—" : `${(score * 100).toFixed(1)}%`);
 
-/** The newest run date any column was scored from: "the run of <date>" in the note. */
-function runDateOf(card: Scorecard): string | null {
+/**
+ * The newest run any column was scored from: "the run of <date>" in the note. Its date and year are the
+ * browser's own (#882): the practice reads its own calendar, and a nightly that started on the evening of
+ * 31 December in Hawaii is already 1 January in UTC.
+ */
+function newestRunOf(card: Scorecard): { date: string; year: number } | null {
   const dates = card.measures.map((m) => m.runStartedAt).filter((d): d is string => d !== null).sort();
   const newest = dates.at(-1);
-  return newest ? new Date(newest).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }) : null;
+  return newest ? { date: localLongDate(newest), year: localYear(new Date(newest)) } : null;
+}
+
+/**
+ * Where the note says the figures come from. A run that started in a year after the card's scored it once
+ * the year had ended: the January re-score (#882), which the note names as one.
+ */
+function sourceLineOf(card: Scorecard): string {
+  const run = newestRunOf(card);
+  if (!run) return "";
+  return run.year > card.measurementYear
+    ? `From WorkWell's re-score of ${card.measurementYear} on ${run.date}. `
+    : `From WorkWell's run of ${run.date}. `;
 }
 
 /** Every provider row in the card, as the picker offers it. "Other" is not a provider and is not offered. */
@@ -165,10 +189,12 @@ function PracticeScorecard() {
   const searchParams = useSearchParams();
   const { user } = useAuth();
   const mayView = canManageCases(user?.role);
+  // The lead's and an admin's: the staff seat reads the scorecard but starts no run (#880).
+  const mayRescore = canRunMeasures(user?.role);
   const { compactLabelFor, titleFor } = useMeasureIdentities();
   // Only asked for by a role that may read the page, so a VIEWER's refused visit sends nothing at all.
   const { ownsPanel } = usePanelAssignments(user?.email, mayView);
-  const thisYear = new Date().getUTCFullYear();
+  const thisYear = localYear();
   const year = yearFrom(searchParams.get("year"), thisYear);
   // A link can name an older year than the two offered (one sent in December, opened in January). It stays
   // in the list, so the control says which year is shown instead of naming another.
@@ -265,6 +291,14 @@ function PracticeScorecard() {
     return () => clearTimeout(timer);
   }, [load, mayView]);
 
+  // A run finishing (a re-score of last year started below, or any other) can change the card.
+  useEffect(() => {
+    if (!mayView) return;
+    const onComplete = () => void load();
+    window.addEventListener("ww:run-complete", onComplete);
+    return () => window.removeEventListener("ww:run-complete", onComplete);
+  }, [load, mayView]);
+
   if (!mayView) {
     return (
       <AccessDenied
@@ -278,11 +312,12 @@ function PracticeScorecard() {
     label: compactLabelFor(m.measureId, m.name, m.logic),
     title: titleFor(m.measureId, m.name, m.logic),
   });
-  const runDate = card ? runDateOf(card) : null;
   // From the server's clock, after the fetch: never rendered on the server, so it cannot mismatch on hydration.
-  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", timeZone: "UTC" }) : "";
+  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long" }) : "";
   const totalName = card?.panel.requested === "me" ? "My providers" : "Practice total";
   const shown = card ? rowsFor(card, providerParam) : null;
+  const closingOut = card !== null && inCloseOutWindow() && card.measurementYear === thisYear - 1;
+  const newYear = card !== null && inCloseOutWindow() && card.measurementYear === thisYear;
 
   return (
     <section className="scorecard space-y-4">
@@ -352,13 +387,20 @@ function PracticeScorecard() {
 
       <div className="space-y-1 text-xs text-neutral-600 dark:text-neutral-400" data-testid="scorecard-note">
         <p>
-          {runDate ? `From WorkWell's run of ${runDate}. ` : ""}
+          {card ? sourceLineOf(card) : ""}
           Each {SUBJECT.singular} counts under their PCP on file. A rate is the numerator over the denominator less its
           exclusions and exceptions; totals add the counts, never the percentages. A rate on fewer than{" "}
           {card?.smallNumberThreshold ?? 20} {SUBJECT.plural} is dimmed.
         </p>
         <RateEstimateNote />
       </div>
+
+      {card && closingOut && mayRescore ? (
+        <CloseOutPanel year={card.measurementYear} currentYear={thisYear} runDate={newestRunOf(card)?.date ?? null} />
+      ) : null}
+      {card && newYear ? (
+        <NewYearLine year={card.measurementYear} onSeeLastYear={() => setParams((params) => params.set("year", String(thisYear - 1)))} />
+      ) : null}
 
       {error ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">{error}</p> : null}
       {loading && !card ? <p className="text-sm text-neutral-500">Loading…</p> : null}
@@ -604,6 +646,120 @@ function RateLine({ rate: r, threshold, prefix }: { rate: ScorecardRate; thresho
   );
 }
 
+/** The server's refusal while another population run is in flight (409 `run_in_progress`), in its own words. */
+const RUN_IN_PROGRESS = "A run is already in progress; try again when it finishes.";
+
+/**
+ * The re-score this browser started, so after a reload the button can still tell it from any other run in
+ * flight. A per-viewer convenience: without it the button only stops saying which run it is.
+ */
+const RESCORE_RUN_KEY = "ww_rescore_run";
+
+function readRescoreRun(): string | null {
+  try {
+    return localStorage.getItem(RESCORE_RUN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function isRunInProgress(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 409) return false;
+  try {
+    return (JSON.parse(err.body) as { error?: unknown }).error === "run_in_progress";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Closing out last year (#882), for the lead and admins from January to March. The year's first nightly
+ * closed every open case of the year before, and records of that year's care keep arriving. Re-scoring the
+ * year counts them on its scorecard and attributed-list report. The server marks the run as an earlier
+ * year's, so it opens or reopens no case and is nobody's "latest": the work list, Programs and the cards
+ * stay on this year.
+ *
+ * The button is held only while the re-score started here runs. Whether another run in flight blocks one
+ * is the server's call (409 `run_in_progress`, said in its own sentence): only a population run the server
+ * planned does, and an import a client left running does not, which this page cannot tell apart.
+ */
+function CloseOutPanel({ year, currentYear, runDate }: { year: number; currentYear: number; runDate: string | null }) {
+  const api = useApi();
+  const { isActive, activeRunId, startTracking } = useRunStatus();
+  const [confirming, setConfirming] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [rescoreRunId, setRescoreRunId] = useState<string | null>(readRescoreRun);
+  const rescoring = isActive && activeRunId !== null && activeRunId === rescoreRunId;
+
+  async function rescore() {
+    setConfirming(false);
+    setStarting(true);
+    setRefusal(null);
+    try {
+      const result = await api.post<{ scopeType: string; evaluationDate: string }, { runId: string; status?: string }>(
+        "/api/runs/manual",
+        { scopeType: "ALL_PROGRAMS", evaluationDate: `${year}-12-31` },
+      );
+      setRescoreRunId(result.runId);
+      try {
+        localStorage.setItem(RESCORE_RUN_KEY, result.runId);
+      } catch {
+        /* a convenience only */
+      }
+      startTracking(result.runId, result.status ?? "REQUESTED");
+      emitToast(`Re-scoring ${year}. The scorecard updates when it finishes.`);
+    } catch (err) {
+      setRefusal(isRunInProgress(err) ? RUN_IN_PROGRESS : err instanceof Error ? err.message : "The re-score could not be started.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  return (
+    <div
+      data-testid="scorecard-close-out"
+      className="space-y-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 print:hidden dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100"
+    >
+      <h3 className="font-semibold">Closing out {year}</h3>
+      <p>
+        {runDate ? `${year}'s figures are from the run of ${runDate}. ` : ""}
+        Re-score {year} to count records of {year} care that arrived since. No {year} case is reopened, and the work
+        list stays on {currentYear}.
+      </p>
+      <Button size="sm" variant="outline" disabled={rescoring || starting} onClick={() => setConfirming(true)}>
+        {rescoring ? `Re-scoring ${year}…` : `Re-score ${year}`}
+      </Button>
+      {refusal ? <p role="alert">{refusal}</p> : null}
+      <ConfirmDialog
+        open={confirming}
+        title={`Re-score ${year}?`}
+        description={`This scores every measure for every ${SUBJECT.singular} over ${year}. It takes about as long as the nightly update; you can leave this page.`}
+        confirmLabel={`Re-score ${year}`}
+        cancelLabel="Cancel"
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => void rescore()}
+      />
+    </div>
+  );
+}
+
+/**
+ * This year's card from January to March (#882): a patient counts once they have this year's visit, so the
+ * rates rest on few, and last year's are a click away, as the year control would show them.
+ */
+function NewYearLine({ year, onSeeLastYear }: { year: number; onSeeLastYear: () => void }) {
+  return (
+    <p data-testid="scorecard-new-year" className="text-sm text-neutral-700 dark:text-neutral-300">
+      {year} has just begun: {SUBJECT.an} {SUBJECT.singular} counts once they have a {year} visit, so these rates rest
+      on few {SUBJECT.plural}.{" "}
+      <button type="button" className="font-medium text-primary-700 hover:underline dark:text-primary-400" onClick={onSeeLastYear}>
+        See {year - 1} →
+      </button>
+    </p>
+  );
+}
+
 /** One refusal for both ways a clinician can be unlinked: no link on the account, or the server says so. */
 const UNLINKED = "Your sign-in isn't linked to a provider in this practice's directory. Ask an administrator.";
 
@@ -634,7 +790,7 @@ function MyScorecard() {
   const searchParams = useSearchParams();
   const { provider, loaded, error: linkFailed, retry } = useMyProvider();
   const { compactLabelFor, titleFor } = useMeasureIdentities();
-  const thisYear = new Date().getUTCFullYear();
+  const thisYear = localYear();
   const year = yearFrom(searchParams.get("year"), thisYear);
   const yearOptions = [thisYear, thisYear - 1];
   if (!yearOptions.includes(year)) yearOptions.push(year);
@@ -714,11 +870,12 @@ function MyScorecard() {
     label: compactLabelFor(m.measureId, m.name, m.logic),
     title: titleFor(m.measureId, m.name, m.logic),
   });
-  const runDate = card ? runDateOf(card) : null;
-  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", timeZone: "UTC" }) : "";
+  const printedMonth = card ? new Date(card.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long" }) : "";
   // A year no run has scored yet (January, before the first run of the new year) has nothing to put in a
   // table; it says so and offers the year before.
   const noRun = card !== null && card.measures.length > 0 && card.measures.every((m) => m.state === "no_run");
+  // Not over a year no run has scored, which already offers the year before in its own words.
+  const newYear = card !== null && !noRun && inCloseOutWindow() && card.measurementYear === thisYear;
   const rows =
     card?.scope
       ? [
@@ -769,13 +926,17 @@ function MyScorecard() {
 
       <div className="space-y-1 text-xs text-neutral-600 dark:text-neutral-400" data-testid="scorecard-note">
         <p>
-          {runDate ? `From WorkWell's run of ${runDate}. ` : ""}
+          {card ? sourceLineOf(card) : ""}
           A rate is the numerator over the denominator less its exclusions and exceptions; the practice total adds
           the counts, never the percentages. A rate on fewer than {card?.smallNumberThreshold ?? 20} {SUBJECT.plural} is
           dimmed.
         </p>
         <RateEstimateNote />
       </div>
+
+      {card && newYear ? (
+        <NewYearLine year={card.measurementYear} onSeeLastYear={() => router.replace(yearHref(thisYear - 1), { scroll: false })} />
+      ) : null}
 
       {error ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">

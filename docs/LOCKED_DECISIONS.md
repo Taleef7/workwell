@@ -87,3 +87,13 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
    MeasureReport files, and MCP stay with the lead (`ROLE_CASE_MANAGER`) and admins. Single assign stays
    with staff: the split limits the volume of a change, not who may make it. A rule that does not name the
    staff role refuses it.
+10. **The year change** (owner decision, 2026-11-02, #882). The 1 January rollover stays: the year's first
+    run closes every open case of the year before. From then on a cycle that has ended never opens or reopens
+    a case: a run, a re-check or outreach over it records what it found and leaves its cases closed, and
+    campaigns target only a current cycle. A run that scores an ended cycle is marked by the server and is
+    never anyone's "latest", so the work list, roster, Programs, the trend, the cards and MCP stay on the
+    current year. The lead re-scores last year on demand from January to March, which the scorecard and the
+    list report read. "Today" is the practice's date everywhere it decides a year or a cycle; Maui's zone is
+    `Pacific/Honolulu`, pending MIE's confirmation, and the nightly stays at 12:00 UTC (2:00 AM in Hawaii).
+    The comparisons against the year's exact edges stay UTC, a documented limitation (MEASURES.md), until
+    MIE confirms WebChart's zone.

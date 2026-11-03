@@ -8,6 +8,7 @@
 import { dedupeKeyFor, type OrderPriority, type ProposedOrder } from "./proposed-order.ts";
 import { orderForMeasure } from "./order-catalog.ts";
 import type { StandingOrderProvider } from "./standing-order-provider.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 /** Minimal input shape (decoupled from OutcomeWithRun): the route maps outcomes → these. */
 export interface AtRiskOutcome {
@@ -25,7 +26,7 @@ const AT_RISK: Record<string, OrderPriority | undefined> = {
 export function proposeOrders(
   outcomes: AtRiskOutcome[],
   standingOrders: StandingOrderProvider,
-  authoredOn: string = new Date().toISOString().slice(0, 10),
+  authoredOn: string = practiceToday(),
 ): { proposed: ProposedOrder[]; suppressed: ProposedOrder[] } {
   // byKey: proposed orders keyed by dedupeKey (allows priority upgrade on same-code collision)
   const byKey = new Map<string, ProposedOrder>();

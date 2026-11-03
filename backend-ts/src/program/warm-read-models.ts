@@ -129,8 +129,8 @@ async function warmPass(deps: ProgramDeps, trendTimeZone: string | null): Promis
       // measure, and every measure on Maui) this fills the per-run trend memo, which serves the
       // measure page in any time zone (#615). It is asked in the practice's zone first, so the memo is
       // widened until that zone has ten days: warmed in UTC, four of Maui's six measures were a run
-      // short in US Eastern (a late-evening manual run shares a local day with a nightly), and their
-      // first visitor read twenty runs (6-7 s). Then with no zone, as the dashboard asks: usually a memo
+      // short in the practice's zone (a late-evening manual run shares a local day with a nightly), and
+      // their first visitor read twenty runs (6-7 s). Maui's zone is Hawaii since #882. Then with no zone, as the dashboard asks: usually a memo
       // hit, and a read only where UTC's days fall short of the zone's. Another zone that comes up
       // short still reads on at request time, as it did before. Where the monthly series can apply,
       // the page's per-run trend is left cold, because warming it would double this pass for a page

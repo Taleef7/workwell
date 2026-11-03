@@ -98,8 +98,9 @@ validateRunnableMeasureIds(DEFAULT_MEASURE_IDS);
 export function resolveDeploymentProfile(name: string | undefined): DeploymentProfile {
   const normalized = (name ?? "").trim().toLowerCase();
   if (normalized === "maui") {
-    // The pilot group's practice keeps US Eastern time.
-    return { id: "maui", subjectTerm: "patient", visibleTenantIds: ["maui"], runnableMeasureIds: MAUI_MEASURE_IDS, practiceTimeZone: "America/New_York" };
+    // The pilot group's practice is in Hawaii (#847, #882); WebChart's server keeps US Eastern time, which
+    // is the zone its `Z` instants were converted from, not the zone the practice's day turns in.
+    return { id: "maui", subjectTerm: "patient", visibleTenantIds: ["maui"], runnableMeasureIds: MAUI_MEASURE_IDS, practiceTimeZone: "Pacific/Honolulu" };
   }
   return { id: "default", subjectTerm: "employee", visibleTenantIds: "all", runnableMeasureIds: DEFAULT_MEASURE_IDS, practiceTimeZone: null };
 }

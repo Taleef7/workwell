@@ -22,6 +22,8 @@ import { hasNoSingleWindow } from "../case/case-detail-read-model.ts";
 import { matchesCaseSearch, shownStatusFor, siteMatches } from "../case/worklist-read-model.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 import { liveAnswerForCase, liveCellsFor, liveFieldsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { isEarlierCycleRun } from "../run/earlier-cycle.ts";
 
 const measureName = (measureId: string) => measureDisplayName(measureId);
 
@@ -188,7 +190,8 @@ export async function latestVisibleOutcomeRunId(
   runStore: RunStore,
   webChartEnv?: DataSourceEnv,
 ): Promise<string | undefined> {
-  const runs = await runStore.listRuns(DEPLOYMENT_PROFILE.id === "default" ? 1 : 100000);
+  // A re-score of a cycle that has ended is never the default (#882): scan past it to the newest other run.
+  const runs = (await runStore.listRuns(DEPLOYMENT_PROFILE.id === "default" ? 200 : 100000)).filter((run) => !isEarlierCycleRun(run));
   if (DEPLOYMENT_PROFILE.id === "default") return runs[0]?.id;
   for (const run of runs) {
     let offset = 0;
@@ -370,7 +373,7 @@ export async function casesCsv(
   // (`wantsCurrentCycle`, blank meaning `all` here). Not expressible as a store predicate: the period
   // is per MEASURE, so there is no one value to compare a column against.
   if (filter.currentCycleOnly) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = practiceToday();
     cases = cases.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureId, today));
   }
   // caseIds + site aren't SQL-filterable here (site lives in the directory), so apply them in-app.

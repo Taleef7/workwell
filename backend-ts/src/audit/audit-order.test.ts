@@ -33,6 +33,7 @@ import { createAuthHandler } from "../routes/auth.ts";
 import { createJwt } from "../auth/jwt.ts";
 import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
 import { auditedExport } from "./export-audit.ts";
+import { rerunToVerify } from "../case/case-rerun.ts";
 
 /** A ledger that records what it was asked to append, in order. */
 function ledger() {
@@ -366,4 +367,30 @@ test("auditedExport (A1): the EXPORT_GENERATED event survives an export that the
     BOOM,
   );
   assert.deepEqual(l.types(), ["EXPORT_GENERATED"]);
+});
+
+test("rerunToVerify of a closed case whose cycle has ended (#882): CASE_RERUN_VERIFIED survives a failed patch", async () => {
+  const log = ledger();
+  const noop = async () => undefined;
+  const rolledOver = {
+    ...CASE, evaluationPeriod: "2025-01-01", status: "RESOLVED", closedReason: "CYCLE_ROLLED_OVER", closedBy: null,
+    closedAt: "2026-01-01T12:00:00.000Z", nextActionSource: "SYSTEM", assignmentSource: null,
+  };
+  await assert.rejects(
+    () =>
+      rerunToVerify(
+        {
+          cases: { getCase: async () => rolledOver, patchCase: explode } as never,
+          events: { ...log, caseTimeline: async () => [], latestOutreachDeliveryStatus: async () => null } as never,
+          outcomes: { recordOutcome: noop, listOutcomes: async () => [] } as never,
+          runStore: { createRun: async () => ({ id: "run-verify" }), markRunning: noop, appendLog: noop, finalizeRun: noop } as never,
+          engine: { evaluate: async () => ({ outcome: "OVERDUE", evidence: { expressionResults: [] } }) } as never,
+        },
+        rolledOver.id,
+        "lead",
+      ),
+    /the write failed/,
+  );
+  assert.deepEqual(log.types(), ["CASE_RERUN_VERIFIED"]);
+  assert.equal(log.events[0]!.payload.earlierCycle, true);
 });

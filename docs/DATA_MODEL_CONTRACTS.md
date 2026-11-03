@@ -113,6 +113,27 @@ take the uncapped pipeline; `sqlPageBlockedBy` names the blocker. A conformance 
 totals and page ids from both loaders. On a scoped profile `CaseStore.distinctCaseSubjectIds` checks every
 case subject is in the directory; a violation disables the fast path.
 
+### A cycle that has ended opens nothing (#882, LOCKED_DECISIONS §4A.10)
+- **"Earlier"** is `isEarlierCycle(measureId, period, today)`: the period is strictly older than the
+measure's cycle on `today`, the rollover's own comparison. `today` is the practice's date
+(`config/practice-date.ts`), computed once by the server per run.
+- **The marker:** a run that scores an ended cycle for any of its measures carries
+`requested_scope_json.earlierCycle: true` (a JSON boolean; `"true"` or `1` is not one) and its planning
+`today`. Only the server sets either: `POST /api/runs` drops a client's and computes the marker from
+`requestedScope.evaluationDate`; `/evaluate` and `/import` answer **409 `earlier_cycle_unmarked`** for an
+ended-cycle date on an unmarked run. A marked run is never a "latest": `listLatestPopulationRuns`,
+`listLatestPopulationOutcomes`, `listLatestFinalizedOutcomePerMeasure` and the JS reductions over
+`listOutcomesWithRun` (`runEarlierCycle`) skip it, and it writes no quality snapshot and no `/health`
+`lastPopulationRun`. `listPopulationRunsForPeriod` keeps it: the scorecard and list report select it by period.
+- **Upsert:** `UpsertCaseInput.earlierCycle` makes `planCaseUpsert` a no-op unless the case is active
+(`OPEN`/`IN_PROGRESS`), which behaves as before: never an insert, never a reopen.
+- **Re-check** of a closed ended-cycle case: `CASE_RERUN_VERIFIED { earlierCycle: true }` first; a system
+closure then patches only `currentOutcomeStatus` and `lastRunId`; a staff closure is not touched
+(`caseUnchanged: true`). **Outreach** on such a case answers **409 `earlier_cycle_closed`** before any audit
+or send. **Campaigns** skip every ended-cycle case.
+- **One population run at a time:** `/api/runs/manual` and its rerun answer **409 `run_in_progress`** while a
+population run the pipeline planned (it carries `today`) is RUNNING and younger than this process.
+
 ### Resolution is not segment-gated; cycle rollover is closed out
 - `isApplicable` gates creation only. Out-of-cohort close-only upserts: COMPLIANT, and EXCLUDED only where
 an active case exists (run-start snapshot).
@@ -250,7 +271,7 @@ exactly (`1` never matches `11`); grouping is opt-in (`payerCodesInGroup`); an u
 
 **Panel filters are directory joins** (`compliance/subject-filters.ts`, one predicate on every surface;
 `hasActiveSubjectFilters`): `providerId` = the PCP's external id; `ageBand` `0-17|18-44|45-64|65+` from
-`dateOfBirth` vs today (UTC); `sex` `F|M`, matching nothing where unrecorded. A bad `ageBand`/`sex` is a
+`dateOfBirth` vs the practice's date (#882); `sex` `F|M`, matching nothing where unrecorded. A bad `ageBand`/`sex` is a
 **400** naming the accepted values.
 
 ### 6.4 `GET /api/audit-events/export?format=csv`

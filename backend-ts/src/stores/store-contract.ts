@@ -72,6 +72,16 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     // Newest-first by started_at, because the caller takes the first that holds its measure's rows.
     const startedAts = found.map((r) => r.startedAt);
     assert.deepEqual(startedAts, [...startedAts].sort().reverse());
+    // #882: a re-score of the year started in the next one is still that year's, and is selected.
+    const rescore = await store.createRun({
+      ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2027),
+      requestedScope: { evaluationDate: "2027-12-31", today: "2028-01-04", earlierCycle: true },
+    });
+    await store.finalizeRun(rescore.id, "COMPLETED");
+    assert.ok(
+      (await store.listPopulationRunsForPeriod("2027-01-01T00:00:00.000Z", "2028-01-01T00:00:00.000Z", 50)).some((r) => r.id === rescore.id),
+      "the scorecard and the list report select the re-score by its period",
+    );
     // The window is half-open: a run whose period starts exactly at the upper bound is the NEXT year's.
     assert.equal(
       (await store.listPopulationRunsForPeriod("2028-01-01T00:00:00.000Z", "2029-01-01T00:00:00.000Z", 50))
@@ -740,6 +750,59 @@ export function outcomeStoreContract(
     assert.equal(byMeasure.get("cholesterol_ldl")?.runId, runD.id, "PARTIAL_FAILURE is terminal and counts");
     assert.equal(byMeasure.has("tb_surveillance"), false, "a measure with only mid-run rows is absent, not stale");
     assert.deepEqual(await outcomeStore.listLatestFinalizedOutcomePerMeasure("emp-404"), [], "unknown subject → []");
+  });
+
+  test(`[${label}] a run marked earlierCycle is nobody's latest; a later unmarked run still wins, and only the JSON boolean marks (#882)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    // The January shape: the 2027 nightly, then the lead's re-score of 2026 started hours LATER, with
+    // rows evaluated later. Unfiltered, the re-score wins every "latest" read.
+    const mkRun = (startedAt: string, requestedScope: Record<string, unknown>) =>
+      runStore.createRun({ ...sampleRun("all"), scopeType: "ALL_PROGRAMS", status: "COMPLETED", startedAt, requestedScope });
+    const nightly = await mkRun("2027-01-04T12:00:00.000Z", { evaluationDate: "2027-01-04" });
+    const rescore = await mkRun("2027-01-04T20:00:00.000Z", { evaluationDate: "2026-12-31", today: "2027-01-04", earlierCycle: true });
+    // A JSON string and a number are not the marker: these runs are ordinary, and newest for hazwoper.
+    const plain = await mkRun("2027-01-04T12:00:00.000Z", {});
+    const stringy = await mkRun("2027-01-04T21:00:00.000Z", { earlierCycle: "true" });
+    const numeric = await mkRun("2027-01-04T22:00:00.000Z", { earlierCycle: 1 });
+    const rec = (runId: string, measureId: string, status: string, evaluationPeriod: string, evaluatedAt: string) =>
+      outcomeStore.recordOutcome({ runId, subjectId: "emp-006", measureId, evaluationPeriod, status, evidence: {}, evaluatedAt });
+    await rec(nightly.id, "audiogram", "OVERDUE", "2027-01-01", "2027-01-04T12:30:00.000Z");
+    await rec(rescore.id, "audiogram", "COMPLIANT", "2026-01-01", "2027-01-04T20:30:00.000Z");
+    await rec(plain.id, "hazwoper", "OVERDUE", "2027-01-01", "2027-01-04T12:30:00.000Z");
+    await rec(stringy.id, "hazwoper", "DUE_SOON", "2027-01-01", "2027-01-04T21:30:00.000Z");
+    await rec(numeric.id, "noise", "OVERDUE", "2027-01-01", "2027-01-04T22:30:00.000Z");
+
+    const winners = async () =>
+      new Map((await outcomeStore.listLatestPopulationRuns(["audiogram", "hazwoper", "noise"], {})).map((w) => [w.measureId, w.runId]));
+    const latestRows = async (measureId: string) =>
+      new Set((await outcomeStore.listLatestPopulationOutcomes({ measureId })).map((r) => r.runId));
+    const finalized = async () =>
+      new Map((await outcomeStore.listLatestFinalizedOutcomePerMeasure("emp-006")).map((r) => [r.measureId, r.runId]));
+
+    assert.equal((await winners()).get("audiogram"), nightly.id, "listLatestPopulationRuns skips the re-score");
+    assert.deepEqual(await latestRows("audiogram"), new Set([nightly.id]), "listLatestPopulationOutcomes skips it");
+    assert.equal((await finalized()).get("audiogram"), nightly.id, "listLatestFinalizedOutcomePerMeasure skips it");
+    // Not a marker: the newest run wins as before.
+    assert.equal((await winners()).get("hazwoper"), stringy.id, 'a string "true" marks nothing');
+    assert.deepEqual(await latestRows("hazwoper"), new Set([stringy.id]));
+    assert.equal((await finalized()).get("hazwoper"), stringy.id);
+    assert.equal((await winners()).get("noise"), numeric.id, "nor does the number 1");
+    assert.equal((await finalized()).get("noise"), numeric.id);
+
+    // The run-joined read keeps every row and says which run is marked, for the JS reductions.
+    const joined = await outcomeStore.listOutcomesWithRun({ measureId: "audiogram" });
+    assert.deepEqual(
+      joined.map((r) => [r.runId, r.runEarlierCycle ?? false]).sort(),
+      [[nightly.id, false], [rescore.id, true]].sort(),
+    );
+    assert.equal((await outcomeStore.listOutcomesWithRun({ measureId: "hazwoper" })).some((r) => r.runEarlierCycle), false);
+
+    // A later unmarked run still wins: the marker hides a run, never what comes after it.
+    const nextNightly = await mkRun("2027-01-05T12:00:00.000Z", { evaluationDate: "2027-01-05" });
+    await rec(nextNightly.id, "audiogram", "DUE_SOON", "2027-01-01", "2027-01-05T12:30:00.000Z");
+    assert.equal((await winners()).get("audiogram"), nextNightly.id);
+    assert.deepEqual(await latestRows("audiogram"), new Set([nextNightly.id]));
+    assert.equal((await finalized()).get("audiogram"), nextNightly.id);
   });
 
   test(`[${label}] hasOutcomes distinguishes no-rows-at-all from rows-awaiting-finalization (#470)`, async () => {
@@ -1851,6 +1914,29 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     const reopened = await upsert(store, "OVERDUE");
     assert.equal(reopened?.disposition, "REOPENED", "back in the population with a gap → the system closure reopens");
     assert.equal(reopened?.id, opened?.id);
+  });
+
+  test(`[${label}] an ended cycle's outcome opens and reopens nothing, single or batched; an active case still moves (#882)`, async () => {
+    const store = await freshStore();
+    const at = (subjectId: string, outcomeStatus: string, earlierCycle = true) => ({
+      runId: crypto.randomUUID(), subjectId, measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus, earlierCycle,
+    });
+    assert.equal(await store.upsertFromOutcome(at("emp-1", "OVERDUE")), null, "single: no case is inserted");
+    assert.deepEqual(await store.upsertFromOutcomes([at("emp-2", "OVERDUE")]), [null], "batch: no case is inserted");
+
+    await store.upsertFromOutcome(at("emp-3", "OVERDUE", false));
+    assert.equal((await store.upsertFromOutcome(at("emp-3", "COMPLIANT", false)))?.status, "RESOLVED");
+    assert.equal(await store.upsertFromOutcome(at("emp-3", "OVERDUE")), null, "single: a system closure is not reopened");
+    assert.deepEqual(await store.upsertFromOutcomes([at("emp-3", "OVERDUE")]), [null], "batch: nor here");
+
+    await store.upsertFromOutcome(at("emp-4", "OVERDUE", false));
+    await store.upsertFromOutcome(at("emp-5", "OVERDUE", false));
+    assert.equal((await store.upsertFromOutcome(at("emp-4", "COMPLIANT")))?.status, "RESOLVED", "single: an active case resolves as before");
+    assert.equal((await store.upsertFromOutcomes([at("emp-5", "COMPLIANT")]))[0]?.status, "RESOLVED", "batch: as before");
+    assert.deepEqual(
+      (await store.listCases({ limit: 100 })).map((c) => `${c.employeeId}:${c.status}`).sort(),
+      ["emp-3:RESOLVED", "emp-4:RESOLVED", "emp-5:RESOLVED"],
+    );
   });
 
   // ---- upsertFromOutcomes (the batched case pass) -----------------------------------------------

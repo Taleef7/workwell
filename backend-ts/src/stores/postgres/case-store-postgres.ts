@@ -91,6 +91,7 @@ export class PgCaseStore implements CaseStore {
     const planFrom = (row: CaseRow | null) =>
       planCaseUpsert(row ? { status: row.status, currentOutcomeStatus: row.current_outcome_status, closedBy: row.closed_by } : null, input.outcomeStatus, now, {
         outOfPopulation: input.outOfPopulation,
+        earlierCycle: input.earlierCycle,
       });
     // An operator's instruction outlives a run that learned nothing new (`planNextAction`).
     const actionFrom = (row: CaseRow | null) =>
@@ -318,7 +319,7 @@ export class PgCaseStore implements CaseStore {
         existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
         input.outcomeStatus,
         now,
-        { outOfPopulation: input.outOfPopulation },
+        { outOfPopulation: input.outOfPopulation, earlierCycle: input.earlierCycle },
       );
       if (plan.op === "noop") continue; // stays null in `results`, exactly as the per-row call returns
       const action = planNextAction(

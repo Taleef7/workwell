@@ -45,6 +45,8 @@ import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import { isEvaluationErrorEvidence, membershipFor, membershipRatesFor, officialMembership, officialReportIdentity, type PopulationMembership } from "../fhir/measure-report.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
 
 interface ComplianceApiEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -309,12 +311,22 @@ async function latest(
   // "no run has covered this subject", which is the exact confusion the 404 exists to prevent.
   const SCAN = 100000;
   const rows = await stores.outcomes.listOutcomesForEmployee(subjectId, SCAN);
-  const candidates = rows.filter(
-    (r) =>
-      r.measureId === measureId &&
-      (!start || r.evaluationPeriod >= start) &&
-      (!end || r.evaluationPeriod <= end),
-  );
+  // The newest CYCLE first, then the newest evaluation within it (the scan's order; `sort` is stable): a
+  // re-score of a cycle that has ended runs after the current year's nightly, and must not become the
+  // current answer (#882). The cycle, not the raw period: an import or `/evaluate` keeps its own date
+  // (`2027-01-15`) where the pipeline keeps the cycle's first day (`2027-01-01`), and within one cycle the
+  // newer evaluation wins. A period that is not a date sorts last.
+  const cycleOf = (period: string) => (/^\d{4}-\d{2}-\d{2}$/.test(period) ? bucketPeriodForMeasure(measureId, period) : "");
+  const candidates = rows
+    .filter(
+      (r) =>
+        r.measureId === measureId &&
+        (!start || r.evaluationPeriod >= start) &&
+        (!end || r.evaluationPeriod <= end),
+    )
+    .map((r) => ({ r, cycle: cycleOf(r.evaluationPeriod) }))
+    .sort((a, b) => (a.cycle < b.cycle ? 1 : a.cycle > b.cycle ? -1 : 0))
+    .map(({ r }) => r);
 
   /**
    * Only a FINALIZED run's outcome is the persisted answer (review, #399).
@@ -429,7 +441,7 @@ async function preview(
     );
   }
 
-  const evalDate = end ?? new Date().toISOString().slice(0, 10);
+  const evalDate = end ?? practiceToday();
   // The binding-existence guard that used to sit above is gone on purpose: since ADR-072 an
   // official-only measure is runnable with no authored binding, and that guard would have refused
   // exactly the measures the pilot onboards. What can still fail is a measure that is routed before

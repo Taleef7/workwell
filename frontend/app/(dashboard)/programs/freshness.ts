@@ -7,11 +7,14 @@
  *
  * Reads the newest whole-practice runs (ALL_PROGRAMS, nightly or manual), newest first. A run in
  * progress says nothing (the run indicator already does) unless it has been "in progress" for longer
- * than a cycle, which is a stuck run and stale numbers. A single-measure run is never read.
+ * than a cycle, which is a stuck run and stale numbers. A single-measure run is never read, and neither is
+ * a re-score of a year that has ended (#882): it is nobody's "latest", so the page's numbers are never its.
  */
 export interface FreshnessRun {
   status: string;
   startedAt: string;
+  /** A run scoring a year that has ended (the January re-score, #882); present only when true. */
+  earlierCycle?: true;
 }
 
 export type FreshnessNotice =
@@ -64,11 +67,16 @@ const DID_NOT_FINISH = new Set(["FAILED", "CANCELLED"]);
 const REPORTABLE = new Set(["COMPLETED", "PARTIAL_FAILURE"]);
 
 export function freshnessNotice(
-  runsNewestFirst: readonly FreshnessRun[],
+  runsListed: readonly FreshnessRun[],
   now: number = Date.now(),
   schedule: NightlySchedule | null = null,
 ): FreshnessNotice | null {
+  // A re-score of last year (#882) is newer than this year's nightly and never the numbers shown.
+  const runsNewestFirst = runsListed.filter((r) => r.earlierCycle !== true);
   const newest = runsNewestFirst[0];
+  // Every run listed was such a re-score: whether an update ran before them is not known from here, and
+  // "none has run" could be false.
+  if (!newest && runsListed.length > 0) return null;
   // Silence here would last forever on a deployment whose scheduler never created its first run
   // (Codex on #710). A deployment with the scheduler off (staging) has no update to be late for, and
   // saying so is still true.

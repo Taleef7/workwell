@@ -220,6 +220,30 @@ test("latest REFUSES a row from a run that is not finalized", async () => {
   assert.equal((await call("/api/v1/compliance/emp-mid-run/cms125"))!.status, 200);
 });
 
+test("#882: latest is the newest evaluation of the newest cycle, so neither a raw import date nor a re-score of last year wins", async () => {
+  const runStore = new SqliteRunStore((env as { DB: never }).DB);
+  const outcomes = new SqliteOutcomeStore((env as { DB: never }).DB);
+  const record = async (evaluationPeriod: string, evaluatedAt: string, status: string) => {
+    const r = await runStore.createRun({
+      scopeType: "MEASURE", scopeId: "cms125", triggeredBy: "test", requestedScope: { measureId: "cms125" },
+      measurementPeriodStart: `${evaluationPeriod}T00:00:00.000Z`, measurementPeriodEnd: `${evaluationPeriod}T00:00:00.000Z`,
+    });
+    await outcomes.recordOutcome({
+      runId: r.id, subjectId: "emp-cycle-882", measureId: "cms125", status, evaluationPeriod, evaluatedAt,
+      evidence: OFFICIAL_EVIDENCE,
+    });
+    await runStore.finalizeRun(r.id, "COMPLETED");
+  };
+  // An import keeps its own date; a later nightly keeps the cycle's first day and found the gap closed.
+  await record("2027-01-15", "2027-01-15T20:00:00.000Z", "OVERDUE");
+  await record("2027-01-01", "2027-02-02T12:00:00.000Z", "COMPLIANT");
+  // The lead's re-score of 2026, run after both.
+  await record("2026-01-01", "2027-02-10T20:00:00.000Z", "DUE_SOON");
+  const statusOf = async (query = "") => ((await (await call(`/api/v1/compliance/emp-cycle-882/cms125${query}`))!.json()) as { status: string }).status;
+  assert.equal(await statusOf(), "COMPLIANT", "2027's newest evaluation, not the import's later-sorting date nor 2026's re-score");
+  assert.equal(await statusOf("?start=2026-01-01&end=2026-12-31"), "DUE_SOON", "asked for 2026, the re-score is its answer");
+});
+
 test("populationsSource tracks what membershipFor actually DID, not whether a field exists", async () => {
   // The field was added so a consumer can tell measured membership from inferred. A first cut checked
   // `official.populationResults != null`, which is weaker than the condition `membershipFor` branches on

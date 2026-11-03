@@ -109,7 +109,8 @@ export async function latestPopulationWinners(
   return { winners, runKey: runKeyOf(winners) };
 }
 
-const populationRow = (r: OutcomeWithRun): boolean => isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus);
+const populationRow = (r: OutcomeWithRun): boolean =>
+  isPopulationRun(r.runScopeType) && isCompletedRun(r.runStatus) && r.runEarlierCycle !== true;
 
 /**
  * The winners' rows, read as few times and as narrowly as the winners allow. One measure → one read

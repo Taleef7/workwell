@@ -191,6 +191,25 @@ test("get_run_summary by id, and latest when omitted", async () => {
   assert.equal((latest.payload as JsonRecord).run_id, runId);
 });
 
+test("get_run_summary with no runId skips a re-score of an ended year, and names one when asked (#882)", async () => {
+  const rescore = await deps.runStore.createRun({
+    scopeType: "ALL_PROGRAMS",
+    triggeredBy: "test",
+    requestedScope: { evaluationDate: "2025-12-31", today: "2026-01-05", earlierCycle: true },
+    measurementPeriodStart: "2025-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2025-12-31T23:59:59.999Z",
+  });
+  await deps.runStore.finalizeRun(rescore.id, "COMPLETED");
+  try {
+    const listed = (await deps.runStore.listRuns(1))[0]!;
+    assert.equal(listed.id, rescore.id, "the re-score is the newest run");
+    assert.equal((await call("get_run_summary", {})).payload.run_id, runId, "the default stays on the current year");
+    assert.equal((await call("get_run_summary", { runId: rescore.id })).payload.run_id, rescore.id);
+  } finally {
+    await deps.runStore.finalizeRun(rescore.id, "FAILED");
+  }
+});
+
 test("get_run_summary rejects a non-UUID runId", async () => {
   const { payload } = await call("get_run_summary", { runId: "nope" });
   assert.equal(payload.code, "INVALID_ARGUMENT");

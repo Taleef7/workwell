@@ -275,7 +275,7 @@ describe("the provider picker", () => {
     expect(cardNames()).toEqual(["Dr. B", "Wailuku Clinic subtotal", "Practice total"]);
     expect(screen.getByRole("combobox", { name: "Provider" })).toHaveTextContent("Dr. B — Wailuku Clinic");
 
-    const lastYear = new Date().getUTCFullYear() - 1;
+    const lastYear = new Date().getFullYear() - 1;
     fireEvent.change(screen.getByRole("combobox", { name: "Measurement year" }), { target: { value: String(lastYear) } });
     expect(navHolder.current.params.get("year")).toBe(String(lastYear));
     expect(navHolder.current.params.get("provider")).toBe("p-b");
@@ -359,6 +359,6 @@ describe("the default view and the URL", () => {
     serve(scorecard());
     render(<ScorecardPage />);
     await waitFor(() => expect(scorecardCalls().length).toBeGreaterThan(0));
-    expect(scorecardCalls()[0]).toContain(`measurementYear=${new Date().getUTCFullYear()}`);
+    expect(scorecardCalls()[0]).toContain(`measurementYear=${new Date().getFullYear()}`);
   });
 });

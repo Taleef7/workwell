@@ -124,7 +124,8 @@ const cardFor = (label: RegExp) =>
     .getAllByTestId("scorecard-card-measure")
     .find((c) => label.test(within(c).getByRole("heading", { level: 3 }).textContent ?? ""))!;
 
-const thisYear = new Date().getUTCFullYear();
+// The browser's own year, as the page reads it (#882).
+const thisYear = new Date().getFullYear();
 
 beforeEach(() => {
   setSubject("patient");
