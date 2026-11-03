@@ -220,6 +220,7 @@ function PracticeScorecard() {
   const [card, setCard] = useState<Scorecard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const slow = useSlowLoadHint(loading && decided);
 
   /**
    * The query string as last written, for the reason the work list records at length: two writes can land
@@ -279,7 +280,8 @@ function PracticeScorecard() {
     } catch (err) {
       if (request !== requestRef.current) return;
       setCard(null);
-      setError(err instanceof Error ? err.message : "The scorecard could not be loaded.");
+      // As the clinician's view says it (#884): a refusal in its own words, anything else as one sentence.
+      setError(err instanceof ApiError && !err.isServerError ? err.message : SCORECARD_UNAVAILABLE);
     } finally {
       if (request === requestRef.current) setLoading(false);
     }
@@ -402,8 +404,22 @@ function PracticeScorecard() {
         <NewYearLine year={card.measurementYear} onSeeLastYear={() => setParams((params) => params.set("year", String(thisYear - 1)))} />
       ) : null}
 
-      {error ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">{error}</p> : null}
-      {loading && !card ? <p className="text-sm text-neutral-500">Loading…</p> : null}
+      {error ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          <span>{error}</span>
+          <Button size="sm" variant="outline" onClick={() => void load()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+      {slow && loading ? (
+        <p role="status" className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+          <span aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+          {SLOW_SCORECARD_HINT}
+        </p>
+      ) : loading && !card ? (
+        <p className="text-sm text-neutral-500">Loading…</p>
+      ) : null}
 
       {/* The URL's provider is kept, never quietly dropped: switching to the whole practice may well show
           them. Until then nothing is drawn in their place, because rows for everyone under a link that
@@ -763,7 +779,7 @@ function NewYearLine({ year, onSeeLastYear }: { year: number; onSeeLastYear: () 
 /** One refusal for both ways a clinician can be unlinked: no link on the account, or the server says so. */
 const UNLINKED = "Your sign-in isn't linked to a provider in this practice's directory. Ask an administrator.";
 
-const SLOW_SCORECARD_HINT = "Still working — the practice total reads the whole practice's year, which can take about 15 seconds.";
+const SLOW_SCORECARD_HINT = "Still working — the first load after an update reads the whole practice's year, which can take about 15 seconds.";
 
 /**
  * A scorecard read the server never answered, or answered with a 5xx (a deploy restarting it, a proxy's

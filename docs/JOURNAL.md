@@ -5,6 +5,16 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-03
+
+- **The scorecard loads from what the worker kept (#884).** Each finished population run's per-measure read
+  is kept in the worker (three years of every scorecard measure, the working years evicted last), and the
+  warm after every population run and at boot fills it first. Compaction is still checked on every request,
+  and a compaction pass drops what is kept. At Maui's shape locally (20,000 patients, Postgres at 0.25 CPU) a
+  load went from 5.1–5.3 s to about 0.25 s with the same body. The practice view says a failed load in words
+  with Retry, as the clinician's did, and a slow first load says why. Restart after hand SQL on runs or
+  outcomes (DEPLOY.md).
+
 ## 2026-11-02
 
 - **The year change (#882, LOCKED_DECISIONS §4A.10).** The 1 January rollover stays, and a cycle that has

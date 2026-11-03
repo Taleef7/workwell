@@ -462,9 +462,10 @@ From `backend-ts/`, with `DATABASE_URL` set. Idempotent and resumable. Undo SQL 
 
 A crashed `seed:scale` leaves RUNNING runs that are not auto-swept — roll back before resuming.
 
-These run in their own process, so the running backend keeps the Run History counts it had already read
-(kept until compaction or a restart, `run/run-counts.ts`). After `seed:scale`, `seed:trend-history` or
-`outcomes:compact` against a live database, restart the backend (the re-deploy below).
+These run in their own process, so the running backend keeps the Run History counts and the scorecard's
+rows it had already read (each finished run's, kept until compaction or a restart: `run/run-counts.ts`,
+`compliance/measure-year-rows-cache.ts`). After `seed:scale`, `seed:trend-history` or `outcomes:compact`
+against a live database, or any hand SQL on `runs` or `outcomes`, restart the backend (the re-deploy below).
 
 ### Manual re-deploy (force update existing containers)
 
