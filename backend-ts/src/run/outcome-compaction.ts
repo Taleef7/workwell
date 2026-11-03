@@ -27,6 +27,7 @@
 import type { Stores } from "../stores/factory.ts";
 import { resetMeasureRateMemo } from "../program/measure-rate.ts";
 import { resetRunOutcomeCounts } from "./run-counts.ts";
+import { scorecardRows } from "../compliance/scorecard.ts";
 
 export interface CompactionResult {
   /** ISO-8601 instant before which non-exempt rows were deleted. */
@@ -114,9 +115,10 @@ export async function compactOutcomes(
   // otherwise a warm process would serve a pre-compaction rate on the dashboard while the export of the
   // same run is refused, and a cold one the post-compaction rate (own review, ADR-077 d5).
   resetMeasureRateMemo();
-  // Same reason: the Run History list keeps a finished run's counts (#644), and compaction is what
-  // changes them.
+  // Same reason: the Run History list keeps a finished run's counts (#644), and the scorecard a finished
+  // run's rows (#884), and compaction is what changes them.
   resetRunOutcomeCounts();
+  scorecardRows.reset();
 
   // One completion event per pass, not per row: the payload answers "what window was applied and how
   // much went", which is the question an auditor asks, and 100,000 events answering it individually

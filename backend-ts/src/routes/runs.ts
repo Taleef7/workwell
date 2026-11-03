@@ -653,7 +653,10 @@ async function scheduleAsyncRun(
       if (!caseStore || !isPopulationRun(planned.scopeType)) return;
       const finished = await runStore.getRun(planned.run.id).catch(() => null);
       if (!finished || !isCompletedRun(finished.status)) return;
-      await warmReadModels({ runStore, outcomeStore, caseStore, qualitySnapshots, employees, webChartEnv });
+      // The run's own measurement year for the scorecard (#884), the window `selectRunForYear` reads, so a
+      // re-score of last year is warm whenever it is made.
+      const scorecardYears = [new Date(finished.measurementPeriodStart).getUTCFullYear()].filter(Number.isFinite);
+      await warmReadModels({ runStore, outcomeStore, caseStore, qualitySnapshots, employees, webChartEnv }, "run", undefined, { scorecardYears });
     }),
   );
   return runningResponse(planned);

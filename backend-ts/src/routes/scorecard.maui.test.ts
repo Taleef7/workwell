@@ -92,6 +92,13 @@ const script = `
   const card = await (await handleScorecard(new Request("http://x/api/scorecard?measurementYear=" + year), env, actor, "ROLE_CASE_MANAGER", true)).json();
   const out = { year, card, perProvider: [] };
 
+  // The worker keeps each finished run's read (#884): a second GET reads no evidence and says the same.
+  let evidenceReads = 0;
+  const read = stores.outcomes.listOutcomeSubjectMembershipsForRun.bind(stores.outcomes);
+  stores.outcomes.listOutcomeSubjectMembershipsForRun = async (...args) => { evidenceReads += 1; return read(...args); };
+  const again = await (await handleScorecard(new Request("http://x/api/scorecard?measurementYear=" + year), env, actor, "ROLE_CASE_MANAGER", true)).json();
+  out.secondGet = { evidenceReads, same: JSON.stringify({ ...again, generatedAt: null }) === JSON.stringify({ ...card, generatedAt: null }) };
+
   // The clinician seat's card (#870), the refusals, and what each must not say.
   const ask = async (query, who, role, e = env, authEnforced = true) => {
     const res = await handleScorecard(new Request("http://x/api/scorecard?" + query), e, who, role, authEnforced);
@@ -187,6 +194,8 @@ for (const [when, load] of [
   assert.ok(total.rates![0]!.numer > 0, "the seeded scale run (numerator 0) was never the one read");
   // The practice card carries no clinician scope.
   assert.equal("scope" in card, false);
+  // A second GET is the worker's kept read (#884): no evidence read, the same card.
+  assert.deepEqual(out.secondGet, { evidenceReads: 0, same: true });
 });
 
 test("a clinician seat reads its own provider's row and the practice total, and nothing of any colleague (#870)", () => {

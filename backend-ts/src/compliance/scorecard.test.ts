@@ -11,6 +11,7 @@ import { anyOutcomeVia, subjectMembershipsVia } from "../test-support/membership
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import type { CaseRecord } from "../stores/case-store.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { MeasureYearRowsCache } from "./measure-year-rows-cache.ts";
 
 const CYCLE = bucketPeriodForMeasure("cms125", "2026-10-20");
 
@@ -289,4 +290,66 @@ test("a compaction that lands while the rows are read refuses the column, never 
   };
   const card = await buildScorecard(d, request());
   assert.equal(card.measures[0]!.state, "compacted");
+});
+
+// ── The worker's kept reads (#884) ──────────────────────────────────────────────────────────────────
+
+const kept = () => new MeasureYearRowsCache({ maxEntries: () => 18, protectedYears: () => new Set() });
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const v of Object.values(value as object)) deepFreeze(v);
+  }
+  return value;
+}
+
+/** Counts the evidence reads a `deps` makes. */
+function counted(d: ScorecardDeps): { reads: () => number } {
+  let n = 0;
+  const read = d.outcomes.listOutcomeSubjectMembershipsForRun;
+  d.outcomes.listOutcomeSubjectMembershipsForRun = async (runId, measureId) => {
+    n += 1;
+    return read(runId, measureId);
+  };
+  return { reads: () => n };
+}
+
+test("with the kept reads, a second card reads no evidence and is the same card; nothing downstream changes what is kept", async () => {
+  const rows = [row("s1", "cms125", one(true)), row("s2", "cms125", one(false)), row("s3", "cms125", one(true))];
+  const rowsCache = kept();
+  const d = { ...deps({ rows, pcp: { s1: "p-a", s2: "p-a", s3: "p-c" } }), rowsCache };
+  const reads = counted(d);
+  const first = await buildScorecard(d, request());
+  assert.equal(reads.reads(), 1);
+  deepFreeze(await rowsCache.rows(d.outcomes, { runId: "run-1", startedAt: "2026-06-01T00:00:00.000Z" }, "cms125", 2026));
+  const second = await buildScorecard(d, request());
+  assert.equal(reads.reads(), 1, "the second card read nothing");
+  assert.deepEqual(second, first);
+  const uncached = await buildScorecard(deps({ rows, pcp: { s1: "p-a", s2: "p-a", s3: "p-c" } }), request());
+  assert.deepEqual(second, uncached, "the kept read gives the card the store gives");
+});
+
+test("with the kept reads, a compaction since the last visit still refuses the column", async () => {
+  const d = { ...deps({ rows: [row("s1", "cms125", one(true))], pcp: { s1: "p-a" } }), rowsCache: kept() };
+  assert.equal((await buildScorecard(d, request())).measures[0]!.state, "complete");
+  (d as unknown as { setCompacted(v: boolean): void }).setCompacted(true);
+  const card = await buildScorecard(d, request());
+  assert.equal(card.measures[0]!.state, "compacted");
+  assert.equal(card.total.cells.cms125!.rates, null);
+});
+
+test("with the kept reads, a thin column and a mixed-logic column are the cards the store gives", async () => {
+  const thin = { ...one(true), dataInsufficient: { checks: ["encounterTypeCoded"] } };
+  const translation = { official: { kind: "derived", label: "WorkWell translation of CMS125", url: "urn:workwell:t", populationResults: pr(true, true) } };
+  for (const rows of [[row("s1", "cms125", thin)], [row("s1", "cms125", translation), row("s2", "cms125", one(true))]]) {
+    const f = { rows, pcp: { s1: "p-a", s2: "p-a" } };
+    const d = { ...deps(f), rowsCache: kept() };
+    const first = await buildScorecard(d, request());
+    const again = await buildScorecard(d, request());
+    const plain = await buildScorecard(deps(f), request());
+    assert.notEqual(plain.measures[0]!.state, "complete", "the fixture is a refused column");
+    assert.deepEqual(first, plain);
+    assert.deepEqual(again, plain);
+  }
 });

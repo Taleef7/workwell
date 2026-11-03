@@ -37,6 +37,10 @@ import { officialMeasureSemantics } from "../wiring/official-measure-semantics.t
 import { formatScoringLogic, type ScoringLogic } from "../measure/measure-identity.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
 import type { SufficiencyCheck } from "../run/data-sufficiency.ts";
+import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { isRunnableMeasure } from "../config/deployment-profile.ts";
+import { isOfficialRouted } from "../wiring/official-routing.ts";
+import { practiceToday } from "../config/practice-date.ts";
 import {
   foldGroups,
   rateGroupsOf,
@@ -47,9 +51,34 @@ import {
   type MeasureYearRows,
   type SelectedRun,
 } from "./measure-year-rates.ts";
+import { MeasureYearRowsCache } from "./measure-year-rows-cache.ts";
 
 /** Below this effective denominator a rate is marked small (owner decision, 2026-10-20). */
 export const SMALL_NUMBER_THRESHOLD = 20;
+
+/** The scorecard's measures, as the attributed-list report's: runnable and official-routed, the measures with populations. */
+export function scorecardMeasures(): Array<{ id: string; name: string; policyRef: string }> {
+  return MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id) && isOfficialRouted(m.id));
+}
+
+/**
+ * The years the practice is working on `today` (the practice's date): this one, and last year from January
+ * to March, while the lead closes it out (LOCKED_DECISIONS §4A.10). The warm reads these, and the kept rows
+ * evict them last.
+ */
+export function scorecardWorkingYears(today: string = practiceToday()): number[] {
+  const year = Number(today.slice(0, 4));
+  return Number(today.slice(5, 7)) <= 3 ? [year, year - 1] : [year];
+}
+
+/**
+ * The worker's kept reads (#884): three years of every scorecard measure, the working years evicted last.
+ * The route and the warm share it; `buildScorecard` takes it as a dependency, never from here.
+ */
+export const scorecardRows = new MeasureYearRowsCache({
+  maxEntries: () => 3 * scorecardMeasures().length,
+  protectedYears: () => new Set(scorecardWorkingYears()),
+});
 /** The row key of patients whose PCP the directory does not list. No provider id has this shape. */
 const OTHER = "__other__";
 
@@ -66,6 +95,8 @@ export interface ScorecardDeps {
    * shows the live tenant, never folded into "Other".
    */
   providerOf: (id: string) => { id: string; name: string; location: string } | null;
+  /** Kept reads of finished runs (`scorecardRows` in the worker). Without one every column is read afresh. */
+  rowsCache?: MeasureYearRowsCache;
 }
 
 export interface ScorecardRequest {
@@ -277,12 +308,15 @@ async function readColumn(
   if (!run) return column("no_run", null, null);
 
   // Compaction, the one thing that changes a terminal run's rows, is checked before the read (an exposed
-  // run is never read) and after it (a pass that began during the read), as the list report does. Nothing
-  // is cached, so every request reads each measure's evidence again: on a quarter-CPU Postgres (Maui's
-  // Neon compute) that read is most of the page, about 0.6 s per measure for 20,000 rows and 2 s for
-  // CMS137 (2026-10-29), and a cache of every subject's row is memory the next nightly makes stale.
+  // run is never read, nor its kept read shown) and after it (a pass that began during the read), as the
+  // list report does, on every request, kept read or not: the check reads the audit ledger, so it sees a
+  // compaction from any process. The read itself is most of the page on a quarter-CPU Postgres (Maui's Neon
+  // compute: 5.1 of 5.3 s for six measures of 20,000 patients, #884), so the worker keeps a finished run's
+  // (`measure-year-rows-cache.ts`, about 31 MB a year) and a kept load takes about 0.25 s.
   if ((await compactionExposure(run, deps.events)).exposed) return column("compacted", run, null);
-  const read = await readMeasureYearRows(deps.outcomes, run.runId, m.id, measurementYear);
+  const read = deps.rowsCache
+    ? await deps.rowsCache.rows(deps.outcomes, run, m.id, measurementYear)
+    : await readMeasureYearRows(deps.outcomes, run.runId, m.id, measurementYear);
   if ((await compactionExposure(run, deps.events)).exposed) return column("compacted", run, null);
   if (read.periodMismatch) return column("period_mismatch", run, read);
   if (read.mixedLogic) return column("mixed_logic", run, read);

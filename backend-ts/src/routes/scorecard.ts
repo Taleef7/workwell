@@ -14,13 +14,11 @@
  */
 import { getStores } from "../stores/factory.ts";
 import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
-import { employeeById, providerById, isRunnableMeasure, DIRECTORY } from "../config/deployment-profile.ts";
+import { employeeById, providerById, DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
 import { providerIdsOwnedBy } from "../case/panel-assignment.ts";
-import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { isOfficialRouted } from "../wiring/official-routing.ts";
-import { buildScorecard } from "../compliance/scorecard.ts";
+import { buildScorecard, scorecardMeasures, scorecardRows } from "../compliance/scorecard.ts";
 import { linkedProviderOf } from "./providers.ts";
 import { practiceToday } from "../config/practice-date.ts";
 
@@ -89,11 +87,12 @@ export async function handleScorecard(
       // The scoped lookup, with the env: on a deployment showing the live WebChart tenant, its patients'
       // PCP is that tenant's provider, which the static list does not hold.
       providerOf: (id) => providerById(id, env),
+      // The worker's kept reads (#884), which the warm fills after each population run and at boot.
+      rowsCache: scorecardRows,
     },
     {
       measurementYear,
-      // The attributed-list report's set: runnable and official-routed, the measures with populations.
-      measures: MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id) && isOfficialRouted(m.id)),
+      measures: scorecardMeasures(),
       providerIds: !linked && panel === "me" ? new Set(owned) : null,
       onlyProvider: linked?.id ?? null,
       ownsPanel: owned.length > 0,

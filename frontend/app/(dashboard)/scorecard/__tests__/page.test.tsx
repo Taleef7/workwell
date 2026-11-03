@@ -2,6 +2,7 @@ import React from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api/errors";
 import type { createNavMock } from "@/test/mocks/next-navigation-reactive";
 import { setSubject, subject } from "@/test/mocks/terminology";
 vi.mock("@/lib/terminology", () => ({ SUBJECT: subject }));
@@ -361,4 +362,49 @@ describe("the default view and the URL", () => {
     await waitFor(() => expect(scorecardCalls().length).toBeGreaterThan(0));
     expect(scorecardCalls()[0]).toContain(`measurementYear=${new Date().getFullYear()}`);
   });
+});
+
+describe("when the practice's card does not load (#884)", () => {
+  it("says so in words and offers Retry, never the browser's own text, and Retry asks again", async () => {
+    let fail = true;
+    get.mockReset().mockImplementation((url: string) => {
+      if (url.startsWith("/api/scorecard")) return fail ? Promise.reject(new TypeError("Failed to fetch")) : Promise.resolve(scorecard());
+      return Promise.resolve([]);
+    });
+    render(<ScorecardPage />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The scorecard didn't load.");
+    expect(screen.queryByText(/Failed to fetch/)).toBeNull();
+    const before = scorecardCalls().length;
+    fail = false;
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await screen.findByTestId("scorecard-table");
+    expect(scorecardCalls().length).toBe(before + 1);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("states a gateway's timeout page as the same sentence, and a refusal in its own words", async () => {
+    get.mockReset().mockImplementation((url: string) =>
+      url.startsWith("/api/scorecard") ? Promise.reject(new ApiError(504, "<html>Gateway Time-out</html>", "<html>Gateway Time-out</html>")) : Promise.resolve([]),
+    );
+    const { unmount } = render(<ScorecardPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("The scorecard didn't load.");
+    expect(screen.queryByText(/Gateway/)).toBeNull();
+    unmount();
+    get.mockReset().mockImplementation((url: string) =>
+      url.startsWith("/api/scorecard") ? Promise.reject(new ApiError(400, "{}", "measurementYear must be a four-digit year")) : Promise.resolve([]),
+    );
+    render(<ScorecardPage />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("measurementYear must be a four-digit year");
+  });
+
+  it("says why a slow read is slow", async () => {
+    // Real timers: the card is asked for only once the panel mappings have settled, and the hint's clock
+    // starts then, so a fake clock advanced from the render would run past a timer not yet set.
+    get.mockReset().mockImplementation((url: string) => (url.startsWith("/api/scorecard") ? new Promise(() => {}) : Promise.resolve([])));
+    render(<ScorecardPage />);
+    await waitFor(() => expect(scorecardCalls().length).toBe(1));
+    expect(screen.queryByText(/can take about 15 seconds/)).toBeNull();
+    expect(await screen.findByText(/first load after an update .* can take about 15 seconds/, {}, { timeout: 4500 })).toBeInTheDocument();
+  }, 8000);
 });
