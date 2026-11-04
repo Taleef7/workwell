@@ -140,16 +140,25 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
       const runRows = latestRunRows(byMeasure.get(m) ?? []);
       // A measure whose order is offered only when CQL found nothing (cms122, cms2, cms165, cms137) needs each
       // at-risk row's evidence and facts. The snapshot carries neither, so read them for the at-risk subjects
-      // only, in one statement per measure (the winning run).
+      // only, in one statement per measure (the winning run). Every other measure still needs to know which
+      // rows failed to evaluate (`evaluationError`), so a subject nothing scored is never offered an order.
+      // A failed evaluation is always persisted MISSING_DATA, so only those rows are read, without facts.
       const evidenceBySubject = new Map<string, unknown>();
       const orders = ordersForMeasure(m);
-      if (orders && orders.offerOn !== "at-risk" && runRows.length > 0) {
+      if (orders && runRows.length > 0) {
+        const evidenceRuled = orders.offerOn !== "at-risk";
         const ids = runRows
           .filter((r) => AT_RISK_STATUSES.has(r.status) && !(r.outOfPopulation === true && r.status === "MISSING_DATA"))
+          .filter((r) => evidenceRuled || r.status === "MISSING_DATA")
           .filter((r) => !subjectId || r.subjectId === subjectId)
           .map((r) => r.subjectId);
         if (ids.length > 0) {
-          const rows = await s.outcomes.listOutcomeSubjectMembershipsForRun(runRows[0]!.runId, m, ids, { cqlFacts: true });
+          const rows = await s.outcomes.listOutcomeSubjectMembershipsForRun(
+            runRows[0]!.runId,
+            m,
+            ids,
+            evidenceRuled ? { cqlFacts: true } : undefined,
+          );
           for (const row of rows) {
             const ev = (row.evidence ?? {}) as Record<string, unknown>;
             evidenceBySubject.set(row.subjectId, row.cqlFacts === undefined ? ev : { ...ev, cqlFacts: row.cqlFacts });

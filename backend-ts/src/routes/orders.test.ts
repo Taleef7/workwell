@@ -236,6 +236,11 @@ test("#621/#620: on the pilot's six-measure scope every measure has orders; a ch
       const run = await runs.createRun({ scopeType: "ALL_PROGRAMS", triggeredBy: "test", requestedScope: {},
         measurementPeriodStart: "2026-06-19T00:00:00.000Z", measurementPeriodEnd: "2026-06-19T00:00:00.000Z" });
       await outcomes.recordOutcome({ runId: run.id, subjectId: "pat-001", measureId: "cms130", status: "OVERDUE", evidence: {}, outOfPopulation: false });
+      // A failed evaluation persists MISSING_DATA with evaluationError: nothing scored it, so no order.
+      await outcomes.recordOutcome({ runId: run.id, subjectId: "pat-002", measureId: "cms130", status: "MISSING_DATA",
+        evidence: { evaluationError: "engine failure", message: "boom" }, outOfPopulation: false });
+      // An in-population MISSING_DATA that did evaluate is an open gap like any other.
+      await outcomes.recordOutcome({ runId: run.id, subjectId: "pat-003", measureId: "cms130", status: "MISSING_DATA", evidence: {}, outOfPopulation: false });
       await runs.finalizeRun(run.id, "COMPLETED");
       const body = async (qs) => (await (await handleOrders(new Request("http://x/api/orders/proposals" + qs), { DB: db })).json());
       const all = await body("");
@@ -255,9 +260,13 @@ test("#621/#620: on the pilot's six-measure scope every measure has orders; a ch
   assert.deepEqual(output.all, [], "all six pilot measures have orders");
   assert.deepEqual(output.cms130, []);
   const choices = output.choices as Array<Record<string, unknown>>;
-  assert.deepEqual(choices.map((c) => c.subjectId), ["pat-001"]);
+  assert.deepEqual(
+    choices.map((c) => c.subjectId),
+    ["pat-001", "pat-003"],
+    "an errored evaluation (pat-002) is offered nothing, even on a measure offered on any open gap",
+  );
   assert.equal("order" in choices[0]!, false, "a choice row names no default order");
-  assert.equal((output.totals as { choices: number }).choices, 1);
+  assert.equal((output.totals as { choices: number }).choices, 2);
   assert.deepEqual(output.proposed, [], "a choice never enters the protocol list");
   assert.equal(output.bundleEntries, 0, "the bundle drafts no choice");
   const cms130 = output.cms130Orders as { mode: string; options: Array<{ approved: boolean }> };
