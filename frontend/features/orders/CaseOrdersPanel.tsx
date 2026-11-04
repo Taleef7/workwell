@@ -61,7 +61,11 @@ export function CaseOrdersView({ data }: { data: CaseOrders }) {
   );
 }
 
-export function CaseOrdersPanel({ caseId }: { caseId: string }) {
+/**
+ * `revision` changes whenever the case does (a rerun, a resolve, an outreach), so the panel asks again and
+ * never keeps options for a case that has since closed or found a result.
+ */
+export function CaseOrdersPanel({ caseId, revision }: { caseId: string; revision?: string }) {
   const api = useApi();
   const [data, setData] = useState<CaseOrders | null>(null);
   useEffect(() => {
@@ -78,6 +82,6 @@ export function CaseOrdersPanel({ caseId }: { caseId: string }) {
     return () => {
       live = false;
     };
-  }, [api, caseId]);
+  }, [api, caseId, revision]);
   return data ? <CaseOrdersView data={data} /> : null;
 }

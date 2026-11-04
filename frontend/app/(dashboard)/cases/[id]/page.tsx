@@ -1008,7 +1008,7 @@ function CaseDetailView({ caseId }: { caseId: string }) {
               <div className="mt-4 space-y-4">
                 <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
                 <CqlFindings findings={caseDetail.cqlFindings} />
-                {mayViewOrders ? <CaseOrdersPanel caseId={caseId} /> : null}
+                {mayViewOrders ? <CaseOrdersPanel caseId={caseId} revision={`${caseDetail.updatedAt}|${caseDetail.status}|${caseDetail.lastRunId}`} /> : null}
                 {officialPopulations ? (
                   <details className="group">
                     <summary className="cursor-pointer text-sm font-medium text-neutral-700 dark:text-neutral-300">Measure populations</summary>

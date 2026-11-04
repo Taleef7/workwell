@@ -1,12 +1,15 @@
 import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CaseOrdersView } from "../CaseOrdersPanel";
+import { CaseOrdersPanel, CaseOrdersView } from "../CaseOrdersPanel";
 import { OrderCodesAdmin } from "../OrderCodesAdmin";
 
 const get = vi.fn();
 const post = vi.fn();
-vi.mock("@/lib/api/hooks", () => ({ useApi: () => ({ get, post }) }));
+// One client across renders, as the real `useApi` memoizes it: a new object per render would re-run every
+// effect and hide a missing dependency.
+const api = { get, post };
+vi.mock("@/lib/api/hooks", () => ({ useApi: () => api }));
 vi.mock("@/lib/toast", () => ({ emitToast: vi.fn() }));
 
 const CPT = "http://www.ama-assn.org/go/cpt";
@@ -56,6 +59,27 @@ describe("CaseOrdersView (#620, B16)", () => {
   it("renders nothing for a measure with no order defined", () => {
     const { container } = render(<CaseOrdersView data={{ caseId: "c1", measureId: "x", applies: false, reason: "No order", orders: null }} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("CaseOrdersPanel refresh", () => {
+  beforeEach(() => get.mockReset());
+
+  it("asks again when the case changes, so a rerun or resolve never leaves stale options", async () => {
+    const opts = { mode: "choice", options: [{ key: `${CPT}|82274`, code: "82274", system: CPT, display: "FIT", suggestible: true, approved: true }] };
+    get.mockResolvedValueOnce({ caseId: "c1", measureId: "cms130", applies: true, orders: opts });
+    const { rerender } = render(<CaseOrdersPanel caseId="c1" revision="t1|OPEN|r1" />);
+    expect(await screen.findByText("FIT")).toBeInTheDocument();
+
+    // Same revision: no new read.
+    rerender(<CaseOrdersPanel caseId="c1" revision="t1|OPEN|r1" />);
+    expect(get).toHaveBeenCalledTimes(1);
+
+    get.mockResolvedValueOnce({ caseId: "c1", measureId: "cms130", applies: false, reason: "This case is closed.", orders: opts });
+    rerender(<CaseOrdersPanel caseId="c1" revision="t2|RESOLVED|r2" />);
+    expect(await screen.findByTestId("case-orders-why-not")).toHaveTextContent("This case is closed.");
+    expect(screen.queryByText("FIT")).toBeNull();
+    expect(get).toHaveBeenCalledTimes(2);
   });
 });
 
