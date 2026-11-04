@@ -280,7 +280,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     async function loadWorklistGapCount() {
       try {
         // The badge is a COUNT, so ask the server for one: `outreach=none` narrows to open cases with
-        // no OUTREACH_SENT record and `X-Total-Count` carries the full filtered match, while `limit=1`
+        // no contact attempt (an OUTREACH_SENT or a logged CONTACT_LOGGED, #886) and `X-Total-Count` carries the full filtered match, while `limit=1`
         // keeps the body to a single row. Counting rows client-side capped the badge at the server's
         // default page (50) and made the backend load every open case on every navigation.
         const params = new URLSearchParams();
@@ -416,9 +416,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                     // like a mismatch (#698).
                     badge={
                       hasGap ? (
-                        <span title={`${worklistGapCount.toLocaleString()} open gaps with no outreach yet`} data-testid="worklist-badge">
+                        <span title={`${worklistGapCount.toLocaleString()} open gaps not contacted yet`} data-testid="worklist-badge">
                           {worklistGapCount.toLocaleString()}
-                          <span className="sr-only"> open gaps with no outreach yet</span>
+                          <span className="sr-only"> open gaps not contacted yet</span>
                         </span>
                       ) : undefined
                     }

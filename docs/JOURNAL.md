@@ -5,6 +5,15 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-04
+
+- **Log a contact, and each patient's preferred channel (#886).** Staff log a call, text, email, visit or
+  letter they made themselves on the case page (by default on the patient's other open gaps too); nothing is
+  sent, Open moves to In progress, and the gap leaves the "not contacted yet" count. A send now keeps a worked
+  case In progress. A new `contact_preferences` table (owner-approved DDL) holds a preferred channel and the
+  channels not to use: pickers open on it, a send on a declined channel is refused before anything is
+  recorded, and campaigns skip and count those patients. The staff seat may do both (LOCKED_DECISIONS §4A.9).
+
 ## 2026-11-03
 
 - **The scorecard loads from what the worker kept (#884).** Each finished population run's per-measure read

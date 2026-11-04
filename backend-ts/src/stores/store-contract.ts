@@ -7,6 +7,7 @@
  * LOCKED`) must produce identical observable behaviour. Each `freshStore*` factory
  * hands back an isolated, empty store so ordering assertions are deterministic.
  */
+import type { ContactPreferenceStore } from "./contact-preference-store.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CreateRunInput, RunStore } from "./run-store.ts";
@@ -3014,6 +3015,34 @@ export function caseEventStoreContract(
     assert.deepEqual(await eventStore.outreachSentCounts([]), {}, "empty input → {}");
   });
 
+  test(`[${label}] contactAttemptCounts counts sends AND logged contacts; the outreach filter reads it (#886)`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const a = (await newCase(caseStore))!;
+    const b = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+    }))!;
+    const c = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+    }))!;
+    await eventStore.insertAction({ caseId: a.id, actionType: "OUTREACH_SENT", actor: "cm@x", payload: {} });
+    await eventStore.insertAction({ caseId: a.id, actionType: "CONTACT_LOGGED", actor: "cm@x", payload: {} });
+    await eventStore.insertAction({ caseId: b.id, actionType: "CONTACT_LOGGED", actor: "cm@x", payload: {} });
+    await eventStore.insertAction({ caseId: c.id, actionType: "OUTREACH_DELIVERY_UPDATED", actor: "cm@x", payload: {} });
+
+    const attempts = await eventStore.contactAttemptCounts([a.id, b.id, c.id]);
+    assert.equal(attempts[a.id], 2);
+    assert.equal(attempts[b.id], 1, "a logged contact alone is an attempt");
+    assert.equal(attempts[c.id] ?? 0, 0, "a delivery update is not");
+    assert.deepEqual(await eventStore.contactAttemptCounts([]), {});
+    assert.equal((await eventStore.outreachSentCounts([b.id]))[b.id] ?? 0, 0, "the send count stays sends");
+    assert.equal(await eventStore.hasOutreachSent(b.id), false);
+
+    const none = (await caseStore.listCases({ outreach: "none", limit: 100 })).map((x) => x.id);
+    assert.deepEqual(none, [c.id], "only the case nobody contacted");
+    assert.equal((await caseStore.listCasesPage({ outreach: "none" }, { limit: 10, offset: 0 })).total, 1, "the page path agrees");
+    assert.equal((await caseStore.listCasesPage({ outreach: "any" }, { limit: 10, offset: 0 })).total, 2);
+  });
+
   test(`[${label}] latestOutreachDeliveryStatuses answers for a SET exactly as the per-case read does`, async () => {
     // The case CSV asked per case — ~15,300 queries on the pilot, through a ten-connection pool, which
     // answered 504 and held the pool while it did. The batched form must agree with the per-case one
@@ -4241,5 +4270,55 @@ export function subjectListStoreContract(label: string, freshStore: () => Promis
     assert.equal(counts.get(a.id)!.MATCHED, 1);
     assert.equal(counts.get(b.id)!.NOT_FOUND, 1);
     assert.equal(counts.size, 2, "a list id with no members has no key rather than a zeroed one");
+  });
+}
+
+/**
+ * `ContactPreferenceStore` (#886): one row per subject id; the declined set round-trips in canonical
+ * order; upsert replaces; remove returns what it removed.
+ */
+export function contactPreferenceStoreContract(label: string, freshStore: () => Promise<ContactPreferenceStore>): void {
+  test(`[${label}] contact preferences: none is null, and removing none is not an error`, async () => {
+    const store = await freshStore();
+    assert.equal(await store.get("maui-pat-0001"), null);
+    assert.deepEqual(await store.getMany(["maui-pat-0001"]), {});
+    assert.deepEqual(await store.getMany([]), {});
+    assert.equal(await store.remove("maui-pat-0001"), null);
+  });
+
+  test(`[${label}] contact preferences: upsert stores, replaces, and getMany keys by subject`, async () => {
+    const store = await freshStore();
+    const first = await store.upsert({
+      subjectId: "maui-pat-0001", preferredChannel: "SMS", declinedChannels: ["PHONE", "EMAIL"],
+      updatedBy: "quality-staff@workwell.dev", updatedAt: "2026-11-03T10:00:00.000Z",
+    });
+    assert.equal(first.preferredChannel, "SMS");
+    assert.deepEqual(first.declinedChannels, ["EMAIL", "PHONE"], "canonical order, whatever order was given");
+    assert.equal(first.updatedAt, "2026-11-03T10:00:00.000Z");
+    const second = await store.upsert({
+      subjectId: "maui-pat-0001", preferredChannel: null, declinedChannels: ["EMAIL"],
+      updatedBy: "cm@workwell.dev", updatedAt: "2026-11-04T10:00:00.000Z",
+    });
+    assert.equal(second.preferredChannel, null);
+    assert.deepEqual(second.declinedChannels, ["EMAIL"]);
+    assert.equal(second.updatedBy, "cm@workwell.dev");
+    await store.upsert({
+      subjectId: "maui-pat-0002", preferredChannel: "PHONE", declinedChannels: [],
+      updatedBy: "cm@workwell.dev", updatedAt: "2026-11-04T10:00:00.000Z",
+    });
+    const many = await store.getMany(["maui-pat-0001", "maui-pat-0002", "maui-pat-0003", "maui-pat-0001"]);
+    assert.deepEqual(Object.keys(many).sort(), ["maui-pat-0001", "maui-pat-0002"]);
+    assert.deepEqual(many["maui-pat-0002"]!.declinedChannels, []);
+  });
+
+  test(`[${label}] contact preferences: remove returns the row it removed`, async () => {
+    const store = await freshStore();
+    await store.upsert({
+      subjectId: "maui-pat-0001", preferredChannel: "EMAIL", declinedChannels: ["SMS"],
+      updatedBy: "cm@workwell.dev", updatedAt: "2026-11-04T10:00:00.000Z",
+    });
+    const removed = await store.remove("maui-pat-0001");
+    assert.equal(removed?.preferredChannel, "EMAIL");
+    assert.equal(await store.get("maui-pat-0001"), null);
   });
 }

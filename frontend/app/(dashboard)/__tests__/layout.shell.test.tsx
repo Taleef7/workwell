@@ -213,8 +213,8 @@ describe("DashboardLayout — the work list is the daily screen (#698)", () => {
     apiMock.getWithHeaders.mockResolvedValueOnce({ data: [], headers: new Headers({ "X-Total-Count": "15900" }) });
     renderShell();
     const badge = await screen.findByTestId("worklist-badge");
-    expect(badge).toHaveAttribute("title", "15,900 open gaps with no outreach yet");
-    expect(badge).toHaveTextContent("15,900 open gaps with no outreach yet");
+    expect(badge).toHaveAttribute("title", "15,900 open gaps not contacted yet");
+    expect(badge).toHaveTextContent("15,900 open gaps not contacted yet");
   });
 });
 

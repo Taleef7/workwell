@@ -77,6 +77,19 @@ test("outreach reads its detail from the nested action, and says when it was aut
   assert.equal(say("CASE_OUTREACH_DELIVERY_UPDATED", { deliveryStatus: "FAILED" }).summary, "Delivery failed");
 });
 
+test("a logged contact (#886) says how and what came of it, and keeps the note staff typed", () => {
+  assert.deepEqual(say("CASE_CONTACT_LOGGED", { channel: "PHONE", result: "NO_ANSWER", note: "" }), {
+    label: "Contact Logged",
+    summary: "Called — no answer",
+  });
+  assert.equal(
+    say("CASE_CONTACT_LOGGED", { channel: "IN_PERSON", result: "REACHED", note: "at the front desk" }).summary,
+    "Spoke in person — reached, with the note: at the front desk",
+  );
+  assert.equal(say("CASE_CONTACT_LOGGED", { channel: "LETTER" }).summary, "Sent a letter", "no result recorded: none stated");
+  assert.equal(say("CASE_CONTACT_LOGGED", { channel: "FAX", result: "MAYBE" }).summary, "Contacted", "unknown values are left out");
+});
+
 test("appointments name the practice's zone; an unreadable time is left out, never printed raw", () => {
   const s = say("APPOINTMENT_SCHEDULED", { appointmentType: "Mammogram", scheduledAt: "2026-11-03T15:00:00.000Z", location: "Wailuku Clinic" }).summary!;
   assert.match(s, /^Mammogram scheduled for Nov 3, 2026, 10:00\s?AM EST at Wailuku Clinic$/);

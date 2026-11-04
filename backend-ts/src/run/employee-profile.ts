@@ -78,14 +78,17 @@ export interface OpenCaseSummary {
   assignedBy: string | null;
   assignedVia: "PANEL" | "BULK" | "OPERATOR" | null;
   /**
-   * The gap's newest outreach (#868), from its newest `CASE_OUTREACH_SENT`: when, by whom (null for a
-   * run's "system"), on which channel, and the newest delivery status recorded since. All null when the
+   * The gap's newest contact (#868, #886): the newer of its newest `CASE_OUTREACH_SENT` and its newest
+   * `CASE_CONTACT_LOGGED`: when, by whom (null for a run's "system"), on which channel, and — for a send —
+   * the newest delivery status recorded since, or — for a logged contact — its result. All null when the
    * gap was never contacted, so the page says so rather than guessing.
    */
   lastOutreachAt: string | null;
   lastOutreachBy: string | null;
   lastOutreachChannel: string | null;
   lastOutreachDeliveryStatus: string | null;
+  /** The logged contact's result (REACHED, NO_ANSWER, …) when the newest contact was logged; null for a send. */
+  lastContactResult: string | null;
   slaDueDate: string | null;
 }
 export interface AuditEventSummary {
@@ -210,16 +213,27 @@ function assignmentOf(
 
 /** See `OpenCaseSummary.lastOutreachAt`: the newest send, or nulls when there is none. */
 function outreachOf(
-  latest: AuditEventRow | undefined,
+  sent: AuditEventRow | undefined,
+  logged: AuditEventRow | undefined,
   deliveryStatus: string | null,
-): Pick<OpenCaseSummary, "lastOutreachAt" | "lastOutreachBy" | "lastOutreachChannel" | "lastOutreachDeliveryStatus"> {
-  if (!latest) return { lastOutreachAt: null, lastOutreachBy: null, lastOutreachChannel: null, lastOutreachDeliveryStatus: null };
-  const action = latest.payload.action as { channel?: unknown } | undefined;
+): Pick<
+  OpenCaseSummary,
+  "lastOutreachAt" | "lastOutreachBy" | "lastOutreachChannel" | "lastOutreachDeliveryStatus" | "lastContactResult"
+> {
+  // The newer of the two; a tie goes to the send, whose delivery status is the more specific fact.
+  const latest = logged && (!sent || logged.occurredAt > sent.occurredAt) ? logged : sent;
+  if (!latest) {
+    return { lastOutreachAt: null, lastOutreachBy: null, lastOutreachChannel: null, lastOutreachDeliveryStatus: null, lastContactResult: null };
+  }
+  const isLogged = latest === logged;
+  const channel = isLogged ? latest.payload.channel : (latest.payload.action as { channel?: unknown } | undefined)?.channel;
+  const result = latest.payload.result;
   return {
     lastOutreachAt: latest.occurredAt,
     lastOutreachBy: latest.actor && latest.actor !== "system" ? latest.actor : null,
-    lastOutreachChannel: typeof action?.channel === "string" ? action.channel : null,
-    lastOutreachDeliveryStatus: deliveryStatus,
+    lastOutreachChannel: typeof channel === "string" ? channel : null,
+    lastOutreachDeliveryStatus: isLogged ? null : deliveryStatus,
+    lastContactResult: isLogged && typeof result === "string" ? result : null,
   };
 }
 
@@ -275,6 +289,7 @@ async function openCaseSummariesFor(
   const openIds = openCases.map((c) => c.id);
   const assignments = await deps.events.latestCaseEventsOfType(openIds, "CASE_ASSIGNED");
   const outreach = await deps.events.latestCaseEventsOfType(openIds, "CASE_OUTREACH_SENT");
+  const logged = await deps.events.latestCaseEventsOfType(openIds, "CASE_CONTACT_LOGGED");
   const deliveries = openIds.some((id) => outreach[id]) ? await deps.events.latestOutreachDeliveryStatuses(openIds) : {};
 
   return [...openCases]
@@ -288,7 +303,7 @@ async function openCaseSummariesFor(
       priority: c.priority,
       assignee: c.assignee,
       ...assignmentOf(c, assignments[c.id]),
-      ...outreachOf(outreach[c.id], deliveries[c.id] ?? null),
+      ...outreachOf(outreach[c.id], logged[c.id], deliveries[c.id] ?? null),
       slaDueDate: null, // SLA not modeled on the TS case row
     }));
 }

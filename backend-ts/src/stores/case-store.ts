@@ -162,7 +162,8 @@ export interface CaseQuery {
   /** `current_outcome_status`, compared case-insensitively — the frozen column, not the live answer. */
   outcome?: string;
   /**
-   * Whether the case has any `OUTREACH_SENT` action. `none` is the dashboard badge's filter and the
+   * Whether the case has any contact attempt — an `OUTREACH_SENT` or a `CONTACT_LOGGED` action (#886).
+   * `none` is the dashboard badge's filter ("not contacted yet") and the
    * reason it is here: answering it in JavaScript means counting outreach for every row first.
    */
   outreach?: "none" | "any";

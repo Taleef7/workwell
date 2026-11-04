@@ -5,6 +5,7 @@
  * "SMS" channel is carried through to the payload.
  *   node --import tsx --test src/case/case-outreach.test.ts
  */
+import { SqliteContactPreferenceStore } from "../stores/sqlite/contact-preference-store-sqlite.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
@@ -78,6 +79,7 @@ before(async () => {
     cases: new SqliteCaseStore(db),
     events: new SqliteCaseEventStore(db),
     outcomes: new SqliteOutcomeStore(db),
+    contactPreferences: new SqliteContactPreferenceStore(db),
   };
 });
 
@@ -134,6 +136,7 @@ test("patient profile renders clinic wording with no compliance phrasing or due-
       cases: new SqliteCaseStore(db),
       events: new (await import("./src/stores/sqlite/case-event-store-sqlite.ts")).SqliteCaseEventStore(db),
       outcomes: new SqliteOutcomeStore(db),
+      contactPreferences: new (await import("./src/stores/sqlite/contact-preference-store-sqlite.ts")).SqliteContactPreferenceStore(db),
     };
     const run = await new SqliteRunStore(db).createRun({
       scopeType: "MEASURE",
@@ -231,6 +234,7 @@ test("patient campaign resolves an employee template id against patient template
       events: { recordCaseEvent: async ({ audit }) => actions.push(audit) },
       outcomes: { listOutcomes: async () => [] },
       campaigns: { recordCampaign: async () => {} },
+      contactPreferences: { get: async () => null, getMany: async () => ({}) },
       channels: () => ({ type: "EMAIL", send: (message) => ({ channel: "EMAIL", provider: "simulated", status: "SIMULATED", messageId: "msg-1", to: message.to, sentAt: "2026-01-01T00:00:00.000Z", errorDetail: null }) }),
     };
     const result = await runCampaign(deps, { measureId: "cms122", channel: "EMAIL", templateId: "11111111-0000-0000-0000-000000000003" }, "cm@pilot.test");
@@ -267,6 +271,7 @@ test("Q1: a patient campaign sends one message per patient listing every gap, an
       events: { recordCaseEvent: async ({ audit }) => audits.push(audit) },
       outcomes: { listOutcomes: async () => [] },
       campaigns: { recordCampaign: async () => {} },
+      contactPreferences: { get: async () => null, getMany: async () => ({}) },
       channels: () => ({ type: "EMAIL", send: (m) => { sends.push(m); return { channel: "EMAIL", provider: "simulated", status: "SIMULATED", messageId: "msg-" + sends.length, to: m.to, sentAt: "2026-01-01T00:00:00.000Z", errorDetail: null }; } }),
     };
     const result = await runCampaign(deps, { channel: "EMAIL" }, "cm@pilot.test");
@@ -312,6 +317,7 @@ test("Q1: when one case's record fails after its patient's message went out, the
       events: { recordCaseEvent: async ({ audit }) => { calls++; if (calls === 2) throw new Error("ledger down"); audits.push(audit.refCaseId); } },
       outcomes: { listOutcomes: async () => [] },
       campaigns: { recordCampaign: async () => {} },
+      contactPreferences: { get: async () => null, getMany: async () => ({}) },
       channels: () => ({ type: "EMAIL", send: (m) => ({ channel: "EMAIL", provider: "simulated", status: "SIMULATED", messageId: "msg-" + m.to, to: m.to, sentAt: "2026-01-01T00:00:00.000Z", errorDetail: null }) }),
     };
     const result = await runCampaign(deps, { channel: "EMAIL" }, "cm@pilot.test");
