@@ -123,4 +123,18 @@ export interface ValueSetStore {
   listTerminologyMappings(): Promise<TerminologyMappingRecord[]>;
   /** Insert a terminology mapping; returns the stored record. */
   createTerminologyMapping(input: CreateTerminologyMappingInput): Promise<TerminologyMappingRecord>;
+  /** One terminology mapping by id; null if unknown. */
+  getTerminologyMapping(id: string): Promise<TerminologyMappingRecord | null>;
+  /**
+   * Compare-and-set a mapping's review (#640, owner decision 2026-11-04): moves `fromStatus` to `toStatus`
+   * and records who reviewed it and when, only while the row still holds `fromStatus`. Returns the updated
+   * record, or null when the row is gone or another review changed it first (the caller answers 409).
+   */
+  updateTerminologyMappingStatus(
+    id: string,
+    fromStatus: string,
+    toStatus: string,
+    reviewedBy: string,
+    reviewedAt: string,
+  ): Promise<TerminologyMappingRecord | null>;
 }

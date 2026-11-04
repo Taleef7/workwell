@@ -106,28 +106,52 @@ convention.
 `wc|<patientId>` is tried first, then the bare id. So a WebChart client sending `4821` reaches the subject
 WorkWell stored as `wc|4821`, and a synthetic-roster client sending `emp-006` reaches `emp-006`.
 
-### Suggestions are gated on an APPROVED terminology mapping
+### Suggestions: an admin approves each code, and an order is offered only when CQL found nothing
 
 A suggestion is a one-click order into an EHR, and `order-catalog.ts` describes its codes as
 "representative (demo, not billing-certified)". So one is offered only where the order code carries an
-**`APPROVED`** mapping in `terminology_mappings`, read from the store — approving a mapping unlocks a
-suggestion with no code change.
+**`APPROVED`** mapping in `terminology_mappings`, read from the store (`order/approved-codes.ts`). Every
+code starts PROPOSED; an admin approves, rejects or revokes each one on Admin → Order codes, audited
+(`TERMINOLOGY_MAPPING_REVIEWED`, who and when). A new mapping can only be created PROPOSED (#640, owner
+decision 2026-11-04). The owner approves for the sandbox; before the PHI phase the pilot group's clinician
+signs off and an admin records it (`OPEN_QUESTIONS.md`).
 
-| measure | order code | offered? |
-|---|---|---|
-| `audiogram` | CPT 92557 | yes — APPROVED |
-| `tb_surveillance` | CPT 86580 | yes — APPROVED |
-| `flu_vaccine` | CVX 141 | yes — APPROVED |
-| `hazwoper` | internal `hazwoper-exam` | no — mapping is `REVIEWED`, and the code is not a public standard |
-| **`cms122`, `cms125`** | CPT 83036 / 77067 | **no — no mapping exists at all** |
+Each measure has an order set (`ORDER_CATALOG`): **protocol** (one order) or **choice** (the clinician
+picks; WorkWell sets no default). A card offers one suggestion per approved option, under
+`selectionBehavior: "at-most-one"`, with no option marked recommended. A protocol suggestion keeps its
+`(run, subject, measure)` uuid; a choice option's uuid adds `system|code`. The card's `detail` lists the
+whole order set by name (B29), approved or not, and states no interval or billing note (those are catalog
+text, shown in the app only).
 
-> **The consequence is intended, not an oversight.** The officially-routed CMS measures carry information
-> and a link rather than an order. Offering a demo-grade CPT for creation in a certified EHR is the harm the
-> rule exists to prevent. For CMS122 and CMS125 a suggestion is a terminology review, not a code change; the
-> four more that Maui routes (CMS2, CMS130, CMS165, CMS137) have no order code at all.
+**When an order is offered** (`order/order-applicability.ts`, reading `cqlFindingsOf`, the case page's and
+the list report's own reader): only when the measure's CQL found nothing qualifying. A new order does not
+close a gap where a result was found but does not qualify, so none is offered there.
+
+| measure | mode | options | offered when |
+|---|---|---|---|
+| `cms122` | protocol | CPT 83036 HbA1c | CQL found no assessment (`NONE_FOUND`); never for a result over 9% |
+| `cms125` | protocol | CPT 77067 screening mammography | any open gap |
+| `cms2` | choice | LOINC 73832-8 adult, 73831-0 adolescent screening (labels; no age logic) | no screening found |
+| `cms130` | choice | CPT 45378 colonoscopy, 82274 FIT, 81528 FIT-DNA, 45330 sigmoidoscopy, 74263 CT colonography | any open gap |
+| `cms165` | choice | CPT 99473 home blood pressure; LOCAL recheck visit (listed, never a suggestion) | no reading found; never for an uncontrolled reading |
+| `cms137` | choice | HCPCS H0001 assessment, H0004 counseling | Initiation rate with nothing found; never Engagement |
+| TWH measures | protocol | as before (audiogram CPT 92557, TB CPT 86580, flu CVX 141 approved by the demo seed) | any open gap |
+
+A run that recorded nothing a reader can name (authored CQL, a run before #875, an errored row) offers no
+order for an evidence-ruled measure: "we cannot tell" never becomes "order it".
+
+**The clinic's own code** (#640 item 2): an APPROVED mapping from a clinic code to an approved national
+code adds that code as a second `ServiceRequest.code.coding`. Never a `urn:workwell:*` system, never the
+code's own approval row, and at most one approved clinic code per national code (409
+`clinic_code_already_approved`).
 
 Two measures sharing one order code (`diabetes_hba1c` and `cms122` both map to CPT 83036) collapse to a
-single suggestion, because one order is the correct clinical action.
+single suggestion, because one order is the correct clinical action; each choice option is deduped on its
+own code the same way.
+
+**Accept and dismiss are the client's own UI.** WorkWell returns proposals; the EHR draws the buttons and
+decides what accepting does. `CDS_HOOKS_INVOKED` records every suggestion offered (`suggestions: [{uuid,
+measureId, system, code}]`), so an accepted id resolves to the order it proposed.
 
 > **The `ServiceRequest` references the id YOU sent, not WorkWell's internal subject id.** On a live tenant
 > those differ — we persist `wc|4821`, the hook supplies `4821` — and a reference into the `wc` namespace

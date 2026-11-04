@@ -257,7 +257,7 @@ answer is **traceable to the measure's logic** (CMS's FHIR draft, where routed),
 | A compliance answer per subject and measure | **Built** — versioned, read-only `GET` ([`COMPLIANCE_API.md`](../COMPLIANCE_API.md)) |
 | Population dashboards for a quality manager | **Built** — the manager surface is the one part of this diagram that is real |
 | **A standards-shaped way to deliver findings into a workflow** | **Built** — a CDS Hooks 2.0.1 service for the `patient-view` hook ([`CDS_HOOKS.md`](../CDS_HOOKS.md)); cards over the most recent **completed run** |
-| **Follow-up offered as an order the clinician accepts** | **Built** — a card `suggestion` carrying a draft `ServiceRequest`, so nothing is written by WorkWell. Only for order codes with an APPROVED terminology mapping, which today excludes cms122/cms125 |
+| **Follow-up offered as an order the clinician accepts** | **Built** — a card `suggestion` carrying a draft `ServiceRequest`, so nothing is written by WorkWell. Only for order codes an admin has approved (Admin → Order codes), and only where CQL found nothing qualifying; a choice measure offers each approved option and the clinician picks |
 | **Did anyone act on the finding** | **Built** — the CDS Hooks feedback endpoint, audited |
 | Evaluating data supplied on the request | Not built — this is step 2, and `prefetch` is where it would go. WorkWell declares none, because it evaluates none |
 | WebChart pushing an encounter as it happens | Not built — nothing in WebChart calls the cards today (checked 2026-10-02); whether and how it could is an ask to MIE |

@@ -29,6 +29,7 @@ import { scheduleAppointment } from "../case/appointment-service.ts";
 import { uploadEvidence } from "../case/evidence-service.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus } from "../measure/measure-lifecycle.ts";
 import { attachValueSet, detachValueSet, createTerminologyMapping } from "../measure/value-set-governance.ts";
+import { reviewOrderCode, reviewTerminologyMapping } from "../order/order-code-review.ts";
 import { createAuthHandler } from "../routes/auth.ts";
 import { createJwt } from "../auth/jwt.ts";
 import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
@@ -431,4 +432,30 @@ test("setContactPreference / clearContactPreference (#886): each event survives 
     BOOM,
   );
   assert.deepEqual(log2.types(), ["CONTACT_PREFERENCE_CLEARED"]);
+});
+
+test("reviewTerminologyMapping / reviewOrderCode (#640): each event survives a failed status write", async () => {
+  const row = {
+    id: "m-1", localCode: "LAB-1", localDisplay: null, localSystem: "urn:oid:1.2.3", standardCode: "83036",
+    standardDisplay: null, standardSystem: "http://www.ama-assn.org/go/cpt", mappingStatus: "PROPOSED",
+    mappingConfidence: null, reviewedBy: null, reviewedAt: null, notes: null,
+  };
+  const failingStore = {
+    getTerminologyMapping: async () => row,
+    listTerminologyMappings: async () => [row],
+    updateTerminologyMappingStatus: explode,
+    createTerminologyMapping: explode,
+  };
+  const log = ledger();
+  await assert.rejects(() => reviewTerminologyMapping({ valueSets: failingStore as never, events: log as never }, "m-1", "APPROVE", null, "admin"), /the write failed/);
+  assert.deepEqual(log.types(), ["TERMINOLOGY_MAPPING_REVIEWED"]);
+
+  // The order-code path creates the code's own row first: that creation is audited before its insert, too.
+  const empty = { ...failingStore, listTerminologyMappings: async () => [], getTerminologyMapping: async () => null };
+  const log2 = ledger();
+  await assert.rejects(
+    () => reviewOrderCode({ valueSets: empty as never, events: log2 as never }, ["cms125"], "http://www.ama-assn.org/go/cpt", "77067", "APPROVE", null, "admin"),
+    /the write failed/,
+  );
+  assert.deepEqual(log2.types(), ["TERMINOLOGY_MAPPING_CREATED"]);
 });

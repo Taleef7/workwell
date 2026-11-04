@@ -261,4 +261,24 @@ export class PgValueSetStore implements ValueSetStore {
     const { rows } = await this.pool.query<TmRow>(`SELECT ${TM_COLS} FROM ${SPIKE_SCHEMA}.terminology_mappings WHERE id = $1`, [input.id]);
     return toTerminology(rows[0]!);
   }
+
+  async getTerminologyMapping(id: string): Promise<TerminologyMappingRecord | null> {
+    const { rows } = await this.pool.query<TmRow>(`SELECT ${TM_COLS} FROM ${SPIKE_SCHEMA}.terminology_mappings WHERE id = $1`, [id]);
+    return rows[0] ? toTerminology(rows[0]) : null;
+  }
+
+  async updateTerminologyMappingStatus(
+    id: string,
+    fromStatus: string,
+    toStatus: string,
+    reviewedBy: string,
+    reviewedAt: string,
+  ): Promise<TerminologyMappingRecord | null> {
+    const { rows } = await this.pool.query<TmRow>(
+      `UPDATE ${SPIKE_SCHEMA}.terminology_mappings SET mapping_status = $1, reviewed_by = $2, reviewed_at = $3
+       WHERE id = $4 AND mapping_status = $5 RETURNING ${TM_COLS}`,
+      [toStatus, reviewedBy, reviewedAt, id, fromStatus],
+    );
+    return rows[0] ? toTerminology(rows[0]) : null;
+  }
 }

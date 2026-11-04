@@ -474,6 +474,19 @@ describe("CaseDetailPage crosswalk identity rendering", () => {
     expect(assignableCalls).toHaveLength(0);
   });
 
+  it("the orders panel (#620) is asked for by quality staff and never by the viewer seat", async () => {
+    const ordersCalls = () => get.mock.calls.filter(([url]) => String(url).startsWith("/api/orders/cases/"));
+    currentRole = "ROLE_VIEWER";
+    const viewer = render(<CaseDetailPage />);
+    await waitFor(() => expect(screen.getAllByText(/Breast Cancer Screening/i).length).toBeGreaterThan(0));
+    expect(ordersCalls()).toHaveLength(0);
+    viewer.unmount();
+
+    currentRole = "ROLE_QUALITY_STAFF";
+    render(<CaseDetailPage />);
+    await waitFor(() => expect(ordersCalls().map(([url]) => url)).toContain("/api/orders/cases/case-001"));
+  });
+
   it("still offers the assignee control on a closed case", async () => {
     get.mockImplementation((url: string) => {
       if (url === "/api/measures") {

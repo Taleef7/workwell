@@ -349,3 +349,78 @@ test("demo-reset: clears volatile data (non-prod); 403 under prod profile", asyn
   const denied = await handleAdmin(new Request("http://x/api/admin/demo-reset", { method: "POST", body: "{}" }), prodEnv as never, "admin@workwell.dev");
   assert.equal(denied?.status, 403);
 });
+
+// --- #640: an admin approves each order code (owner decision 2026-11-04) ------------------------------
+
+const CPT_SYS = "http://www.ama-assn.org/go/cpt";
+type Mapping = { id: string; mappingStatus: string; reviewedBy: string | null; reviewedAt: string | null; localCode: string; standardCode: string };
+const reviewEvents = async () =>
+  (await new SqliteCaseEventStore((env as { DB: never }).DB).recentAuditEvents(500)).filter((e) => e.eventType === "TERMINOLOGY_MAPPING_REVIEWED");
+
+test("a new mapping is always PROPOSED: creating one APPROVED is refused", async () => {
+  const refused = await adminPost("/api/admin/terminology-mappings", {
+    localCode: "LAB-X", localSystem: "urn:oid:1.2.3", standardCode: "83036", standardSystem: CPT_SYS, mappingStatus: "APPROVED",
+  });
+  assert.equal(refused!.status, 400);
+  const created = await adminPost("/api/admin/terminology-mappings", {
+    localCode: "LAB-X", localSystem: "urn:oid:1.2.3", standardCode: "83036", standardSystem: CPT_SYS,
+  });
+  assert.equal(created!.status, 201);
+  assert.equal(((await created!.json()) as Mapping).mappingStatus, "PROPOSED");
+});
+
+test("reviewing a mapping: approve records who and when, audited; again is 409; unknown 404; bad decision 400", async () => {
+  const created = (await (await adminPost("/api/admin/terminology-mappings", {
+    localCode: "LAB-A1C", localSystem: "urn:oid:1.2.4", standardCode: "83036", standardSystem: CPT_SYS,
+  }))!.json()) as Mapping;
+  const before = (await reviewEvents()).length;
+  const res = await adminPost(`/api/admin/terminology-mappings/${created.id}/review`, { decision: "approve", note: "matches the lab's code" });
+  assert.equal(res!.status, 200);
+  const approved = (await res!.json()) as Mapping;
+  assert.equal(approved.mappingStatus, "APPROVED");
+  assert.equal(approved.reviewedBy, "admin@workwell.dev");
+  assert.ok(approved.reviewedAt);
+  const events = await reviewEvents();
+  assert.equal(events.length, before + 1, "one audited review");
+  assert.equal((events[0]!.payload as { from: string }).from, "PROPOSED");
+  assert.equal((events[0]!.payload as { to: string }).to, "APPROVED");
+
+  const again = await adminPost(`/api/admin/terminology-mappings/${created.id}/review`, { decision: "APPROVE" });
+  assert.equal(again!.status, 409);
+  assert.equal(((await again!.json()) as { error: string }).error, "unchanged");
+  assert.equal((await adminPost("/api/admin/terminology-mappings/nope/review", { decision: "APPROVE" }))!.status, 404);
+  assert.equal((await adminPost(`/api/admin/terminology-mappings/${created.id}/review`, { decision: "maybe" }))!.status, 400);
+
+  // A second clinic code for the same national code is refused while the first stands.
+  const second = (await (await adminPost("/api/admin/terminology-mappings", {
+    localCode: "LAB-A1C-2", localSystem: "urn:oid:1.2.4", standardCode: "83036", standardSystem: CPT_SYS,
+  }))!.json()) as Mapping;
+  const clash = await adminPost(`/api/admin/terminology-mappings/${second.id}/review`, { decision: "APPROVE" });
+  assert.equal(clash!.status, 409);
+  assert.equal(((await clash!.json()) as { error: string }).error, "clinic_code_already_approved");
+});
+
+test("order codes: listed PROPOSED; approve creates the code's own row; revoke rejects EVERY approved row; re-approve works", async () => {
+  const listed = (await body("/api/admin/order-codes")) as { codes: Array<{ measureId: string; code: string; status: string; mode: string }> };
+  const mammo = listed.codes.find((c) => c.measureId === "cms125" && c.code === "77067");
+  assert.equal(mammo?.status, "PROPOSED");
+  assert.equal(mammo?.mode, "protocol");
+
+  const approve = await adminPost("/api/admin/order-codes/review", { system: CPT_SYS, code: "77067", decision: "APPROVE" });
+  assert.equal(approve!.status, 200);
+  const after = (await body("/api/admin/order-codes")) as typeof listed;
+  assert.equal(after.codes.find((c) => c.code === "77067")?.status, "APPROVED");
+  assert.equal((await adminPost("/api/admin/order-codes/review", { system: CPT_SYS, code: "77067", decision: "APPROVE" }))!.status, 409, "the same row, found again: unchanged");
+
+  // cms122's code has an approved clinic row from the test above; revoking the code rejects it too.
+  assert.equal((await adminPost("/api/admin/order-codes/review", { system: CPT_SYS, code: "83036", decision: "APPROVE" }))!.status, 200);
+  const revoke = await adminPost("/api/admin/order-codes/review", { system: CPT_SYS, code: "83036", decision: "REJECT", note: "pending sign-off" });
+  assert.equal(revoke!.status, 200);
+  assert.equal(((await revoke!.json()) as { reviewed: unknown[] }).reviewed.length, 2, "the code's own row and the clinic row");
+  const mappings = (await body("/api/admin/terminology-mappings")) as Mapping[];
+  assert.ok(!mappings.some((m) => m.standardCode === "83036" && m.mappingStatus === "APPROVED"), "nothing keeps the code card-ready");
+  assert.equal((await adminPost("/api/admin/order-codes/review", { system: CPT_SYS, code: "83036", decision: "APPROVE" }))!.status, 200, "re-approve after a revoke");
+
+  const unknown = await adminPost("/api/admin/order-codes/review", { system: CPT_SYS, code: "99999", decision: "APPROVE" });
+  assert.equal(unknown!.status, 400);
+});

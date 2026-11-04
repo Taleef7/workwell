@@ -3599,6 +3599,33 @@ export function valueSetStoreContract(label: string, freshStore: () => Promise<V
     assert.equal(list[0]!.mappingStatus, "APPROVED", "status ASC (APPROVED before PROPOSED)");
     assert.equal(list[1]!.mappingConfidence, 0.7);
   });
+
+  test(`[${label}] terminology mappings: a review is a compare-and-set on the status the reviewer saw (#640)`, async () => {
+    const store = await freshStore();
+    await store.createTerminologyMapping({
+      id: "tm-r",
+      localCode: "LAB-1",
+      localDisplay: null,
+      localSystem: "urn:oid:1.2.3",
+      standardCode: "83036",
+      standardDisplay: null,
+      standardSystem: "http://www.ama-assn.org/go/cpt",
+      mappingStatus: "PROPOSED",
+      mappingConfidence: null,
+      notes: null,
+    });
+    assert.equal(await store.getTerminologyMapping("nope"), null);
+    const at = "2026-11-04T10:00:00.000Z";
+    const approved = await store.updateTerminologyMappingStatus("tm-r", "PROPOSED", "APPROVED", "admin@x", at);
+    assert.equal(approved?.mappingStatus, "APPROVED");
+    assert.equal(approved?.reviewedBy, "admin@x");
+    assert.equal(approved?.reviewedAt, at);
+    // A second reviewer who also saw PROPOSED loses: nothing changes, and the caller is told.
+    assert.equal(await store.updateTerminologyMappingStatus("tm-r", "PROPOSED", "REJECTED", "other@x", at), null);
+    assert.equal((await store.getTerminologyMapping("tm-r"))?.mappingStatus, "APPROVED");
+    assert.equal((await store.getTerminologyMapping("tm-r"))?.reviewedBy, "admin@x");
+    assert.equal(await store.updateTerminologyMappingStatus("gone", "PROPOSED", "APPROVED", "admin@x", at), null);
+  });
 }
 
 /** Registers the OutreachTemplateStore contract — seed, list (active-only), create, update. */

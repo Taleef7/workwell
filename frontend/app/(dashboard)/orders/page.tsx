@@ -13,6 +13,7 @@ import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { OUTCOME_LABELS, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
+import { CardReadyBadge, CodeChip, type MeasureOrdersView } from "@/components/order-options";
 
 // Backend contract (#77 E7 — GET /api/orders/proposals?format=domain). With `limit`/`offset` the
 // server windows BOTH arrays by the same page and `totals` carries the full counts before windowing.
@@ -27,10 +28,14 @@ type ProposedOrder = {
   dedupeKey: string;
   authoredOn: string;
 };
+/** A choice measure's gap (#640 item 3): the options are listed and the clinician picks; there is no default. */
+type ChoiceRow = { subjectId: string; measureId: string; reasonOutcome: string; priority: string; optionKeys: string[] };
 type ProposalsResponse = {
   proposed: ProposedOrder[];
   suppressed: ProposedOrder[];
-  totals?: { proposed: number; suppressed: number };
+  choices?: ChoiceRow[];
+  totals?: { proposed: number; suppressed: number; choices?: number };
+  ordersByMeasure?: Record<string, MeasureOrdersView>;
   /** Whether orders already placed were looked at (#616). Absent or false: they were not. */
   standingOrdersChecked?: boolean;
   /** Measures in scope with no order to propose (#621): their at-risk patients get no proposal. */
@@ -49,21 +54,14 @@ const PAGE_SIZE = 100;
 function pageCount(res: ProposalsResponse | null): number {
   const proposedTotal = res?.totals?.proposed ?? res?.proposed.length ?? 0;
   const suppressedTotal = res?.totals?.suppressed ?? res?.suppressed.length ?? 0;
-  return Math.max(1, Math.ceil(Math.max(proposedTotal, suppressedTotal) / PAGE_SIZE));
+  const choicesTotal = res?.totals?.choices ?? res?.choices?.length ?? 0;
+  return Math.max(1, Math.ceil(Math.max(proposedTotal, suppressedTotal, choicesTotal) / PAGE_SIZE));
 }
 
 function priorityClass(priority: string): string {
   return normalizeEnumValue(priority) === "URGENT"
     ? "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300"
     : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
-}
-
-function systemLabel(system: string): string {
-  if (system.includes("cpt")) return "CPT";
-  if (system.includes("cvx")) return "CVX";
-  if (system.includes("loinc")) return "LOINC";
-  if (system.includes("urn:workwell")) return "LOCAL";
-  return system;
 }
 
 export default function OrdersPage() {
@@ -173,6 +171,11 @@ export default function OrdersPage() {
   const proposed = data?.proposed ?? [];
   const withoutOrder = data && dataFilter === measureFilter ? (data.measuresWithoutOrder ?? []) : [];
   const suppressed = data?.suppressed ?? [];
+  const choices = data?.choices ?? [];
+  const choicesTotal = data?.totals?.choices ?? choices.length;
+  const ordersByMeasure = data?.ordersByMeasure ?? {};
+  const optionFor = (measureId: string, code: string, system: string) =>
+    ordersByMeasure[measureId]?.options.find((o) => o.code === code && o.system === system);
   const proposedTotal = data?.totals?.proposed ?? proposed.length;
   const suppressedTotal = data?.totals?.suppressed ?? suppressed.length;
   const totalPages = pageCount(data);
@@ -181,7 +184,7 @@ export default function OrdersPage() {
     return (
       <AccessDenied
         title="Order Proposals"
-        message="Order proposals are clinical decision support, managed by Case Managers and Admins — your role doesn’t have access."
+        message="Order proposals are clinical decision support, worked by the lead, quality staff and admins. Your role doesn’t have access."
       />
     );
   }
@@ -215,7 +218,8 @@ export default function OrdersPage() {
       <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
         Advisory only — these proposals never auto-submit and never change compliance status. CQL remains the sole
         compliance authority. Nothing here reaches WebChart: the only action is copying the bundle to use elsewhere,
-        and no order is placed from this page.
+        and no order is placed from this page. The bundle drafts only the measures with one order; where the clinician
+        chooses, nothing is drafted.
         {/* #616: until an order source is connected, a proposal is not known to be new. Said only once
             the answer arrives, and never when the server did look. */}
         {data && data.standingOrdersChecked !== true ? (
@@ -269,6 +273,7 @@ export default function OrdersPage() {
                       <th scope="col" className="px-3 py-2">Code</th>
                       <th scope="col" className="px-3 py-2">Reason</th>
                       <th scope="col" className="px-3 py-2">Priority</th>
+                      <th scope="col" className="px-3 py-2">Card</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -288,9 +293,7 @@ export default function OrdersPage() {
                         <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{measureLabel(o.measureId)}</td>
                         <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{o.order.display}</td>
                         <td className="px-3 py-2">
-                          <span className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-[11px] text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
-                            {systemLabel(o.order.system)} {o.order.code}
-                          </span>
+                          <CodeChip system={o.order.system} code={o.order.code} />
                         </td>
                         <td className="px-3 py-2">
                           <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(o.reasonOutcome)}`}>
@@ -302,6 +305,12 @@ export default function OrdersPage() {
                             {o.priority.toLowerCase()}
                           </span>
                         </td>
+                        <td className="px-3 py-2">
+                          {(() => {
+                            const opt = optionFor(o.measureId, o.order.code, o.order.system);
+                            return opt ? <CardReadyBadge option={opt} /> : null;
+                          })()}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -309,6 +318,67 @@ export default function OrdersPage() {
               </ScrollRegion>
             )}
           </div>
+
+          {choicesTotal > 0 ? (
+            <div data-testid="clinician-chooses">
+              <h3 className="mb-2 text-sm font-semibold uppercase tracking-[0.1em] text-neutral-500 dark:text-neutral-400">
+                Clinician chooses ({choicesTotal})
+              </h3>
+              <p className="mb-2 text-xs text-neutral-500 dark:text-neutral-400">
+                These measures have more than one way to close the gap. The options are listed and the clinician picks one;
+                WorkWell sets no default.
+              </p>
+              {choices.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-6 text-sm text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
+                  No choices on this page.
+                </div>
+              ) : (
+                <ScrollRegion label="Orders the clinician chooses table" className="rounded-2xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+                  <table className="min-w-full text-sm">
+                    <thead className="border-b border-neutral-200 bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:bg-neutral-800/50 dark:text-neutral-400">
+                      <tr>
+                        <th scope="col" className="px-3 py-2">Subject</th>
+                        <th scope="col" className="px-3 py-2">Measure</th>
+                        <th scope="col" className="px-3 py-2">Options</th>
+                        <th scope="col" className="px-3 py-2">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {choices.map((c) => {
+                        const options = (ordersByMeasure[c.measureId]?.options ?? []).filter((o) => c.optionKeys.includes(o.key));
+                        return (
+                          <tr key={`${c.subjectId}|${c.measureId}`} className="border-b border-neutral-100 align-top last:border-0 dark:border-neutral-800/60">
+                            <td className="px-3 py-2">
+                              <Link href={subjectPath(c.subjectId)} className="font-medium text-primary-700 hover:underline dark:text-primary-400">
+                                {c.subjectId}
+                              </Link>
+                            </td>
+                            <td className="px-3 py-2 text-neutral-700 dark:text-neutral-300">{measureLabel(c.measureId)}</td>
+                            <td className="px-3 py-2">
+                              <ul className="space-y-1">
+                                {options.map((o) => (
+                                  <li key={o.key} className="flex flex-wrap items-center gap-2 text-neutral-700 dark:text-neutral-300">
+                                    <span>{o.display}</span>
+                                    <CodeChip system={o.system} code={o.code} />
+                                    <CardReadyBadge option={o} />
+                                  </li>
+                                ))}
+                              </ul>
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${outcomeStatusClass(c.reasonOutcome)}`}>
+                                {labelFor(OUTCOME_LABELS, c.reasonOutcome)}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </ScrollRegion>
+              )}
+            </div>
+          ) : null}
 
           {suppressedTotal > 0 ? (
             <div>

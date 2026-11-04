@@ -230,6 +230,17 @@ test("every invocation writes an audit event carrying the uuids it emitted", asy
   const forThatCall = after[after.length - 1]!.payload as Record<string, unknown>;
   const recorded = (forThatCall["cards"] as Array<{ uuid: string; measureId: string | null }>).map((c) => c.uuid);
   assert.deepEqual(recorded, returned, "the ledger must record exactly the uuids the client received");
+  // #640: and every suggestion it offered, with its code, so an accepted suggestion id resolves to the
+  // order it proposed without recomputing against a catalog that may have changed since.
+  const returnedSuggestions = ((await (await post(INVOKE, hookBody("emp-006")))!.json()) as {
+    cards: Array<{ suggestions?: Array<{ uuid: string }> }>;
+  }).cards.flatMap((c) => (c.suggestions ?? []).map((s) => s.uuid));
+  const latest = (await stores.events.listAuditEvents(1000)).filter((e) => e.eventType === "CDS_HOOKS_INVOKED").at(-1)!.payload as {
+    suggestions: Array<{ uuid: string; measureId: string | null; system: string | null; code: string | null }>;
+  };
+  assert.ok(returnedSuggestions.length > 0, "fixture: the audiogram card carries a suggestion");
+  assert.deepEqual(latest.suggestions.map((s) => s.uuid), returnedSuggestions);
+  assert.equal(latest.suggestions[0]!.code, "92557");
   // And the run, so recovering a measure from a feedback uuid is one recomputation per measure rather than a
   // search over every run in the subject's history.
   assert.equal(forThatCall["runId"], completedRunId);

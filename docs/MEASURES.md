@@ -684,8 +684,10 @@ Each outcome evidence payload includes:
 - **E7 action-evaluator order map (#77):** `backend-ts/src/order/order-catalog.ts` maps a measure to
   the order it proposes. Codes reuse the `terminology_mappings` seed standards where present: audiogram
   → CPT 92557; tb_surveillance → CPT 86580; flu_vaccine → CVX 141; hazwoper → `hazwoper-exam` in
-  `urn:workwell:vs:hazwoper-exams`. Others use a representative standard code (cms122 → CPT 83036, cms125
-  → CPT 77067) or a LOCAL `urn:workwell:orders` code (BMI). A measure absent from the catalog proposes
-  nothing; on Maui that is cms2, cms130, cms165 and cms137, and the route names them in
-  `measuresWithoutOrder` (#621). `GET /api/orders/proposals` returns `ProposedOrder` records
+  `urn:workwell:vs:hazwoper-exams`. Others use a representative standard code or a LOCAL `urn:workwell:orders`
+  code (BMI). All six pilot measures have an order set (#620, #640): protocol (cms122 CPT 83036, cms125 CPT
+  77067) or choice (cms2, cms130, cms165, cms137: the clinician picks; no default). An order is proposed
+  only when the measure's CQL found nothing qualifying, and is card-ready only once an admin approves the
+  code. The table is in `CDS_HOOKS.md`. A measure absent from the catalog proposes nothing, and the route
+  names it in `measuresWithoutOrder` (#621). `GET /api/orders/proposals` returns `ProposedOrder` records
   (or FHIR R4 `ServiceRequest` bundles) for at-risk subjects; proposals are advisory only.

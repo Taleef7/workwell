@@ -15,11 +15,21 @@ import { createSqliteD1 } from "@mieweb/cloud-local";
 import { RUN_STORE_FLOOR_DDL } from "../stores/sqlite/schema.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
+import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { handleOrders } from "./orders.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
 const dbPath = join(tmpdir(), `workwell-orders-route-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
+// Evidence in the shape a run persists (#875), so the route's evidence read is exercised for real.
+const pop = (numer: boolean) => ({ ipp: true, denom: true, numer, denex: false, denexcep: false });
+const facts = (values: Array<[string, string]>) => ({ spec: 1, values: values.map(([define, value]) => ({ define, value })) });
+const cms122 = (noRecord: boolean) => ({
+  official: { ecqmId: "122FHIR", version: "1.0.000", populationResults: pop(true) },
+  cqlFacts: facts(noRecord
+    ? [["Has No Record Of Glycemic Status Assessment", "true"]]
+    : [["Most Recent Glycemic Status Date", "2026-02-10"], ["Has No Record Of Glycemic Status Assessment", "false"]]),
+});
 const get = (qs = "") => handleOrders(new Request(`http://x/api/orders/proposals${qs}`, { method: "GET" }), env as never);
 
 before(async () => {
@@ -49,8 +59,10 @@ before(async () => {
   // #546: two patients whose official evaluation persisted MISSING_DATA (ADR-078) — one INSIDE
   // cms122's initial population and one outside, as the run recorded it (ADR-079). Only the first is
   // at risk of anything.
-  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-020", measureId: "cms122", status: "MISSING_DATA", evidence: {}, outOfPopulation: false });
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-020", measureId: "cms122", status: "MISSING_DATA", evidence: cms122(true), outOfPopulation: false });
   await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-021", measureId: "cms122", status: "MISSING_DATA", evidence: {}, outOfPopulation: true });
+  // #620: a cms122 reading CQL found and counts as not controlled gets NO order (a new test does not fix it).
+  await outcomes.recordOutcome({ runId: run.id, subjectId: "emp-022", measureId: "cms122", status: "OVERDUE", evidence: cms122(false), outOfPopulation: false });
   await runStore.finalizeRun(run.id, "COMPLETED");
 });
 
@@ -88,7 +100,11 @@ test("#616: with no order source connected, no proposal is withheld and the answ
 
 test("the domain view carries totals, and ?limit/?offset window both lists without changing the totals", async () => {
   const whole = (await get("").then((r) => r!.json())) as { proposed: unknown[]; suppressed: unknown[]; totals: { proposed: number; suppressed: number } };
-  assert.deepEqual(whole.totals, { proposed: whole.proposed.length, suppressed: whole.suppressed.length }, "no window → whole arrays, totals alongside");
+  assert.deepEqual(
+    { proposed: whole.totals.proposed, suppressed: whole.totals.suppressed },
+    { proposed: whole.proposed.length, suppressed: whole.suppressed.length },
+    "no window → whole arrays, totals alongside",
+  );
   // emp-006/008/013/014 on audiogram, plus emp-020 — the cms122 patient who IS in the population.
   // emp-021 is the same status on the same measure and is absent, which is the #546 rule.
   assert.equal(whole.totals.proposed + whole.totals.suppressed, 5, "the five at-risk subjects, and not the out-of-population one");
@@ -200,10 +216,11 @@ test("#546: a patient outside the measure's initial population gets no proposal,
   assert.equal(body.totals.proposed + body.totals.suppressed, 1);
 });
 
-test("#621: the measures with no order to propose are named, on the pilot's six-measure scope", () => {
-  // On Maui four of the six routed measures have no catalog order, so their at-risk patients get no
-  // proposal. The page used to show an empty list, which reads as "nobody is at risk"; the route names
-  // them so it can say otherwise. Run in a fresh Maui process: the scope is fixed at module load.
+test("#621/#620: on the pilot's six-measure scope every measure has orders; a choice is a row with no order", () => {
+  // #621 named the four routed measures with no catalog order; #620 gave all six their options, so none
+  // is named now. A choice measure's gap (cms130) is a choice row, never a protocol proposal and never in
+  // the bundle. Run in a fresh Maui process: the scope is fixed at module load.
+  // The Maui profile serves only its directory's patients, so the gap is pat-001's.
   const output = runProfileChild(
     "maui",
     `
@@ -212,17 +229,98 @@ test("#621: the measures with no order to propose are named, on the pilot's six-
       import { handleOrders } from "./src/routes/orders.ts";
       const db = await createSqliteD1(":memory:");
       await db.exec(RUN_STORE_FLOOR_DDL.split(String.fromCharCode(10)).join(" "));
-      const read = async (qs) => (await (await handleOrders(new Request("http://x/api/orders/proposals" + qs), { DB: db })).json()).measuresWithoutOrder;
-      console.log(JSON.stringify({ all: await read(""), cms130: await read("?measureId=cms130"), cms122: await read("?measureId=cms122") }));
+      import { SqliteRunStore } from "./src/stores/sqlite/run-store-sqlite.ts";
+      import { SqliteOutcomeStore } from "./src/stores/sqlite/outcome-store-sqlite.ts";
+      const runs = new SqliteRunStore(db);
+      const outcomes = new SqliteOutcomeStore(db);
+      const run = await runs.createRun({ scopeType: "ALL_PROGRAMS", triggeredBy: "test", requestedScope: {},
+        measurementPeriodStart: "2026-06-19T00:00:00.000Z", measurementPeriodEnd: "2026-06-19T00:00:00.000Z" });
+      await outcomes.recordOutcome({ runId: run.id, subjectId: "pat-001", measureId: "cms130", status: "OVERDUE", evidence: {}, outOfPopulation: false });
+      await runs.finalizeRun(run.id, "COMPLETED");
+      const body = async (qs) => (await (await handleOrders(new Request("http://x/api/orders/proposals" + qs), { DB: db })).json());
+      const all = await body("");
+      const fhir = await body("?format=fhir");
+      console.log(JSON.stringify({
+        all: all.measuresWithoutOrder,
+        cms130: (await body("?measureId=cms130")).measuresWithoutOrder,
+        choices: all.choices,
+        proposed: all.proposed.map((p) => p.subjectId),
+        totals: all.totals,
+        cms130Orders: all.ordersByMeasure.cms130,
+        bundleEntries: (fhir.entry ?? []).length,
+      }));
     `,
     { WORKWELL_OFFICIAL_MEASURES: "cms122,cms125,cms2,cms130,cms165,cms137", DATABASE_URL: undefined },
   );
-  assert.deepEqual([...(output.all as string[])].sort(), ["cms130", "cms137", "cms165", "cms2"]);
-  assert.deepEqual(output.cms130, ["cms130"], "filtered to a measure with no order: named, not an empty list");
-  assert.deepEqual(output.cms122, [], "a measure with an order is not named");
+  assert.deepEqual(output.all, [], "all six pilot measures have orders");
+  assert.deepEqual(output.cms130, []);
+  const choices = output.choices as Array<Record<string, unknown>>;
+  assert.deepEqual(choices.map((c) => c.subjectId), ["pat-001"]);
+  assert.equal("order" in choices[0]!, false, "a choice row names no default order");
+  assert.equal((output.totals as { choices: number }).choices, 1);
+  assert.deepEqual(output.proposed, [], "a choice never enters the protocol list");
+  assert.equal(output.bundleEntries, 0, "the bundle drafts no choice");
+  const cms130 = output.cms130Orders as { mode: string; options: Array<{ approved: boolean }> };
+  assert.equal(cms130.mode, "choice");
+  assert.equal(cms130.options.length, 5);
+  assert.ok(cms130.options.every((o) => o.approved === false), "no code is approved until an admin approves it");
+
 });
 
 test("#621: on the default profile every active measure has an order, so none is named", async () => {
   const body = (await get("").then((r) => r!.json())) as { measuresWithoutOrder: string[] };
   assert.deepEqual(body.measuresWithoutOrder, []);
+});
+
+test("#620: cms122 with a result CQL found gets no order; with no record it does", async () => {
+  const body = (await get("").then((r) => r!.json())) as { proposed: Array<{ subjectId: string }>; choices: Array<{ subjectId: string }> };
+  assert.ok(body.proposed.some((p) => p.subjectId === "emp-020"), "no record → an HbA1c order");
+  assert.ok(!body.proposed.some((p) => p.subjectId === "emp-022"), "a result found and not controlled → no order");
+  assert.ok(!body.choices.some((p) => p.subjectId === "emp-022"));
+});
+
+// --- GET /api/orders/cases/:id (#620 / B16): one case's orders, from the outcome the case cites ---------
+
+async function seedCase(subjectId: string, measureId: string, status: string, evidence: unknown): Promise<string> {
+  const db = (env as { DB: never }).DB;
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE", scopeId: measureId, triggeredBy: "test", requestedScope: { measureId },
+    measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2026-01-01T00:00:00.000Z",
+  });
+  await new SqliteOutcomeStore(db).recordOutcome({ runId: run.id, subjectId, measureId, evaluationPeriod: "2026", status, evidence, outOfPopulation: false });
+  const c = await new SqliteCaseStore(db).upsertFromOutcome({ runId: run.id, subjectId, measureId, evaluationPeriod: "2026", outcomeStatus: status, evidence });
+  assert.ok(c, "fixture: the case was created");
+  return c.id;
+}
+const caseOrdersOf = async (id: string) => {
+  const res = await handleOrders(new Request(`http://x/api/orders/cases/${encodeURIComponent(id)}`, { method: "GET" }), env as never);
+  return { status: res!.status, body: (await res!.json()) as { applies?: boolean; reason?: string; orders: { mode: string; options: Array<{ code: string; approved: boolean }> } | null } };
+};
+
+test("case orders: CMS122 with no record of an assessment offers the HbA1c order", async () => {
+  const { status, body } = await caseOrdersOf(await seedCase("emp-040", "cms122", "OVERDUE", cms122(true)));
+  assert.equal(status, 200);
+  assert.equal(body.applies, true);
+  assert.equal(body.orders?.mode, "protocol");
+  assert.deepEqual(body.orders?.options.map((o) => o.code), ["83036"]);
+  assert.equal(body.orders?.options[0]?.approved, false, "card-ready only once an admin approves the code");
+});
+
+test("case orders: CMS122 with a result CQL found says why no order applies, stating no value", async () => {
+  const { body } = await caseOrdersOf(await seedCase("emp-041", "cms122", "OVERDUE", cms122(false)));
+  assert.equal(body.applies, false);
+  assert.match(body.reason ?? "", /not controlled/);
+  assert.doesNotMatch(body.reason ?? "", /\d/, "the reason asserts no reading");
+});
+
+test("case orders: an unknown case is 404", async () => {
+  assert.equal((await caseOrdersOf("no-such-case")).status, 404);
+});
+
+test("case orders: a closed case says so and offers nothing", async () => {
+  await seedCase("emp-042", "cms122", "OVERDUE", cms122(true));
+  const closedId = await seedCase("emp-042", "cms122", "COMPLIANT", cms122(true));
+  const { body } = await caseOrdersOf(closedId);
+  assert.equal(body.applies, false);
+  assert.match(body.reason ?? "", /closed/);
 });

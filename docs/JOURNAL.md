@@ -7,6 +7,13 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 ## 2026-11-04
 
+- **Order options for all six pilot measures, each code approved by an admin (#620, #640).** Every measure
+  has an order set, one order or a choice the clinician makes (no default), and an order is offered only
+  where the measure's CQL found nothing qualifying: no HbA1c for a result over 9%, no order for an
+  uncontrolled blood pressure or for CMS137's engagement rate. Codes start PROPOSED; an admin approves,
+  rejects or revokes each on Admin → Order codes, audited, and a new mapping can only be created PROPOSED.
+  Cards offer each approved option and list the whole set; the case page shows the options, or why none
+  applies; Orders lists the choices. An approved clinic code rides as a second coding. No schema change.
 - **Log a contact, and each patient's preferred channel (#886).** Staff log a call, text, email, visit or
   letter they made themselves on the case page (by default on the patient's other open gaps too); nothing is
   sent, Open moves to In progress, and the gap leaves the "not contacted yet" count. A send now keeps a worked

@@ -154,6 +154,21 @@ declined channel is 409 `channel_declined`, no channel takes the preferred one, 
 PHONE not declined, else 409 `all_channels_declined`. Campaigns skip a subject who declined their channel
 (`skippedDeclined`, in the result and dry run only). Linked records are not merged.
 
+### Order codes and mapping review (#640, owner decision 2026-11-04)
+- **A mapping is created PROPOSED only** (`createTerminologyMapping`; another status is 400). Only a review
+changes its status: `reviewTerminologyMapping` / `reviewOrderCode` (`order/order-code-review.ts`), ADMIN.
+- **A review is audit-first** (`TERMINOLOGY_MAPPING_REVIEWED`: from, to, note, who, when), then a
+compare-and-set on the status read (`updateTerminologyMappingStatus`, both stores; a lost race is 409
+`conflict` and leaves the event as an over-claim). Same status is 409 `unchanged`.
+- **The code's own row** (local = national) records an order code's approval. It is created PROPOSED the
+first time an admin acts on the code (audited `TERMINOLOGY_MAPPING_CREATED`, deterministic id
+`order-code:<system>|<code>`; a unique conflict reads the row back), never seeded. Revoking rejects every
+APPROVED row for the national code, each audited.
+- **One approved clinic code per national code** (409 `clinic_code_already_approved`). The code's own row and
+a `urn:workwell:*` row never count and never ride on a ServiceRequest. Residual: the check is a read, so two
+clinic codes approved at the same instant could both stand (the unique key spans the local code); the card
+then takes the first in the store's order.
+
 ### Resolution is not segment-gated; cycle rollover is closed out
 - `isApplicable` gates creation only. Out-of-cohort close-only upserts: COMPLIANT, and EXCLUDED only where
 an active case exists (run-start snapshot).
