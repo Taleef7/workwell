@@ -358,7 +358,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (campaignsResponse) return campaignsResponse;
 
   // Employees — directory profile + search over the synthetic directory + outcomes/cases (#107).
-  const employeesResponse = await handleEmployees(req, env);
+  const employeesResponse = await handleEmployees(req, env, actor);
   if (employeesResponse) return employeesResponse;
 
   // Programs — compliance KPI overview + site list over runs/outcomes/cases (#107).

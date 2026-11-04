@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { useApi } from "@/lib/api/hooks";
 import { OUTCOME_LABELS, labelFor, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import { useMeasureIdentities } from "@/lib/measure-identity";
 import { lastContactLine } from "@/features/employee/last-contact";
-import type { OpenCaseSummary } from "@/features/employee/hooks/useEmployeeProfile";
+import type { ContactPreference, OpenCaseSummary } from "@/features/employee/hooks/useEmployeeProfile";
 
 type Load = { state: "loading" } | { state: "failed" } | { state: "loaded"; openCases: OpenCaseSummary[] };
 
@@ -18,23 +18,46 @@ type Load = { state: "loading" } | { state: "failed" } | { state: "loaded"; open
  * promise "all": that page leaves CMS2 and CMS137 unticked until a person chooses them (#868). Read from
  * `GET /api/employees/:id/open-cases`, the patient page's own Open Cases, so the two cannot disagree.
  */
-export function OtherOpenGaps({ subjectId, caseId, canMessage }: { subjectId: string; caseId: string; canMessage: boolean }) {
+export function OtherOpenGaps({
+  subjectId,
+  caseId,
+  canMessage,
+  onLoaded,
+}: {
+  subjectId: string;
+  caseId: string;
+  canMessage: boolean;
+  /**
+   * The same answer, for the case page (#886): the other gaps a logged contact may also be recorded on, and
+   * the person's contact preference for its channel picker. Called with null when the read failed.
+   */
+  onLoaded?: (data: { openCases: OpenCaseSummary[]; contactPreference: ContactPreference | null } | null) => void;
+}) {
   const api = useApi();
   const { labelFor: measureLabelFor } = useMeasureIdentities();
   const [load, setLoad] = useState<Load>({ state: "loading" });
+  const reportLoaded = useEffectEvent((data: Parameters<NonNullable<typeof onLoaded>>[0]) => onLoaded?.(data));
 
   useEffect(() => {
     let mounted = true;
     api
-      .get<{ openCases?: unknown }>(`/api/employees/${encodeURIComponent(subjectId)}/open-cases`)
+      .get<{ openCases?: unknown; contactPreference?: ContactPreference | null }>(`/api/employees/${encodeURIComponent(subjectId)}/open-cases`)
       .then((data) => {
         if (!mounted) return;
         // Anything but a list is a server this page does not understand, never "no other gaps".
-        if (Array.isArray(data?.openCases)) setLoad({ state: "loaded", openCases: data.openCases as OpenCaseSummary[] });
-        else setLoad({ state: "failed" });
+        if (Array.isArray(data?.openCases)) {
+          const openCases = data.openCases as OpenCaseSummary[];
+          setLoad({ state: "loaded", openCases });
+          reportLoaded({ openCases, contactPreference: data.contactPreference ?? null });
+        } else {
+          setLoad({ state: "failed" });
+          reportLoaded(null);
+        }
       })
       .catch(() => {
-        if (mounted) setLoad({ state: "failed" });
+        if (!mounted) return;
+        setLoad({ state: "failed" });
+        reportLoaded(null);
       });
     return () => {
       mounted = false;

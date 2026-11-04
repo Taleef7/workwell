@@ -6,13 +6,8 @@ import { useApi } from '@/lib/api/hooks';
 import { ApiError } from '@/lib/api/errors';
 import { emitToast } from '@/lib/toast';
 import { SUBJECT } from '@/lib/terminology';
-import type { OpenCaseSummary } from '@/features/employee/hooks/useEmployeeProfile';
-
-const CHANNELS = [
-  { value: 'EMAIL', label: 'Email' },
-  { value: 'SMS', label: 'SMS' },
-  { value: 'PHONE', label: 'Phone' },
-];
+import type { ContactPreference, OpenCaseSummary } from '@/features/employee/hooks/useEmployeeProfile';
+import { channelOptions, defaultChannel } from '@/features/employee/contact-preference';
 
 interface PreviewMessage {
   caseIds: string[];
@@ -39,16 +34,23 @@ interface SendResult {
 export function GapOutreach({
   cases,
   labelFor,
+  preference,
   onSent,
 }: {
   /** The ticked gaps, in the table's order. */
   cases: OpenCaseSummary[];
   labelFor: (c: OpenCaseSummary) => string;
+  /** How the person wants to be reached (#886): the picker opens on it and disables declined channels. */
+  preference?: ContactPreference | null;
   /** Re-read the profile: after a send, and to reload a page a refusal found stale. */
   onSent: () => void;
 }) {
   const api = useApi();
-  const [channel, setChannel] = useState('EMAIL');
+  const opening = defaultChannel(preference);
+  const [chosen, setChosen] = useState<string | null>(null);
+  // Staff's choice, else the person's preferred channel (#886): the server's own default.
+  const channel = chosen ?? opening ?? 'EMAIL';
+  const setChannel = setChosen;
   const [preview, setPreview] = useState<{ key: string; messages: PreviewMessage[] } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [sending, setSending] = useState(false);
@@ -113,14 +115,14 @@ export function GapOutreach({
       </p>
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <div className="w-36">
-          <Select label="Channel" size="sm" value={channel} onValueChange={setChannel} options={CHANNELS} />
+          <Select label="Channel" size="sm" value={channel} onValueChange={setChannel} options={channelOptions(preference)} />
         </div>
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={() => void showPreview()}
-          disabled={n === 0 || previewing || sending}
+          disabled={n === 0 || previewing || sending || opening === null}
           isLoading={previewing}
           loadingText="Previewing..."
         >
@@ -131,14 +133,19 @@ export function GapOutreach({
           variant="primary"
           size="sm"
           onClick={() => void send()}
-          disabled={!previewed || sending}
-          title={!previewed ? 'Preview the message before sending' : undefined}
+          disabled={!previewed || sending || opening === null}
+          title={opening === null ? `This ${SUBJECT.singular} declined all contact` : !previewed ? 'Preview the message before sending' : undefined}
           isLoading={sending}
           loadingText="Sending..."
         >
           {sendLabel}
         </Button>
       </div>
+      {opening === null ? (
+        <p className="mt-3 text-sm font-medium text-amber-700 dark:text-amber-300" data-testid="gap-outreach-declined-all">
+          Declined all contact. Nothing can be sent to this {SUBJECT.singular}; a contact they make can still be logged on a case.
+        </p>
+      ) : null}
       {previewed
         ? previewed.messages.map((m) => (
             <div

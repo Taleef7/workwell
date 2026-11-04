@@ -479,6 +479,20 @@ CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.panel_assignments (
 -- about intent as much as cost: the column the read filters on is the one that is indexed.
 CREATE INDEX IF NOT EXISTS spike_panel_assignments_assignee_idx ON ${SPIKE_SCHEMA}.panel_assignments (assignee);
 
+-- How each subject wants to be reached (#886; B6, #584 item 1): a preferred channel and the channels not to
+-- use. Keyed by the subject id cases use (cases.employee_id): a person with two linked records has two
+-- rows, as their cases do. A send on a declined channel is refused before anything is recorded; a
+-- preference never touches compliance.
+-- OWNER-APPROVED DDL (#886, 2026-11-03): Taleef approved this exact table in-session.
+-- Additive (CREATE IF NOT EXISTS), reversible (DROP TABLE), no data migration.
+CREATE TABLE IF NOT EXISTS ${SPIKE_SCHEMA}.contact_preferences (
+  subject_id         TEXT PRIMARY KEY,
+  preferred_channel  TEXT,                     -- EMAIL | SMS | PHONE, or NULL
+  declined_channels  TEXT NOT NULL DEFAULT '', -- comma-separated subset of EMAIL,SMS,PHONE
+  updated_by         TEXT NOT NULL,
+  updated_at         TIMESTAMPTZ NOT NULL
+);
+
 -- Login families (#688): each refresh-token family's CURRENT jti, which refresh rotation and logout
 -- revocation check (Fable M5). It lived in the in-memory CACHE KV, so every deploy or restart emptied it
 -- and signed every user out within one access-token lifetime. No credential is stored: a random family

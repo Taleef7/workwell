@@ -55,7 +55,9 @@ import {
   evalStateStoreContract,
   panelStoreContract,
   subjectListStoreContract,
+  contactPreferenceStoreContract,
 } from "../store-contract.ts";
+import { PgContactPreferenceStore } from "./contact-preference-store-postgres.ts";
 
 const url = process.env.WORKWELL_TEST_PG_URL ?? "postgres://workwell:workwell@localhost:5432/workwell";
 
@@ -103,7 +105,7 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
 
   const truncate = () =>
     pool.query(
-      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments, ${SPIKE_SCHEMA}.quality_snapshots, ${SPIKE_SCHEMA}.person_links, ${SPIKE_SCHEMA}.eval_state, ${SPIKE_SCHEMA}.panel_assignments, ${SPIKE_SCHEMA}.subject_list_members, ${SPIKE_SCHEMA}.subject_lists RESTART IDENTITY CASCADE`,
+      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments, ${SPIKE_SCHEMA}.quality_snapshots, ${SPIKE_SCHEMA}.person_links, ${SPIKE_SCHEMA}.eval_state, ${SPIKE_SCHEMA}.panel_assignments, ${SPIKE_SCHEMA}.contact_preferences, ${SPIKE_SCHEMA}.subject_list_members, ${SPIKE_SCHEMA}.subject_lists RESTART IDENTITY CASCADE`,
     );
 
   /**
@@ -327,6 +329,11 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
   panelStoreContract("postgres", async () => {
     await truncate();
     return new PgPanelStore(pool);
+  });
+
+  contactPreferenceStoreContract("postgres", async () => {
+    await truncate();
+    return new PgContactPreferenceStore(pool);
   });
 
   subjectListStoreContract("postgres", async () => {

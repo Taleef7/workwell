@@ -3,6 +3,7 @@
  * a real run dispatches per recipient, tallies counts (sent+failed===total), and persists.
  *   node --import tsx --test src/case/outreach-campaign.test.ts
  */
+import { SqliteContactPreferenceStore } from "../stores/sqlite/contact-preference-store-sqlite.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
@@ -33,7 +34,7 @@ before(async () => {
   const outcomes = new SqliteOutcomeStore(db);
   const cases = new SqliteCaseStore(db);
   const events = new SqliteCaseEventStore(db);
-  deps = { cases, events, outcomes, campaigns: new AuditBackedCampaignStore(events) };
+  deps = { cases, events, outcomes, campaigns: new AuditBackedCampaignStore(events), contactPreferences: new SqliteContactPreferenceStore(db) };
   const run = await runStore.createRun({
     scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
     measurementPeriodStart: "2026-06-13T00:00:00.000Z", measurementPeriodEnd: "2026-06-13T00:00:00.000Z",

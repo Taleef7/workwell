@@ -150,7 +150,7 @@ const RULES: Rule[] = [
   // (`/api/cases/:id/assign`) stays with staff, so this is a limit on volume, not on authority.
   { method: "POST", pattern: rx("/api/cases/bulk-assign"), access: [CM, A] },
   // One case's work: assign, outreach, escalate, resolve, appointment, re-check, the patient's one
-  // message, AI explain. The staff seat's job.
+  // message, a logged contact (#886), AI explain. The staff seat's job.
   { method: "POST", pattern: rx("/api/cases/**"), access: [CM, QS, A] },
   // Batch outreach campaigns (#75 E5) multiply per-case outreach over up to 100k cases —
   // they carry the same operational case/PII data, so ALL methods on /api/campaigns and
@@ -228,6 +228,9 @@ const RULES: Rule[] = [
   // The read-only VIEWER is the public /sandbox and the Maui clinician seat. Must precede the catch-alls.
   // The CSVs are the staff seat's too (owner decision 2026-11-02); the QRDA and MeasureReport files are
   // the lead's (#880), the files a report is filed from.
+  // A subject's contact preference (#886): the staff seat and the lead set it (LOCKED §4A.9). Reading it
+  // rides on the profile, which stays AUTHENTICATED; writing it changes which channel every send uses.
+  { pattern: rx("/api/employees/*/contact-preference"), access: [CM, QS, A] },
   { pattern: rx("/api/exports/**"), access: [CM, QS, A] },
   { pattern: rx("/api/audit-events/**"), access: [A] },
   { method: "GET", pattern: rx("/api/runs/*/qrda1"), access: [CM, A] },

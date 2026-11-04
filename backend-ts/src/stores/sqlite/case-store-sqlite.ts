@@ -477,8 +477,9 @@ export class SqliteCaseStore implements CaseStore {
       binds.push(query.outcome);
     }
     if (query.outreach) {
-      // The same definition `outreachSentCounts` uses, as a correlated EXISTS.
-      const exists = "EXISTS (SELECT 1 FROM case_actions ca WHERE ca.case_id = cases.id AND ca.action_type = 'OUTREACH_SENT')";
+      // The same definition `contactAttemptCounts` uses (a send or a logged contact, #886), as a correlated EXISTS.
+      const exists =
+        "EXISTS (SELECT 1 FROM case_actions ca WHERE ca.case_id = cases.id AND ca.action_type IN ('OUTREACH_SENT', 'CONTACT_LOGGED'))";
       where.push(query.outreach === "none" ? `NOT ${exists}` : exists);
     }
     // `created_at` is an ISO-8601 Z string here and TIMESTAMPTZ on the ceiling; both compare the UTC

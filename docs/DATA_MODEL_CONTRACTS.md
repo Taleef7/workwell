@@ -134,6 +134,26 @@ or send. **Campaigns** skip every ended-cycle case.
 - **One population run at a time:** `/api/runs/manual` and its rerun answer **409 `run_in_progress`** while a
 population run the pipeline planned (it carries `today`) is RUNNING and younger than this process.
 
+### Contacts and preferences (#886)
+- **A logged contact** (`POST /api/cases/contact-log`, `case/contact-log.ts`) records a call, text, email,
+visit or letter staff made themselves; nothing is sent. Only ACTIVE cases of one subject (else 409
+`case_not_active`, 400 `mixed_subjects`, 404); per case, audit-first `CASE_CONTACT_LOGGED` (action
+`CONTACT_LOGGED`, payload channel, result, note, from/to status), then OPEN moves to `IN_PROGRESS`. It never
+changes an outcome, `current_outcome_status` or `next_action`.
+- **A send keeps `IN_PROGRESS`** (`recordDispatch`); any other status becomes OPEN, as before. Escalate still
+resets to OPEN.
+- **"Contacted"**: `outreach=none` means no `OUTREACH_SENT` and no `CONTACT_LOGGED` (`contactAttemptCounts`, the
+SQL `EXISTS` on both stores and the in-memory filter). `outreachRecordCount`, `outreachSentCounts` and
+`hasOutreachSent` stay send-only.
+- **Campaigns stay OPEN-only**, so a worked (`IN_PROGRESS`) case is skipped; so is the case on an MCP
+compliance answer, which a logged contact now removes more often.
+- **Contact preference** (`contact_preferences`, keyed by the case subject id; `case/contact-preference.ts`):
+audit-first `CONTACT_PREFERENCE_SET` / `CONTACT_PREFERENCE_CLEARED` (entity `subject`); a no-op writes nothing,
+an empty preference deletes the row. Every send and preview resolves its channel before any audit or send: a
+declined channel is 409 `channel_declined`, no channel takes the preferred one, else the first of EMAIL, SMS,
+PHONE not declined, else 409 `all_channels_declined`. Campaigns skip a subject who declined their channel
+(`skippedDeclined`, in the result and dry run only). Linked records are not merged.
+
 ### Resolution is not segment-gated; cycle rollover is closed out
 - `isApplicable` gates creation only. Out-of-cohort close-only upserts: COMPLIANT, and EXCLUDED only where
 an active case exists (run-start snapshot).

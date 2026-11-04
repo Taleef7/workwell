@@ -146,6 +146,13 @@ export interface CaseEventStore {
    */
   outreachSentCounts(caseIds: readonly string[]): Promise<Record<string, number>>;
   /**
+   * Per-case count of contact ATTEMPTS — OUTREACH_SENT plus CONTACT_LOGGED (#886) — for the given case
+   * ids: what the work list's `outreach=` filter ("not contacted yet") reads. The badge's
+   * `outreachRecordCount` stays a send count ({@link outreachSentCounts}). Same shape: absent ids are 0,
+   * empty input returns {} (no query).
+   */
+  contactAttemptCounts(caseIds: readonly string[]): Promise<Record<string, number>>;
+  /**
    * The `deliveryStatus` from the most recent OUTREACH_DELIVERY_UPDATED / OUTREACH_SENT
    * case_action payload (CaseDetail.latestOutreachDeliveryStatus), or null if none.
    */

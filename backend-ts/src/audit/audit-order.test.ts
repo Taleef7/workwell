@@ -34,6 +34,8 @@ import { createJwt } from "../auth/jwt.ts";
 import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
 import { auditedExport } from "./export-audit.ts";
 import { rerunToVerify } from "../case/case-rerun.ts";
+import { logContact } from "../case/contact-log.ts";
+import { setContactPreference, clearContactPreference } from "../case/contact-preference.ts";
 
 /** A ledger that records what it was asked to append, in order. */
 function ledger() {
@@ -393,4 +395,40 @@ test("rerunToVerify of a closed case whose cycle has ended (#882): CASE_RERUN_VE
   );
   assert.deepEqual(log.types(), ["CASE_RERUN_VERIFIED"]);
   assert.equal(log.events[0]!.payload.earlierCycle, true);
+});
+
+test("logContact (#886): CASE_CONTACT_LOGGED survives a failed status patch, and the case is reported failed", async () => {
+  const log = ledger();
+  const open = {
+    id: "c1", employeeId: "pat-1", measureId: "cms125", evaluationPeriod: "2026-01-01", status: "OPEN", lastRunId: "run-1",
+  };
+  const out = await logContact(
+    { cases: { getCases: async () => [open], patchCase: explode } as never, events: log as never },
+    { caseIds: ["c1"], channel: "PHONE", result: "NO_ANSWER", note: null, actor: "quality-staff@workwell.dev" },
+  );
+  assert.deepEqual(log.types(), ["CASE_CONTACT_LOGGED"]);
+  assert.deepEqual(out.failed, ["c1"]);
+});
+
+test("setContactPreference / clearContactPreference (#886): each event survives a failed store write", async () => {
+  const log = ledger();
+  const store = { get: async () => null, upsert: explode, remove: explode, getMany: async () => ({}) };
+  await assert.rejects(
+    setContactPreference({ contactPreferences: store, events: log }, {
+      subjectId: "pat-1", preferredChannel: "SMS", declinedChannels: ["EMAIL"], actor: "quality-staff@workwell.dev",
+    }),
+    BOOM,
+  );
+  assert.deepEqual(log.types(), ["CONTACT_PREFERENCE_SET"]);
+
+  const existing = {
+    subjectId: "pat-1", preferredChannel: "SMS" as const, declinedChannels: ["EMAIL" as const],
+    updatedBy: "x", updatedAt: "2026-11-03T00:00:00.000Z",
+  };
+  const log2 = ledger();
+  await assert.rejects(
+    clearContactPreference({ contactPreferences: { ...store, get: async () => existing }, events: log2 }, "pat-1", "cm@workwell.dev"),
+    BOOM,
+  );
+  assert.deepEqual(log2.types(), ["CONTACT_PREFERENCE_CLEARED"]);
 });

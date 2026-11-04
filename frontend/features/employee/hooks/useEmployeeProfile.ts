@@ -47,9 +47,20 @@ export interface OpenCaseSummary {
   lastOutreachBy?: string | null;
   lastOutreachChannel?: string | null;
   lastOutreachDeliveryStatus?: string | null;
+  /** The result staff logged (#886) when the newest contact was a logged one; null for a send. */
+  lastContactResult?: string | null;
   slaDueDate: string | null;
   slaRemainingDays: number | null;
   slaBreached: boolean;
+}
+
+/** How this person wants to be reached (#886); null when none is recorded. */
+export interface ContactPreference {
+  subjectId: string;
+  preferredChannel: 'EMAIL' | 'SMS' | 'PHONE' | null;
+  declinedChannels: Array<'EMAIL' | 'SMS' | 'PHONE'>;
+  updatedBy: string;
+  updatedAt: string;
 }
 
 export interface EmployeeProfile {
@@ -64,6 +75,8 @@ export interface EmployeeProfile {
   active: boolean;
   measureOutcomes: MeasureOutcomeSummary[];
   openCases: OpenCaseSummary[];
+  /** Absent from a server from before #886. */
+  contactPreference?: ContactPreference | null;
   recentAuditEvents: Array<{
     eventType: string;
     occurredAt: string;

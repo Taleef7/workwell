@@ -18,6 +18,9 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
 import { CqlFindings, type CaseCqlFindings } from "@/features/evidence/CqlFindings";
 import { OtherOpenGaps } from "@/features/employee/components/OtherOpenGaps";
+import { LogContactModal } from "@/features/outreach/LogContactModal";
+import { channelOptions as preferenceChannelOptions, declinedAll, defaultChannel, preferenceLine } from "@/features/employee/contact-preference";
+import type { ContactPreference, OpenCaseSummary } from "@/features/employee/hooks/useEmployeeProfile";
 import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
 import { LocalOnlyNotice } from "@/features/common/LocalOnlyNotice";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
@@ -209,8 +212,13 @@ function CaseDetailView({ caseId }: { caseId: string }) {
   const [explaining, setExplaining] = useState(false);
   const [templates, setTemplates] = useState<OutreachTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
-  // Outreach channel: EMAIL is the default so existing behavior is unchanged (#75 E5).
+  // Outreach channel (#75 E5): opens on the person's preferred channel once it is known (#886), else Email.
   const [outreachChannel, setOutreachChannel] = useState<string>("EMAIL");
+  const [channelTouched, setChannelTouched] = useState(false);
+  // The person's other gaps and contact preference, as Other open gaps read them (#886).
+  const [gapsInfo, setGapsInfo] = useState<{ openCases: OpenCaseSummary[]; contactPreference: ContactPreference | null } | null>(null);
+  const [gapsVersion, setGapsVersion] = useState(0);
+  const [logContactOpen, setLogContactOpen] = useState(false);
   const [outreachPreview, setOutreachPreview] = useState<OutreachPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [showRawEvidence, setShowRawEvidence] = useState(false);
@@ -278,14 +286,11 @@ function CaseDetailView({ caseId }: { caseId: string }) {
     ],
     [templates],
   );
-  const channelOptions = useMemo(
-    () => [
-      { value: "EMAIL", label: "Email" },
-      { value: "SMS", label: "SMS" },
-      { value: "PHONE", label: "Phone" },
-    ],
-    [],
-  );
+  // Declined channels are shown and disabled (#886): the server refuses a send on one.
+  const contactPreference = gapsInfo?.contactPreference ?? null;
+  const channelOptions = useMemo(() => preferenceChannelOptions(contactPreference), [contactPreference]);
+  const noContactReason = declinedAll(contactPreference) ? `This ${SUBJECT.singular} declined all contact.` : null;
+  const otherOpenCaseIds = gapsInfo ? gapsInfo.openCases.filter((c) => c.caseId !== caseId).map((c) => c.caseId) : null;
   const appointmentTypeOptions = isPatientTerm ? PATIENT_APPOINTMENT_TYPE_OPTIONS : EMPLOYEE_APPOINTMENT_TYPE_OPTIONS;
 
   const loadCase = useCallback(async () => {
@@ -356,7 +361,7 @@ function CaseDetailView({ caseId }: { caseId: string }) {
     if (action === "outreach") {
       const params = new URLSearchParams();
       if (selectedTemplateId) params.set("templateId", selectedTemplateId);
-      // EMAIL is the default; forward channel so SMS/PHONE selections reach the backend (#75 E5).
+      // Forward the channel so SMS/PHONE selections reach the backend (#75 E5).
       params.set("channel", outreachChannel);
       const qs = params.toString();
       templateQuery = qs ? `?${qs}` : "";
@@ -401,8 +406,10 @@ function CaseDetailView({ caseId }: { caseId: string }) {
     setPreviewing(true);
     setError(null);
     try {
-      const templateQuery = selectedTemplateId ? `?templateId=${encodeURIComponent(selectedTemplateId)}` : "";
-      const data = await api.get<OutreachPreview>(`/api/cases/${caseId}/actions/outreach/preview${templateQuery}`);
+      // The channel too (#886), so a preview on a channel the person declined is refused as the send would be.
+      const params = new URLSearchParams({ channel: outreachChannel });
+      if (selectedTemplateId) params.set("templateId", selectedTemplateId);
+      const data = await api.get<OutreachPreview>(`/api/cases/${caseId}/actions/outreach/preview?${params.toString()}`);
       setOutreachPreview(data);
     } catch (err) {
       refuse(err);
@@ -745,9 +752,18 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                   <Select
                     label="Channel"
                     value={outreachChannel}
-                    onValueChange={setOutreachChannel}
+                    onValueChange={(v) => {
+                      setChannelTouched(true);
+                      setOutreachChannel(v);
+                      setOutreachPreview(null);
+                    }}
                     options={channelOptions}
                   />
+                  {preferenceLine(contactPreference) ? (
+                    <p className="text-xs text-neutral-600 dark:text-neutral-400" data-testid="case-contact-preference">
+                      {preferenceLine(contactPreference)}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</span>
@@ -779,8 +795,8 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                     type="button"
                     variant="outline"
                     onClick={() => void previewOutreach()}
-                    disabled={previewing || caseStatus === "EXCLUDED" || noOutreachReason !== null}
-                    title={noOutreachReason ?? undefined}
+                    disabled={previewing || caseStatus === "EXCLUDED" || noOutreachReason !== null || noContactReason !== null}
+                    title={noOutreachReason ?? noContactReason ?? undefined}
                     isLoading={previewing}
                     loadingText="Previewing..."
                   >
@@ -790,8 +806,8 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                     type="button"
                     variant="primary"
                     onClick={() => void runAction("outreach")}
-                    disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null || noOutreachReason !== null}
-                    title={noOutreachReason ?? (outreachPreview === null ? "Preview the message before sending" : undefined)}
+                    disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null || noOutreachReason !== null || noContactReason !== null}
+                    title={noOutreachReason ?? noContactReason ?? (outreachPreview === null ? "Preview the message before sending" : undefined)}
                     isLoading={acting === "outreach"}
                     loadingText="Sending outreach..."
                   >
@@ -834,6 +850,15 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                   >
                     Schedule Appointment
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setLogContactOpen(true)}
+                    disabled={caseIsFinished}
+                    title={caseIsFinished ? "Only an open case takes a logged contact." : "Record a call, text or visit you made yourself; nothing is sent."}
+                  >
+                    Log contact
+                  </Button>
                 </div>
                 {/* §8E on the DESKTOP path. The first version of this change put the notice only in
                     the phone layout this page used to have, so every desktop user — which is most of them — saw
@@ -844,6 +869,19 @@ function CaseDetailView({ caseId }: { caseId: string }) {
                 <LocalOnlyNotice action="Outreach" className="mt-3" />
                 </>
                 )}
+                {canManage && caseId ? (
+                  <LogContactModal
+                    open={logContactOpen}
+                    onClose={() => setLogContactOpen(false)}
+                    caseId={caseId}
+                    otherCaseIds={otherOpenCaseIds}
+                    preference={contactPreference}
+                    onLogged={() => {
+                      void loadCase();
+                      setGapsVersion((v) => v + 1);
+                    }}
+                  />
+                ) : null}
                 <Modal open={appointmentModalOpen} onOpenChange={(open) => { if (!open) setAppointmentModalOpen(false); }} size="md">
                   <ModalHeader>
                     <ModalTitle>Schedule Appointment</ModalTitle>
@@ -1068,7 +1106,18 @@ function CaseDetailView({ caseId }: { caseId: string }) {
           </div>
 
           <div className="min-w-0 space-y-4 sm:space-y-6">
-            <OtherOpenGaps subjectId={caseDetail.employeeId} caseId={caseId} canMessage={canManage} />
+            <OtherOpenGaps
+              key={gapsVersion}
+              subjectId={caseDetail.employeeId}
+              caseId={caseId}
+              canMessage={canManage}
+              onLoaded={(data) => {
+                setGapsInfo(data);
+                // Open on the person's channel (#886), unless staff already chose one.
+                const preferred = defaultChannel(data?.contactPreference);
+                if (!channelTouched && preferred) setOutreachChannel(preferred);
+              }}
+            />
             <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Metadata</p>
               <dl className="mt-4 space-y-3 text-sm">
@@ -1351,6 +1400,7 @@ function eventIcon(eventType: string) {
   if (normalized.includes("APPOINTMENT")) return "📅";
   if (normalized.includes("EVIDENCE")) return "📎";
   if (normalized.includes("OUTREACH")) return "✉";
+  if (normalized.includes("CONTACT")) return "☎";
   if (normalized.includes("RERUN") || normalized.includes("RUN")) return "↻";
   if (normalized.includes("CREATED")) return "+";
   if (normalized.includes("RESOLVED") || normalized.includes("CLOSED")) return "✓";
@@ -1375,6 +1425,14 @@ function timelineNotificationBadge(event: AuditEvent) {
     return {
       label: "Auto",
       className: "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300"
+    };
+  }
+
+  // A contact staff made themselves and logged (#886): nothing was sent.
+  if (eventType.includes("CONTACT_LOGGED")) {
+    return {
+      label: "Logged",
+      className: "border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
     };
   }
 

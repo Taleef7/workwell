@@ -14,6 +14,7 @@ import { SUBJECT } from "@/lib/terminology";
 import Link from 'next/link';
 import { useEmployeeProfile, type OpenCaseSummary } from '@/features/employee/hooks/useEmployeeProfile';
 import { GapOutreach } from '@/features/employee/components/GapOutreach';
+import { ContactPreferenceCard } from '@/features/employee/components/ContactPreferenceCard';
 import { isSensitiveMeasure } from '@/lib/sensitive-measures';
 import { ComplianceSummaryBar, shownStatusOf } from '@/features/employee/components/ComplianceSummaryBar';
 import { IndividualComplianceStatus } from '@/features/employee/components/IndividualComplianceStatus';
@@ -353,6 +354,7 @@ export default function EmployeeProfilePage() {
           <GapOutreach
             cases={profile.openCases.filter(isTicked)}
             labelFor={(c) => compactLabelFor(c.measureId, c.measureName, c.logic)}
+            preference={profile.contactPreference ?? null}
             onSent={refetch}
           />
         ) : null}
@@ -443,6 +445,17 @@ export default function EmployeeProfilePage() {
       </div>
 
       <aside className="min-w-0 space-y-6 xl:sticky xl:top-6 xl:self-start">
+      {/* How this person wants to be reached (#886). Absent from a server from before it: no card. */}
+      {profile.contactPreference !== undefined ? (
+        <ContactPreferenceCard
+          key={profile.contactPreference?.updatedAt ?? 'none'}
+          subjectId={externalId}
+          preference={profile.contactPreference}
+          canEdit={canManageThisCase}
+          onSaved={refetch}
+        />
+      ) : null}
+
       {/* Recent activity timeline */}
       <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Recent Activity</h2>
