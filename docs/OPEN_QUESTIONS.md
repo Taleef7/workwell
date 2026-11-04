@@ -91,6 +91,19 @@ nothing regardless of whether it is right.
   measure for one patient). Since #880 each screen says so in its heading. If the practice's staff use
   other words for the two, the screens and their navigation take those words.
 
+### 1.6 Which order codes may a card offer, before real data?
+
+**Raised:** 2026-11-04 (#620, #640). **Status:** the owner approves codes for the sandbox; open for the PHI
+phase.
+
+- Each measure's order set is in `CDS_HOOKS.md`. Before the pilot runs on real data, the pilot group's
+  clinician signs off on each code a card may offer, and an admin records each approval on Admin → Order
+  codes (audited, with who and when).
+- CMS137's options (HCPCS H0001, H0004) lean on Medicaid behavioral-health codes. Do they fit the pilot
+  group's payers, or does the practice order SUD assessment and counseling under other codes?
+- The clinic's own order catalog (#640 item 4): which local code does the practice use for each order, so a
+  card can carry it beside the national code? Waits on MIE.
+
 ---
 
 ## 2. For the ACO

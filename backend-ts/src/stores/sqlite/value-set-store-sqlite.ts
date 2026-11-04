@@ -285,4 +285,27 @@ export class SqliteValueSetStore implements ValueSetStore {
     const row = await this.db.prepare(`${TM_SELECT} WHERE id = ?`).bind(input.id).first<TmRow>();
     return toTerminology(row!);
   }
+
+  async getTerminologyMapping(id: string): Promise<TerminologyMappingRecord | null> {
+    const row = await this.db.prepare(`${TM_SELECT} WHERE id = ?`).bind(id).first<TmRow>();
+    return row ? toTerminology(row) : null;
+  }
+
+  async updateTerminologyMappingStatus(
+    id: string,
+    fromStatus: string,
+    toStatus: string,
+    reviewedBy: string,
+    reviewedAt: string,
+  ): Promise<TerminologyMappingRecord | null> {
+    const { results } = await this.db
+      .prepare(
+        `UPDATE terminology_mappings SET mapping_status = ?, reviewed_by = ?, reviewed_at = ?
+         WHERE id = ? AND mapping_status = ? RETURNING 1 AS ok`,
+      )
+      .bind(toStatus, reviewedBy, reviewedAt, id, fromStatus)
+      .all<{ ok: number }>();
+    if ((results ?? []).length !== 1) return null;
+    return this.getTerminologyMapping(id);
+  }
 }

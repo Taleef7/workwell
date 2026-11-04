@@ -21,8 +21,12 @@ import { isCompletedRun, isPopulationRun, latestRunRows } from "../program/rollu
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { proposeOrders, type AtRiskOutcome } from "../order/order-proposal.ts";
 import { resolveStandingOrderProvider, type StandingOrderEnv } from "../order/standing-order-provider.ts";
-import { orderForMeasure } from "../order/order-catalog.ts";
+import { codeKey, ordersForMeasure, type MeasureOrders } from "../order/order-catalog.ts";
 import { bundleOf } from "../order/proposed-order.ts";
+import { AT_RISK_STATUSES, orderApplicability } from "../order/order-applicability.ts";
+import { readApprovedOrderCodes } from "../order/approved-codes.ts";
+import { outcomeForCase } from "../case/case-outcome.ts";
+import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import { DEPLOYMENT_PROFILE, isRunnableMeasure } from "../config/deployment-profile.ts";
 import type { DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { latestPopulationSnapshot } from "../program/latest-population.ts";
@@ -35,9 +39,58 @@ interface OrdersEnv extends StandingOrderEnv, DataSourceEnv {
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
+/** A measure's order options for a screen: catalog text plus whether an admin approved each code for cards. */
+export function optionsView(orders: MeasureOrders, approved: ReadonlySet<string>) {
+  return {
+    mode: orders.mode,
+    ...(orders.caveat ? { caveat: orders.caveat } : {}),
+    options: orders.options.map((o) => ({
+      key: codeKey(o),
+      code: o.code,
+      system: o.system,
+      display: o.display,
+      ...(o.interval ? { interval: o.interval } : {}),
+      ...(o.audience ? { audience: o.audience } : {}),
+      ...(o.note ? { note: o.note } : {}),
+      suggestible: o.suggestible !== false,
+      approved: approved.has(codeKey(o)),
+    })),
+  };
+}
+
+const CASE_ORDERS = /^\/api\/orders\/cases\/([^/]+)$/;
+
+/**
+ * `GET /api/orders/cases/:id` (#620/#640, B16): the orders that could close ONE case's gap, for the case
+ * page. Computed from the outcome the case cites (`outcomeForCase`) and the measure's catalog, never a
+ * population read. `applies: false` carries the reason, so the page says why no order is offered instead
+ * of showing nothing. Gated with the rest of `/api/orders/**` (lead, staff, admin; never the clinician seat).
+ */
+async function caseOrders(caseId: string, env: OrdersEnv): Promise<Response> {
+  const s = await getStores(env);
+  const c = await s.cases.getCase(caseId);
+  if (!c) return json({ error: "not_found", message: "Case not found." }, 404);
+  const orders = ordersForMeasure(c.measureId);
+  const { approved } = await readApprovedOrderCodes(s.valueSets);
+  const base = { caseId: c.id, measureId: c.measureId, orders: orders ? optionsView(orders, approved) : null };
+  if (!(ACTIVE_CASE_STATUSES as readonly string[]).includes((c.status ?? "").toUpperCase())) {
+    return json({ ...base, applies: false, reason: "This case is closed." });
+  }
+  const outcome = c.lastRunId ? await outcomeForCase(s.outcomes, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod) : null;
+  const verdict = orderApplicability(
+    c.measureId,
+    outcome
+      ? { status: outcome.status, evidence: outcome.evidence, outOfPopulation: outcome.outOfPopulation }
+      : { status: c.currentOutcomeStatus ?? "" },
+  );
+  return json({ ...base, ...verdict });
+}
+
 export async function handleOrders(req: Request, env: OrdersEnv): Promise<Response | null> {
   if (req.method !== "GET") return null;
   const url = new URL(req.url);
+  const caseMatch = CASE_ORDERS.exec(url.pathname);
+  if (caseMatch) return caseOrders(decodeURIComponent(caseMatch[1]!), env);
   if (url.pathname !== "/api/orders/proposals") return null;
 
   const q = url.searchParams;
@@ -84,14 +137,48 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
     const byMeasure = new Map<string, typeof all>();
     for (const r of visibleRows) (byMeasure.get(r.measureId) ?? byMeasure.set(r.measureId, []).get(r.measureId)!).push(r);
     for (const m of scope) {
-      for (const r of latestRunRows(byMeasure.get(m) ?? [])) {
+      const runRows = latestRunRows(byMeasure.get(m) ?? []);
+      // A measure whose order is offered only when CQL found nothing (cms122, cms2, cms165, cms137) needs each
+      // at-risk row's evidence and facts. The snapshot carries neither, so read them for the at-risk subjects
+      // only, in one statement per measure (the winning run). Every other measure still needs to know which
+      // rows failed to evaluate (`evaluationError`), so a subject nothing scored is never offered an order.
+      // A failed evaluation is always persisted MISSING_DATA, so only those rows are read, without facts.
+      const evidenceBySubject = new Map<string, unknown>();
+      const orders = ordersForMeasure(m);
+      if (orders && runRows.length > 0) {
+        const evidenceRuled = orders.offerOn !== "at-risk";
+        const ids = runRows
+          .filter((r) => AT_RISK_STATUSES.has(r.status) && !(r.outOfPopulation === true && r.status === "MISSING_DATA"))
+          .filter((r) => evidenceRuled || r.status === "MISSING_DATA")
+          .filter((r) => !subjectId || r.subjectId === subjectId)
+          .map((r) => r.subjectId);
+        if (ids.length > 0) {
+          const rows = await s.outcomes.listOutcomeSubjectMembershipsForRun(
+            runRows[0]!.runId,
+            m,
+            ids,
+            evidenceRuled ? { cqlFacts: true } : undefined,
+          );
+          for (const row of rows) {
+            const ev = (row.evidence ?? {}) as Record<string, unknown>;
+            evidenceBySubject.set(row.subjectId, row.cqlFacts === undefined ? ev : { ...ev, cqlFacts: row.cqlFacts });
+          }
+        }
+      }
+      for (const r of runRows) {
         if (subjectId && r.subjectId !== subjectId) continue;
         // A subject the measure's own logic put OUTSIDE its initial population is not at risk of
         // anything (#546). Read from the persisted flag (ADR-079) rather than the status, which
         // since ADR-078 records them as MISSING_DATA and so made every non-diabetic eligible for an
         // HbA1c and every man for a mammogram: 33,963 proposals for a 20,000-patient roster.
         if (r.outOfPopulation === true && r.status === "MISSING_DATA") continue;
-        atRisk.push({ subjectId: r.subjectId, measureId: r.measureId, status: r.status });
+        atRisk.push({
+          subjectId: r.subjectId,
+          measureId: r.measureId,
+          status: r.status,
+          outOfPopulation: r.outOfPopulation,
+          ...(evidenceBySubject.has(r.subjectId) ? { evidence: evidenceBySubject.get(r.subjectId) } : {}),
+        });
       }
     }
     // A page is only a page if the order underneath it is stable: the store's read carries no ORDER
@@ -100,19 +187,41 @@ export async function handleOrders(req: Request, env: OrdersEnv): Promise<Respon
     atRisk.sort((a, b) => a.subjectId.localeCompare(b.subjectId) || a.measureId.localeCompare(b.measureId));
   }
   const standingOrders = resolveStandingOrderProvider(env);
-  const { proposed, suppressed } = proposeOrders(atRisk, standingOrders);
+  const { proposed, suppressed, choices, suppressedChoices } = proposeOrders(atRisk, standingOrders);
+  const { approved, clinicCodes } = await readApprovedOrderCodes(s.valueSets);
   // FHIR output carries only `proposed` — a standing-order-suppressed item must NOT emit a duplicate
   // ServiceRequest (the charter's "duplicate orders are bad") — and is never windowed: it is the
   // bundle a clinician copies whole. The domain view returns both so callers can see why an at-risk
   // member got no order, windowed when asked, with the full counts alongside either way.
-  if (fhir) return json(bundleOf(proposed));
-  const totals = { proposed: proposed.length, suppressed: suppressed.length };
+  // Choice rows are never in the bundle: there is no single order to draft until the clinician chooses.
+  if (fhir) return json(bundleOf(proposed, clinicCodes));
+  const totals = {
+    proposed: proposed.length,
+    suppressed: suppressed.length,
+    choices: choices.length,
+    suppressedChoices: suppressedChoices.length,
+  };
   const page = <T>(xs: T[]): T[] => (limit === null ? xs : xs.slice(offset, offset + limit));
   // #616: whether orders already placed were looked at. False on every deployment today (no order
   // source is connected), and the page then says a proposal may repeat an order already on the chart.
   const standingOrdersChecked = standingOrders.checksExistingOrders;
   // #621: a measure with no catalog order proposes nothing for any at-risk patient (`proposeOrders`
   // skips it). Named here, so the page says so instead of an empty list reading as "nobody at risk".
-  const measuresWithoutOrder = scope.filter((m) => orderForMeasure(m) === null);
-  return json({ proposed: page(proposed), suppressed: page(suppressed), totals, standingOrdersChecked, measuresWithoutOrder });
+  const measuresWithoutOrder = scope.filter((m) => ordersForMeasure(m) === null);
+  // Each measure's options once, not per row (a pilot run has thousands of choice rows).
+  const ordersByMeasure = Object.fromEntries(
+    scope.flatMap((m) => {
+      const o = ordersForMeasure(m);
+      return o ? [[m, optionsView(o, approved)]] : [];
+    }),
+  );
+  return json({
+    proposed: page(proposed),
+    suppressed: page(suppressed),
+    choices: page(choices),
+    totals,
+    standingOrdersChecked,
+    measuresWithoutOrder,
+    ordersByMeasure,
+  });
 }

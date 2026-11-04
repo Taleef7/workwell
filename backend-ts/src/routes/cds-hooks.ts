@@ -25,6 +25,7 @@
  * gap, not an oversight (ADR-067). Invoke and feedback are gated by the ordinary bearer token via
  * `authorize.ts`; discovery is PERMIT because it returns service metadata and no patient data.
  */
+import { readApprovedOrderCodes, type ApprovedOrderCodes } from "../order/approved-codes.ts";
 import type { CloudDatabase } from "@mieweb/cloud";
 import { getStores } from "../stores/factory.ts";
 import { parseAllowedOrigins } from "../config/cors.ts";
@@ -154,15 +155,9 @@ async function latestFinalizedByMeasure(
   return null;
 }
 
-/** `"{system}|{code}"` for every APPROVED terminology mapping — read from the STORE, never the seed. */
-async function approvedOrderCodes(env: CdsHooksEnv): Promise<ReadonlySet<string>> {
-  const stores = await getStores(env);
-  const mappings = await stores.valueSets.listTerminologyMappings();
-  return new Set(
-    mappings
-      .filter((m) => m.mappingStatus === "APPROVED")
-      .map((m) => `${m.standardSystem}|${m.standardCode}`),
-  );
+/** Approved order codes and their clinic codes, read from the STORE, never the seed (`order/approved-codes.ts`). */
+async function approvedOrderCodes(env: CdsHooksEnv): Promise<ApprovedOrderCodes> {
+  return readApprovedOrderCodes((await getStores(env)).valueSets);
 }
 
 async function readJson(req: Request): Promise<unknown | "malformed"> {
@@ -242,10 +237,10 @@ async function invoke(
     found === null || found.rows.length === 0
       ? [noEvaluationCard(patientId, base)]
       : await buildComplianceCards(found.rows, {
+          ...(await approvedOrderCodes(env).then((a) => ({ approvedOrderCodes: a.approved, clinicCodes: a.clinicCodes }))),
           subjectId: found.subjectId,
           // The id the CLIENT sent, which is the only one it can act on. See `CardOptions.patientId`.
           patientId,
-          approvedOrderCodes: await approvedOrderCodes(env),
           standingOrders: resolveStandingOrderProvider(env),
           studioBaseUrl: base,
         });
@@ -269,6 +264,14 @@ async function invoke(
     cards: cards
       .filter((c): c is typeof c & { uuid: string } => !!c.uuid)
       .map((c) => ({ uuid: c.uuid, measureId: measureIdOfCard(c, found?.rows ?? []) })),
+    // Every suggestion offered, so an accepted suggestion's id resolves to the order it proposed without
+    // recomputing uuids against a catalog that may have changed since (a choice card offers several).
+    suggestions: cards.flatMap((c) =>
+      (c.suggestions ?? []).map((sg) => {
+        const coding = (sg.actions[0]?.resource as { code?: { coding?: Array<{ system?: string; code?: string }> } } | undefined)?.code?.coding?.[0];
+        return { uuid: sg.uuid, measureId: measureIdOfCard(c, found?.rows ?? []), system: coding?.system ?? null, code: coding?.code ?? null };
+      }),
+    ),
   });
   return json({ cards });
 }

@@ -10,7 +10,8 @@ import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases } from "@/lib/rbac";
+import { canManageCases, canViewOrders } from "@/lib/rbac";
+import { CaseOrdersPanel } from "@/features/orders/CaseOrdersPanel";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { CopyableId } from "@/components/copyable-id";
@@ -189,6 +190,8 @@ export default function CaseDetailPage() {
 function CaseDetailView({ caseId }: { caseId: string }) {
   const api = useApi();
   const { user } = useAuth();
+  // The case page's orders panel reads /api/orders/** (lead, staff, admin); the clinician seat never asks.
+  const mayViewOrders = canViewOrders(user?.role);
   // Case write actions (outreach/rerun/assign/escalate/delivery/evidence) are CASE_MANAGER, QUALITY_STAFF
   // and ADMIN on the backend (#880); read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
   // the API gate so those controls simply don't render for read roles.
@@ -1005,6 +1008,7 @@ function CaseDetailView({ caseId }: { caseId: string }) {
               <div className="mt-4 space-y-4">
                 <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
                 <CqlFindings findings={caseDetail.cqlFindings} />
+                {mayViewOrders ? <CaseOrdersPanel caseId={caseId} revision={`${caseDetail.updatedAt}|${caseDetail.status}|${caseDetail.lastRunId}`} /> : null}
                 {officialPopulations ? (
                   <details className="group">
                     <summary className="cursor-pointer text-sm font-medium text-neutral-700 dark:text-neutral-300">Measure populations</summary>
