@@ -70,7 +70,8 @@ export const ECQM_CANONICAL_CODES = {
   /**
    * LOINC, and an Observation — not CPT on a Procedure. The official CMS125 numerator is
    * `[Observation: "Mammography"]`, and every one of that value set's 92 members is LOINC. The corpus
-   * still emits the CPT Procedure too (see `MAMMOGRAPHY_PROCEDURE_CODES`); a real EHR records both.
+   * still emits the CPT Procedure too (see `MAMMOGRAPHY_PROCEDURE_CODES`), standing for an EHR that charts
+   * the result beside the bill. WebChart ingest never derives this Observation from a billed Procedure.
    */
   mammogram: { code: "24606-6", system: LOINC, display: "MG Breast Screening" },
   historyBilateralMastectomy: { code: "136071000119101", system: SNOMED },

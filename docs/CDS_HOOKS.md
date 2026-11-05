@@ -137,6 +137,10 @@ close a gap where a result was found but does not qualify, so none is offered th
 | `cms137` | choice | HCPCS H0001 assessment, H0004 counseling | Initiation rate with nothing found; never Engagement |
 | TWH measures | protocol | as before (audiogram CPT 92557, TB CPT 86580, flu CVX 141 approved by the demo seed) | any open gap |
 
+A billed mammogram is not a result (owner decision 2026-11-05, `WEBCHART_FHIR_MAPPING.md` §3.6), so a
+woman whose mammogram is only billed keeps an open cms125 gap, and its proposal can repeat a study she
+had. The proposal is a draft a clinician accepts; the case page asks for that result to be charted.
+
 A run that recorded nothing a reader can name (authored CQL, a run before #875, an errored row) offers no
 order for an evidence-ruled measure: "we cannot tell" never becomes "order it".
 

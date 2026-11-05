@@ -42,7 +42,7 @@ export interface CaseSummary {
    * `providerName`/`payerName` are DISPLAY, `providerId`/`payer` are what the filters match on; both
    * travel together so a list can render a name without a second lookup that could disagree with it.
    * Null where the directory records none: the occupational roster has no payer, and a live WebChart
-   * directory has neither until Coverage extraction lands (#533).
+   * directory has neither until Coverage extraction lands (#893).
    */
   providerId: string | null;
   providerName: string | null;

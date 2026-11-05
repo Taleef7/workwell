@@ -23,8 +23,8 @@
  *   | `Procedure`                       | Procedure, Performed       | …22.4.14@2014-06-09 + …24.3.64   |
  *
  * An `Observation` routes on `category` — the same discriminator CMS125's official numerator uses
- * (`Status.isDiagnosticStudyPerformed` requires `category ~ imaging`), which is why ADR-044's crosswalk
- * dual-stamps it. A resource we cannot classify is SKIPPED rather than guessed into the nearest
+ * (`Status.isDiagnosticStudyPerformed` requires `category ~ imaging`), which is why the synthetic corpus
+ * stamps its mammogram Observation `imaging`. A resource we cannot classify is SKIPPED rather than guessed into the nearest
  * datatype: a Diagnosis that was really a lab result is worse for a recalculating receiver than an
  * absent entry, because absent is visible and wrong-datatype is not.
  *

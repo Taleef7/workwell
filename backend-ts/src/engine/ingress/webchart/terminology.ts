@@ -173,27 +173,12 @@ export function reconcileCoding(coding: Coding | undefined): Coding[] {
 
 /**
  * The ONE way this module compares a coding: system through the alias table, code trimmed and upcased.
- *
- * Exported because a second comparison written fifty lines away WILL disagree with it, and did — review
- * of #390 measured `normalizeWebChartBundle` recognising a CPT-as-OID mammogram as a cms125 event (so the
- * authored engine read COMPLIANT) while an exact `system|code` match beside it failed to derive the LOINC
- * Observation the official numerator reads (so official read OVERDUE). That is the engine divergence the
- * derivation exists to remove, created by the derivation. Any new code that asks "is this coding X?" must
- * come through here.
+ * Any new code that asks "is this coding X?" must come through here: a second, exact `system|code`
+ * comparison beside it once disagreed with the crosswalk on a CPT-as-OID code (review, #390).
  */
 export function codingKey(coding: Coding | undefined): string | null {
   if (!coding?.code) return null;
   return `${normalizeSystem(coding.system)}|${coding.code.trim().toUpperCase()}`;
-}
-
-/** Does this coding-holder carry any coding whose canonical key is in `keys`? */
-export function holderHasCoding(holder: unknown, keys: ReadonlySet<string>): boolean {
-  const codings = (holder as { coding?: Coding[] } | undefined)?.coding;
-  if (!Array.isArray(codings)) return false;
-  return codings.some((c) => {
-    const key = codingKey(c);
-    return key !== null && keys.has(key);
-  });
 }
 
 /**
