@@ -37,6 +37,7 @@ import { auditedExport } from "./export-audit.ts";
 import { rerunToVerify } from "../case/case-rerun.ts";
 import { logContact } from "../case/contact-log.ts";
 import { setContactPreference, clearContactPreference } from "../case/contact-preference.ts";
+import { closeRetiredMeasureCases } from "../run/retired-measures.ts";
 
 /** A ledger that records what it was asked to append, in order. */
 function ledger() {
@@ -409,6 +410,17 @@ test("logContact (#886): CASE_CONTACT_LOGGED survives a failed status patch, and
   );
   assert.deepEqual(log.types(), ["CASE_CONTACT_LOGGED"]);
   assert.deepEqual(out.failed, ["c1"]);
+});
+
+test("closeRetiredMeasureCases (#889): CASE_RESOLVED survives a failed patch, and the case is reported failed", async () => {
+  const log = ledger();
+  const open = { id: "c1", employeeId: "pat-1", measureId: "cms137", evaluationPeriod: "2026-01-01", status: "OPEN" };
+  const out = await closeRetiredMeasureCases(
+    { caseStore: { listCases: async () => [open], getCase: async () => open, patchCase: explode } as never, events: log as never },
+    { retiredMeasureIds: ["cms137"], runId: "run-1", actor: "system" },
+  );
+  assert.deepEqual(log.types(), ["CASE_RESOLVED"]);
+  assert.deepEqual([out.closed, out.failed], [0, 1]);
 });
 
 test("setContactPreference / clearContactPreference (#886): each event survives a failed store write", async () => {

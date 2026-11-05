@@ -24,7 +24,7 @@ test.describe("Maui runs", () => {
   test("a manual ALL_PROGRAMS run evaluates every routed measure for every corpus patient", async ({ page, request }) => {
     // The one mutating test in this file, and the guard is on it rather than on the file: the run-list
     // test below is a read and stays useful against a stack this may not write to. On the pilot
-    // sandbox a population run is 20,000 patients across six measures and hours of work on a stack the
+    // sandbox a population run is 20,000 patients across five measures and hours of work on a stack the
     // pilot group signs into, so it happens on a local stack or when the operator asks for it by name.
     test.skip(!writesAllowed(), WRITES_SKIP_REASON);
     test.setTimeout(240_000);

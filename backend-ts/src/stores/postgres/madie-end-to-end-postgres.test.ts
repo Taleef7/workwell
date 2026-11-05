@@ -13,14 +13,15 @@
 import { after, test } from "node:test";
 import pg from "pg";
 
-const SIX = "cms122,cms125,cms2,cms130,cms165,cms137";
+// Maui's five routes (cms137 retired, #889).
+const FIVE = "cms122,cms125,cms2,cms130,cms165";
 process.env.WORKWELL_INSTANCE = "maui";
-process.env.WORKWELL_OFFICIAL_MEASURES = SIX;
+process.env.WORKWELL_OFFICIAL_MEASURES = FIVE;
 delete process.env.WORKWELL_VSAC_API_KEY;
 
 const { officialRoutingProblems } = await import("../../wiring/executor-router.ts");
 const { __resetSharedFqmWorker } = await import("../../wiring/fqm-worker.ts");
-const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: SIX });
+const problems = officialRoutingProblems({ WORKWELL_OFFICIAL_MEASURES: FIVE });
 const required = process.env.WORKWELL_REQUIRE_OFFICIAL_TERMINOLOGY === "true";
 
 const url = process.env.WORKWELL_TEST_PG_URL ?? "postgres://workwell:workwell@localhost:5432/workwell";
@@ -44,7 +45,7 @@ after(async () => {
 // The `[postgres]` prefix is reserved for a test that actually ran against Postgres: CI greps for it to
 // prove the ceiling was exercised, so no skip or failure notice below may carry it.
 if (problems.length > 0) {
-  const why = `the six Maui measures cannot all be routed here:\n  ${problems.join("\n  ")}`;
+  const why = `the five Maui measures cannot all be routed here:\n  ${problems.join("\n  ")}`;
   if (required) {
     test("MADiE end to end (Postgres): terminology is required in this context", () => {
       throw new Error(why);
@@ -76,7 +77,7 @@ if (problems.length > 0) {
 
   test("[postgres] MADiE end to end: every deck patient, through the run, the store and the read APIs", { timeout: 15 * 60_000 }, async () => {
     const { runMadieEndToEnd } = await import("../../test-support/madie-end-to-end.ts");
-    const env = { DATABASE_URL: dbUrl.toString(), WORKWELL_OFFICIAL_MEASURES: SIX };
+    const env = { DATABASE_URL: dbUrl.toString(), WORKWELL_OFFICIAL_MEASURES: FIVE };
     const summary = await runMadieEndToEnd(env);
     console.log(`[madie-e2e] Postgres ${JSON.stringify(summary)}`);
   });

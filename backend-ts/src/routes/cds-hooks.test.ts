@@ -87,6 +87,10 @@ before(async () => {
   await outcomes.recordOutcome({ runId: completed.id, subjectId: "emp-006", measureId: "flu_vaccine", status: "COMPLIANT", evaluationPeriod: "2026-06-12", evidence: {} });
   // emp-007: evaluated and clean — the ONLY subject that legitimately gets an empty card list.
   await outcomes.recordOutcome({ runId: completed.id, subjectId: "emp-007", measureId: "audiogram", status: "COMPLIANT", evaluationPeriod: "2026-06-12", evidence: {} });
+  // emp-008 (#889): clean on what this deployment runs, OVERDUE on a measure it does not (cms137 is routed
+  // nowhere here, as on Maui since its retirement). That stored row is history, never a card.
+  await outcomes.recordOutcome({ runId: completed.id, subjectId: "emp-008", measureId: "audiogram", status: "COMPLIANT", evaluationPeriod: "2026-06-12", evidence: {} });
+  await outcomes.recordOutcome({ runId: completed.id, subjectId: "emp-008", measureId: "cms137", status: "OVERDUE", evaluationPeriod: "2026-01-01", evidence: { expressionResults: [] } });
   // wc|4821: the live-namespace subject, reachable only if a bare hook patientId is tried as `wc|<id>`.
   await outcomes.recordOutcome({ runId: completed.id, subjectId: "wc|4821", measureId: "audiogram", status: "OVERDUE", evaluationPeriod: "2026-06-12", evidence: OVERDUE_EVIDENCE });
 
@@ -190,6 +194,11 @@ test("a bare hook patientId resolves the `wc|` live namespace", async () => {
 test("an evaluated-and-clean subject gets an EMPTY card list — the only correct silence", async () => {
   const { cards } = (await (await post(INVOKE, hookBody("emp-007")))!.json()) as { cards: unknown[] };
   assert.deepEqual(cards, []);
+});
+
+test("a measure this deployment does not run returns no card, though its stored outcome is OVERDUE (#889)", async () => {
+  const { cards } = (await (await post(INVOKE, hookBody("emp-008")))!.json()) as { cards: unknown[] };
+  assert.deepEqual(cards, [], "only the runnable measure counts, and it is met");
 });
 
 test("an unknown patient, and a mid-run patient, each get a CARD saying so — never silence", async () => {

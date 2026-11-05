@@ -32,6 +32,7 @@ import { parseAllowedOrigins } from "../config/cors.ts";
 import { resolveStandingOrderProvider, type StandingOrderEnv } from "../order/standing-order-provider.ts";
 import { CDS_SERVICES, serviceById } from "../cds/discovery.ts";
 import { buildComplianceCards, noEvaluationCard, type CardInput } from "../cds/cards.ts";
+import { isCatalogActiveRunnable } from "../compliance/panels.ts";
 import type { CdsFeedbackRequest, CdsRequest } from "../cds/types.ts";
 
 interface CdsHooksEnv extends StandingOrderEnv {
@@ -138,7 +139,9 @@ async function latestFinalizedByMeasure(
     if (rows.length > 0) {
       return {
         subjectId,
-        rows: rows.map((r) => ({
+        // #889: a card speaks only for a measure this deployment runs. A retired one (CMS137 on Maui)
+        // keeps its last stored outcome for ever, and a card would keep stating that gap in the encounter.
+        rows: rows.filter((r) => isCatalogActiveRunnable(r.measureId)).map((r) => ({
           measureId: r.measureId,
           status: r.status,
           evidence: r.evidence,

@@ -55,8 +55,8 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
   - both: `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_BUCKET_S3_*`.
   - TWH: `WORKWELL_INSTANCE=twh`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125` and
     `WORKWELL_DERIVED_MEASURES=cms125,cms122`.
-  - Maui: `WORKWELL_INSTANCE=maui`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137`
-    and `WORKWELL_DERIVED_MEASURES=cms137,cms130,cms125,cms165,cms122,cms2`;
+  - Maui: `WORKWELL_INSTANCE=maui`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165`
+    and `WORKWELL_DERIVED_MEASURES=cms130,cms125,cms165,cms122,cms2` (cms137 retired, #889);
     `WORKWELL_MAUI_CORPUS_SIZE`, `WORKWELL_RUN_CHUNK_SIZE`, `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC`,
     `WORKWELL_SCHEDULER_DAYS=1-5`; `WORKWELL_OUTCOME_RETENTION_DAYS` unset (retention paused 2026-10-15).
 - Other workflows: `ci.yml`, `flip-gate.yml`, `cross-engine-sweep.yml`, `vendor-official-measure.yml`,
@@ -206,7 +206,8 @@ needs a clean compile and well-formed test fixtures. `validateTests`
 ### 5.4 Outcomes -> Cases
 `CaseStore.upsertFromOutcome` applies `planCaseUpsert` on the key
 `(employee_id, measure_version_id, evaluation_period)`. The rules are in `DATA_MODEL_CONTRACTS.md` §4.
-After the loop: older-cycle cases close as `CYCLE_ROLLED_OVER`, `RUN_COMPLETED` is written, and the
+After the loop: older-cycle cases close as `CYCLE_ROLLED_OVER`, on an all-programs run a retired
+measure's open cases close as `MEASURE_RETIRED` (#889), `RUN_COMPLETED` is written, and the
 quality snapshot is materialized (`materializeRun`, best-effort).
 
 ### 5.5 Cases -> Actions

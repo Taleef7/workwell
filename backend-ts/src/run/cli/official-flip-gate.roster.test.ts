@@ -27,7 +27,7 @@ test("parseArgs accepts --subjects as a positive integer cap and rejects anythin
 });
 
 test("on the Maui profile the roster is the corpus, routed as if the measure were flipped", () => {
-  const { subjects, source } = rosterSubjectsFor("cms137", "2026-06-30", MAUI_ENV, resolveDeploymentProfile("maui"), { limit: 10 });
+  const { subjects, source } = rosterSubjectsFor("cms165", "2026-06-30", MAUI_ENV, resolveDeploymentProfile("maui"), { limit: 10 });
   assert.equal(subjects.length, 10);
   assert.deepEqual(subjects.slice(0, 2).map((s) => s.subjectId), ["pat-001", "pat-002"]);
   // A corpus bundle is the patient's WHOLE record: a Patient resource carrying the subject's own id.
@@ -38,8 +38,15 @@ test("on the Maui profile the roster is the corpus, routed as if the measure wer
     profile: "maui",
     directorySize: 60,
     evaluated: 10,
-    routedAs: "cms122,cms125,cms137",
+    routedAs: "cms122,cms125,cms165",
   });
+});
+
+test("a measure Maui retired is refused there like any measure outside its set (#889)", () => {
+  assert.throws(
+    () => rosterSubjectsFor("cms137", "2026-06-30", MAUI_ENV, resolveDeploymentProfile("maui"), { limit: 1 }),
+    (error: unknown) => error instanceof FlipGateUsageError && /cms137 is not in the maui profile/.test(String((error as Error).message)),
+  );
 });
 
 test("without a cap the whole directory is evaluated, and a cap above it is not an error", () => {

@@ -36,6 +36,7 @@ import {
   DIRECTORY,
 } from "../config/deployment-profile.ts";
 import { batchPhaseTiming, emitPhaseTiming, type PhaseTimingSink } from "./phase-timing.ts";
+import { closeRetiredMeasureCases, retiredClosureTouched } from "./retired-measures.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
@@ -193,6 +194,8 @@ export interface RunPipelineDeps {
   valueSets?: Pick<ValueSetStore, "listAll">;
   /** Subject-bundle seam (Task 2): injectable for tests; defaults to the env-composed composite. */
   bundleSource?: SubjectBundleSource;
+  /** #889 — tests only: the deployment profile's `retiredMeasureIds` otherwise. */
+  retiredMeasureIds?: readonly string[];
   /** #789 — tests only: `DEFAULT_INDIVIDUAL_RETRY_FAILURE_LIMIT` otherwise. */
   individualRetryFailureLimit?: number;
   /** #789 — tests only: `DEFAULT_INDIVIDUAL_RETRY_BUDGET` otherwise. */
@@ -1881,6 +1884,19 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       .catch(() => {});
   }
 
+  // #889: close the still-active cases of a measure this deployment retired (CMS137 on Maui). Only an
+  // all-programs run (the nightly, or the lead's manual one) does it, so a SITE, EMPLOYEE, MEASURE or CASE
+  // run never closes another measure's cases. Its own counts: `rollover` is checked for equality by the
+  // year-change rehearsal, and these are not cases of an executed measure.
+  const retiredIds = deps.retiredMeasureIds ?? DEPLOYMENT_PROFILE.retiredMeasureIds;
+  const retired =
+    scopeType === "ALL_PROGRAMS" && retiredIds.length > 0 && deps.caseStore && deps.events
+      ? await closeRetiredMeasureCases(
+          { caseStore: deps.caseStore, events: deps.events, runStore: deps.runStore },
+          { retiredMeasureIds: retiredIds, runId, actor: auditActor },
+        )
+      : null;
+
   // #853: a measure scored on data too thin to trust is a partial failure, with no new status (D12).
   const terminalStatus = failures > 0 || insufficient.size > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
   await deps.runStore.finalizeRun(runId, terminalStatus);
@@ -1922,6 +1938,8 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           ...(liveTenant ? { liveTenant } : {}),
           // #854: present only on a run that closed, failed to close or could not read an earlier cycle's cases.
           ...(rolledOver ? { rollover } : {}),
+          // #889: present only on a run that closed, or tried to close, a retired measure's cases.
+          ...(retired && retiredClosureTouched(retired) ? { retired } : {}),
           // #853: what was measured on a live run, and which measures fell short and why. The run detail
           // page reads it; the reports refuse from the rows, so a lost write here cannot let a rate out.
           ...(liveSufficiency

@@ -81,8 +81,8 @@ Maui also vendors the sidecar of each WorkWell translation it routes (`measures/
 per id, before `docker build`:
 
 ```bash
-node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
 node scripts/vendor-derived-terminology.mjs --catalog-id cms130 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
+node scripts/vendor-derived-terminology.mjs --catalog-id cms125 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
 ```
 
 Every value set is re-expanded from VSAC at the release the committed manifest names. `--verify-pin`
@@ -168,7 +168,7 @@ measure to `OFFICIAL_GATED_MEASURES`, both deploy workflows' vendor lists and `f
 ### Flipping a measure to official execution — pre-flip checklist (ADR-043)
 
 Routing is `WORKWELL_OFFICIAL_MEASURES`: **TWH `cms122,cms125`; Maui
-`cms122,cms125,cms2,cms130,cms165,cms137`** (ADR-078). Pass a stack's current list to flip tooling.
+`cms122,cms125,cms2,cms130,cms165`** (ADR-078; cms137 retired 2026-11-05, #889). Pass a stack's current list to flip tooling.
 A missing artifact, sidecar or complete expansion refuses. A whole roster falling **outside the
 initial population** does not — it completes with MISSING_DATA and a `WARN`. This catches it:
 
@@ -223,13 +223,23 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
 **Reversible:** remove the id where step 4 says and redeploy; `logic_version` carries the artifact's
 identity (ADR-040), so no cache cleanup is needed.
 
-**Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms137,cms130,cms125,cms165,cms122,cms2`; TWH: `cms125,cms122`) lets a committed WorkWell
+**Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms130,cms125,cms165,cms122,cms2`; TWH: `cms125,cms122`) lets a committed WorkWell
 translation score the one year it covers (2027); CMS's artifact still scores every other year. Each id
 must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit it where step 4 says (the build arg and the gate's
 `EXPECTED_DERIVED`, same value), and keep the build job's `vendor-derived-terminology.mjs` lines
 naming the same ids (and, for Maui, `ROUTED_TRANSLATIONS` in CI's `e2e-maui`). `official-flip-config.test.ts` fails
 the build otherwise, and pins TWH and staging to none. `flip-gate.yml` does not read the key: a flip-gate
 run for a 2027 date scores CMS's 2026 artifact, not what Maui runs.
+
+**Retiring a measure (#889; cms137 on Maui, 2026-11-05).** Take it off both routing keys everywhere
+`official-flip-config.test.ts` checks (build args, `EXPECTED_*`, the derived vendor line, CI's `e2e-maui`
+lists, `flip-gate.yml`, `rebuild-quality-snapshots-maui.yml`), take it off the profile's measure list and
+add it to that profile's `retiredMeasureIds` (`config/deployment-profile.ts`; the two lists may not share
+an id). The first all-programs run after the deploy (the nightly, or the lead's manual one) closes its open
+cases `MEASURE_RETIRED`, one audited `CASE_RESOLVED` each, and `RUN_COMPLETED.retired.closed` counts them.
+**A rollback to an image that still routes the measure reopens those cases on its next run** (they are
+system closures, which `planCaseUpsert` reopens), each audited; roll forward instead. Its official
+terminology may stay vendored: an artifact nobody routes is not run.
 
 ### The deploy script and the Container Manager API
 
@@ -343,7 +353,7 @@ then `2027-01-01`, then `2026-12-31 --today 2027-01-04`, the January re-score). 
   `CASE_RESOLVED` audit event each: 783 per 1,000 patients rehearsed, about 15,300 on Maui. The closes are
   sequential, two writes each (1.8 s for 783 locally), so on Neon the time is about 2 × the count × one round
   trip; the run log states it;
-- **the 2027 work list starts nearly empty and fills as patients are seen.** Each of the six measures counts
+- **the 2027 work list starts nearly empty and fills as patients are seen.** Each of the five measures counts
   only patients with a visit in 2027: 17 cases per 1,000 on the corpus (8 in 1,000 have a 1 January visit),
   none on real data. The rates rest on those few patients (Programs marks a denominator under 20 as small);
 - a measure nobody has entered yet logs `WARN … not one of N subjects entered the official initial
@@ -474,7 +484,7 @@ Actions → the stack's deploy workflow → Run workflow, `replace_existing: tru
 ### Maui sandbox deployment
 
 The pilot group's sandbox (`deploy-maui-mieweb.yml`), with its own Neon project, JWT secret and R2 bucket
-(`workwell-evidence-maui`); env as above with `WORKWELL_INSTANCE=maui`, and an image that routes the six
+(`workwell-evidence-maui`); env as above with `WORKWELL_INSTANCE=maui`, and an image that routes the five
 measures.
 
 - **Isolation guard:** deploy and reconcile refuse when `DATABASE_URL_MAUI` has the same host as

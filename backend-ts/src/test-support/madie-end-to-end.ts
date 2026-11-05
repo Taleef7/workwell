@@ -37,7 +37,8 @@ import { handleRuns } from "../routes/runs.ts";
 import { PROFILE_DEFAULT_PANEL } from "../compliance/panels.ts";
 import { expectedCase, expectedStatus, membershipOf, type DisplayStatus } from "./madie-oracle.ts";
 
-export const MAUI_MEASURES = ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"] as const;
+// The five Maui routes; cms137 was retired on 2026-11-05 (#889), and its deck stays gated by the official-cases gate.
+export const MAUI_MEASURES = ["cms122", "cms125", "cms2", "cms130", "cms165"] as const;
 export type MauiMeasure = (typeof MAUI_MEASURES)[number];
 
 /** Every deck resolves to the 2026 calendar year; an evaluation date inside it scores that year. */
@@ -130,7 +131,7 @@ export function installDeckDirectory(cases: readonly DeckCase[]): readonly Emplo
 /**
  * Each measure evaluates ITS deck's patients with ITS deck's bundles, and nothing else. No
  * `bundleForSubject`: a deck patient's record is written for one measure, and the pipeline would reuse
- * a whole-record bundle across all six. A request for a patient under another measure throws, so a
+ * a whole-record bundle across all five. A request for a patient under another measure throws, so a
  * cross-measure leak fails loudly instead of evaluating somebody else's test patient.
  */
 export function deckBundleSource(cases: readonly DeckCase[], employees: readonly EmployeeProfile[]): SubjectBundleSource {
@@ -297,8 +298,8 @@ async function checkSurfaces(
         const scored = want.ipp && want.denom && !want.denex && !want.denexcep && c.status !== "OUT_OF_POPULATION";
         if (!scored) {
           assert.equal(row.evidenceStatus, "NOT_APPLICABLE", label);
-        } else if (m === "cms125" || (m === "cms137" && i === 1)) {
-          assert.equal(row.evidenceStatus, "NOT_EXPOSED_BY_LOGIC", `${label}: no define names a mammogram or an engagement treatment`);
+        } else if (m === "cms125") {
+          assert.equal(row.evidenceStatus, "NOT_EXPOSED_BY_LOGIC", `${label}: no define names a mammogram`);
         } else if (want.numer) {
           const allowed = m === "cms122" ? ["NUMERATOR_EVIDENCE", "NONE_FOUND"] : ["NUMERATOR_EVIDENCE"];
           assert.ok(allowed.includes(row.evidenceStatus ?? ""), `${label}: numerator met, got ${row.evidenceStatus}`);
@@ -403,7 +404,7 @@ async function checkSurfaces(
 }
 
 /**
- * Runs the six decks through one ALL_PROGRAMS run on the stores `env` selects, checks every surface
+ * Runs the five decks through one ALL_PROGRAMS run on the stores `env` selects, checks every surface
  * against the oracle, then runs again, checks nothing changed, and checks every surface again against
  * the newer run. Returns a per-measure summary for the evidence file.
  */

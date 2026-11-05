@@ -89,17 +89,18 @@ reference to either anywhere (code comments, old docs) resolves from git history
 **The Maui pilot sandbox, before PY2027 starts on 2027-01-01.** The work is the "Ready for January"
 milestone; asks blocked on MIE, the practice or the ACO carry the `waiting` label; minor findings are the
 checklist in #655. The plan is `docs/ROADMAP_2026-08-30.md` (ADR-070) and the owner decisions are
-`LOCKED_DECISIONS.md` §4A. The sandbox routes all six ACO measures — cms122, cms125, cms2, cms130, cms165,
-cms137 (ADR-078). It is a sandbox: the pilot's real-data (PHI) phase is a separate decision gated by
+`LOCKED_DECISIONS.md` §4A. The sandbox routes five ACO measures — cms122, cms125, cms2, cms130, cms165
+(ADR-078); cms137 was retired on 2026-11-05, after the CY2027 final rule removed Quality ID 305 from APP
+Plus (§4A.2, #889). It is a sandbox: the pilot's real-data (PHI) phase is a separate decision gated by
 `PRODUCTION_READINESS`. Naming policy: repo documents say "Maui" and "the pilot group" only.
 
 ## Standing corrections
 Each is a claim the project got wrong once and would otherwise repeat.
-1. **The CMS FHIR-reporting timeline is an RFI.** The CY2027 PFS proposed rule (CMS-1848-P) *seeks comment
-   on* FHIR reporting voluntary PY2028–29, mandatory PY2030 for applicable APP Plus measures. Cite it as
-   **sought comment on**, never as proposed or final (final rule ~Nov 2026). MIPS CQMs are proposed to be
-   **extended** for PY2027+; sunsetting traditional MIPS after PY2028 is a *different* proposal. The same
-   rule proposes removing Quality IDs 305 (CMS137) and 493 from APP Plus for PY2027.
+1. **The CMS FHIR-reporting timeline is not a rule.** CMS-1848-P sought comment on FHIR reporting voluntary
+   PY2028–29 and mandatory PY2030 for applicable APP Plus measures; the final rule (CMS-1848-F, 2026-11-04)
+   says those policies would be proposed through future rulemaking. Cite it as **sought comment on; not yet
+   proposed**, never as final. CMS-1848-F did finalize: MIPS CQMs extended for PY2027+, a new Medicare eCQM
+   collection type (assigned beneficiaries only), and Quality IDs 305 (CMS137) and 493 removed from APP Plus.
 2. **"QI-Core STU7 = US Core 7 = WebChart's exact surface" is half right.** CMS's shipping content is
    authored on QI-Core 6; the direction of travel is US Quality Core 0.5.0 over US Core 6.1.0.
 3. **Cypress CVU+ is not the verification bar.** The bar is the FHIR-column verification set

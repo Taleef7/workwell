@@ -61,6 +61,7 @@ test("Maui: the measures the simulation cannot replay are named, not silently dr
   );
   assert.deepEqual(output.evaluated, ["cms122", "cms125"]);
   const notSimulated = output.notSimulated as Array<{ measureId: string; name: string }>;
-  assert.deepEqual(notSimulated.map((m) => m.measureId), ["cms2", "cms130", "cms165", "cms137"]);
+  // cms137 is routed in this env but retired on the profile (#889): it is not one of the patient's measures.
+  assert.deepEqual(notSimulated.map((m) => m.measureId), ["cms2", "cms130", "cms165"]);
   assert.equal(notSimulated.find((m) => m.measureId === "cms130")?.name, "Colorectal Cancer Screening");
 });

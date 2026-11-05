@@ -170,6 +170,13 @@ clinic codes approved at the same instant could both stand (the unique key spans
 then takes the first in the store's order.
 
 ### Resolution is not segment-gated; cycle rollover is closed out
+- **A retired measure's cases close (#889).** `DEPLOYMENT_PROFILE.retiredMeasureIds` (Maui: `cms137`; never
+"whatever is not runnable") names measures no run evaluates any more. After an `ALL_PROGRAMS` run (never a
+site, subject, measure or case run), each of their OPEN/`IN_PROGRESS` cases is re-read, then audited
+`CASE_RESOLVED` (`reason: 'MEASURE_RETIRED'`), then patched `RESOLVED`, `closed_reason='MEASURE_RETIRED'`,
+`closed_by=NULL` (`run/retired-measures.ts`); a failed audit leaves the case open, a failed patch is counted.
+Counts in `RUN_COMPLETED.retired`, apart from `rollover`. A rollback to an image that routes the measure
+reopens them (a system closure). Cards skip a measure the deployment does not run.
 - `isApplicable` gates creation only. Out-of-cohort close-only upserts: COMPLIANT, and EXCLUDED only where
 an active case exists (run-start snapshot).
 - After a population run, OPEN/`IN_PROGRESS` cases of an evaluated `(subject, measure)` in a strictly

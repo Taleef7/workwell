@@ -166,6 +166,10 @@ evaluation-failure card included (owner decision, 2026-10-20). Its rate would be
 missing, and a card would put that into the encounter as a finding. Other measures' cards are unaffected, and
 the next run whose data meets the floors brings the measure's cards back.
 
+A measure this deployment does not run returns no card either (#889): the route reads only measures
+`isCatalogActiveRunnable` admits, so a retired measure's last stored outcome (CMS137 on Maui) is never
+put into an encounter.
+
 ### A failed evaluation is reported as ours
 
 A run can finish `PARTIAL_FAILURE`, and a subject whose evaluation threw is persisted `MISSING_DATA` with an
