@@ -117,7 +117,9 @@ test("default profile — employees search returns both Maui and TWH employees",
 
 // #769: the patient page names the logic of the rows it shows, from their own evidence, with CMS137 ROUTED
 // to CMS's artifact — so a reader that asked routing (or the vendored manifest) would say CMS137FHIR.
+// CMS137 is retired on Maui (#889); the prelude lists it back, since it is the multi-rate measure here.
 const logicScript = `
+  import "./src/test-support/runnable-with-cms137.ts";
   import { createSqliteD1 } from "@mieweb/cloud-local";
   import { RUN_STORE_FLOOR_DDL } from "./src/stores/sqlite/schema.ts";
   import { SqliteRunStore } from "./src/stores/sqlite/run-store-sqlite.ts";

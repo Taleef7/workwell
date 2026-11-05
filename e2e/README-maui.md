@@ -5,8 +5,8 @@ primary-care quality team working **by provider panel and by patient**, using
 status chips ("jelly beans") as pre-filtered work lists and thinking in MIPS
 Quality IDs.
 
-In CI the stack routes the six ACO measures the sandbox runs — cms122, cms125,
-cms2, cms130, cms165 and cms137 — labelled by MIPS Quality ID (for example
+In CI the stack routes the five ACO measures the sandbox runs — cms122, cms125,
+cms2, cms130 and cms165 (cms137 was retired on 2026-11-05) — labelled by MIPS Quality ID (for example
 **MIPS 001 · CMS122**).
 
 ## Accounts

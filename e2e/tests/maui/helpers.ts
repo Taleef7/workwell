@@ -108,7 +108,7 @@ export const AS_ADMIN_RESPONSIVE = session(ADMIN_EMAIL, "responsive");
 export const AS_CLINICIAN = session(CLINICIAN_EMAIL, "clinician");
 
 /**
- * The ACO's whole computable set, which the Maui stack has ROUTED since ADR-078 — in CI too, since the
+ * The ACO's computable set, which the Maui stack has ROUTED since ADR-078 (five since cms137's retirement, #889) — in CI too, since the
  * e2e job vendors the terminology sidecars with the VSAC credential. Each is a roster column, a
  * programs card and a set of status chips, so one list drives every spec that enumerates measures.
  * `mips` is the MIPS Quality Id the crosswalk renders beside the CMS id
@@ -120,7 +120,6 @@ export const ROUTED_MEASURES = [
   { id: "cms2", cms: "CMS2", mips: "134", label: "Depression" },
   { id: "cms130", cms: "CMS130", mips: "113", label: "Colorectal" },
   { id: "cms165", cms: "CMS165", mips: "236", label: "Blood Pressure" },
-  { id: "cms137", cms: "CMS137", mips: "305", label: "Substance Use" },
 ] as const;
 
 export const MAUI_ACCOUNTS = {

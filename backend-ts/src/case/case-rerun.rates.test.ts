@@ -19,6 +19,9 @@ import type { RerunDeps } from "./case-rerun.ts";
 
 process.env.WORKWELL_INSTANCE = "maui";
 process.env.WORKWELL_OFFICIAL_MEASURES = "cms122,cms125,cms137";
+// cms137 is retired on the Maui profile (#889) but stays the one multi-rate measure: list it back.
+const profile = await import("../config/deployment-profile.ts");
+profile.__setRunnableMeasureIdsForTest([...profile.RUNNABLE_MEASURE_IDS, "cms137"]);
 
 const rate = (numer: boolean) => [
   { populationType: "initial-population", result: true },

@@ -1,6 +1,6 @@
 # WorkWell Measure Catalog
 
-WorkWell is one product with several instances. The TWH instance (employees) runs the OSHA, wellness and immunization measures, plus CMS122 and CMS125 on CMS's FHIR drafts. The Maui sandbox (patients) runs six CMS measures on those drafts. The catalog below is seeded on startup, and each instance runs its own subset of it.
+WorkWell is one product with several instances. The TWH instance (employees) runs the OSHA, wellness and immunization measures, plus CMS122 and CMS125 on CMS's FHIR drafts. The Maui sandbox (patients) runs five CMS measures on those drafts. The catalog below is seeded on startup, and each instance runs its own subset of it.
 
 ## Catalog summary
 
@@ -22,9 +22,9 @@ Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS 
 (`cms2`, `cms130`, `cms165`, and since 2026-09-06 `cms137` — the Draft `cms137v14` placeholder was retired
 into it by the ADR-071 seed, the way `cms2v15` was) have no authored CQL and no synthetic binding: they are
 runnable only where the deployment names them in `WORKWELL_OFFICIAL_MEASURES`, and `classifyRunnable`
-reports them as `official-pending` everywhere else. **Since 2026-09-08 the Maui sandbox routes all
-six** (ADR-078, owner decision): cms122, cms125, cms2, cms130, cms165 and cms137, so CMS2, CMS130,
-CMS165 and CMS137 are Active, gated AND executing there; TWH still routes cms122 and cms125 only. All
+reports them as `official-pending` everywhere else. **Since 2026-09-08 the Maui sandbox routes the
+ACO's set** (ADR-078, owner decision): cms122, cms125, cms2, cms130, cms165, and cms137 until its retirement
+on 2026-11-05 (below), so CMS2, CMS130 and CMS165 are Active, gated AND executing there; TWH still routes cms122 and cms125 only. All
 four pass their full MADiE deck against the runtime (36/36, 64/64, 68/68 and 45/45, zero errors); cms2's
 whole-roster gate reads 17,795 of 20,000 in the initial population and 5,413 actionable
 (`docs/evidence/FLIP_GATE_2026-09-08_CMS2.md`); cms130's, run through the credentialed
@@ -45,10 +45,11 @@ banked (2026-09-07):** `flip-gate --measure cms137 --subjects all` over all 20,0
 both rates alive (numerators 231 and 81) and the effectivePeriod covering the measured year — evidence
 FOR the flip on the full roster, not a 2,000-subject sample
 (`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`).
-Its flip landed with the others on 2026-09-08 (ADR-078); it is un-routed, if the final rule removes Quality
-ID 305, by removing it from both `WORKWELL_OFFICIAL_MEASURES` and `WORKWELL_DERIVED_MEASURES` (DEPLOY.md,
-"Turning a translation on or off"). For 2027, Maui scores it with WorkWell's translation of CMS137v15
-(ww-2027.1, #767), never under a CMS eCQM id.
+Its flip landed with the others on 2026-09-08 (ADR-078). **It was retired on Maui on 2026-11-05** (#889,
+owner decision): the CY2027 final rule (CMS-1848-F) removed Quality ID 305 from APP Plus, so it is in
+neither routing list, the Maui profile names it retired, and an all-programs run closes its open cases as
+`MEASURE_RETIRED` (DEPLOY.md, "Retiring a measure"). Its artifact, its MADiE gate and WorkWell's
+translation of CMS137v15 (ww-2027.1, #767) stay in the repository, routed nowhere.
 
 **Every cross-engine disagreement is run to a cause (2026-10-19, #846).** On a Java image pinned by
 digest (cqf-fhir-cr 4.13.0), the second engine agrees on **397 of 455** MADiE cases across all nine

@@ -25,7 +25,7 @@ WorkWell is one product with several instances, each set up for its setting: a s
 
 ## What runs where today
 
-- **The Maui pilot sandbox:** A sandbox for the pilot group, a primary-care group preparing for a Medicare Shared Savings Program ACO in performance year 2027 (which begins 2027-01-01). It runs the six ACO measures over a generated 20,000-patient roster, with patient-driven terminology, a work list organized by provider panel, and clickable status counts that open the matching patient list.
+- **The Maui pilot sandbox:** A sandbox for the pilot group, a primary-care group preparing for a Medicare Shared Savings Program ACO in performance year 2027 (which begins 2027-01-01). It runs five ACO measures over a generated 20,000-patient roster, with patient-driven terminology, a work list organized by provider panel, and clickable status counts that open the matching patient list.
 - **The Total Worker Health (TWH) instance:** The occupational instance. It runs WorkWell's occupational and wellness measures alongside CMS122 (diabetes glycemic control) and CMS125 (breast cancer screening) over a synthetic workforce, as a public read-only sandbox.
 
 Both instances run entirely on synthetic clinical data. A separate staging stack has exercised the live-EHR path against a WebChart trial system, which is how the integration is verified without putting real patients in the demo or the sandbox. There is no Protected Health Information (PHI) anywhere in the repository or sandbox environments. The pilot's production use with real patient data (PHI) is a separate, future phase requiring formal HIPAA and tenant-isolation controls.
@@ -40,7 +40,7 @@ Both instances run entirely on synthetic clinical data. A separate staging stack
 
 - **Measure authorship:** Where an instance runs a CMS measure, it runs CMS's own measure logic, not a rewrite. Not every vendored CMS measure runs yet: CMS68, CMS138 and CMS951 pass their official test cases but run on no instance. Where no national digital specification exists, as for the occupational measures, WorkWell authors its own measure specifications from public statutes and clinical guidelines. Its HEDIS-style wellness measures are authored from public clinical guidance and cite HEDIS by name only.
 - **Grounded standards claims:** Conformance claims are strictly limited to what is verified in [Standards Conformance](STANDARDS_CONFORMANCE.md). WorkWell validates clean aggregate QRDA documents and clean patient-level documents for official measures over its synthetic corpus against HL7 base standards (authored-measure patient-level QRDA is nonconformant by design), but does not claim ONC certification or official agency endorsements. OSHA does not certify software, and WorkWell's OSHA measures represent careful regulatory interpretation, not government validation.
-- **FHIR reporting timelines:** The CY2027 Physician Fee Schedule proposed rule (CMS-1848-P) sought comment on FHIR-based reporting (voluntary for performance years 2028–29, mandatory from 2030 for applicable APP Plus measures). That is a request for comment, not a proposal or a final rule.
+- **FHIR reporting timelines:** The CY2027 Physician Fee Schedule proposed rule (CMS-1848-P) sought comment on FHIR-based reporting (voluntary for performance years 2028–29, mandatory from 2030 for applicable APP Plus measures). The final rule (CMS-1848-F) says those policies would be proposed through future rulemaking, so nothing about them is proposed or final yet.
 
 ## Where to read more
 

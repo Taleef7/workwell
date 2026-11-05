@@ -5,6 +5,17 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-05
+
+- **CMS137 retired on Maui (#889).** The CY2027 final rule (CMS-1848-F) removed Quality IDs 305 (CMS137) and
+  493 from APP Plus, and the owner retired CMS137 on Maui: the stack routes five measures, and the profile's
+  new `retiredMeasureIds` names it. Un-routing alone would have left its open cases open for good (the
+  rollover closes only measures a run evaluated), so an all-programs run now closes a retired measure's
+  active cases, audit-first, as `MEASURE_RETIRED` (a system closure; counts in `RUN_COMPLETED.retired`).
+  Cards skip a measure the deployment does not run. The artifact, its MADiE gate and the 2027 translation
+  stay, routed nowhere. Standing correction 1 now says the final rule left the FHIR timeline unproposed.
+  No schema change. A rollback to a six-measure image reopens the closed cases (DEPLOY.md).
+
 ## 2026-11-04
 
 - **Order options for all six pilot measures, each code approved by an admin (#620, #640).** Every measure

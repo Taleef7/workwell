@@ -37,6 +37,8 @@ export const STATUS_LABELS = CASE_STATUS_LABELS;
 export const CLOSED_REASON_LABELS: Record<string, string> = {
   // #882: the first nightly of a year closes every open case of the year before.
   CYCLE_ROLLED_OVER: "The measurement year ended",
+  // #889: the deployment retired the measure (CMS137 on the pilot, after the CY2027 final rule).
+  MEASURE_RETIRED: "The measure is no longer reported",
 };
 
 export function closedReasonLabel(reason: string | null | undefined): string {

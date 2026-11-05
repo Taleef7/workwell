@@ -14,7 +14,7 @@ on:
         required: true
         type: choice
         default: cms130
-        options: [cms2, cms130, cms165, cms137, cms122, cms125]
+        options: [cms2, cms130, cms165, cms122, cms125]
       subjects:
         description: "How many corpus subjects to evaluate: a number, or `all` for the whole roster."
         required: true
@@ -29,7 +29,7 @@ on:
         description: "The deployment's CURRENT WORKWELL_OFFICIAL_MEASURES (the gate appends the measure under test). Paste the value deploy-maui-mieweb.yml ships."
         required: true
         type: string
-        default: "cms122,cms125,cms2,cms130,cms165,cms137"
+        default: "cms122,cms125,cms2,cms130,cms165"
 
 permissions:
   contents: read

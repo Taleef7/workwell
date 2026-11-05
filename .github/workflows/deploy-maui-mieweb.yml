@@ -185,7 +185,6 @@ jobs:
           # not reproduce the pin (it changed a grouping's expansion at a pinned release on 2026-10-15) or
           # cannot be reached, --fallback-dir restores the stack's stored copy and the SAME pin check judges
           # it; the pin decides either way.
-          node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
           node scripts/vendor-derived-terminology.mjs --catalog-id cms130 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
           node scripts/vendor-derived-terminology.mjs --catalog-id cms125 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
           node scripts/vendor-derived-terminology.mjs --catalog-id cms165 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
@@ -234,15 +233,17 @@ jobs:
           # official-flip-config.test.ts holds the rest.
           #
           # THE FLIP (ADR-045; ADR-078, owner decision 2026-09-08): the sandbox routes the whole ACO
-          # computable set. cms2/cms130/cms137 have their second-engine evidence; cms165 runs on the
-          # profiles the corpus stamps (trustMetaProfile per measure, ADR-076 d1) and its WebChart ingest
-          # caveat governs the PHI phase, not the sandbox. The WorkWell translations of CMS137v15, CMS130v15, CMS125v15, CMS165v15, CMS122v15 and CMS2v16
+          # computable set, five measures since cms137 was retired on 2026-11-05 (#889: CMS-1848-F removed
+          # Quality ID 305 from APP Plus; its artifact is still vendored above, routed nowhere, and the
+          # profile's retiredMeasureIds closes its cases). cms2/cms130 have their second-engine evidence;
+          # cms165 runs on the profiles the corpus stamps (trustMetaProfile per measure, ADR-076 d1) and its WebChart ingest
+          # caveat governs the PHI phase, not the sandbox. The WorkWell translations of CMS130v15, CMS125v15, CMS165v15, CMS122v15 and CMS2v16
           # (WORKWELL_DERIVED_MEASURES) score 2027 only; CMS's artifacts still score every other year.
           build-args: |
             NODE_IMAGE=${{ steps.base.outputs.image }}
             WORKWELL_BUILD_SHA=${{ github.sha }}
-            WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137
-            WORKWELL_DERIVED_MEASURES=cms137,cms130,cms125,cms165,cms122,cms2
+            WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165
+            WORKWELL_DERIVED_MEASURES=cms130,cms125,cms165,cms122,cms2
           # Only the IMMUTABLE tag is pushed here. `maui-latest` is the tag the self-heal reconciler
           # recreates from, so it must mean "the last image that DEPLOYED successfully", not "the last
           # image that BUILT" — otherwise a build that deploys badly poisons the recovery path, and the
@@ -476,8 +477,8 @@ jobs:
         env:
           HEALTH_URL: ${{ env.BACKEND_TS_URL }}/health
           EXPECTED_SHA: ${{ github.sha }}
-          EXPECTED_OFFICIAL: cms122,cms125,cms2,cms130,cms165,cms137
-          EXPECTED_DERIVED: cms137,cms130,cms125,cms165,cms122,cms2
+          EXPECTED_OFFICIAL: cms122,cms125,cms2,cms130,cms165
+          EXPECTED_DERIVED: cms130,cms125,cms165,cms122,cms2
         run: bash .github/scripts/verify-routing-health.sh
 
       # The recovery tag is promoted ONLY here, after the container above came up and served its routing.

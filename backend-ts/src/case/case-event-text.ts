@@ -98,6 +98,8 @@ function resolved(p: Record<string, unknown>): string {
       ? `Closed: a new measurement period began (${prior} to ${current})`
       : "Closed: a new measurement period began";
   }
+  // #889: the gap was never closed; the measure stopped being reported, so say that and nothing else.
+  if (p.reason === "MEASURE_RETIRED") return "Closed: this measure is no longer reported (CMS removed it from the ACO's set)";
   if (p.closedReason === "OUT_OF_POPULATION") return "Closed: no longer in this measure's population";
   // A run's closure records its disposition; a rerun-to-verify's does not.
   if ("disposition" in p) return "Closed: the latest run found the measure met";

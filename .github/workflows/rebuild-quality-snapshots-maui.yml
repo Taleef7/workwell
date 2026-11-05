@@ -34,7 +34,7 @@ jobs:
       PROD_DATABASE_URL: ${{ secrets.DATABASE_URL_TWH }}
       WORKWELL_INSTANCE: maui
       WORKWELL_MAUI_CORPUS_SIZE: "20000"
-      WORKWELL_OFFICIAL_MEASURES: cms122,cms125,cms2,cms130,cms165,cms137
+      WORKWELL_OFFICIAL_MEASURES: cms122,cms125,cms2,cms130,cms165
     steps:
       - name: Confirmation and safety checks
         working-directory: .

@@ -12,12 +12,14 @@ import { officialMeasureSemantics } from "../wiring/official-measure-semantics.t
  * official-capable measure a deployment can run must have wording here, or the fallback prose is what a
  * clinician reads.
  */
-const IDS = [...resolveDeploymentProfile("maui").runnableMeasureIds].filter((id) => officialMeasureSemantics(id) !== undefined);
+// Retired measures too (#889): their stored outcomes and closed cases are still read.
+const MAUI = resolveDeploymentProfile("maui");
+const IDS = [...MAUI.runnableMeasureIds, ...MAUI.retiredMeasureIds].filter((id) => officialMeasureSemantics(id) !== undefined);
 const STATUSES = ["COMPLIANT", "OVERDUE", "EXCLUDED", "MISSING_DATA"] as const;
 
 test("every official measure the pilot can run has wording for every status — derived from the profile", () => {
-  assert.ok(IDS.includes("cms137"), "the set this derives from must include the pilot's sixth measure");
-  assert.ok(IDS.length >= 6, `expected the six ACO measures, got ${IDS.join(", ")}`);
+  assert.ok(IDS.includes("cms137"), "the set this derives from must include retired cms137");
+  assert.ok(IDS.length >= 6, `expected the five ACO measures and retired cms137, got ${IDS.join(", ")}`);
   for (const id of IDS) for (const s of STATUSES) {
     const d = officialDisplayFor(id, s);
     assert.ok(d, `${id}/${s}: no official display wording — the roster would fall back to authored prose`);

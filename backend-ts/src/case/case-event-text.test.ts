@@ -50,6 +50,11 @@ test("run-created events: opened, re-checked, reopened, and each way a case clos
     say("CASE_RESOLVED", { reason: "CYCLE_ROLLED_OVER", priorPeriod: "2026-01-01", currentPeriod: "2027-01-01" }).summary,
     "Closed: a new measurement period began (2026-01-01 to 2027-01-01)",
   );
+  // #889: a retired measure's closure says so, never that a re-check found the measure met.
+  assert.equal(
+    say("CASE_RESOLVED", { reason: "MEASURE_RETIRED", measureId: "cms137", priorStatus: "OPEN" }).summary,
+    "Closed: this measure is no longer reported (CMS removed it from the ACO's set)",
+  );
   assert.equal(say("CASE_EXCLUDED", { exclusionReason: "Excluded on verification rerun." }).summary, "Excluded on verification rerun.");
   assert.equal(say("CASE_EXCLUDED", { disposition: "EXCLUDED" }).summary, "Closed as excluded");
 });

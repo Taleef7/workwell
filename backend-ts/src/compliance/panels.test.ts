@@ -28,7 +28,7 @@ test("profile-aware exports equal raw constants on default profile", () => {
 
 const OFFICIAL_ONLY_IDS = new Set(["cms2", "cms130", "cms165", "cms137"]);
 
-test("a routed official-only column is titled by the catalog, not by its raw id (the pilot's four)", () => {
+test("a routed official-only column is titled by the catalog, not by its raw id; a retired one is no column even when routed (#889)", () => {
   const output = runProfileChild(
     "maui",
     `
@@ -46,7 +46,9 @@ test("a routed official-only column is titled by the catalog, not by its raw id 
     { WORKWELL_OFFICIAL_MEASURES: "cms122,cms125,cms2,cms130,cms165,cms137" },
   );
   const columnNames = output.columnNames as Record<string, string>;
-  for (const id of OFFICIAL_ONLY_IDS) {
+  // cms137 is routed here and still gets no column: the Maui profile retired it (#889).
+  assert.equal("cms137" in columnNames, false, "a retired measure is no column, whatever the routing env says");
+  for (const id of [...OFFICIAL_ONLY_IDS].filter((id) => id !== "cms137")) {
     assert.ok(id in columnNames, `${id} is a column once routed`);
     assert.notEqual(columnNames[id], id, `${id}'s header is a name, not the id (it read "${id}" on the pilot until 2026-09-10)`);
   }

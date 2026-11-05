@@ -9,7 +9,7 @@ import { deriveExamConfig, type TargetOutcome } from "../engine/synthetic/exam-c
 import { buildSyntheticBundle, type FhirBundle } from "../engine/synthetic/fhir-bundle-builder.ts";
 import { buildOfficialOnlyBundle, type OfficialOnlyMeasureId } from "../engine/synthetic/official-only-bundles.ts";
 import { seededDistribution, seededTargetFor, type SeededAssignment } from "../run/distribution.ts";
-import { classifyRunnable, deploymentCorpusSeed, DEPLOYMENT_PROFILE, type DeploymentProfile } from "../config/deployment-profile.ts";
+import { classifyRunnable, deploymentCorpusSeed, DEPLOYMENT_PROFILE, RUNNABLE_MEASURE_IDS, type DeploymentProfile } from "../config/deployment-profile.ts";
 import { corpusBundleSource } from "./corpus-bundle-source.ts";
 
 export interface SubjectBundleSource {
@@ -88,9 +88,12 @@ export function compositeBundleSource(
     // back a plausible-looking patient bundle for an occupational measure it does not run. It reads
     // the profile's own list rather than `isRunnableMeasure`, which consults process.env and would
     // disagree with the `env` this composite was handed.
+    // The deployment's own profile reads the live list, the same array outside tests (the one test seam,
+    // `__setRunnableMeasureIdsForTest`, #889, lists retired cms137 back for the multi-rate tests).
+    const listed = (): readonly string[] => (profile === DEPLOYMENT_PROFILE ? RUNNABLE_MEASURE_IDS : profile.runnableMeasureIds);
     const gate = (id: string): void => {
       pick(id);
-      if (!(profile.runnableMeasureIds as readonly string[]).includes(id)) {
+      if (!listed().includes(id)) {
         throw new Error(`[workwell] ${id} is not runnable here (not in the ${profile.id} profile's measure set)`);
       }
     };

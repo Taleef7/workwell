@@ -24,7 +24,8 @@ export const ACTIVE_CASE_STATUSES = ["OPEN", "IN_PROGRESS"] as const;
  * `STAFF` is every closure a person made: a manual close (`MANUAL_RESOLVE`, which CQL does not
  * corroborate — the patient is still a gap) AND a rerun-to-verify close (`RERUN_VERIFIED` /
  * `RERUN_EXCLUDED`, which CQL does corroborate). `SYSTEM` is every closure the run made
- * (`AUTO_RESOLVED`, `EXCLUDED`, `OUT_OF_POPULATION`, `CYCLE_ROLLED_OVER`). `NONE` is an active case.
+ * (`AUTO_RESOLVED`, `EXCLUDED`, `OUT_OF_POPULATION`, `CYCLE_ROLLED_OVER`, `MEASURE_RETIRED`). `NONE` is an
+ * active case.
  *
  * `closed_by` is the ONLY trustworthy discriminator: `planCaseUpsert` respects a closure iff it is set
  * (a human closure is never reopened by a run; a system closure is), `status` is an untyped string

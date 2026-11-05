@@ -173,8 +173,7 @@ test("#776: the coverage of every logic the Maui sandbox scores with is pinned",
     // Retrieves by type except its blood pressure, whose profile preparation stamps (#591), so it reads
     // what the others read. Until 2026-10-10 it trusted every profile and nearly every row was "not served".
     "cms165 cms-artifact": cmsWithDevices,
-    "cms137 cms-artifact": withoutDevices,
-    "cms137 workwell-translation": withoutDevices,
+    // cms137 is retired on Maui (#889), so no table describes it.
     // Its edit changes how a retrieved diagnosis is compared, not what is retrieved (#779), so it reads
     // exactly what CMS's artifact reads.
     "cms130 workwell-translation": cmsWithDevices,
