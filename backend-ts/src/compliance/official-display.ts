@@ -66,8 +66,11 @@ const OVERDUE = {
     need: "Needs an HbA1c (or GMI) of 9% or less this year",
   },
   cms125: {
-    method: "No mammogram in the 27-month window.",
-    whyFlagged: "Flagged: no mammogram within the 27-month window for this measurement period.",
+    // "Result": the measure reads a charted LOINC result, never a billed mammogram (owner decision
+    // 2026-11-05), so a woman billed for one still reads here until its result is charted.
+    method: "No mammogram result in the 27-month window.",
+    whyFlagged:
+      "Flagged: no mammogram result on file within the 27-month window for this measurement period. A billed or outside mammogram counts once its result is charted.",
     nextAction: "Review breast imaging history; order or document screening if none exists.",
     need: "Needs a mammogram",
   },

@@ -205,8 +205,10 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
    engine-agreement check, not a roster forecast. No roster is needed: measures with an official
    artifact are never roster-stamped, so a tenant with no qualifying encounters reads INCONCLUSIVE.
 
-3. **Check the numerator, not just membership** (ADR-044: CPT vs LOINC mammograms made screened women
-   OVERDUE).
+3. **Check the numerator, not just membership.** For CMS125, authored and official disagree by design on
+   a billed-only mammogram: authored reads the CPT/HCPCS `Procedure`, official counts only a charted
+   LOINC imaging result (owner decision 2026-11-05, `WEBCHART_FHIR_MAPPING.md`). Expect it; it is not a
+   defect.
 
 4. **Edit the deploy workflow, never the container**: its `build-backend-ts` build args and the routing
    gate's `EXPECTED_*`. No container env array may carry the lists (#768). For Maui also `flip-gate.yml`'s

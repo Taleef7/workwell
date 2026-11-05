@@ -29,8 +29,10 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). The CQL engine is the sole source of truth.
 - Nothing invents clinical data. Bundle preparation may add a missing system to a recognised code but never
   supplies or replaces a code (an absent field stays absent), and the synthetic corpus holds no fact dated
-  after its as-of. WebChart ingest's derivations from real rows (us-core-sex from gender, the mammogram
-  Observation from its Procedure) are mappings, not exceptions. So is the QRDA I importer's blood-pressure
+  after its as-of. WebChart ingest's derivation of us-core-sex from gender is a mapping, not an exception. A billed
+  mammogram is not a result: no ingest path derives the LOINC imaging Observation official CMS125 reads from
+  a CPT 77067 / HCPCS G0202 Procedure (owner decision 2026-11-05), so for official CMS125 a patient whose
+  only record is the bill is a gap until the result is charted. So is the QRDA I importer's blood-pressure
   panel (LOCKED_DECISIONS §4A.8): it supplies the panel code 85354-9 and the `vital-signs` category, and
   only under §4A.8's conditions. A blood pressure the document states as one Physical Exam coded 85354-9,
   its readings as QDM Components, is imported as that panel: only the `vital-signs` category (and the UCUM

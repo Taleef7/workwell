@@ -206,7 +206,9 @@ cannot call out.
 
 ### 4.2 Do the API terms apply to WorkWell?
 
-**Status:** asked 2026-10-02; unanswered.
+**Status:** asked 2026-10-02; answered in part on 2026-10-09. MIE's WebChart contact knows of no call
+limit and pointed to the owner of the API terms, who has not answered. Still open: whether the published
+terms apply to WorkWell.
 
 The published Terms of API Use forbid storing User Content beyond a session and cap use at 15,000 calls
 per app per day. WorkWell stores outcomes and evidence. A nightly over a practice through per-resource
@@ -252,6 +254,16 @@ WebChart can show a scanned mammogram, colonoscopy, FOBT or similar document, an
 reported" date, as screening evidence on its own screens. Over FHIR these are mostly untyped
 DocumentReferences that the CMS measures do not read, so a patient whose only evidence is a scanned
 document is a gap in WorkWell. The pilot group needs to hear that before anyone compares the numbers.
+
+The same holds for a **billed mammogram** (CPT 77067 / HCPCS G0202) since 2026-11-05 (owner decision):
+official CMS125 counts only a charted LOINC result, so a woman whose mammogram is only billed reads
+OVERDUE, and her card can propose the mammogram again (`CDS_HOOKS.md`). Two questions follow, both in
+#892:
+- Where does WebChart chart a mammogram result: `mammo_tracking`, a scanned `MAMMO` document, or
+  elsewhere?
+- May a mapper supply `Observation.category = imaging` from a mammogram LOINC code? The shim and the
+  dev-DB export emit observation rows with no category, and official CMS125 requires it. Supplying it is
+  an owner decision, because a category is a fact about the result, not a system on its code.
 
 ### 4.7 Which result statuses mean a final result?
 

@@ -108,7 +108,7 @@ export interface EmployeeProfileResponse {
   /**
    * The panel facts (MM-2): attributed PCP and primary payer, ids for matching and names for display.
    * Null where the directory records none — the occupational roster has no payer, and a live WebChart
-   * directory has neither until Coverage extraction lands (#533).
+   * directory has neither until Coverage extraction lands (#893).
    */
   providerId: string | null;
   providerName: string | null;

@@ -290,7 +290,7 @@ HISTORY here**, `current` on the work list (`wantsCurrentCycle`). Explicit `curr
 - `status` (`worklistQueryFor`): blank = every row here and the ACTIVE set on the work list; `all` =
 every row on both; `staff_closed` = terminal with `closed_by` set.
 - `providerId`, `payer` were appended, never inserted (also §6.2): directory facts, empty where unrecorded
-(WebChart Coverage: #591); `payer` is a Source of Payment Typology code.
+(WebChart Coverage: #893); `payer` is a Source of Payment Typology code.
 - `closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus`, `liveOutcomeRunId` were appended, never
 inserted (ADR-083). `live*` only on person-closed rows (else empty); not evaluated = `UNKNOWN`; a winning
 run describing another `evaluationPeriod` = `UNKNOWN`/`UNKNOWN`, run id filled. `liveState`
