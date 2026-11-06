@@ -339,6 +339,16 @@ test("QRDA I: an AUTHORED measure is non-conformant BECAUSE it has no published 
   assert.equal(xmlProblem(doc!.xml), null);
 });
 
+test("QRDA I: a subject nothing scored is not said to be scored by authored logic (item 13)", () => {
+  const errored = { ...outcome("MISSING_DATA"), evidence: { evaluationError: "CQL engine failure", message: "boom" } };
+  const [doc] = buildQrda1Documents(run, "cms125", [errored], () => bundle);
+  assert.match(doc!.xml, /NOT CONFORMANT: measure cms125 was not scored by CMS's published logic for this patient/);
+  assert.doesNotMatch(doc!.xml, /WorkWell-authored/);
+  assert.match(doc!.nonConformanceReasons.join(" | "), /not scored by CMS's published logic/);
+  assert.doesNotMatch(doc!.nonConformanceReasons.join(" | "), /authored logic/);
+  assert.equal(xmlProblem(doc!.xml), null);
+});
+
 test("QRDA I: an OFFICIAL outcome with patient data has NO non-conformance reasons", () => {
   const [doc] = buildQrda1Documents(run, "cms125", [outcome("COMPLIANT", officialEvidence(true))], () => bundle);
   assert.deepEqual(doc!.nonConformanceReasons, []);

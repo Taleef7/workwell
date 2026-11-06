@@ -804,3 +804,24 @@ test("an errored subject gets NO individual MeasureReport in the bundle — the 
   const count = (code: string) => summary.group[0]!.population.find((p) => p.code.coding[0]!.code === code)?.count ?? 0;
   assert.equal(count("initial-population"), 1, "the errored subject is in no population of the summary either");
 });
+
+test("a report with no official identity says it is not a CMS measure; an official one says nothing (item 13)", () => {
+  const authored = buildSummaryMeasureReport(run, "audiogram", [{ ...oc("COMPLIANT"), evidence: { expressionResults: [] } }], GENERATED_AT);
+  assert.equal(authored.text?.status, "additional", "not rendered from the structured elements");
+  assert.match(authored.text!.div, /^<div xmlns="http:\/\/www\.w3\.org\/1999\/xhtml"><p>Not a CMS measure: audiogram was scored by WorkWell-authored logic/);
+  assert.match(authored.text!.div, /identified by WorkWell's own canonical\.<\/p><\/div>$/);
+  // Nothing evaluated (every row errored): the neutral wording, never "authored".
+  const errored = buildSummaryMeasureReport(run, "cms122", [{ ...oc("MISSING_DATA"), measureId: "cms122", evidence: { evaluationError: "CQL engine failure", message: "boom" } }], GENERATED_AT);
+  assert.match(errored.text!.div, /not computed by CMS's published logic/);
+  assert.doesNotMatch(errored.text!.div, /authored/i);
+  // The counts path the route takes: wording from the caller's flag.
+  assert.match(buildSummaryMeasureReportFromCounts(run, "audiogram", { ipp: 1, denom: 1, denex: 0, numer: 1, denexcep: 0 }, GENERATED_AT, null, [], true).text!.div, /WorkWell-authored/);
+  assert.doesNotMatch(buildSummaryMeasureReportFromCounts(run, "audiogram", { ipp: 1, denom: 1, denex: 0, numer: 1, denexcep: 0 }, GENERATED_AT).text!.div, /authored/i);
+  // Per subject: an individual report picks its wording from its own outcome.
+  const ind = buildIndividualMeasureReport({ ...oc("COMPLIANT"), evidence: { expressionResults: [] } }, run, "audiogram", GENERATED_AT);
+  assert.match(ind.text!.div, /WorkWell-authored/);
+  // An official report claims its artifact and carries no narrative.
+  const official = buildSummaryMeasureReport(run, "cms122", [officialOc("OVERDUE", { ipp: true, denom: true, denex: false, numer: true })], GENERATED_AT);
+  assert.equal(official.text, undefined);
+  assert.equal(buildIndividualMeasureReport(officialOc("OVERDUE", { ipp: true, denom: true, denex: false, numer: true }), run, "cms122", GENERATED_AT).text, undefined);
+});

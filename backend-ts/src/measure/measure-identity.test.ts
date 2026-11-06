@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { MEASURE_CATALOG } from "./measure-catalog.ts";
 import { readFileSync } from "node:fs";
 import {
+  authoredLogicLabel,
+  authoredScored,
+  executedLogicLabelOf,
+  noCmsIdentityStatement,
   CMS_ARTIFACT_LINEAGE_FOR_TEST,
   MEASURE_IDENTITY,
   ecqmIdOf,
@@ -376,3 +380,31 @@ test("measureVersionOf is the version that scored the row, never the catalog rec
   assert.equal(measureVersionOf("cms2", { expressionResults: [] }), "");
 });
 
+test("executedLogicLabelOf names WorkWell's own CQL as such, and nothing for a row nothing scored by name (item 13)", () => {
+  assert.equal(authoredLogicLabel("cms125"), "WorkWell-authored BreastCancerScreeningCQL 2.0.0");
+  assert.equal(authoredLogicLabel("audiogram"), "WorkWell-authored AnnualAudiogramCompleted 1.0.0");
+  assert.equal(authoredLogicLabel("cms2"), null, "an official-only measure has no authored library");
+  assert.equal(executedLogicLabelOf("cms125", cmsRow()), "CMS125FHIR v1.0.000");
+  assert.equal(executedLogicLabelOf("cms137", translatedRow), "WorkWell translation of CMS137v15 (ww-2027.1)");
+  assert.equal(executedLogicLabelOf("cms125", { expressionResults: [] }), "WorkWell-authored BreastCancerScreeningCQL 2.0.0");
+  // `official: null` reads as no official block, as the SQL projection and `officialReportIdentity` read it.
+  assert.equal(executedLogicLabelOf("cms125", { official: null, expressionResults: [] }), "WorkWell-authored BreastCancerScreeningCQL 2.0.0");
+  assert.equal(executedLogicLabelOf("cms125", { evaluationError: "CQL engine failure", message: "boom" }), "");
+  assert.equal(executedLogicLabelOf("cms125", { official: { ecqmId: "125FHIR" } }), "", "a malformed official block names nothing");
+  assert.equal(executedLogicLabelOf("cms2", { expressionResults: [] }), "");
+  // Seeded rows were scored by nothing named: demo trend history, and generated or trimmed scale rows.
+  for (const seed of [{ seedTrendHistory: true, target: "x", rate: 0.5 }, { scale: true }]) {
+    assert.equal(authoredScored(seed), false);
+    assert.equal(executedLogicLabelOf("audiogram", seed), "");
+    assert.equal(measureVersionOf("audiogram", seed), "", "version and label agree on a seeded row");
+  }
+  assert.equal(authoredScored(null), false);
+  assert.equal(authoredScored([]), false);
+});
+
+test("noCmsIdentityStatement says 'authored' only when WorkWell's own CQL scored the rows (item 13)", () => {
+  assert.match(noCmsIdentityStatement("cms125", true), /^Not a CMS measure: cms125 was scored by WorkWell-authored logic/);
+  const neutral = noCmsIdentityStatement("cms125", false);
+  assert.match(neutral, /not computed by CMS's published logic/);
+  assert.doesNotMatch(neutral, /authored/i);
+});
