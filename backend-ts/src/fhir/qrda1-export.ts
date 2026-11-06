@@ -47,6 +47,7 @@ import { employeeById } from "../config/deployment-profile.ts";
 import { ROSTER_ELIGIBLE_MEASURES } from "../engine/ingress/enrollment/roster.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
 import { officialReportIdentity } from "./measure-report.ts";
+import { authoredScored } from "../measure/measure-identity.ts";
 import {
   CUSTODIAN_ID_ROOT,
   DEVICE_ID_ROOT,
@@ -276,11 +277,19 @@ export function buildQrda1Document(
   // — and ADR-046 decision 3 forbids inventing one, so the document falls back to WorkWell's urn and is
   // structurally non-conformant. That is the correct outcome rather than a defect: QRDA I is a format
   // for reporting PUBLISHED eCQMs, so a measure outside that set is outside the format.
+  //
+  // "WorkWell-authored" only when WorkWell's own CQL really scored this subject (`authoredScored`): an
+  // errored subject, or one whose official evidence names an artifact no longer vendored, was not, and
+  // is told so neutrally (item 13).
   const localIdentityNote = official
     ? ""
-    : `\n            NOT CONFORMANT: measure ${esc(measureId)} was evaluated from WorkWell-authored logic, which has no
+    : authoredScored(outcome.evidence)
+      ? `\n            NOT CONFORMANT: measure ${esc(measureId)} was evaluated from WorkWell-authored logic, which has no
             published eMeasure Identifier. QRDA I requires one (CONF:67-12811) and this document will not
-            claim an identity the run did not use.`;
+            claim an identity the run did not use.`
+      : `\n            NOT CONFORMANT: measure ${esc(measureId)} was not scored by CMS's published logic for this patient, so
+            this document has no published eMeasure Identifier to name. QRDA I requires one (CONF:67-12811) and
+            this document will not claim an identity the run did not use.`;
 
   // The Patient Data section is where a receiver recalculates from. When it is empty the document says
   // so in prose — `nullFlavor` on a `<section>` is measurably INERT (identical Schematron output with
@@ -408,7 +417,7 @@ export function indexBundlesBySubject(
 export function qrda1NonConformance(outcome: OutcomeRecord, measureId: string, bundle: unknown): string[] {
   const translation = bundle === undefined ? { entries: [], untranslatable: [] } : translateQdm(bundle);
   const degradationMessage = bundle === undefined ? undefined : patientFallbackDiagnostics(bundle);
-  return nonConformanceFrom(measureId, translation, measureReference(measureId, outcome.evidence), degradationMessage);
+  return nonConformanceFrom(measureId, translation, measureReference(measureId, outcome.evidence), authoredScored(outcome.evidence), degradationMessage);
 }
 
 /** Identical lines once each, with how many resources each stands for (review, #362). */
@@ -423,6 +432,8 @@ function nonConformanceFrom(
   measureId: string,
   translation: QdmTranslation,
   reference: string,
+  /** WorkWell's own CQL scored the subject (`authoredScored`), which decides how a missing identity is explained. */
+  authored: boolean,
   degradationMessage?: string,
 ): string[] {
   const reasons: string[] = [];
@@ -450,7 +461,11 @@ function nonConformanceFrom(
     );
   }
   if (!reference.includes(EMEASURE_ID_ROOT)) {
-    reasons.push(`measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was evaluated from authored logic`);
+    reasons.push(
+      authored
+        ? `measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was evaluated from authored logic`
+        : `measure ${measureId} has no published eMeasure Identifier (CONF:67-12811) — it was not scored by CMS's published logic`,
+    );
   }
   return reasons;
 }
@@ -489,7 +504,7 @@ export function buildQrda1Documents(
     const translation = bundle === undefined ? { entries: [], untranslatable: [] } : translateQdm(bundle);
     const reference = measureReference(measureId, outcome.evidence);
     const degradationMessage = bundle === undefined ? undefined : patientFallbackDiagnostics(bundle);
-    const nonConformanceReasons = nonConformanceFrom(measureId, translation, reference, degradationMessage);
+    const nonConformanceReasons = nonConformanceFrom(measureId, translation, reference, authoredScored(outcome.evidence), degradationMessage);
     return {
       subjectId: outcome.subjectId,
       xml: buildQrda1Document(run, measureId, outcome, bundle, { entries: translation.entries, reference, zoned: translation.zoned ?? false }),

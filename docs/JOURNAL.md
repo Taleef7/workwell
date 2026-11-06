@@ -5,6 +5,14 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-06
+
+- **Custom measures kept apart from the CMS set (item 13).** Authored runs still export, now labelled:
+  QRDA III and MeasureReport say "not a CMS measure", and the CSVs' `executedLogic` names
+  `WorkWell-authored <Library> <version>`. The Measures grid and Studio label authored and unrunnable rows.
+  Studio refuses CMS eCQM / MIPS ids in a name or policy reference, and duplicate names; MCP's by-name lookup
+  answers `MEASURE_AMBIGUOUS` rather than pick. No schema change; authored cms122/cms125 keep the CMS id.
+
 ## 2026-11-05
 
 - **CMS137 retired on Maui (#889).** The CY2027 final rule (CMS-1848-F) removed Quality IDs 305 (CMS137) and

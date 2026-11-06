@@ -234,8 +234,13 @@ export async function handleMeasures(req: Request, env: MeasuresEnv, actor = "sy
     if (specId) {
       const parsed = validateSpecUpdate(await req.json().catch(() => null));
       if (!parsed.ok) return json({ error: "invalid_request", message: parsed.message }, 400);
-      const ok = await updateMeasureSpec(await lifecycleDeps(env), specId, parsed.value, actor);
-      return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: specId }, 404);
+      try {
+        const ok = await updateMeasureSpec(await lifecycleDeps(env), specId, parsed.value, actor);
+        return ok ? json({ status: "saved" }) : json({ error: "not_found", measureId: specId }, 404);
+      } catch (err) {
+        if (err instanceof MeasureError) return json({ error: "invalid_request", message: err.message }, 400);
+        throw err;
+      }
     }
     const cqlId = pathname.match(/^\/api\/measures\/([^/]+)\/cql$/)?.[1];
     if (cqlId) {

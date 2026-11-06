@@ -857,3 +857,22 @@ test("#880: get_case drops the case page's reading of the facts (`cqlFindings`) 
   assert.equal(res.isError, false);
   assert.doesNotMatch(res.content[0]!.text, /SENTINEL-READING|cqlFacts|cqlFindings/);
 });
+
+test("item 13: a measureName shared by several records resolves to the one not Deprecated, else MEASURE_AMBIGUOUS", async () => {
+  // Older stacks keep deprecated legacy rows under an active measure's name; a by-name lookup must
+  // answer about the live one, and with two live ones it must not pick whichever the store listed first.
+  const a = await deps.measureStore.createMeasure({ name: "Twin Measure", policyRef: "Practice policy", owner: "a@b.c" });
+  const b = await deps.measureStore.createMeasure({ name: "twin measure", policyRef: "Practice policy", owner: "a@b.c" });
+  for (const tool of ["list_cases", "list_noncompliant", "explain_rule", "get_measure_traceability", "list_data_quality_gaps"]) {
+    const { payload } = await call(tool, { measureName: "Twin Measure" });
+    assert.equal(payload.code, "MEASURE_AMBIGUOUS", tool);
+    assert.match(String(payload.message), new RegExp(`${[a.measureId, b.measureId].sort().join(", ")}`), tool);
+  }
+  const versionCall = await callTool("get_measure_version", { measureName: "Twin Measure" }, ctx());
+  assert.equal(versionCall.isError, true);
+  assert.match(versionCall.content[0]!.text, /More than one measure is named/);
+  await deps.measureStore.setVersionStatus(b.measureId, b.versionId, { status: "Deprecated" });
+  const resolved = await call("explain_rule", { measureName: "TWIN MEASURE" });
+  assert.equal(resolved.payload.error, undefined);
+  assert.equal(resolved.payload.measureName, "Twin Measure", "the live record (a), never the deprecated one (b, 'twin measure')");
+});

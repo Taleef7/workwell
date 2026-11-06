@@ -794,7 +794,26 @@ test("an errored row never names the report's logic, even when it kept an offici
   const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
   assert.equal(report.measures[0]!.logic, null);
   assert.equal(report.measures[0]!.ecqmId, null);
+  // The evaluated row was scored by WorkWell's own CQL, and is named as such with its version (item 13);
+  // never by the errored row's artifact.
+  assert.equal(report.measures[0]!.executedLogic, "WorkWell-authored DiabetesHbA1cPoorControlCQL 2.0.0");
+  assert.equal(report.measures[0]!.version, "2.0.0");
+});
+
+test("rows that all errored name no logic at all: nothing scored them (item 13)", async () => {
+  const errored = { evaluationError: "CQL engine failure", message: "boom" };
+  const result = await runReport({ rows: [row("pat-001", errored), row("pat-002", errored)] });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
   assert.equal(report.measures[0]!.executedLogic, null);
+  assert.equal(report.measures[0]!.version, null);
+  assert.doesNotMatch(subjectListReportCsv(report, profile, "patient"), /WorkWell-authored/);
+});
+
+test("an authored winning run's CSV rows name its logic beside its version (item 13)", async () => {
+  const result = await runReport({ rows: [row("pat-001", { expressionResults: [] })] });
+  const report = (result as { report: import("./subject-list-report.ts").SubjectListReport }).report;
+  const csv = subjectListReportCsv(report, profile, "patient");
+  assert.match(csv, /2\.0\.0,[^\n]*WorkWell-authored DiabetesHbA1cPoorControlCQL 2\.0\.0/);
 });
 
 test("a measure with no run has no logic", async () => {

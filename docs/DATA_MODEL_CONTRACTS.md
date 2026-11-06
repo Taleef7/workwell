@@ -269,9 +269,11 @@ Columns:
 
 `executedLogic` was appended, never inserted (#769): the logic that scored the row, from its own
 evidence (`scoringLogicOf`): `CMS125FHIR v1.0.000`, or `WorkWell translation of CMS137v15 (ww-2027.1)`
-(§6.6's string plus the translation's version); empty for an authored or errored row. `measureVersion`
+(§6.6's string plus the translation's version); for a row WorkWell's own CQL scored (no `official`, or
+`official: null`), `WorkWell-authored <Library> <version>` (`executedLogicLabelOf`, item 13); empty for an
+errored row and a seeded one (`seedTrendHistory`, `scale`: nothing scored it by name). `measureVersion`
 is the same row's (`measureVersionOf`): the artifact's or translation's own version, the authored
-library's for an authored row, empty for an errored row; never the catalog record's `v1.0`.
+library's for an authored row, empty for an errored or seeded row; never the catalog record's `v1.0`.
 
 ### 6.3 `GET /api/exports/cases?format=csv`
 Columns:
@@ -301,7 +303,8 @@ action (empty if none, never an older one), read in one batch.
 describe the case's CITED outcome (`lastRunId`, subject, measure, and the row of the case's own
 `evaluationPeriod` where the run holds more than one) as §6.2 does, read once per (run, measure) for the
 exported rows through an identity-only projection (`scoringForCases`), never from today's routing; empty
-when that run holds no row for the case. On a person-closed row they describe the frozen `currentOutcomeStatus`, not `live*`.
+when that run holds no row for the case. An authored cited row is `WorkWell-authored <Library> <version>`
+(item 13); the projection carries no seed marker, so a seeded cited row reads as authored here. On a person-closed row they describe the frozen `currentOutcomeStatus`, not `live*`.
 
 **Subject headers** (§6.2/§6.3, `subjectHeaders`): a patient deployment (`WORKWELL_INSTANCE=maui`,
 `subjectTerm === "patient"`) names the subject columns `patientExternalId`/`patientName`, and in §6.2
@@ -372,7 +375,9 @@ never a truncated 200. A data-insufficient measure (#853) is refused the same wa
 `-`, `@`, tab, CR).
 - `ecqmId` is CMS-prefixed (`CMS137FHIR`, `ecqmIdOf`) since #769; it was the evidence's bare `137FHIR`.
 - `executedLogic` was appended, never inserted: `CMS137FHIR v1.0.000` for CMS's artifact, a WorkWell
-translation's label (its `ecqmId` empty) otherwise; filled wherever the measure columns are. A selected
+translation's label (its `ecqmId` empty) otherwise, and `WorkWell-authored <Library> <version>` (with that
+library's version in `measureVersion`, in the CSV and the report JSON alike) when the counted rows were
+scored by WorkWell's own CQL (item 13); filled wherever the measure columns are. A selected
 run whose counted rows were scored by more than one logic answers **409 `mixed_logic`**, as a run mixing
 periods answers 409 `period_mismatch`.
 - The four `evidence*` columns were appended (#875), per rate, from that rate's flags and the row's

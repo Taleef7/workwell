@@ -54,7 +54,7 @@
 import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord } from "../stores/outcome-store.ts";
 import { loadOfficialArtifact, officialMeasureIdentifiers } from "../wiring/official-artifacts.ts";
-import { scoredByCurrentLogic } from "../measure/measure-identity.ts";
+import { authoredScored, noCmsIdentityStatement, scoredByCurrentLogic } from "../measure/measure-identity.ts";
 import {
   ACT,
   CUSTODIAN_ID_ROOT,
@@ -161,7 +161,8 @@ function criterionNamer(
 export function buildQrda3Document(run: RunRecord, measureId: string, outcomes: OutcomeRecord[]): string {
   const official = outcomes.map((o) => officialReportIdentity(o.evidence)).find((i) => i !== null) ?? null;
   const { rates, strata } = aggregateByRate(outcomes, measureId);
-  return buildQrda3DocumentFromCounts(run, measureId, rates.length > 1 ? rates : rates[0]!, official, strata);
+  const authored = official === null && outcomes.some((o) => authoredScored(o.evidence));
+  return buildQrda3DocumentFromCounts(run, measureId, rates.length > 1 ? rates : rates[0]!, official, strata, authored);
 }
 
 /**
@@ -227,8 +228,15 @@ export function buildQrda3DocumentFromCounts(
   official: OfficialReportIdentity | null = null,
   /** Per rate, the strata the group declares (empty for an unstratified group). Index-aligned with `c`. */
   strata: StratumCounts[][] = [],
+  /**
+   * WorkWell's own CQL scored the counts (`OfficialRunAggregate.authored`). Read only when `official` is
+   * null, to pick the wording of the "not a CMS measure" statement (item 13): a document with no published
+   * eMeasure identity says so in its title and Measure Section, so a custom measure is never read as a CMS one.
+   */
+  authored = false,
 ): string {
   const rates = Array.isArray(c) ? c : [c];
+  const notCms = official ? "" : noCmsIdentityStatement(measureId, authored);
   const groups = publishedGroups(measureId, official);
   const now = hl7Ts(new Date().toISOString());
   const low = hl7Ts(run.measurementPeriodStart);
@@ -318,7 +326,7 @@ export function buildQrda3DocumentFromCounts(
   <templateId root="2.16.840.1.113883.10.20.27.1.1" extension="2020-12-01"/>
   <id root="${crypto.randomUUID()}"/>
   <code code="55184-6" codeSystem="${LOINC}" codeSystemName="LOINC" displayName="Quality Reporting Document Architecture Calculated Summary Report"/>
-  <title>WorkWell QRDA Category III — ${esc(measureId)}${official ? ` (official ${esc(official.ecqmId ?? measureId)} v${esc(official.version ?? "?")})` : ""}</title>
+  <title>WorkWell QRDA Category III — ${esc(measureId)}${official ? ` (official ${esc(official.ecqmId ?? measureId)} v${esc(official.version ?? "?")})` : " — not a CMS measure"}</title>
   <effectiveTime value="${now}"/>
   <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>
   <languageCode code="en-US"/>
@@ -382,7 +390,7 @@ export function buildQrda3DocumentFromCounts(
           <templateId root="2.16.840.1.113883.10.20.27.2.1" extension="2020-12-01"/>
           <code code="55186-1" codeSystem="${LOINC}" codeSystemName="LOINC" displayName="Measure Section"/>
           <title>Measure Section</title>
-          <text>Aggregate results for measure ${esc(measureId)} (run ${esc(run.id)})${rates.length > 1 ? `, ${rates.length} rates` : ""}.</text>
+          <text>Aggregate results for measure ${esc(measureId)} (run ${esc(run.id)})${rates.length > 1 ? `, ${rates.length} rates` : ""}.${notCms ? ` ${esc(notCms)}` : ""}</text>
           <entry>
             <organizer classCode="CLUSTER" moodCode="EVN">
               <templateId root="2.16.840.1.113883.10.20.24.3.98"/>

@@ -219,7 +219,7 @@ test("createMeasure: the MEASURE_CREATED event survives a failed insert, and nam
   await assert.rejects(
     () =>
       createMeasure(
-        { measures: { createMeasure: explode } as never, events: log as never },
+        { measures: { createMeasure: explode, listLatest: async () => [] } as never, events: log as never },
         { name: "Respirator fit test", policyRef: "OSHA 1910.134", owner: "safety" },
         "admin",
       ),
@@ -238,6 +238,7 @@ test("createMeasure: a successful create inserts under the ids the event named",
   const returned = await createMeasure(
     {
       measures: {
+        listLatest: async () => [],
         createMeasure: async (input: Record<string, unknown>) => {
           passed = input;
           return { ...MEASURE, measureId: input.measureId, versionId: input.versionId };

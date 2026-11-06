@@ -129,6 +129,14 @@ always compliance-oriented. This includes `cms122`, whose WorkWell numerator rev
 poor-control orientation. Accordingly, reports claim only `urn:workwell:measure:*`; using an official
 CMS canonical without also reorienting the numerator and notation is forbidden and guard-tested.
 
+**A report no CMS logic computed says so in prose (item 13, 2026-11-06).** A MeasureReport without an
+official identity carries `text` (`status: "additional"`, an XHTML div) stating it is not a CMS measure
+report; a QRDA III document's title gains "— not a CMS measure" and its Measure Section text the same
+sentence; QRDA I's existing note now uses the same chooser. The authored wording ("scored by
+WorkWell-authored logic") is used only where an evaluated row was; an all-errored run gets the neutral one.
+Documents scored by CMS's artifact or a translation are byte-identical (pinned). **Not re-measured:** the
+DEQM, CVU+ and Schematron results above predate the note; it adds narrative only and was not re-run.
+
 Each emitted MeasureReport now has a lowercase UUID `id`, a request-scoped report-generation `date`, and
 a contained Organization reporter named **WorkWell Measure Studio**. The route injects one generation
 timestamp for deterministic timestamp assertions; the run's measurement timeframe remains in `period`.

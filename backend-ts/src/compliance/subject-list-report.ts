@@ -52,7 +52,7 @@ import { createRateAggregator, reportingPeriod, type OfficialReportIdentity, typ
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
-import { ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import { authoredLogicLabel, authoredLogicVersion, ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
 import type { SufficiencyCheck } from "../run/data-sufficiency.ts";
 import { PAGE, foldGroups, rateGroupsOf, readMeasureYearRows, selectRunForYear, type Buckets } from "./measure-year-rates.ts";
 import type { CqlFacts } from "../wiring/official-facts.ts";
@@ -274,8 +274,10 @@ export async function subjectListReport(
       measureId,
       // One spelling on every served eCQM id, and none for a translation, whatever its rows carried.
       ecqmId: read.identity?.ecqmId && read.identity.kind !== "derived" ? ecqmIdOf(read.identity.ecqmId) : null,
-      version: read.identity?.version ?? null,
-      executedLogic: executedLogicOf(read.identity ?? null),
+      // WorkWell's own CQL scored the rows (a winning run from before the measure was routed): named as
+      // such, with its library's version, so the CSV row never leaves the logic blank beside counts (item 13).
+      version: read.identity?.version ?? (read.authored ? authoredLogicVersion(measureId) : null),
+      executedLogic: executedLogicOf(read.identity ?? null) ?? (read.authored ? authoredLogicLabel(measureId) : null),
       logic: read.logic,
       runId: winner.runId,
       runStartedAt: winner.startedAt,
@@ -419,6 +421,8 @@ const emptyEntry = (
 interface MeasureRead {
   aggregate: RateAggregate;
   identity: OfficialReportIdentity | null;
+  /** WorkWell's own CQL scored the evaluated kept rows (`MeasureYearRead.authored`). */
+  authored: boolean;
   seen: Set<string>;
   rows: ReportRow[];
   /** The four DISJOINT buckets every seen subject falls into (`bucketOf`), classified per row in a stated order. */
@@ -482,6 +486,7 @@ async function readMeasure(
   return {
     aggregate: counted?.aggregate ?? createRateAggregator(measureId, { declaredRates: read.declaredRates }).finish(),
     identity: read.identity,
+    authored: read.authored,
     seen: new Set(read.rows.map((row) => row.subjectId)),
     rows,
     buckets: counted?.buckets ?? { scored: 0, unmeasured: 0, evaluationErrors: 0, outOfPopulation: 0 },

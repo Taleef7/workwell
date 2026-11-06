@@ -161,6 +161,18 @@ export default function MeasuresPage() {
       }
       if (column.field === "routing") {
         const routing = String(row.routing ?? "");
+        // Item 13: a measure WorkWell's own CQL scores is never mistaken for a CMS one, and a catalog row
+        // that cannot run here says so rather than leaving the cell blank.
+        if (routing === "authored" || routing === "not-runnable") {
+          return (
+            <span
+              data-testid={`measure-routing-${routing}`}
+              className="inline-flex items-center rounded bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700"
+            >
+              {routing === "authored" ? "WorkWell-authored" : "Not runnable here"}
+            </span>
+          );
+        }
         if (routing !== "official" && routing !== "official-pending") return null;
         return (
           <span className="inline-flex items-center rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:ring-blue-900">

@@ -327,7 +327,12 @@ Invalid arguments or missing records return a structured error — no stack trac
 }
 ```
 
-Error codes used: `ACCESS_DENIED`, `EMPLOYEE_NOT_FOUND`, `MEASURE_NOT_FOUND`, `CASE_NOT_FOUND`, `INVALID_ARGUMENT`
+Error codes used: `ACCESS_DENIED`, `EMPLOYEE_NOT_FOUND`, `MEASURE_NOT_FOUND`, `MEASURE_AMBIGUOUS`, `CASE_NOT_FOUND`, `INVALID_ARGUMENT`
+
+`MEASURE_AMBIGUOUS` (item 13): a `measureName` that names several records. Of those, the one record not
+`Deprecated` is used (older stacks keep deprecated legacy rows under an active measure's name); with no single
+such record the tool answers this code with the ids it could mean, never an arbitrary pick. `get_measure_version`
+reports it as a tool error, as it does a missing measure. Ask by `measureId` instead.
 
 ## Audit record (MCP_TOOL_CALLED)
 

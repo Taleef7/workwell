@@ -15,6 +15,7 @@
 import type { MeasureStore, MeasureRecord } from "../stores/measure-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import { compileAllowsActivation, toActivationReadiness } from "./measure-read-models.ts";
+import { cmsIdentityRefusal, sameMeasureName } from "./measure-naming.ts";
 
 export interface MeasureLifecycleDeps {
   measures: MeasureStore;
@@ -59,6 +60,13 @@ export async function createMeasure(
   const policyRef = input.policyRef?.trim();
   const owner = input.owner?.trim();
   if (!name || !policyRef || !owner) throw new MeasureError("name, policyRef and owner are required");
+  // Item 13: a Studio measure is never mistaken for a CMS one, so it states no CMS identity and no other
+  // measure's name. Checked before the audit, so a refused create writes nothing. Residual: two creates
+  // at the same instant can still share a name (no unique key on `measures.name`; DDL is the owner's).
+  const refusal = cmsIdentityRefusal("name", name) ?? cmsIdentityRefusal("policyRef", policyRef);
+  if (refusal) throw new MeasureError(refusal);
+  const taken = (await deps.measures.listLatest()).find((m) => sameMeasureName(m.name, name));
+  if (taken) throw new MeasureError(`a measure named "${taken.name}" already exists (${taken.measureId}); choose another name`);
   // AUDIT BEFORE MUTATE (#598). Both ids are minted HERE rather than by the insert — the store now
   // accepts them — so the event can name the version before the row exists. `audit` takes the record
   // it keys on, so it is handed the ids directly; every field in the payload is an input, not a

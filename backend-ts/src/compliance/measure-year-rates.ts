@@ -148,6 +148,11 @@ export interface MeasureYearRows {
   declaredRates: number;
   /** The first evaluated kept row's artifact identity; null when none was evaluated or it was authored. */
   identity: OfficialReportIdentity | null;
+  /**
+   * WorkWell's own authored CQL scored the evaluated kept rows: one was evaluated, it carried no official
+   * identity, and the rows were not mixed. Tells an authored `identity: null` from an all-errored one (item 13).
+   */
+  authored: boolean;
   /** The kept rows were scored by more than one logic (`scoringOfRows`), e.g. CMS's draft and a translation. */
   mixedLogic: boolean;
   /** The one logic the evaluated kept rows were scored by; null when mixed, authored, or none named. */
@@ -327,6 +332,7 @@ export async function readMeasureYearRows(
     periodMismatch,
     declaredRates,
     identity,
+    authored: identified && identity === null && !scoring.conflict,
     mixedLogic: scoring.conflict,
     logic: scoring.conflict ? null : (scoring.logics[0] ?? null),
     dataInsufficient: thin ? [...thin].sort() : null,
