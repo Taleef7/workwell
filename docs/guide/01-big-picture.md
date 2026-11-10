@@ -15,7 +15,7 @@ The case and worklist flow is drawn as a sequence in [chapter 10, S3](10-scenari
 setting. **TWH** is the occupational instance: its subjects are employees, and it runs WorkWell's
 occupational and wellness measures plus CMS122 and CMS125 on CMS's drafts over a 150-person
 synthetic roster. **Maui** is a sandbox for the pilot group, a primary-care group entering a
-Medicare Shared Savings Program ACO in 2027: its subjects are patients, and it runs six CMS
+Medicare Shared Savings Program ACO in 2027: its subjects are patients, and it runs five CMS
 measures on the drafts over a generated 20,000-patient corpus. Both use synthetic data only.
 Running the pilot on real data is a separate, later decision.
 
@@ -71,7 +71,7 @@ of duplicating it. [Chapters 5](05-fhir.md) and [4](04-engine-and-routing.md).
 **Stage 3 — the engine, routed per measure.** On TWH, twelve of fourteen runnable measures execute
 our own compiled CQL on MITRE's reference JavaScript engine, about 68 ms per person, and two (CMS122,
 CMS125) run CMS's FHIR draft artifact, unmodified, on the reference measure calculator. On Maui all
-six measures run the CMS drafts that way. Both paths return the same
+five measures run the CMS drafts that way. Both paths return the same
 shape, so nothing downstream knows which answered. [Chapters 3](03-compiler-and-elm.md) and
 [4](04-engine-and-routing.md).
 

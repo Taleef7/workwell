@@ -33,7 +33,7 @@ supplements it.
 ```mermaid
 flowchart LR
   V["9 CMS measures vendored, code lists complete"] --> G["9 pass their authors' own test decks - 455 of 455"]
-  G --> R["6 routed on the Maui pilot sandbox - cms122, cms125, cms2, cms130, cms165, cms137; 2 on TWH"]
+  G --> R["5 routed on the Maui pilot sandbox - cms122, cms125, cms2, cms130, cms165 (cms137 retired 2026-11-05); 2 on TWH"]
   A["14 authored measures, runnable on TWH"] --> P["12 run on our own engine there; cms122 and cms125 run the CMS drafts"]
 ```
 
@@ -152,8 +152,8 @@ owner-locked decisions constraining it are in `docs/LOCKED_DECISIONS.md` §4 and
    clickable status-chip drill-downs, primary-care synthetic roster, MIPS↔CMS crosswalk in the UI —
    **all landed by 2026-09-01** — the crosswalk last, in #505 — and the Maui sandbox is live)
    → MM-1 (official-only measure onboarding for CMS2/CMS130/CMS165 — gated ≠ routable ≠ runnable —
-   per-measure gated flips, 2027 logic (CMS has not published FHIR versions of the 2027 measures, so WorkWell translates them itself; CMS137's, CMS130's, CMS125's, CMS165's, CMS122's and CMS2's translations are routed on Maui, #767, #779, #782, #816, #818 and #822, CMS125's and CMS122's on TWH too, #820, and a measure without one scores a 2027 period with its 2026 draft), and, for the real-data phase, CMS137 only if Quality ID 305 survives the CY2027
-   final rule; **U1–U3 built by 2026-09-06**: the runnable rule and calendar period (ADR-072), the
+   per-measure gated flips, 2027 logic (CMS has not published FHIR versions of the 2027 measures, so WorkWell translates them itself; CMS130's, CMS125's, CMS165's, CMS122's and CMS2's translations are routed on Maui, #779, #782, #816, #818 and #822 (CMS137's, #767, was until its retirement), CMS125's and CMS122's on TWH too, #820, and a measure without one scores a 2027 period with its 2026 draft), and CMS137 retired on Maui on 2026-11-05, after the CY2027 final rule removed Quality ID 305 from
+   APP Plus (#889); **U1–U3 built by 2026-09-06**: the runnable rule and calendar period (ADR-072), the
    20,000-patient data-first corpus whose clinical facts follow the year each run scores (ADR-075),
    and CMS137 vendored, gated 45/45 and read as two rates with its strata carried into the
    MeasureReport and QRDA III (ADR-074) — all six measures are runnable once routed, and the flips

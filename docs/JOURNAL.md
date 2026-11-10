@@ -5,6 +5,15 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-10
+
+- **Handoff, and `v1.0.0`.** `docs/HANDOFF.md` is new: what is left and who it waits on, the accounts the
+  live stacks depend on (most held by the original developer, and a UMLS licence that cannot be handed
+  over), how to take the stacks over on any Postgres 16, and the order to shut them down in (the health
+  checks read green with no database). CLAUDE.md now names "the owner" as the maintainer MIE names.
+  README, the guide and the one-page explainer said Maui runs six measures; it runs five since #889. The
+  four `.claude/skills` trap lists are committed. No code change.
+
 ## 2026-11-06
 
 - **Custom measures kept apart from the CMS set (item 13).** Authored runs still export, now labelled:
