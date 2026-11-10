@@ -144,7 +144,7 @@ For the same flows drawn as *sequences* — who calls what, in what order — se
    too. When a real person is assessed there is no compiler, no download and no disk read in the
    path.
 2. **Routing is per measure, not per system.** On TWH, twelve of fourteen run logic we wrote and two run
-   CMS's FHIR draft untouched; on Maui all six run the drafts. Both return the same shape, and switching one over is a
+   CMS's FHIR draft untouched; on Maui all five run the drafts. Both return the same shape, and switching one over is a
    reviewed configuration change with a diff.
 3. **The evidence is the product.** We keep the value of every rule the measure evaluated, not
    just the verdict. That is what lets a case screen say *why* somebody was flagged, and what an

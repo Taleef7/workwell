@@ -52,6 +52,11 @@ backend/src/test/resources/logback-test.xml
 # Git worktrees (isolated workspaces — project-local)
 .worktrees/
 
+# Claude Code: the skills in .claude/skills/ are committed; local settings and worktrees are not
+.claude/settings.local.json
+.claude/launch.json
+.claude/worktrees/
+
 # Local-only notes (tokens, personal config — never commit)
 docs/MCP_LOCAL.md
 docs/vision doc screenshots
