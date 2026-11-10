@@ -13,6 +13,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   checks read green with no database). CLAUDE.md now names "the owner" as the maintainer MIE names.
   README, the guide and the one-page explainer said Maui runs six measures; it runs five since #889. The
   four `.claude/skills` trap lists are committed. No code change.
+- **README tour shows Maui.** Five screenshots of the pilot sandbox (Programs, work list, patient, case,
+  scorecard; synthetic data) now lead the tour, above the TWH ones.
 
 ## 2026-11-06
 

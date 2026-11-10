@@ -53,7 +53,19 @@ A staging stack reads FHIR from a live WebChart trial tenant. All three run on s
 
 ## A tour of the product
 
-The screenshots are from the TWH instance, where the subjects are employees. On Maui the subjects are patients.
+### Maui: the primary-care pilot sandbox
+
+Taken on 2026-11-10 as the quality lead. Every patient and provider is synthetic: Maui holds no real patient data.
+
+| | |
+|---|---|
+| ![Programs overview for the five ACO measures](docs/assets/10-maui-programs.jpg) **Programs**: the five ACO measures with this year's rate, the status counts and the trend across nightly runs. | ![Patient work list with every open gap per patient](docs/assets/11-maui-worklist.jpg) **Work list**: one row per patient with every open gap, so one call or message covers them all. Filter by attributed list, PCP, insurance or owner. |
+| ![Patient page with gaps, contact preference and activity](docs/assets/12-maui-patient.jpg) **Patient**: every measure's status for one patient, with re-check and outreach per gap, the contact preference and the recent activity. | ![Case page with the next action and outreach](docs/assets/13-maui-case.jpg) **Case**: one gap, why the measure flagged it, what closes it, and outreach from the same page. The patient's other open gaps are on the right. |
+| ![Provider scorecard by location](docs/assets/14-maui-scorecard.jpg) **Scorecard**: each measure's rate for each provider's patients, by location. It is WorkWell's estimate; WebChart calculates and submits the reported rate. | |
+
+### TWH: the occupational-health instance
+
+Here the subjects are employees.
 
 | | |
 |---|---|
