@@ -14,6 +14,8 @@ import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { handleCampaigns } from "./campaigns.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 const dbPath = join(tmpdir(), `workwell-camproute-${crypto.randomUUID()}.sqlite`);
 let env: { DB: unknown };
@@ -35,7 +37,7 @@ before(async () => {
   });
   for (const s of ["emp-006", "emp-010"]) {
     await outcomes.recordOutcome({ runId: run.id, subjectId: s, measureId: "audiogram", status: "OVERDUE", evidence: {} });
-    await cases.upsertFromOutcome({ runId: run.id, subjectId: s, measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" });
+    await cases.upsertFromOutcome({ runId: run.id, subjectId: s, measureId: "audiogram", evaluationPeriod: bucketPeriodForMeasure("audiogram", practiceToday()), outcomeStatus: "OVERDUE" });
   }
 });
 after(() => { try { rmSync(dbPath, { force: true }); } catch { /* best effort */ } });

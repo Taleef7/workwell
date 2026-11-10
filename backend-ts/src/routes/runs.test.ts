@@ -57,7 +57,7 @@ after(() => {
 });
 
 test("create run → evaluate subject via engine → persist + list outcome", async () => {
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { evaluationDate: "2026-06-12" } });
   assert.equal(created?.status, 201);
   const run = (await created!.json()) as { id: string };
   assert.ok(run.id);
@@ -627,7 +627,7 @@ test("GET /api/runs/:id/measure-report → 422 for a multi-measure (ALL_PROGRAMS
   const tbBundle = JSON.parse(
     readFileSync(fileURLToPath(new URL("../../spike/synthetic/tb_surveillance/present_recent.json", import.meta.url)), "utf8"),
   );
-  const created = await post("/api/runs", { scopeType: "ALL_PROGRAMS", triggeredBy: "test" });
+  const created = await post("/api/runs", { scopeType: "ALL_PROGRAMS", triggeredBy: "test", requestedScope: { evaluationDate: "2026-06-12" } });
   const runId = ((await created!.json()) as { id: string }).id;
   for (const [measureId, patientBundle] of [["audiogram", bundle], ["tb_surveillance", tbBundle]] as const) {
     const evaluated = await post(`/api/runs/${runId}/evaluate`, { measureId, patientBundle, evaluationDate: "2026-06-12" });
@@ -919,7 +919,7 @@ test("POST /api/runs/:id/evaluate accepts a QRDA I document — §170.315(c)(2) 
   // recalculates from it. This drives the real route end to end — export the bundle the engine just
   // evaluated, feed the DOCUMENT back in, and require the same outcome. Importing is a mapping into the
   // unchanged engine, not a second calculator (ADR-051).
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { evaluationDate: "2026-06-12" } });
   const run = (await created!.json()) as { id: string };
 
   const direct = await post(`/api/runs/${run.id}/evaluate`, {
@@ -1049,7 +1049,7 @@ test("import gaps are PERSISTED in the outcome evidence, not only in the POST re
   // Returning `untranslatedTemplates` only in the immediate response meant every later read — outcomes,
   // MeasureReport, QRDA — presented a partial calculation as an ordinary one, and the qualification died
   // with the request.
-  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test" });
+  const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { evaluationDate: "2026-06-12" } });
   const run = (await created!.json()) as { id: string };
   const runRecord = { id: run.id, measurementPeriodStart: "2025-06-12T00:00:00.000Z", measurementPeriodEnd: "2026-06-12T00:00:00.000Z" } as never;
   const realCoded = {
@@ -1085,6 +1085,12 @@ const importRun = {
   requestedScope: { measureId: "audiogram", importDriven: true },
 };
 
+/**
+ * An import run created for the day its documents are evaluated as of. From 2027 that day is in a cycle
+ * that has ended, and only a run created for it may hold its rows (#882).
+ */
+const importRunOn = (evaluationDate: string) => ({ ...importRun, requestedScope: { ...importRun.requestedScope, evaluationDate } });
+
 /** A minimal QRDA I for the audiogram measure's shape — one Encounter, so the import does not refuse it. */
 const importableDocument = (mrn: string, mbi?: string, encounterId = "enc-1") => `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3">
@@ -1114,7 +1120,7 @@ test("import → finalize → export: a batch of documents becomes a reportable 
   // route could do before: `GET /api/runs/:id/qrda` refuses a RUNNING run (correctly — exporting a run
   // that is still writing outcomes presents a partial roster as complete) and NOTHING finalized an
   // imported run, so the loop stopped one step short of a document to submit.
-  const created = await post("/api/runs", importRun);
+  const created = await post("/api/runs", importRunOn("2026-06-12"));
   const run = (await created!.json()) as { id: string };
 
   // Three documents, two people: the first two share a Medicare Beneficiary Identifier the way a
@@ -1154,7 +1160,7 @@ test("import: two people whose identifiers share an extension are persisted as t
   // One MRN extension under two assigning authorities: grouping keeps the two people apart, but both
   // documents give the engine the same Patient.id. Persisted under it, the second person's outcome would
   // read as the first's on every per-subject surface.
-  const created = await post("/api/runs", importRun);
+  const created = await post("/api/runs", importRunOn("2026-06-12"));
   const run = (await created!.json()) as { id: string };
   const otherRoot = importableDocument("mrn-x", undefined, "e2").replace('extension="mrn-x" root="1.3.6.1.4.1.115"', 'extension="mrn-x" root="2.16.840.1.113883.19.5"');
   assert.notEqual(otherRoot, importableDocument("mrn-x", undefined, "e2"), "the fixture must move the second MRN to another root");
@@ -1174,7 +1180,7 @@ test("finalize REFUSES a run whose outcomes did not come from imported documents
   // is done; finalizing one from outside would mark a partial roster COMPLETED and make it exportable —
   // the exact harm `notReportable` exists to prevent. Checked without new state: an imported outcome
   // carries `qrda1Import` evidence and a pipeline one does not.
-  const created = await post("/api/runs", importRun);
+  const created = await post("/api/runs", importRunOn("2026-06-12"));
   const run = (await created!.json()) as { id: string };
   const evaluated = await post(`/api/runs/${run.id}/evaluate`, {
     measureId: "audiogram",
@@ -1199,7 +1205,7 @@ test("finalize REFUSES a run with no outcomes rather than reporting an empty ros
 });
 
 test("finalize is not a second chance — a finished run is refused, not re-finalized", async () => {
-  const created = await post("/api/runs", importRun);
+  const created = await post("/api/runs", importRunOn("2026-06-12"));
   const run = (await created!.json()) as { id: string };
   await post(`/api/runs/${run.id}/import`, {
     measureId: "audiogram",
@@ -1352,7 +1358,7 @@ test("ONE document about another measure fails the whole batch — the check is 
 });
 
 test("finalize writes an audit event — a run state change with no ledger entry is a hard-rule breach", async () => {
-  const run = (await (await post("/api/runs", importRun))!.json()) as { id: string };
+  const run = (await (await post("/api/runs", importRunOn("2026-06-12")))!.json()) as { id: string };
   await post(`/api/runs/${run.id}/import`, {
     measureId: "audiogram",
     evaluationDate: "2026-06-12",
@@ -1370,7 +1376,7 @@ test("a run takes ONE submission — a retried import cannot double the populati
   // accepting every row as imported (Codex, #389). Refusing beats upserting: a retry is
   // indistinguishable from a deliberate second archive, and silently merging two into one report is the
   // worse mistake.
-  const run = (await (await post("/api/runs", importRun))!.json()) as { id: string };
+  const run = (await (await post("/api/runs", importRunOn("2026-06-12")))!.json()) as { id: string };
   const documents = { measureId: "audiogram", evaluationDate: "2026-06-12", qrda1: [importableDocument("mrn-once", "MBI-ONCE")] };
   assert.equal((await post(`/api/runs/${run.id}/import`, documents))?.status, 201);
 
@@ -1402,12 +1408,28 @@ test("the engine evaluates the date the row is LABELLED with", async () => {
   };
 
   const fromRun = await daysSince({ measureId: "audiogram", importDriven: true, evaluationDate: "2025-01-15" }, {});
-  const explicit = await daysSince({ measureId: "audiogram", importDriven: true }, { evaluationDate: "2025-01-15" });
+  // A body's date over the run's: the run is created for 2025 (so it carries the earlier-cycle marker, #882)
+  // and the body names another 2025 day.
+  const explicit = await daysSince({ measureId: "audiogram", importDriven: true, evaluationDate: "2025-06-01" }, { evaluationDate: "2025-01-15" });
   const today = await daysSince({ measureId: "audiogram", importDriven: true }, {});
 
   assert.equal(fromRun.period, "2025-01-15", "the row is labelled with the run's date");
   assert.equal(fromRun.days, explicit.days, "and the engine computed that date, not another one");
   assert.notEqual(fromRun.days, today.days, "which is a different answer from today's — so the check can fail");
+});
+
+test("an import dated in a cycle that has ended needs a run created for it (#882)", async () => {
+  // A run created for the current cycle carries no earlier-cycle marker, so its 2025 rows would be every
+  // "latest" read's newest: the roster, the trend and the cards would show last year's answer.
+  const run = (await (await post("/api/runs", { ...importRun, requestedScope: { measureId: "audiogram", importDriven: true } }))!.json()) as { id: string };
+  const refused = await post(`/api/runs/${run.id}/import`, {
+    measureId: "audiogram",
+    qrda1: [importableDocument(`mrn-${crypto.randomUUID()}`, `MBI-${crypto.randomUUID()}`)],
+    evaluationDate: "2025-01-15",
+  });
+  assert.equal(refused?.status, 409);
+  assert.equal(((await refused!.json()) as { error: string }).error, "earlier_cycle_unmarked");
+  assert.equal((await new SqliteOutcomeStore(env.DB as never).listOutcomes(run.id)).length, 0, "nothing was recorded");
 });
 
 /**
@@ -1751,4 +1773,75 @@ test("GET /api/runs/schedule answers the nightly's hour and weekdays, and is not
   assert.equal(typeof body.enabled, "boolean");
   assert.equal(typeof body.anchorHourUtc, "number");
   assert.ok(body.days === null || Array.isArray(body.days));
+});
+
+// ---- #882: the server's date, the earlier-cycle marker, one population run at a time -------------
+
+test("POST /api/runs drops a client's today and marker, and marks the run itself from its evaluation date (#882)", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const scopeOf = async (requestedScope: Record<string, unknown>) => {
+    const created = await post("/api/runs", { scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "t", requestedScope });
+    assert.equal(created?.status, 201);
+    return (await runStore.getRun(((await created!.json()) as { id: string }).id))!.requestedScope;
+  };
+  // 2025 has ended in any year this runs: marked, whatever the client claimed.
+  assert.deepEqual(await scopeOf({ evaluationDate: "2025-03-01", today: "2030-01-01", earlierCycle: false }), { evaluationDate: "2025-03-01", earlierCycle: true });
+  // No date: nothing to mark, and a client's own marker and day are not kept.
+  assert.deepEqual(await scopeOf({ measureId: "audiogram", today: "1999-01-01", earlierCycle: true }), { measureId: "audiogram" });
+});
+
+test("POST /api/runs/manual and rerun refuse a population run while one the pipeline planned is running (#882)", async () => {
+  const runStore = new SqliteRunStore(env.DB as never);
+  const seed = (requestedScope: Record<string, unknown>, startedAt = new Date().toISOString(), status = "RUNNING") =>
+    runStore.createRun({
+      scopeType: "ALL_PROGRAMS", triggeredBy: "scheduler", requestedScope, status, startedAt,
+      measurementPeriodStart: "2026-01-01T00:00:00.000Z", measurementPeriodEnd: "2027-01-01T00:00:00.000Z",
+    } as Parameters<SqliteRunStore["createRun"]>[0]);
+  // "Atlantis" is refused as an unknown site (400) once the guard lets the request through, so the
+  // probe never starts a real run.
+  const probe = async () => (await post("/api/runs/manual", { scopeType: "SITE", site: "Atlantis" }))!;
+
+  const leftover = await seed({ measureId: "audiogram" }); // an /evaluate or import run a client left RUNNING
+  const stale = await seed({ today: "2026-11-01" }, "2020-01-01T00:00:00.000Z"); // older than this process
+  try {
+    assert.equal((await probe()).status, 400, "neither a client's run nor one from before this process blocks");
+    const nightly = await seed({ today: "2026-11-02", evaluationDate: "2026-11-02" });
+    try {
+      const refused = await probe();
+      assert.equal(refused.status, 409);
+      assert.deepEqual(await refused.json(), {
+        error: "run_in_progress",
+        runId: nightly.id,
+        message: "A run is already in progress; try again when it finishes.",
+      });
+      const rerun = await post(`/api/runs/${stale.id}/rerun`);
+      assert.equal(rerun?.status, 409, "a population rerun is refused too");
+      // A single person's run is not a population run, and is not held.
+      assert.notEqual((await post("/api/runs/manual", { scopeType: "EMPLOYEE", employeeExternalId: "nobody-882" }))?.status, 409);
+    } finally {
+      await runStore.finalizeRun(nightly.id, "COMPLETED");
+    }
+    // One the pipeline has created but not yet marked RUNNING holds the button too.
+    const queued = await seed({ today: "2026-11-02", evaluationDate: "2026-12-31", earlierCycle: true }, undefined, "QUEUED");
+    try {
+      const refused = await probe();
+      assert.equal(refused.status, 409);
+      assert.equal(((await refused.json()) as { runId: string }).runId, queued.id);
+    } finally {
+      await runStore.finalizeRun(queued.id, "COMPLETED");
+    }
+  } finally {
+    await runStore.finalizeRun(leftover.id, "COMPLETED");
+    await runStore.finalizeRun(stale.id, "COMPLETED");
+  }
+});
+
+test("POST /api/runs/manual plans on the server's date: in January, 31 December is an earlier cycle and the run is marked (#882)", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2027-01-04T20:00:00.000Z") });
+  const res = await post("/api/runs/manual", { scopeType: "EMPLOYEE", employeeExternalId: "emp-006", evaluationDate: "2026-12-31" });
+  assert.equal(res?.status, 201);
+  const { runId } = (await res!.json()) as { runId: string };
+  const run = await new SqliteRunStore(env.DB as never).getRun(runId);
+  assert.equal(run!.requestedScope.today, "2027-01-04");
+  assert.equal(run!.requestedScope.earlierCycle, true);
 });

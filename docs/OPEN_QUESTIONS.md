@@ -83,6 +83,27 @@ nothing regardless of whether it is right.
   status), or as ordinary diagnoses? Read as confirmed, they put patients into denominators they do not
   belong to.
 
+### 1.5 What does the practice call a patient's row, and one gap?
+
+**Raised:** 2026-10-22. **Status:** asked on the call; no answer yet. Blocks renaming the screens.
+
+- WorkWell's work list has one row per patient with every open gap, and Cases has one row per gap (one
+  measure for one patient). Since #880 each screen says so in its heading. If the practice's staff use
+  other words for the two, the screens and their navigation take those words.
+
+### 1.6 Which order codes may a card offer, before real data?
+
+**Raised:** 2026-11-04 (#620, #640). **Status:** the owner approves codes for the sandbox; open for the PHI
+phase.
+
+- Each measure's order set is in `CDS_HOOKS.md`. Before the pilot runs on real data, the pilot group's
+  clinician signs off on each code a card may offer, and an admin records each approval on Admin → Order
+  codes (audited, with who and when).
+- CMS137's options (HCPCS H0001, H0004) lean on Medicaid behavioral-health codes. Do they fit the pilot
+  group's payers, or does the practice order SUD assessment and counseling under other codes?
+- The clinic's own order catalog (#640 item 4): which local code does the practice use for each order, so a
+  card can carry it beside the national code? Waits on MIE.
+
 ---
 
 ## 2. For the ACO
@@ -116,23 +137,18 @@ no ranking, no target and no colour against one. Benchmarks and deciles wait on 
 
 *(2.3 is answered; see §5.)*
 
-### 2.4 Does the ACO want CMS137 for 2027?
-
-**Raised:** 2026-10-08. **Status:** unasked.
-
-The CY2027 proposed rule would remove Quality ID 305 (CMS137) from APP Plus, and the final rule is
-expected around November. WorkWell is set up to score CMS137's 2027 periods with its own translation
-(routed on Maui, #767). If
-the ACO does not want it whatever the rule says, it should come off the pilot's catalog rather than sit
-on every screen.
-
-### 2.5 Every patient, or only the ACO's attributed patients?
+### 2.5 Every patient, or only the ACO's attributed patients? Which collection type?
 
 **Raised:** 2026-10-08. **Status:** unasked.
 
 The attributed-list report (#654) scores whichever patients are on the list. Whether the ACO wants
 quality for every patient the practice sees, or only for the patients the ACO attributes to the
 practice, decides what the list should hold and what the report's denominators mean.
+
+The CY2027 final rule (CMS-1848-F) adds a Medicare eCQM collection type: CMS's eCQM specifications
+reported on the ACO's assigned beneficiaries only, scored on flat benchmarks. Which collection type the
+ACO will use for PY2027 (eCQMs, Medicare eCQMs or MIPS CQMs) decides which patients a reported rate
+covers.
 
 ---
 
@@ -190,7 +206,9 @@ cannot call out.
 
 ### 4.2 Do the API terms apply to WorkWell?
 
-**Status:** asked 2026-10-02; unanswered.
+**Status:** asked 2026-10-02; answered in part on 2026-10-09. MIE's WebChart contact knows of no call
+limit and pointed to the owner of the API terms, who has not answered. Still open: whether the published
+terms apply to WorkWell.
 
 The published Terms of API Use forbid storing User Content beyond a session and cap use at 15,000 calls
 per app per day. WorkWell stores outcomes and evidence. A nightly over a practice through per-resource
@@ -236,6 +254,16 @@ WebChart can show a scanned mammogram, colonoscopy, FOBT or similar document, an
 reported" date, as screening evidence on its own screens. Over FHIR these are mostly untyped
 DocumentReferences that the CMS measures do not read, so a patient whose only evidence is a scanned
 document is a gap in WorkWell. The pilot group needs to hear that before anyone compares the numbers.
+
+The same holds for a **billed mammogram** (CPT 77067 / HCPCS G0202) since 2026-11-05 (owner decision):
+official CMS125 counts only a charted LOINC result, so a woman whose mammogram is only billed reads
+OVERDUE, and her card can propose the mammogram again (`CDS_HOOKS.md`). Two questions follow, both in
+#892:
+- Where does WebChart chart a mammogram result: `mammo_tracking`, a scanned `MAMMO` document, or
+  elsewhere?
+- May a mapper supply `Observation.category = imaging` from a mammogram LOINC code? The shim and the
+  dev-DB export emit observation rows with no category, and official CMS125 requires it. Supplying it is
+  an owner decision, because a category is a fact about the result, not a system on its code.
 
 ### 4.7 Which result statuses mean a final result?
 
@@ -351,7 +379,24 @@ data. WorkWell may not map the text to a code. The dev database holds billed E/M
 
 ---
 
+### 4.16 Which zone is the practice in, and which is WebChart's server in?
+
+**Status:** new 2026-11-02 (#847, #882); to be asked through the pilot's MIE contact.
+
+WorkWell now takes "today" as the practice's date: which year a run scores, which cycle is current, when the
+work list turns to the new year. Maui is set to `Pacific/Honolulu`, read from the pilot's materials; it was
+`America/New_York`, the WebChart server's. Two answers are needed: the practice's own zone (Hawaii, as set?),
+and the zone WebChart's server states times from (US Eastern, with FHIR times sent as UTC?). The second
+decides whether the four exact-time comparisons in MEASURES.md ("The year's edges are UTC") can be fixed by
+converting at ingest. The nightly stays at 12:00 UTC, 2:00 AM in Hawaii.
+
 ## 5. Answered
+
+### 2.4 Does the ACO want CMS137 for 2027?
+
+**Raised:** 2026-10-08. **Answered 2026-11-05 by the CY2027 final rule:** CMS-1848-F removed Quality ID
+305 (CMS137) from APP Plus from PY2027, so the ACO does not report it. The owner retired it on Maui the
+same day (#889, LOCKED_DECISIONS §4A.2).
 
 ### 2.3 Are 837/835 claims files in scope?
 

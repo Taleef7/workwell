@@ -95,7 +95,7 @@ export interface RosterRow {
      * The panel facts (MM-2): attributed PCP and primary payer. Ids are what the filters match on,
      * names are display; both travel together so a cell can be labelled without a second lookup.
      * Null where the directory records none — the occupational roster has no payer, and a live
-     * WebChart directory has neither until Coverage extraction lands (#533).
+     * WebChart directory has neither until Coverage extraction lands (#893).
      */
     providerId: string | null; providerName: string | null; payer: string | null; payerName: string | null;
   };

@@ -25,6 +25,7 @@ import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 import { ecqmIdOf } from "../measure/measure-identity.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import type { MeasureReportEntry, ReportRow, SubjectListReport } from "./subject-list-report.ts";
+import { evidenceOf, type EvidenceCells } from "./evidence-status.ts";
 
 export const reportCsvHeaders = (term: "employee" | "patient" = DEPLOYMENT_PROFILE.subjectTerm): string[] => [
   "listId",
@@ -54,7 +55,16 @@ export const reportCsvHeaders = (term: "employee" | "patient" = DEPLOYMENT_PROFI
   "payer",
   // APPENDED, never inserted (§6.6): which logic produced the row's numbers.
   "executedLogic",
+  // APPENDED (#875): what the measure's own CQL found for the patient on this rate (`evidenceOf`).
+  "evidenceStatus",
+  "evidenceDate",
+  "evidenceDateSource",
+  "evidenceDetail",
 ];
+
+// The per-rate evidence reader lives in its own module (#880): the case page reads it too, and this file
+// sits in an import cycle the case read model must not join.
+export { evidenceOf, type EvidenceCells, type EvidenceStatus } from "./evidence-status.ts";
 
 export function subjectListReportCsv(
   report: SubjectListReport,
@@ -109,6 +119,8 @@ function rowCells(
   ];
   // evaluatedAt, rate, the five populations, status, outOfPopulation, evaluationError.
   const EVALUATION_COLUMNS = 10;
+  // evidenceStatus, evidenceDate, evidenceDateSource, evidenceDetail: per rate, so empty on a row with none.
+  const NO_EVIDENCE = ["", "", "", ""];
 
   if (row.rowStatus === "NOT_MATCHED") {
     // Every patient and measure column empty — the row exists to say this identifier resolved to
@@ -118,6 +130,7 @@ function rowCells(
       ...measureCells.map(() => ""),
       ...Array.from({ length: EVALUATION_COLUMNS }, () => ""),
       ...tail,
+      ...NO_EVIDENCE,
     ]];
   }
   if (row.rowStatus === "MISSING_FROM_RUN" || row.rates.length === 0) {
@@ -131,9 +144,10 @@ function rowCells(
       csvCell(row.outcome ? String(row.outcome.outOfPopulation ?? false) : ""),
       csvCell(row.evaluationError ? "true" : row.outcome ? "false" : ""),
       ...tail,
+      ...NO_EVIDENCE,
     ]];
   }
-  return row.rates.map((rate) => [
+  return row.rates.map((rate, index) => [
     ...lead,
     ...measureCells,
     csvCell(row.outcome?.evaluatedAt ?? ""),
@@ -147,5 +161,10 @@ function rowCells(
     csvCell(String(row.outcome?.outOfPopulation ?? false)),
     csvCell(row.evaluationError ? "true" : "false"),
     ...tail,
+    ...evidenceCells(evidenceOf(row.measureId ?? "", measure, index, rate, row)),
   ]);
 }
+
+// The status and the date are ours; the source names a define and a logic label, and the detail is
+// CQL's rendering of chart data (a coding's display, a note), so both are neutralised.
+const evidenceCells = (e: EvidenceCells): string[] => [csvCell(e.status), csvCell(e.date), csvTextCell(e.dateSource), csvTextCell(e.detail)];

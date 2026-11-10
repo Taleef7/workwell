@@ -14,8 +14,9 @@ export const OUTCOME_LABELS: Record<string, string> = {
   MISSING_DATA: "Missing Data",
   // ADR-078: the logic ran and this patient is not the measure's concern this period. Kept out of
   // Missing Data, which means the patient IS in the population and the result needed to score them
-  // is absent — the difference between a report and a piece of work.
-  OUT_OF_POPULATION: "Not in population",
+  // is absent — the difference between a report and a piece of work. "Not eligible" (#880): the
+  // practice's word; "population" is the measure author's.
+  OUT_OF_POPULATION: "Not eligible",
   EXCLUDED: "Excluded"
 };
 
@@ -29,6 +30,22 @@ export const CASE_STATUS_LABELS: Record<string, string> = {
 
 export const STATUS_LABELS = CASE_STATUS_LABELS;
 
+/**
+ * Why a case closed, in the practice's words, where the server's code would not read as a sentence. A code
+ * with no entry is shown as the server wrote it.
+ */
+export const CLOSED_REASON_LABELS: Record<string, string> = {
+  // #882: the first nightly of a year closes every open case of the year before.
+  CYCLE_ROLLED_OVER: "The measurement year ended",
+  // #889: the deployment retired the measure (CMS137 on the pilot, after the CY2027 final rule).
+  MEASURE_RETIRED: "The measure is no longer reported",
+};
+
+export function closedReasonLabel(reason: string | null | undefined): string {
+  if (!reason) return "-";
+  return CLOSED_REASON_LABELS[normalizeEnumValue(reason)] ?? reason;
+}
+
 export const PRIORITY_LABELS: Record<string, string> = {
   HIGH: "High",
   MEDIUM: "Medium",
@@ -38,12 +55,14 @@ export const PRIORITY_LABELS: Record<string, string> = {
 export const ROLE_LABELS: Record<string, string> = {
   ROLE_ADMIN: "Admin",
   ROLE_CASE_MANAGER: "Case Manager",
+  ROLE_QUALITY_STAFF: "Quality staff",
   ROLE_AUTHOR: "Author",
   ROLE_APPROVER: "Approver",
   ROLE_VIEWER: "Viewer",
   ROLE_MCP_CLIENT: "MCP Client",
   ADMIN: "Admin",
   CASE_MANAGER: "Case Manager",
+  QUALITY_STAFF: "Quality staff",
   AUTHOR: "Author",
   APPROVER: "Approver",
   VIEWER: "Viewer",
@@ -154,7 +173,7 @@ export const COMPLIANCE_STATUS_LABELS: Record<string, string> = {
   EXCLUDED: "Excluded",
   DECLINED: "Declined",
   IN_PROGRESS: "In Progress",
-  OUT_OF_POPULATION: "Not in population",
+  OUT_OF_POPULATION: "Not eligible",
   NOT_APPLICABLE: "Not Applicable",
   NA: "N/A"
 };

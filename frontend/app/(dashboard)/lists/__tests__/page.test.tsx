@@ -23,8 +23,9 @@ vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 const emitToast = vi.fn();
 vi.mock("@/lib/toast", () => ({ emitToast: (...args: unknown[]) => emitToast(...args) }));
 
+const auth = vi.hoisted(() => ({ role: "ROLE_CASE_MANAGER" }));
 vi.mock("@/components/auth-provider", () => ({
-  useAuth: () => ({ user: { role: "ROLE_CASE_MANAGER", email: "cm@workwell.dev" } }),
+  useAuth: () => ({ user: { role: auth.role, email: "cm@workwell.dev" } }),
 }));
 
 import ListsPage from "../page";
@@ -43,6 +44,7 @@ const LIST = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  auth.role = "ROLE_CASE_MANAGER";
   setSubject("employee");
   get.mockImplementation(async (path: string) => {
     if (path === "/api/subject-lists") return [LIST];
@@ -381,4 +383,22 @@ it("the members table names the PCP and the insurance, never a raw id or typolog
   expect(screen.getByText("Medicare Advantage")).toHaveAttribute("title", "11");
   expect(screen.getByText("maui-prov-999")).toBeInTheDocument();
   expect(screen.getByText("99")).toBeInTheDocument();
+});
+
+it("the staff seat (#880) is shown why, and its own cases, and the lists are never fetched", async () => {
+  auth.role = "ROLE_QUALITY_STAFF";
+  render(<ListsPage />);
+  expect(await screen.findByRole("heading", { name: "Attributed lists" })).toBeInTheDocument();
+  expect(screen.getByText(/Attributed lists are your lead's/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Your cases →" })).toHaveAttribute("href", "/cases?view=mine");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  expect(get).not.toHaveBeenCalled();
+});
+
+it("a VIEWER is refused with no way out it could not use", async () => {
+  auth.role = "ROLE_VIEWER";
+  render(<ListsPage />);
+  expect(await screen.findByText(/managed by Case Managers and Admins/)).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Your cases →" })).toBeNull();
+  expect(get).not.toHaveBeenCalled();
 });

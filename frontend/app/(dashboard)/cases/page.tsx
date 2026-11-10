@@ -22,10 +22,11 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
-import { canExportAudit, canExportData, canManageCases } from "@/lib/rbac";
+import { canActInBulk, canExportAudit, canExportData, canManageCases, canRunMeasures, canUseLists } from "@/lib/rbac";
 import { worklistHref } from "@/lib/worklist-links";
 import { dueSoonPossible, useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { formatEvaluationPeriod, fmtCount } from "@/lib/format";
+import { newYearListNote } from "@/lib/local-date";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { LIST_FILTER_LABEL, ListFilterNote, listParam, useListFilter } from "@/features/subject-list/list-filter";
@@ -128,7 +129,7 @@ function staffClosureLine(item: CaseSummary): string | null {
     // population is canonical MISSING_DATA, and calling that "verified compliant" would credit a
     // person with a result nobody produced — the exact over-claim this change exists to remove.
     const display = (item.liveDisplayStatus ?? item.liveOutcomeStatus ?? "").toUpperCase();
-    if (display === "OUT_OF_POPULATION") return `${who} — outside this measure's population`;
+    if (display === "OUT_OF_POPULATION") return `${who} — not eligible for this measure`;
     if (display === "EXCLUDED") return `verified excluded by ${item.closedBy}${when ? ` on ${when}` : ""}`;
     if (display === "COMPLIANT") return `verified compliant by ${item.closedBy}${when ? ` on ${when}` : ""}`;
     // Anything else CQL no longer counts: say that, rather than guessing at "compliant".
@@ -236,10 +237,14 @@ export default function CasesPage() {
   // The ACO's attributed list (#874): in the URL like the PCP, and sent only by a seat the server
   // accepts it from. One of `caseFilterParams`' filters, so the list, "load more" and the CSV all carry it.
   const { listId, refused: listRefused } = listParam(searchParams, user?.role);
-  const listFilter = useListFilter(listId, canManage);
+  // Lists are the lead's (#880): the staff seat gets no picker and fetches none.
+  const mayUseLists = canUseLists(user?.role);
+  const listFilter = useListFilter(listId, mayUseLists);
+  const mine = view === "mine";
   const mayExport = canExportData(user?.role);
   const mayExportAudit = canExportAudit(user?.role);
   const isPatientTerm = SUBJECT.singular === "patient";
+  const newYearNote = newYearListNote();
   // `measureLabelFor` names a measure in the filter (unversioned: a filter spans years); a case row names
   // the logic that scored its own outcome (#769).
   const { labelFor: measureLabelFor, compactLabelFor, titleFor, measures: catalogMeasures } = useMeasureIdentities();
@@ -425,7 +430,8 @@ export default function CasesPage() {
    * deliberately closed with a reason. The roster gates the same affordance per cell; these lists gate
    * it per view, because every row on them is closed.
    */
-  const canBulkAct = canManage && statusFilter !== "staff_closed" && statusFilter !== "closed" && statusFilter !== "excluded";
+  // Bulk actions are the lead's (#880): the staff seat works one case at a time, so it gets no checkboxes.
+  const canBulkAct = canActInBulk(user?.role) && statusFilter !== "staff_closed" && statusFilter !== "closed" && statusFilter !== "excluded";
 
   const allFilteredSelected = filteredCases.length > 0 && filteredCases.every((item) => selectedCaseIds.includes(item.caseId));
 
@@ -667,8 +673,8 @@ export default function CasesPage() {
         <p className="text-sm uppercase tracking-[0.3em] text-neutral-300">Caseflow</p>
         <h2 className="mt-2 text-3xl font-semibold text-white">Cases</h2>
         <p className="mt-3 max-w-2xl text-neutral-300">
-          One row per gap: the open cases by default, with the closed and excluded ones behind the tabs. Each card links to the
-          structured evidence that explains why the case opened, including {isPatientTerm ? "exclusion" : "waiver"} context when an exclusion applies.
+          A case is one gap: one measure for one {SUBJECT.singular}. {SUBJECT.an === "an" ? "An" : "A"} {SUBJECT.singular} with three gaps has three cases. The open
+          cases show by default, with the closed and excluded ones behind the tabs.
         </p>
         {/* The daily screen is the work list, one row per patient (#698); this keeps the measure and status.
             Cases lists the whole practice, so the work list does too (`panel=all`): a staff member who owns
@@ -694,8 +700,15 @@ export default function CasesPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Open and recent cases</h3>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">Filter, search, and bulk-act on flagged cases.</p>
+          {/* The staff seat lands here (#880, `homeRouteFor`), so "mine" names whose list it is. */}
+          <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{mine ? "Assigned to you" : "Open and recent cases"}</h3>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            {mine
+              ? "Gaps assigned to you, from any panel. Open one to work it."
+              : canBulkAct
+                ? "Filter, search, and bulk-act on flagged cases."
+                : "Filter and search flagged cases."}
+          </p>
         </div>
         <p className="text-sm text-neutral-500 dark:text-neutral-400">
           {/* Not "0 cases loaded" while the first page is still coming: that reads as an empty list. */}
@@ -706,7 +719,7 @@ export default function CasesPage() {
               : `${cases.length} case${cases.length !== 1 ? "s" : ""} loaded`}
         </p>
         <div className="flex items-center gap-2">
-          {/* Bulk downloads are CASE_MANAGER/ADMIN and the audit ledger ADMIN (D5); the backend refuses
+          {/* Bulk downloads are CASE_MANAGER, QUALITY_STAFF and ADMIN and the audit ledger ADMIN (D5, #880); the backend refuses
               everyone else, so the buttons are not offered to a role that would only meet a 403. */}
           {mayExport ? (
             <Button
@@ -786,7 +799,7 @@ export default function CasesPage() {
             {`Cases closed as excluded (${isPatientTerm ? "a documented exclusion, such as hospice or a mastectomy" : "an active waiver or exemption"}), whether by a run or by a staff rerun, from every measurement year. A case stays here after the ${SUBJECT.singular} becomes compliant or leaves the measure's population, so this list differs from the “Excluded” count on Programs, which counts the ${SUBJECT.plural} the latest run excludes.`}
           </p>
         ) : null}
-        {canManage ? (
+        {mayUseLists ? (
           <Select
             label={LIST_FILTER_LABEL}
             size="sm"
@@ -820,14 +833,17 @@ export default function CasesPage() {
           onValueChange={setPriorityFilter}
           options={priorityOptions}
         />
-        <Select
-          label="Assignee"
-          size="sm"
-          className="w-44"
-          value={assigneeFilter}
-          onValueChange={setAssigneeFilter}
-          options={assigneeOptions}
-        />
+        {/* "Assigned to you" already names the assignee; a second filter could only contradict it. */}
+        {mine ? null : (
+          <Select
+            label="Assignee"
+            size="sm"
+            className="w-44"
+            value={assigneeFilter}
+            onValueChange={setAssigneeFilter}
+            options={assigneeOptions}
+          />
+        )}
         <Select
           label="Site"
           size="sm"
@@ -946,15 +962,38 @@ export default function CasesPage() {
 
       {!loading && !error && filteredCases.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-sm text-neutral-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">
+          {/* January to March (#882) an empty open list is the new year's, not a fault: last year's gaps
+              closed when this year began, so running a measure is not the answer it is the rest of the year. */}
           {urlSearch.trim()
             ? `No results match your search "${urlSearch.trim()}".`
+            : mine && statusFilter === "open"
+              ? (
+                <>
+                  Nothing is assigned to you.{" "}
+                  {newYearNote ? `${newYearNote} ` : null}
+                  <Link
+                    href={(() => {
+                      const params = new URLSearchParams(searchParams.toString());
+                      params.set("view", "all");
+                      return `/cases?${params.toString()}`;
+                    })()}
+                    className="font-medium text-primary-700 hover:underline dark:text-primary-400"
+                  >
+                    See all cases →
+                  </Link>
+                </>
+              )
             : statusFilter === "excluded"
               ? "No excluded cases yet."
               : statusFilter === "closed"
                 ? "No closed cases yet."
                 : statusFilter === "all"
                   ? "No cases found for the current filters."
-                  : "No open cases. Run a measure to generate cases."}
+                  : newYearNote
+                    ? `${canRunMeasures(user?.role) ? "No open cases." : "No open cases for the current filters."} ${newYearNote}`
+                    : canRunMeasures(user?.role)
+                      ? "No open cases. Run a measure to generate cases."
+                      : "No open cases for the current filters."}
         </div>
       ) : null}
 
@@ -1068,7 +1107,7 @@ export default function CasesPage() {
 
               <p className="mt-4 text-sm text-neutral-600 dark:text-neutral-400">Updated {new Date(item.updatedAt).toLocaleString()}.</p>
               <Link href={`/cases/${item.caseId}`} className="mt-2 inline-block text-sm font-medium text-neutral-900 hover:underline dark:text-neutral-100">
-                View structured evidence →
+                Open case →
               </Link>
             </div>
           );
@@ -1134,8 +1173,9 @@ function CasesTable({
                 </td>
               ) : null}
               <td className="px-3 py-2">
+                {/* The name opens the patient, as on the cards; "Open case →" opens the gap (#880). */}
                 <Link
-                  href={`/cases/${item.caseId}`}
+                  href={subjectPath(item.employeeId)}
                   className="font-medium text-neutral-900 hover:text-primary-700 hover:underline dark:text-neutral-100 dark:hover:text-primary-400"
                 >
                   {item.employeeName}
@@ -1175,7 +1215,7 @@ function CasesTable({
               </td>
               <td className="px-3 py-2 text-right">
                 <Link href={`/cases/${item.caseId}`} className="text-xs font-medium text-primary-700 hover:underline dark:text-primary-400">
-                  View →
+                  Open case →
                 </Link>
               </td>
             </tr>

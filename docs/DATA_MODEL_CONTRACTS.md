@@ -58,7 +58,8 @@ change (an operator can claim a case the panel placed).
 - **`POST /api/cases/bulk-assign`:** `{ assignee, caseIds[] }` or `{ assignee, measureId, subjectIds[] }`,
 resolved in one bounded read to each subject's ACTIVE case in that ONE measure, then the `caseIds` path
 unchanged (500 cap included). `measureId` is required and single; both shapes = 400; nothing found =
-`assigned: 0` in the success shape.
+`assigned: 0` in the success shape. CASE_MANAGER/ADMIN only (#880): the staff seat assigns one case at a
+time (`POST /api/cases/{id}/assign`).
 
 ### Audit ordering (incomplete: see the missing primitive below)
 - **New code audits BEFORE it mutates**; the ledger errs toward an over-claim, never a silent change.
@@ -112,7 +113,70 @@ take the uncapped pipeline; `sqlPageBlockedBy` names the blocker. A conformance 
 totals and page ids from both loaders. On a scoped profile `CaseStore.distinctCaseSubjectIds` checks every
 case subject is in the directory; a violation disables the fast path.
 
+### A cycle that has ended opens nothing (#882, LOCKED_DECISIONS §4A.10)
+- **"Earlier"** is `isEarlierCycle(measureId, period, today)`: the period is strictly older than the
+measure's cycle on `today`, the rollover's own comparison. `today` is the practice's date
+(`config/practice-date.ts`), computed once by the server per run.
+- **The marker:** a run that scores an ended cycle for any of its measures carries
+`requested_scope_json.earlierCycle: true` (a JSON boolean; `"true"` or `1` is not one) and its planning
+`today`. Only the server sets either: `POST /api/runs` drops a client's and computes the marker from
+`requestedScope.evaluationDate`; `/evaluate` and `/import` answer **409 `earlier_cycle_unmarked`** for an
+ended-cycle date on an unmarked run. A marked run is never a "latest": `listLatestPopulationRuns`,
+`listLatestPopulationOutcomes`, `listLatestFinalizedOutcomePerMeasure` and the JS reductions over
+`listOutcomesWithRun` (`runEarlierCycle`) skip it, and it writes no quality snapshot and no `/health`
+`lastPopulationRun`. `listPopulationRunsForPeriod` keeps it: the scorecard and list report select it by period.
+- **Upsert:** `UpsertCaseInput.earlierCycle` makes `planCaseUpsert` a no-op unless the case is active
+(`OPEN`/`IN_PROGRESS`), which behaves as before: never an insert, never a reopen.
+- **Re-check** of a closed ended-cycle case: `CASE_RERUN_VERIFIED { earlierCycle: true }` first; a system
+closure then patches only `currentOutcomeStatus` and `lastRunId`; a staff closure is not touched
+(`caseUnchanged: true`). **Outreach** on such a case answers **409 `earlier_cycle_closed`** before any audit
+or send. **Campaigns** skip every ended-cycle case.
+- **One population run at a time:** `/api/runs/manual` and its rerun answer **409 `run_in_progress`** while a
+population run the pipeline planned (it carries `today`) is RUNNING and younger than this process.
+
+### Contacts and preferences (#886)
+- **A logged contact** (`POST /api/cases/contact-log`, `case/contact-log.ts`) records a call, text, email,
+visit or letter staff made themselves; nothing is sent. Only ACTIVE cases of one subject (else 409
+`case_not_active`, 400 `mixed_subjects`, 404); per case, audit-first `CASE_CONTACT_LOGGED` (action
+`CONTACT_LOGGED`, payload channel, result, note, from/to status), then OPEN moves to `IN_PROGRESS`. It never
+changes an outcome, `current_outcome_status` or `next_action`.
+- **A send keeps `IN_PROGRESS`** (`recordDispatch`); any other status becomes OPEN, as before. Escalate still
+resets to OPEN.
+- **"Contacted"**: `outreach=none` means no `OUTREACH_SENT` and no `CONTACT_LOGGED` (`contactAttemptCounts`, the
+SQL `EXISTS` on both stores and the in-memory filter). `outreachRecordCount`, `outreachSentCounts` and
+`hasOutreachSent` stay send-only.
+- **Campaigns stay OPEN-only**, so a worked (`IN_PROGRESS`) case is skipped; so is the case on an MCP
+compliance answer, which a logged contact now removes more often.
+- **Contact preference** (`contact_preferences`, keyed by the case subject id; `case/contact-preference.ts`):
+audit-first `CONTACT_PREFERENCE_SET` / `CONTACT_PREFERENCE_CLEARED` (entity `subject`); a no-op writes nothing,
+an empty preference deletes the row. Every send and preview resolves its channel before any audit or send: a
+declined channel is 409 `channel_declined`, no channel takes the preferred one, else the first of EMAIL, SMS,
+PHONE not declined, else 409 `all_channels_declined`. Campaigns skip a subject who declined their channel
+(`skippedDeclined`, in the result and dry run only). Linked records are not merged.
+
+### Order codes and mapping review (#640, owner decision 2026-11-04)
+- **A mapping is created PROPOSED only** (`createTerminologyMapping`; another status is 400). Only a review
+changes its status: `reviewTerminologyMapping` / `reviewOrderCode` (`order/order-code-review.ts`), ADMIN.
+- **A review is audit-first** (`TERMINOLOGY_MAPPING_REVIEWED`: from, to, note, who, when), then a
+compare-and-set on the status read (`updateTerminologyMappingStatus`, both stores; a lost race is 409
+`conflict` and leaves the event as an over-claim). Same status is 409 `unchanged`.
+- **The code's own row** (local = national) records an order code's approval. It is created PROPOSED the
+first time an admin acts on the code (audited `TERMINOLOGY_MAPPING_CREATED`, deterministic id
+`order-code:<system>|<code>`; a unique conflict reads the row back), never seeded. Revoking rejects every
+APPROVED row for the national code, each audited.
+- **One approved clinic code per national code** (409 `clinic_code_already_approved`). The code's own row and
+a `urn:workwell:*` row never count and never ride on a ServiceRequest. Residual: the check is a read, so two
+clinic codes approved at the same instant could both stand (the unique key spans the local code); the card
+then takes the first in the store's order.
+
 ### Resolution is not segment-gated; cycle rollover is closed out
+- **A retired measure's cases close (#889).** `DEPLOYMENT_PROFILE.retiredMeasureIds` (Maui: `cms137`; never
+"whatever is not runnable") names measures no run evaluates any more. After an `ALL_PROGRAMS` run (never a
+site, subject, measure or case run), each of their OPEN/`IN_PROGRESS` cases is re-read, then audited
+`CASE_RESOLVED` (`reason: 'MEASURE_RETIRED'`), then patched `RESOLVED`, `closed_reason='MEASURE_RETIRED'`,
+`closed_by=NULL` (`run/retired-measures.ts`); a failed audit leaves the case open, a failed patch is counted.
+Counts in `RUN_COMPLETED.retired`, apart from `rollover`. A rollback to an image that routes the measure
+reopens them (a system closure). Cards skip a measure the deployment does not run.
 - `isApplicable` gates creation only. Out-of-cohort close-only upserts: COMPLIANT, and EXCLUDED only where
 an active case exists (run-start snapshot).
 - After a population run, OPEN/`IN_PROGRESS` cases of an evaluated `(subject, measure)` in a strictly
@@ -146,7 +210,12 @@ no single window (#650), so no screen, card, CSV or AI fallback states one.
 `official:<population>` or multi-rate `official:<Rate label>:<population>`); `official` when
 official-routed (`populationResults`, read by MeasureReport/QRDA; multi-rate adds `rates`, stratified adds
 `strata` of `{ id, code, result, appliesResult }` keyed by `Measure.group.stratifier.id`, both otherwise
-absent); `qrda1Import` on QRDA-I imports (finalize requires it on every outcome). An outcome scored by a
+absent); `qrda1Import` on QRDA-I imports (finalize requires it on every outcome); `cqlFacts: { spec,
+values: [{ define, value }] }` (#875) on an official outcome scored on some rate (initial population and
+denominator, no exclusion or exception; never an errored row): the non-null values of the defines
+`wiring/official-facts.ts` names for its logic, as CQL computed them, rendered as text (≤600 bytes each; a
+FHIR resource without its References, notes or identifiers), and `values: []` when CQL found nothing. Top-level, never in `official`; the AI explain prompt and MCP never see
+it (`withoutCqlFacts`). An outcome scored by a
 WorkWell translation (decision 3) adds `official.kind: "derived"`, `label`, `url` and `derivedFrom`, and its
 `ecqmId` is `null`: read `kind` before falling back to any CMS identity. QRDA I/III refuse such a run
 (422 `derived_logic_not_reportable`); a run whose evaluated rows were scored by more than one logic (CMS's
@@ -200,9 +269,11 @@ Columns:
 
 `executedLogic` was appended, never inserted (#769): the logic that scored the row, from its own
 evidence (`scoringLogicOf`): `CMS125FHIR v1.0.000`, or `WorkWell translation of CMS137v15 (ww-2027.1)`
-(§6.6's string plus the translation's version); empty for an authored or errored row. `measureVersion`
+(§6.6's string plus the translation's version); for a row WorkWell's own CQL scored (no `official`, or
+`official: null`), `WorkWell-authored <Library> <version>` (`executedLogicLabelOf`, item 13); empty for an
+errored row and a seeded one (`seedTrendHistory`, `scale`: nothing scored it by name). `measureVersion`
 is the same row's (`measureVersionOf`): the artifact's or translation's own version, the authored
-library's for an authored row, empty for an errored row; never the catalog record's `v1.0`.
+library's for an authored row, empty for an errored or seeded row; never the catalog record's `v1.0`.
 
 ### 6.3 `GET /api/exports/cases?format=csv`
 Columns:
@@ -221,7 +292,7 @@ HISTORY here**, `current` on the work list (`wantsCurrentCycle`). Explicit `curr
 - `status` (`worklistQueryFor`): blank = every row here and the ACTIVE set on the work list; `all` =
 every row on both; `staff_closed` = terminal with `closed_by` set.
 - `providerId`, `payer` were appended, never inserted (also §6.2): directory facts, empty where unrecorded
-(WebChart Coverage: #591); `payer` is a Source of Payment Typology code.
+(WebChart Coverage: #893); `payer` is a Source of Payment Typology code.
 - `closedReason`, `closedBy`, `liveState`, `liveOutcomeStatus`, `liveOutcomeRunId` were appended, never
 inserted (ADR-083). `live*` only on person-closed rows (else empty); not evaluated = `UNKNOWN`; a winning
 run describing another `evaluationPeriod` = `UNKNOWN`/`UNKNOWN`, run id filled. `liveState`
@@ -232,7 +303,8 @@ action (empty if none, never an older one), read in one batch.
 describe the case's CITED outcome (`lastRunId`, subject, measure, and the row of the case's own
 `evaluationPeriod` where the run holds more than one) as §6.2 does, read once per (run, measure) for the
 exported rows through an identity-only projection (`scoringForCases`), never from today's routing; empty
-when that run holds no row for the case. On a person-closed row they describe the frozen `currentOutcomeStatus`, not `live*`.
+when that run holds no row for the case. An authored cited row is `WorkWell-authored <Library> <version>`
+(item 13); the projection carries no seed marker, so a seeded cited row reads as authored here. On a person-closed row they describe the frozen `currentOutcomeStatus`, not `live*`.
 
 **Subject headers** (§6.2/§6.3, `subjectHeaders`): a patient deployment (`WORKWELL_INSTANCE=maui`,
 `subjectTerm === "patient"`) names the subject columns `patientExternalId`/`patientName`, and in §6.2
@@ -244,7 +316,7 @@ exactly (`1` never matches `11`); grouping is opt-in (`payerCodesInGroup`); an u
 
 **Panel filters are directory joins** (`compliance/subject-filters.ts`, one predicate on every surface;
 `hasActiveSubjectFilters`): `providerId` = the PCP's external id; `ageBand` `0-17|18-44|45-64|65+` from
-`dateOfBirth` vs today (UTC); `sex` `F|M`, matching nothing where unrecorded. A bad `ageBand`/`sex` is a
+`dateOfBirth` vs the practice's date (#882); `sex` `F|M`, matching nothing where unrecorded. A bad `ageBand`/`sex` is a
 **400** naming the accepted values.
 
 ### 6.4 `GET /api/audit-events/export?format=csv`
@@ -268,7 +340,8 @@ Columns (pinned by a test; subject pair per `subjectHeaders`, TWH `employeeExter
 `listId, listRevision, generatedAt, rawIdentifier, patientExternalId, patientName, resolution,
 rowStatus, measureId, ecqmId, measureVersion, runId, measurementPeriodStart, measurementPeriodEnd,
 evaluatedAt, rate, initialPopulation, denominator, denominatorExclusion, denominatorException,
-numerator, status, outOfPopulation, evaluationError, providerId, payer, executedLogic`
+numerator, status, outOfPopulation, evaluationError, providerId, payer, executedLogic, evidenceStatus,
+evidenceDate, evidenceDateSource, evidenceDetail`
 
 - `measurementYear` is REQUIRED. Per measure: the newest reportable population run whose own measurement
 period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by start date. A seeded run
@@ -276,7 +349,7 @@ period is that year (`RunStore.listPopulationRunsForPeriod`), never chosen by st
 never selected (#852).
 - The rate count is the widest the list members' newest evaluated rows carry; a list none of whose rows was
 evaluated takes the run's (every subject's newest row), so it still reports every rate (CMS137's two). A
-superseded duplicate never sets it. The provider scorecard (`GET /api/scorecard`, CM/ADMIN) selects, reads
+superseded duplicate never sets it. The provider scorecard (`GET /api/scorecard`, CASE_MANAGER, QUALITY_STAFF, ADMIN) selects, reads
 and counts through the same code (`compliance/measure-year-rates.ts`, one unordered narrowed read), so a
 provider's cell is this report's rate for a list of exactly that provider's patients. A VIEWER whose sign-in
 is linked to a provider (#870, `DemoUser.providerId`) gets only that provider's row (`scope`) and the
@@ -302,9 +375,22 @@ never a truncated 200. A data-insufficient measure (#853) is refused the same wa
 `-`, `@`, tab, CR).
 - `ecqmId` is CMS-prefixed (`CMS137FHIR`, `ecqmIdOf`) since #769; it was the evidence's bare `137FHIR`.
 - `executedLogic` was appended, never inserted: `CMS137FHIR v1.0.000` for CMS's artifact, a WorkWell
-translation's label (its `ecqmId` empty) otherwise; filled wherever the measure columns are. A selected
+translation's label (its `ecqmId` empty) otherwise, and `WorkWell-authored <Library> <version>` (with that
+library's version in `measureVersion`, in the CSV and the report JSON alike) when the counted rows were
+scored by WorkWell's own CQL (item 13); filled wherever the measure columns are. A selected
 run whose counted rows were scored by more than one logic answers **409 `mixed_logic`**, as a run mixing
 periods answers 409 `period_mismatch`.
+- The four `evidence*` columns were appended (#875), per rate, from that rate's flags and the row's
+`cqlFacts` only (`evidenceOf`); empty on `MISSING_FROM_RUN` and `NOT_MATCHED` rows. `evidenceStatus`, first
+rule that applies: not scored on the rate, or out of population, `NOT_APPLICABLE`; the logic names no define
+for the rate (CMS125; CMS137's Engagement rate) `NOT_EXPOSED_BY_LOGIC`; no `cqlFacts`, another spec version, or
+no recorded logic (a run before #875) `NOT_RECORDED_BY_RUN`; CMS122 (inverse): "Has No Record Of Glycemic Status
+Assessment" true `NONE_FOUND`, else numerator met `NUMERATOR_EVIDENCE`, else `LATEST_NOT_QUALIFYING`; every
+other measure: a value found is `NUMERATOR_EVIDENCE` (numerator met) or `LATEST_NOT_QUALIFYING`, none found
+`NONE_FOUND`, and a numerator met with none `NOT_EXPOSED_BY_LOGIC`. `evidenceDate` is the spec's one Date
+define (CMS122, CMS165), only on the two found statuses; `evidenceDateSource` is `<define> (<executedLogic>)`;
+`evidenceDetail` is every recorded value as `define: value`, joined ` || `, on the found and `NONE_FOUND`
+statuses. Source and detail pass through `csvTextCell`. The report's JSON never carries the facts; only its CSV reads them.
 
 ### 6.7 `?listId=` on the filtered surfaces (ADR-082)
 Restricts the roster, cases route, work list, §6.2/§6.3 CSVs and MCP `list_noncompliant` to a list's

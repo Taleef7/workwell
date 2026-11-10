@@ -20,7 +20,7 @@ test("seeds the four Java demo roles plus the read-only viewer (public sandbox)"
       "clinician@maui.workwell.dev:ROLE_VIEWER",
       "cm@workwell.dev:ROLE_CASE_MANAGER",
       "quality-lead@maui.workwell.dev:ROLE_CASE_MANAGER",
-      "quality-staff@maui.workwell.dev:ROLE_CASE_MANAGER",
+      "quality-staff@maui.workwell.dev:ROLE_QUALITY_STAFF",
       "viewer@workwell.dev:ROLE_VIEWER",
     ],
   );
@@ -29,7 +29,7 @@ test("seeds the four Java demo roles plus the read-only viewer (public sandbox)"
 test("Maui sandbox accounts resolve case-insensitively with their expected roles on the maui profile", () => {
   const accounts = [
     ["quality-lead@maui.workwell.dev", "ROLE_CASE_MANAGER"],
-    ["quality-staff@maui.workwell.dev", "ROLE_CASE_MANAGER"],
+    ["quality-staff@maui.workwell.dev", "ROLE_QUALITY_STAFF"],
     ["clinician@maui.workwell.dev", "ROLE_VIEWER"],
     ["admin@maui.workwell.dev", "ROLE_ADMIN"],
   ] as const;
@@ -56,7 +56,7 @@ test("Maui sandbox accounts authenticate with the documented demo password on th
     assert.equal(output[u.email], null, `${u.email} returns null on maui`);
   }
   assert.equal(output["quality-lead@maui.workwell.dev"], "ROLE_CASE_MANAGER");
-  assert.equal(output["quality-staff@maui.workwell.dev"], "ROLE_CASE_MANAGER");
+  assert.equal(output["quality-staff@maui.workwell.dev"], "ROLE_QUALITY_STAFF");
   assert.equal(output["clinician@maui.workwell.dev"], "ROLE_VIEWER");
   assert.equal(output["admin@maui.workwell.dev"], "ROLE_ADMIN");
 });

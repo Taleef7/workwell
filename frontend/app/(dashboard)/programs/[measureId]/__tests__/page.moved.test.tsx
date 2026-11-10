@@ -108,6 +108,6 @@ describe("ProgramDetailPage — what moved here from the card (#637)", () => {
     mockPrograms({ ...withRate, notInPopulation: 15000 });
     render(<ProgramDetailPage />);
     await screen.findByText("Compliance 40.0%");
-    expect(screen.queryByText("Not in population")).toBeNull();
+    expect(screen.queryByText("Not eligible")).toBeNull();
   });
 });

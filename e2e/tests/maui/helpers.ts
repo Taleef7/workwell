@@ -108,7 +108,7 @@ export const AS_ADMIN_RESPONSIVE = session(ADMIN_EMAIL, "responsive");
 export const AS_CLINICIAN = session(CLINICIAN_EMAIL, "clinician");
 
 /**
- * The ACO's whole computable set, which the Maui stack has ROUTED since ADR-078 — in CI too, since the
+ * The ACO's computable set, which the Maui stack has ROUTED since ADR-078 (five since cms137's retirement, #889) — in CI too, since the
  * e2e job vendors the terminology sidecars with the VSAC credential. Each is a roster column, a
  * programs card and a set of status chips, so one list drives every spec that enumerates measures.
  * `mips` is the MIPS Quality Id the crosswalk renders beside the CMS id
@@ -120,20 +120,24 @@ export const ROUTED_MEASURES = [
   { id: "cms2", cms: "CMS2", mips: "134", label: "Depression" },
   { id: "cms130", cms: "CMS130", mips: "113", label: "Colorectal" },
   { id: "cms165", cms: "CMS165", mips: "236", label: "Blood Pressure" },
-  { id: "cms137", cms: "CMS137", mips: "305", label: "Substance Use" },
 ] as const;
 
 export const MAUI_ACCOUNTS = {
   qualityLead: { email: "quality-lead@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
-  qualityStaff: { email: "quality-staff@maui.workwell.dev", role: "ROLE_CASE_MANAGER" },
+  qualityStaff: { email: "quality-staff@maui.workwell.dev", role: "ROLE_QUALITY_STAFF" },
   clinician: { email: "clinician@maui.workwell.dev", role: "ROLE_VIEWER" },
   admin: { email: "admin@maui.workwell.dev", role: "ROLE_ADMIN" },
 } as const;
 
-/** Where an account lands after signing in: a case manager on the work list, everyone else on Programs. */
+/**
+ * Where an account lands after signing in (`frontend/lib/rbac.ts` `homeRouteFor`): the lead on the work
+ * list, the staff seat on the gaps assigned to it (#880), everyone else on Programs.
+ */
 export function homeFor(email: string): RegExp {
   const account = Object.values(MAUI_ACCOUNTS).find((a) => a.email === email);
-  return account?.role === "ROLE_CASE_MANAGER" ? /\/worklist/ : /\/programs/;
+  if (account?.role === "ROLE_CASE_MANAGER") return /\/worklist/;
+  if (account?.role === "ROLE_QUALITY_STAFF") return /\/cases\?view=mine/;
+  return /\/programs/;
 }
 
 export async function loginAs(page: Page, email: string, password: string = MAUI_PASSWORD) {

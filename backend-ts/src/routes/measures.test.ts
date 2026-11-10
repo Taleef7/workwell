@@ -133,7 +133,8 @@ test("GET /api/measures and GET /api/measures/:id include identity field ({cmsId
 
 test("GET /api/measures?status=Draft filters by lifecycle status", async () => {
   const rows = (await get("/api/measures?status=Draft").then((r) => r!.json())) as CatalogRow[];
-  assert.ok(rows.length >= 44, "the remaining CMS eCQM drafts (+ Respirator Fit Test)");
+  // 42 since #880 retired the two surgical measures (CMS56, CMS133) to Deprecated.
+  assert.ok(rows.length >= 42, "the remaining CMS eCQM drafts (+ Respirator Fit Test)");
   assert.ok(rows.every((m) => m.status === "Draft"));
 });
 
@@ -176,6 +177,13 @@ test("GET /api/measures/:id returns MeasureDetail with spec + reconstructed CQL 
   // V015 seeds 5 demo fixtures for audiogram — they must be carried into the detail.
   assert.equal((d.testFixtures as unknown[]).length, 5);
   assert.equal(d.identity, null);
+});
+
+test("item 13: GET /api/measures/:id names WorkWell's own logic for an authored-runnable measure, and none for an unrunnable one", async () => {
+  const audiogram = (await get("/api/measures/audiogram").then((r) => r!.json())) as { authoredLogic: string | null };
+  assert.match(String(audiogram.authoredLogic), /^WorkWell-authored \S+ \d+\.\d+\.\d+$/);
+  const cms128 = (await get("/api/measures/cms128v14").then((r) => r!.json())) as { authoredLogic: string | null };
+  assert.equal(cms128.authoredLogic, null);
 });
 
 test("GET /api/measures/:id for an official-only Active measure: descriptive spec, empty CQL, COMPILED", async () => {
@@ -499,6 +507,33 @@ test("POST /api/measures creates a Draft measure persisted to the store", async 
   assert.equal(d.compileStatus, "ERROR", "an empty Draft has no compiled CQL");
   // missing fields → 400
   assert.equal((await post("/api/measures", { name: "x" }))?.status, 400);
+});
+
+test("item 13: POST /api/measures refuses a CMS id in the name or policyRef, and a name already taken, writing nothing", async () => {
+  const created = async () =>
+    (await new SqliteCaseEventStore(env.DB as never).listAuditEvents()).filter((a) => a.eventType === "MEASURE_CREATED").length;
+  const before = await created();
+  for (const body of [
+    { name: "CMS125 for our clinic", policyRef: "Practice policy 4", owner: "a@b.c" },
+    { name: "Our breast screening", policyRef: "QID 112", owner: "a@b.c" },
+    { name: "Our breast screening", policyRef: "cms125v14FHIR", owner: "a@b.c" },
+    { name: "  annual   AUDIOGRAM completed ", policyRef: "OSHA 1910.95", owner: "a@b.c" },
+  ]) {
+    const res = await post("/api/measures", body);
+    assert.equal(res?.status, 400, JSON.stringify(body));
+    assert.equal(((await res!.json()) as { error: string }).error, "invalid_request");
+  }
+  assert.equal(await created(), before, "a refused create writes no MEASURE_CREATED");
+  // A claim form and a rule year are not measure identities.
+  const ok = await post("/api/measures", { name: "Claims follow-up", policyRef: "CMS-1500 billing, CMS 2026 final rule, MIPS 2026", owner: "a@b.c" });
+  assert.equal(ok?.status, 201);
+  // Its spec save may not take a CMS identity through the policy reference (400, not 500)...
+  const { id } = (await ok!.json()) as { id: string };
+  const saved = await put(`/api/measures/${id}/spec`, { policyRef: "MIPS #112", description: "x" });
+  assert.equal(saved?.status, 400);
+  assert.match(((await saved!.json()) as { message: string }).message, /CMS measure identity/);
+  // ...while a seeded catalog row keeps its CMS crosswalk reference.
+  assert.equal((await put("/api/measures/cms125/spec", { policyRef: "MIPS 112 · CMS125v15", description: "bump" }))?.status, 200);
 });
 
 test("POST /api/measures/:id/status enforces the /approve + /deprecate gates — no back door (Fable M2/M3)", async () => {

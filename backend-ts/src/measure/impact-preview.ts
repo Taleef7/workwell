@@ -23,6 +23,7 @@ import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { compositeBundleSource } from "../wiring/subject-bundle-source.ts";
 import { runChunkSize } from "../run/run-pipeline.ts";
 import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 export interface ImpactPreviewScope {
   site?: string | null;
@@ -144,7 +145,7 @@ export async function previewImpact(deps: ImpactPreviewDeps, measure: MeasureRec
   if (rawDate && !isValidIsoDate(rawDate)) {
     throw new ImpactPreviewError(`Invalid evaluationDate: '${rawDate}' — expected a real calendar date in YYYY-MM-DD form`);
   }
-  const evaluationDate = rawDate || new Date().toISOString().slice(0, 10);
+  const evaluationDate = rawDate || practiceToday();
   const warnings: string[] = [];
 
   // Guard: a measure with no authored binding has no synthetic bundle path (rateKey, exam config,

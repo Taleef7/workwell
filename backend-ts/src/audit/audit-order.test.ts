@@ -14,7 +14,8 @@
  * The route-level surfaces resolve their stores from `env` rather than taking them injected, so they
  * are not reachable THIS way — but they are reachable (`routes/segments.test.ts` patches the store's
  * prototype to make a write fail, and asserts the same property; so does `routes/mcp-auth.test.ts` for
- * minting and revoking MCP tokens, #704). An earlier version of this comment
+ * minting and revoking MCP tokens, #704). The seed's retirement of the surgical Draft rows (#880) needs a
+seeded store, so its case lives in `measure/measure-seed.test.ts`. An earlier version of this comment
  * said their ordering was not testable at all, and three cases were written to a weaker property as a
  * result (#612 review).
  *
@@ -28,10 +29,15 @@ import { scheduleAppointment } from "../case/appointment-service.ts";
 import { uploadEvidence } from "../case/evidence-service.ts";
 import { createMeasure, approveMeasure, deprecateMeasure, transitionStatus } from "../measure/measure-lifecycle.ts";
 import { attachValueSet, detachValueSet, createTerminologyMapping } from "../measure/value-set-governance.ts";
+import { reviewOrderCode, reviewTerminologyMapping } from "../order/order-code-review.ts";
 import { createAuthHandler } from "../routes/auth.ts";
 import { createJwt } from "../auth/jwt.ts";
 import { credentialVersion, findDemoUser } from "../auth/demo-users.ts";
 import { auditedExport } from "./export-audit.ts";
+import { rerunToVerify } from "../case/case-rerun.ts";
+import { logContact } from "../case/contact-log.ts";
+import { setContactPreference, clearContactPreference } from "../case/contact-preference.ts";
+import { closeRetiredMeasureCases } from "../run/retired-measures.ts";
 
 /** A ledger that records what it was asked to append, in order. */
 function ledger() {
@@ -213,7 +219,7 @@ test("createMeasure: the MEASURE_CREATED event survives a failed insert, and nam
   await assert.rejects(
     () =>
       createMeasure(
-        { measures: { createMeasure: explode } as never, events: log as never },
+        { measures: { createMeasure: explode, listLatest: async () => [] } as never, events: log as never },
         { name: "Respirator fit test", policyRef: "OSHA 1910.134", owner: "safety" },
         "admin",
       ),
@@ -232,6 +238,7 @@ test("createMeasure: a successful create inserts under the ids the event named",
   const returned = await createMeasure(
     {
       measures: {
+        listLatest: async () => [],
         createMeasure: async (input: Record<string, unknown>) => {
           passed = input;
           return { ...MEASURE, measureId: input.measureId, versionId: input.versionId };
@@ -365,4 +372,103 @@ test("auditedExport (A1): the EXPORT_GENERATED event survives an export that the
     BOOM,
   );
   assert.deepEqual(l.types(), ["EXPORT_GENERATED"]);
+});
+
+test("rerunToVerify of a closed case whose cycle has ended (#882): CASE_RERUN_VERIFIED survives a failed patch", async () => {
+  const log = ledger();
+  const noop = async () => undefined;
+  const rolledOver = {
+    ...CASE, evaluationPeriod: "2025-01-01", status: "RESOLVED", closedReason: "CYCLE_ROLLED_OVER", closedBy: null,
+    closedAt: "2026-01-01T12:00:00.000Z", nextActionSource: "SYSTEM", assignmentSource: null,
+  };
+  await assert.rejects(
+    () =>
+      rerunToVerify(
+        {
+          cases: { getCase: async () => rolledOver, patchCase: explode } as never,
+          events: { ...log, caseTimeline: async () => [], latestOutreachDeliveryStatus: async () => null } as never,
+          outcomes: { recordOutcome: noop, listOutcomes: async () => [] } as never,
+          runStore: { createRun: async () => ({ id: "run-verify" }), markRunning: noop, appendLog: noop, finalizeRun: noop } as never,
+          engine: { evaluate: async () => ({ outcome: "OVERDUE", evidence: { expressionResults: [] } }) } as never,
+        },
+        rolledOver.id,
+        "lead",
+      ),
+    /the write failed/,
+  );
+  assert.deepEqual(log.types(), ["CASE_RERUN_VERIFIED"]);
+  assert.equal(log.events[0]!.payload.earlierCycle, true);
+});
+
+test("logContact (#886): CASE_CONTACT_LOGGED survives a failed status patch, and the case is reported failed", async () => {
+  const log = ledger();
+  const open = {
+    id: "c1", employeeId: "pat-1", measureId: "cms125", evaluationPeriod: "2026-01-01", status: "OPEN", lastRunId: "run-1",
+  };
+  const out = await logContact(
+    { cases: { getCases: async () => [open], patchCase: explode } as never, events: log as never },
+    { caseIds: ["c1"], channel: "PHONE", result: "NO_ANSWER", note: null, actor: "quality-staff@workwell.dev" },
+  );
+  assert.deepEqual(log.types(), ["CASE_CONTACT_LOGGED"]);
+  assert.deepEqual(out.failed, ["c1"]);
+});
+
+test("closeRetiredMeasureCases (#889): CASE_RESOLVED survives a failed patch, and the case is reported failed", async () => {
+  const log = ledger();
+  const open = { id: "c1", employeeId: "pat-1", measureId: "cms137", evaluationPeriod: "2026-01-01", status: "OPEN" };
+  const out = await closeRetiredMeasureCases(
+    { caseStore: { listCases: async () => [open], getCase: async () => open, patchCase: explode } as never, events: log as never },
+    { retiredMeasureIds: ["cms137"], runId: "run-1", actor: "system" },
+  );
+  assert.deepEqual(log.types(), ["CASE_RESOLVED"]);
+  assert.deepEqual([out.closed, out.failed], [0, 1]);
+});
+
+test("setContactPreference / clearContactPreference (#886): each event survives a failed store write", async () => {
+  const log = ledger();
+  const store = { get: async () => null, upsert: explode, remove: explode, getMany: async () => ({}) };
+  await assert.rejects(
+    setContactPreference({ contactPreferences: store, events: log }, {
+      subjectId: "pat-1", preferredChannel: "SMS", declinedChannels: ["EMAIL"], actor: "quality-staff@workwell.dev",
+    }),
+    BOOM,
+  );
+  assert.deepEqual(log.types(), ["CONTACT_PREFERENCE_SET"]);
+
+  const existing = {
+    subjectId: "pat-1", preferredChannel: "SMS" as const, declinedChannels: ["EMAIL" as const],
+    updatedBy: "x", updatedAt: "2026-11-03T00:00:00.000Z",
+  };
+  const log2 = ledger();
+  await assert.rejects(
+    clearContactPreference({ contactPreferences: { ...store, get: async () => existing }, events: log2 }, "pat-1", "cm@workwell.dev"),
+    BOOM,
+  );
+  assert.deepEqual(log2.types(), ["CONTACT_PREFERENCE_CLEARED"]);
+});
+
+test("reviewTerminologyMapping / reviewOrderCode (#640): each event survives a failed status write", async () => {
+  const row = {
+    id: "m-1", localCode: "LAB-1", localDisplay: null, localSystem: "urn:oid:1.2.3", standardCode: "83036",
+    standardDisplay: null, standardSystem: "http://www.ama-assn.org/go/cpt", mappingStatus: "PROPOSED",
+    mappingConfidence: null, reviewedBy: null, reviewedAt: null, notes: null,
+  };
+  const failingStore = {
+    getTerminologyMapping: async () => row,
+    listTerminologyMappings: async () => [row],
+    updateTerminologyMappingStatus: explode,
+    createTerminologyMapping: explode,
+  };
+  const log = ledger();
+  await assert.rejects(() => reviewTerminologyMapping({ valueSets: failingStore as never, events: log as never }, "m-1", "APPROVE", null, "admin"), /the write failed/);
+  assert.deepEqual(log.types(), ["TERMINOLOGY_MAPPING_REVIEWED"]);
+
+  // The order-code path creates the code's own row first: that creation is audited before its insert, too.
+  const empty = { ...failingStore, listTerminologyMappings: async () => [], getTerminologyMapping: async () => null };
+  const log2 = ledger();
+  await assert.rejects(
+    () => reviewOrderCode({ valueSets: empty as never, events: log2 as never }, ["cms125"], "http://www.ama-assn.org/go/cpt", "77067", "APPROVE", null, "admin"),
+    /the write failed/,
+  );
+  assert.deepEqual(log2.types(), ["TERMINOLOGY_MAPPING_CREATED"]);
 });

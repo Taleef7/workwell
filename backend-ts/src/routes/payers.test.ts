@@ -31,7 +31,7 @@ test("the route declines anything that is not GET /api/payers", async () => {
 
 test("GET /api/payers is 200 and profile-scoped: empty on the occupational directory", async () => {
   // The default profile's roster has never carried a payer, and the live WebChart directory still
-  // discards Coverage (#533). Both must answer [] rather than inventing options that match nobody.
+  // discards Coverage (#893). Both must answer [] rather than inventing options that match nobody.
   const res = (await get("http://localhost/api/payers"))!;
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), []);

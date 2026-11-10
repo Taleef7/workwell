@@ -23,7 +23,7 @@ GET /api/v1/compliance/{subjectId}/{measureId}?start=YYYY-MM-DD&end=YYYY-MM-DD&m
 |---|---|---|
 | `subjectId` | path, required | The employee/patient external id. Percent-encode it — WebChart ids contain `\|`. |
 | `measureId` | path, required | A WorkWell catalog id (`cms125`, `audiogram`, …). An unknown id is a **400** that lists the known ids. |
-| `start`, `end` | query, optional | Bound the evaluation period, inclusive. `YYYY-MM-DD`. Omitted ⇒ the most recent outcome regardless of period. |
+| `start`, `end` | query, optional | Bound the evaluation period, inclusive. `YYYY-MM-DD`. Omitted ⇒ the most recent outcome of the newest measurement cycle. |
 | `mode` | query, optional | `latest` (default) or `preview`. |
 
 **Authentication:** the standard bearer token. An anonymous request is **401**.
@@ -133,7 +133,9 @@ membership computed by CMS's own logic, require `populationsSource == "official-
 ### `mode=latest` (default)
 
 The most recent persisted outcome **from a FINALIZED run** — `COMPLETED` or `PARTIAL_FAILURE`. Audit-backed
-and traceable; `provenance.runId` names the run.
+and traceable; `provenance.runId` names the run. "Most recent" is within the newest measurement cycle in
+range (#882): a re-score of last year, run in January, never replaces this year's answer, and within one
+cycle an import dated the 15th does not outrank a later nightly dated the cycle's first day.
 
 Outcome rows exist as soon as a run's evaluation loop writes them, which is *before* the run reaches a
 terminal status and before `/finalize` in the QRDA import flow. Those rows are **not** served: a partial

@@ -98,6 +98,8 @@ function resolved(p: Record<string, unknown>): string {
       ? `Closed: a new measurement period began (${prior} to ${current})`
       : "Closed: a new measurement period began";
   }
+  // #889: the gap was never closed; the measure stopped being reported, so say that and nothing else.
+  if (p.reason === "MEASURE_RETIRED") return "Closed: this measure is no longer reported (CMS removed it from the ACO's set)";
   if (p.closedReason === "OUT_OF_POPULATION") return "Closed: no longer in this measure's population";
   // A run's closure records its disposition; a rerun-to-verify's does not.
   if ("disposition" in p) return "Closed: the latest run found the measure met";
@@ -114,6 +116,30 @@ function outreach(p: Record<string, unknown>): string | null {
   const parts = [head + (channel ? ` by ${channel}` : ""), delivery ? `delivery ${delivery}` : null];
   const sentence = parts.filter(Boolean).join(", ");
   return a.autoTriggered === true ? `${sentence} (automatic)` : sentence;
+}
+
+const CONTACT_VERBS: Record<string, string> = {
+  PHONE: "Called",
+  SMS: "Texted",
+  EMAIL: "Emailed",
+  IN_PERSON: "Spoke in person",
+  LETTER: "Sent a letter",
+};
+const CONTACT_RESULTS: Record<string, string> = {
+  REACHED: "reached",
+  NO_ANSWER: "no answer",
+  LEFT_MESSAGE: "left a message",
+  WRONG_NUMBER: "wrong number",
+  DECLINED: "declined",
+};
+
+/** A contact staff logged themselves (#886): "Called — no answer, with the note: …". */
+function contactLogged(p: Record<string, unknown>): string {
+  const verb = CONTACT_VERBS[text(p.channel) ?? ""] ?? "Contacted";
+  const result = CONTACT_RESULTS[text(p.result) ?? ""];
+  const note = text(p.note);
+  const head = result ? `${verb} — ${result}` : verb;
+  return note ? `${head}, with the note: ${note}` : head;
 }
 
 /** The label and sentence for one case event (pure; the practice zone is a parameter for tests). */
@@ -151,6 +177,8 @@ export function describeCaseEvent(
     }
     case "CASE_OUTREACH_SENT":
       return { label: "Outreach Sent", summary: outreach(p) };
+    case "CASE_CONTACT_LOGGED":
+      return { label: "Contact Logged", summary: contactLogged(p) };
     case "CASE_OUTREACH_DELIVERY_UPDATED": {
       const delivery = status(p.deliveryStatus);
       return { label: "Delivery Updated", summary: delivery ? `Delivery ${delivery}` : null };

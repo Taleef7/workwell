@@ -53,7 +53,7 @@ export const isSubjectListRow = (value: unknown): value is SubjectListRow => {
 };
 
 /**
- * `enabled: false` fetches nothing: the work screens pass `canManageCases`, because the endpoint is
+ * `enabled: false` fetches nothing: the work screens pass `canUseLists`, because the endpoint is
  * CASE_MANAGER/ADMIN and a VIEWER would only meet a 403 (#874).
  */
 export function useSubjectLists({ enabled = true }: { enabled?: boolean } = {}): {

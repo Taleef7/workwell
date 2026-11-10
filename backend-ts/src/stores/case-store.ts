@@ -48,6 +48,12 @@ export interface UpsertCaseInput {
    */
   outOfPopulation?: boolean;
   /**
+   * The outcome scores a cycle older than the measure's current one (#882, `isEarlierCycle`): last year
+   * re-scored in January, or a re-check of a rolled-over case. Acts only on an ACTIVE case, as any run
+   * does; never creates a case and never reopens a closed one (`planCaseUpsert`).
+   */
+  earlierCycle?: boolean;
+  /**
    * The provider-panel owner for this subject, applied ON THE INSERT BRANCH ONLY (ADR-080 d2): a case
    * this run OPENS is created already assigned to whoever works that provider's panel, so the nightly
    * run hands the practice work that is already on somebody rather than a pile to re-distribute by
@@ -156,7 +162,8 @@ export interface CaseQuery {
   /** `current_outcome_status`, compared case-insensitively — the frozen column, not the live answer. */
   outcome?: string;
   /**
-   * Whether the case has any `OUTREACH_SENT` action. `none` is the dashboard badge's filter and the
+   * Whether the case has any contact attempt — an `OUTREACH_SENT` or a `CONTACT_LOGGED` action (#886).
+   * `none` is the dashboard badge's filter ("not contacted yet") and the
    * reason it is here: answering it in JavaScript means counting outreach for every row first.
    */
   outreach?: "none" | "any";

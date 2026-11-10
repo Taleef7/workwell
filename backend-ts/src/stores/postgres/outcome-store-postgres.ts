@@ -20,6 +20,7 @@ import type {
   OutcomeStatusCount,
   MeasureScanOptions,
   ScoringIdentityRow,
+  OutcomeSubjectMembership,
 } from "../outcome-store.ts";
 
 interface OutcomeRow {
@@ -255,7 +256,8 @@ export class PgOutcomeStore implements OutcomeStore {
     runId: string,
     measureId: string,
     subjectIds?: readonly string[],
-  ): Promise<Array<Pick<OutcomeRecord, "id" | "subjectId" | "evaluatedAt" | "outOfPopulation" | "status" | "evidence">>> {
+    opts?: { cqlFacts?: boolean },
+  ): Promise<OutcomeSubjectMembership[]> {
     if (!isUuid(runId) || subjectIds?.length === 0) return [];
     // The membership projection's narrowing, with the build moved out of the statement. Within one
     // (run, measure) the three extracted values take a handful of distinct values (the artifact identity
@@ -276,6 +278,8 @@ export class PgOutcomeStore implements OutcomeStore {
     // A subject set is ONE array bind, as `listOutcomes`' is: the planner ANDs the subject index with
     // `(run_id, measure_id)` (#874). `= ANY('{}')` is false for every row, so an empty set matches nobody.
     const members = subjectIds !== undefined ? ` AND subject_id = ANY($3::text[])` : "";
+    // Facts are per row, so they are never part of the shared narrowed object below.
+    const facts = opts?.cqlFacts ? `,\n                    evidence_json -> 'cqlFacts' AS cql_facts` : "";
     const { rows } = await this.pool.query<{
       id: string;
       subject_id: string;
@@ -285,11 +289,12 @@ export class PgOutcomeStore implements OutcomeStore {
       official: string | null;
       evaluation_error: string | null;
       data_insufficient: string | null;
+      cql_facts?: string | null;
     }>({
       text: `SELECT id, subject_id, evaluated_at, out_of_population, status,
                     evidence_json -> 'official' AS official,
                     evidence_json -> 'evaluationError' AS evaluation_error,
-                    evidence_json -> 'dataInsufficient' AS data_insufficient
+                    evidence_json -> 'dataInsufficient' AS data_insufficient${facts}
                FROM ${T} WHERE run_id = $1 AND measure_id = $2${members}`,
       values: subjectIds !== undefined ? [runId, measureId, [...subjectIds]] : [runId, measureId],
       types: JSON_AS_TEXT,
@@ -307,6 +312,7 @@ export class PgOutcomeStore implements OutcomeStore {
         }
         narrowed.set(key, evidence);
       }
+      const cqlFacts: unknown = r.cql_facts == null ? null : JSON.parse(r.cql_facts);
       return {
         id: r.id,
         subjectId: r.subject_id,
@@ -314,6 +320,7 @@ export class PgOutcomeStore implements OutcomeStore {
         outOfPopulation: flagOf(r.out_of_population),
         status: r.status,
         evidence,
+        ...(cqlFacts !== null ? { cqlFacts } : {}),
       };
     });
   }
@@ -553,6 +560,7 @@ export class PgOutcomeStore implements OutcomeStore {
          JOIN (SELECT DISTINCT ON (o2.measure_id) o2.id
                  FROM ${T} o2 JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o2.run_id
                 WHERE o2.subject_id = $1 AND UPPER(r.status) IN ('COMPLETED', 'PARTIAL_FAILURE')
+                  AND (r.requested_scope_json->'earlierCycle') IS DISTINCT FROM 'true'::jsonb
                 ORDER BY o2.measure_id, o2.evaluated_at DESC, o2.id DESC) pick ON pick.id = o.id`,
       [subjectId],
     );
@@ -651,8 +659,10 @@ export class PgOutcomeStore implements OutcomeStore {
       measure_id: string;
       status: string;
       out_of_population: boolean | null;
+      run_earlier_cycle: boolean | null;
     }>(
-      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status, o.out_of_population
+      `SELECT o.run_id, r.started_at AS run_started_at, r.scope_type AS run_scope_type, r.status AS run_status, r.triggered_by AS run_triggered_by, o.subject_id, o.measure_id, o.status, o.out_of_population,
+              (r.requested_scope_json->'earlierCycle') = 'true'::jsonb AS run_earlier_cycle
          FROM ${SPIKE_SCHEMA}.outcomes o JOIN ${SPIKE_SCHEMA}.runs r ON r.id = o.run_id${clause}`,
       binds,
     );
@@ -666,6 +676,7 @@ export class PgOutcomeStore implements OutcomeStore {
       measureId: r.measure_id,
       status: r.status,
       outOfPopulation: flagOf(r.out_of_population),
+      ...(r.run_earlier_cycle === true ? { runEarlierCycle: true } : {}),
     }));
   }
 
@@ -683,6 +694,8 @@ export class PgOutcomeStore implements OutcomeStore {
       // COMPLETED SITE run never becomes "the roster" (ADR-077 d4).
       "UPPER(r2.scope_type) IN ('MEASURE','ALL_PROGRAMS')",
       "UPPER(r2.status) IN ('COMPLETED','PARTIAL_FAILURE')",
+      // A re-score of a cycle that has ended is nobody's latest (#882, `run/earlier-cycle.ts`).
+      "(r2.requested_scope_json->'earlierCycle') IS DISTINCT FROM 'true'::jsonb",
     ];
     const binds: unknown[] = [];
     if (filter.measureId) inner.push(`o2.measure_id = $${binds.push(filter.measureId)}`);
@@ -740,7 +753,12 @@ export class PgOutcomeStore implements OutcomeStore {
     // disagree on which run wins if a run holds no row for the measure — which is what the probe checks.
     // `triggered_by NOT IN (...)` is what the sibling reads apply; a NULL triggered_by is excluded there
     // too (NULL NOT IN (...) is not true), so the same run set qualifies here.
-    const runWhere: string[] = ["UPPER(r.scope_type) IN ('MEASURE','ALL_PROGRAMS')", "UPPER(r.status) IN ('COMPLETED','PARTIAL_FAILURE')"];
+    const runWhere: string[] = [
+      "UPPER(r.scope_type) IN ('MEASURE','ALL_PROGRAMS')",
+      "UPPER(r.status) IN ('COMPLETED','PARTIAL_FAILURE')",
+      // A re-score of a cycle that has ended is nobody's latest (#882, `run/earlier-cycle.ts`).
+      "(r.requested_scope_json->'earlierCycle') IS DISTINCT FROM 'true'::jsonb",
+    ];
     const binds: unknown[] = [];
     if (filter.from) runWhere.push(`(r.started_at AT TIME ZONE 'UTC')::date >= $${binds.push(filter.from)}::date`);
     if (filter.to) runWhere.push(`(r.started_at AT TIME ZONE 'UTC')::date <= $${binds.push(filter.to)}::date`);

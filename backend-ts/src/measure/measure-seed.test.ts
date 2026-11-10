@@ -1210,3 +1210,111 @@ test("seedMeasureStore — a description rewrite that fails after its audit is c
   assert.deepEqual((await store.getLatest("cms2"))!.spec, catalogSpec("cms2"));
   assert.equal(await countSpecRefreshed(db, versionId), 2, "each attempt is recorded: an over-claim, never a silent change");
 });
+
+// #880 (A30): the two surgical catalog entries retire from Draft to Deprecated on a store seeded before.
+const RETIRED = ["cms56v14", "cms133v14"] as const;
+
+/** A store seeded before #880: the whole catalog, the two surgical rows as the Draft seed wrote them. */
+async function seedPreRetirementCatalog(store: MeasureStore, editedId?: string): Promise<void> {
+  const TIER: Record<string, string> = {
+    Active: "2026-06-10T00:00:00.000Z",
+    Approved: "2026-04-01T00:00:00.000Z",
+    Draft: "2026-02-01T00:00:00.000Z",
+    Deprecated: "2025-06-01T00:00:00.000Z",
+  };
+  for (const m of MEASURE_CATALOG) {
+    const retired = (RETIRED as readonly string[]).includes(m.id);
+    const status = retired ? "Draft" : m.status;
+    await store.seedMeasure({
+      measureId: m.id,
+      name: m.name,
+      policyRef: m.policyRef,
+      owner: m.owner,
+      tags: [...m.tags],
+      versionId: `${m.id}-${m.version}`,
+      version: m.version,
+      status,
+      spec: m.id === editedId ? { ...m.spec, description: `${m.spec.description} (edited)` } : m.spec,
+      cqlText: "",
+      compileStatus: m.compileStatus,
+      createdAt: TIER[status]!,
+      changeSummary: "Seeded measure version",
+    });
+  }
+}
+
+const retirementEvents = async (db: Awaited<ReturnType<typeof freshDb>>, id: string) =>
+  ((await db
+    .prepare("SELECT event_type, payload_json FROM audit_events WHERE entity_id = ? AND event_type = 'MEASURE_DEPRECATED'")
+    .bind(`${id}-v1.0`)
+    .all<{ event_type: string; payload_json: string }>()).results ?? []) as Array<{ event_type: string; payload_json: string }>;
+
+test("seedMeasureStore — #880: retires the two surgical Draft rows once each, audited, and a second boot does nothing", async () => {
+  assert.deepEqual(RETIRED.map((id) => MEASURE_CATALOG.find((m) => m.id === id)?.status), ["Deprecated", "Deprecated"]);
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedPreRetirementCatalog(store);
+
+  await seedMeasureStore(store, () => "", events);
+  for (const id of RETIRED) {
+    assert.equal((await store.getLatest(id))?.status, "Deprecated", id);
+    const rows = await retirementEvents(db, id);
+    assert.equal(rows.length, 1, id);
+    const payload = JSON.parse(rows[0]!.payload_json) as { payload?: Record<string, unknown> } & Record<string, unknown>;
+    const body = (payload.payload ?? payload) as Record<string, unknown>;
+    assert.equal(body.deprecatedBy, "system");
+    assert.match(String(body.reason), /surgical measure/);
+  }
+  await seedMeasureStore(store, () => "", events);
+  for (const id of RETIRED) assert.equal((await retirementEvents(db, id)).length, 1, `${id}: no second event`);
+});
+
+test("seedMeasureStore — #880: retirement audits before the status change and a retry writes no second event", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedPreRetirementCatalog(store);
+  const setVersionStatus = store.setVersionStatus.bind(store);
+  let failOnce = true;
+  store.setVersionStatus = async (measureId, versionId, change) => {
+    if (failOnce && measureId === "cms56v14") {
+      failOnce = false;
+      throw new Error("transient status failure");
+    }
+    return setVersionStatus(measureId, versionId, change);
+  };
+  await assert.rejects(() => seedMeasureStore(store, () => "", events), /transient status failure/);
+  assert.equal((await store.getLatest("cms56v14"))?.status, "Draft");
+  assert.equal((await retirementEvents(db, "cms56v14")).length, 1, "the event is written before the change");
+  await seedMeasureStore(store, () => "", events);
+  assert.equal((await store.getLatest("cms56v14"))?.status, "Deprecated");
+  assert.equal((await retirementEvents(db, "cms56v14")).length, 1);
+});
+
+test("seedMeasureStore — #880: an edited surgical row is left as it is, and a fresh store seeds them Deprecated with no event", async () => {
+  const db = await freshDb();
+  const store = new SqliteMeasureStore(db);
+  const events = new SqliteCaseEventStore(db);
+  await seedPreRetirementCatalog(store, "cms133v14");
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+  try {
+    await seedMeasureStore(store, () => "", events);
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal((await store.getLatest("cms133v14"))?.status, "Draft", "an edited row is somebody's");
+  assert.equal((await retirementEvents(db, "cms133v14")).length, 0);
+  assert.ok(warnings.some((w) => w.includes("cms133v14")), "and the boot log says so");
+  assert.equal((await store.getLatest("cms56v14"))?.status, "Deprecated");
+
+  const freshDbHandle = await freshDb();
+  const fresh = new SqliteMeasureStore(freshDbHandle);
+  await seedMeasureStore(fresh, () => "", new SqliteCaseEventStore(freshDbHandle));
+  for (const id of RETIRED) {
+    assert.equal((await fresh.getLatest(id))?.status, "Deprecated");
+    assert.equal((await retirementEvents(freshDbHandle, id)).length, 0, "the fresh seed's no-audit path");
+  }
+});

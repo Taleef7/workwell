@@ -17,13 +17,14 @@ import { SENSITIVE_MEASURES } from "@/lib/sensitive-measures";
 
 const get = vi.fn();
 const post = vi.fn();
-const apiMock = { get, post };
+const put = vi.fn();
+const apiMock = { get, post, put };
 vi.mock("@/lib/api/hooks", () => ({ useApi: () => apiMock }));
 
 const emitToast = vi.fn();
 vi.mock("@/lib/toast", () => ({ emitToast: (...args: unknown[]) => emitToast(...args) }));
 
-const ROLE = vi.hoisted(() => ({ current: "ROLE_CASE_MANAGER" }));
+const ROLE = vi.hoisted(() => ({ current: "ROLE_QUALITY_STAFF" }));
 vi.mock("@/components/auth-provider", () => ({
   useAuth: () => ({ user: { role: ROLE.current, email: "quality-staff@maui.workwell.dev" } }),
 }));
@@ -75,7 +76,7 @@ const sendButton = () => screen.getByRole("button", { name: /^Send one message a
 
 beforeEach(() => {
   setSubject("patient");
-  ROLE.current = "ROLE_CASE_MANAGER";
+  ROLE.current = "ROLE_QUALITY_STAFF";
   emitToast.mockReset();
   post.mockReset().mockImplementation((url: string, body?: { dryRun?: boolean; caseIds?: string[] }) => {
     if (url === "/api/cases/patient-outreach") {
@@ -237,5 +238,83 @@ describe("the last contact and a re-check, per gap", () => {
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
     expect(screen.queryByTestId("gap-outreach")).toBeNull();
     expect(screen.queryAllByRole("button", { name: /^Re-check:/ })).toHaveLength(0);
+  });
+});
+
+describe("contact preference and logged contacts (#886)", () => {
+  const withPref = (contactPreference: unknown, extra: Record<string, unknown> = {}) =>
+    get.mockImplementation((url: string) => {
+      if (url === "/api/employees/maui-pat-00001/profile") return Promise.resolve({ ...profile, contactPreference, ...extra });
+      return Promise.resolve([]);
+    });
+  const pref = (preferredChannel: string | null, declinedChannels: string[]) => ({
+    subjectId: "maui-pat-00001", preferredChannel, declinedChannels, updatedBy: "quality-staff@maui.workwell.dev", updatedAt: "2026-11-03T10:00:00.000Z",
+  });
+
+  it("the picker opens on the preferred channel, a declined one is marked and disabled, and the preview asks for it", async () => {
+    withPref(pref("SMS", ["EMAIL"]));
+    render(<EmployeeProfilePage />);
+    expect(await screen.findByTestId("contact-preference")).toHaveTextContent("Prefers SMS · declined Email");
+    expect(screen.getByTestId("contact-preference")).toHaveTextContent("Set by quality-staff@maui.workwell.dev");
+    await userEvent.click(screen.getByRole("button", { name: "Preview message" }));
+    await waitFor(() => expect(post).toHaveBeenLastCalledWith("/api/cases/patient-outreach", { caseIds: ["case-1", "case-2"], channel: "SMS", dryRun: true }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Channel" }));
+    const email = await screen.findByRole("option", { name: "Email (declined)" });
+    expect(email).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("with no preference the picker opens on Email, as before", async () => {
+    withPref(null);
+    render(<EmployeeProfilePage />);
+    expect(await screen.findByTestId("contact-preference")).toHaveTextContent("No preference recorded.");
+    await userEvent.click(screen.getByRole("button", { name: "Preview message" }));
+    await waitFor(() => expect(post).toHaveBeenLastCalledWith("/api/cases/patient-outreach", { caseIds: ["case-1", "case-2"], channel: "EMAIL", dryRun: true }));
+  });
+
+  it("a person who declined every channel cannot be messaged, and the page says so", async () => {
+    withPref(pref(null, ["EMAIL", "SMS", "PHONE"]));
+    render(<EmployeeProfilePage />);
+    expect(await screen.findByTestId("gap-outreach-declined-all")).toHaveTextContent("Declined all contact");
+    expect(screen.getByRole("button", { name: "Preview message" })).toBeDisabled();
+    expect(screen.getByTestId("contact-preference")).toHaveTextContent("Declined all contact");
+  });
+
+  it("staff edit the preference: the save sends the chosen channels and the profile is read again", async () => {
+    withPref(null);
+    put.mockReset().mockResolvedValue({ contactPreference: pref("PHONE", ["SMS"]) });
+    render(<EmployeeProfilePage />);
+    const card = await screen.findByTestId("contact-preference");
+    await userEvent.click(within(card).getByRole("button", { name: "Edit" }));
+    await userEvent.click(within(card).getByRole("checkbox", { name: "SMS" }));
+    await userEvent.click(within(card).getByRole("combobox", { name: "Preferred channel" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Phone" }));
+    const readsBefore = profileReads();
+    await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith("/api/employees/maui-pat-00001/contact-preference", { preferredChannel: "PHONE", declinedChannels: ["SMS"] }),
+    );
+    await waitFor(() => expect(profileReads()).toBeGreaterThan(readsBefore));
+  });
+
+  it("a viewer sees the preference but no Edit", async () => {
+    ROLE.current = "ROLE_VIEWER";
+    withPref(pref("SMS", []));
+    render(<EmployeeProfilePage />);
+    const card = await screen.findByTestId("contact-preference");
+    expect(card).toHaveTextContent("Prefers SMS");
+    expect(within(card).queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("a gap's logged contact says what came of it", async () => {
+    withPref(null, {
+      openCases: [
+        gap("case-1", "cms125", "Breast Cancer Screening", {
+          lastOutreachAt: "2026-11-03T15:00:00.000Z", lastOutreachBy: "quality-staff@maui.workwell.dev",
+          lastOutreachChannel: "PHONE", lastOutreachDeliveryStatus: null, lastContactResult: "NO_ANSWER",
+        }),
+      ],
+    });
+    render(<EmployeeProfilePage />);
+    expect(await screen.findByText(/Called Nov 3, 2026 by quality-staff@maui\.workwell\.dev — no answer/)).toBeInTheDocument();
   });
 });

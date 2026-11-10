@@ -8,7 +8,7 @@ import { fmtCount } from "@/lib/format";
 import { useRunStatus } from "@/components/run-status-provider";
 import { useGlobalFilters } from "@/components/global-filter-context";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases, canRunMeasures } from "@/lib/rbac";
+import { canActInBulk, canManageCases, canRunMeasures, canUseLists } from "@/lib/rbac";
 import { worklistHref } from "@/lib/worklist-links";
 import { emitToast } from "@/lib/toast";
 import { canSeeEngineering } from "@/lib/public-demo";
@@ -111,8 +111,8 @@ export default function CompliancePage() {
     [searchParams],
   );
   // The ACO's attributed list (#874): URL-derived like the panel filters, and sent only by a seat the
-  // server accepts it from.
-  const mayUseLists = canManageCases(user?.role);
+  // server accepts it from: the lead's, not the staff seat's (#880).
+  const mayUseLists = canUseLists(user?.role);
   const { listId, refused: listRefused } = listParam(searchParams, user?.role);
   const listFilter = useListFilter(listId, mayUseLists);
   /**
@@ -125,7 +125,9 @@ export default function CompliancePage() {
    * authority on which patients actually have one — the selectability rule below is an affordance so
    * nobody ticks a row that cannot move, not a correctness guard.
    */
-  const canAssignFromRoster = canManageCases(user?.role);
+  // A bulk assign, so the lead's (#880); the staff seat still gets the way to the work list below.
+  const canAssignFromRoster = canActInBulk(user?.role);
+  const canWorkGaps = canManageCases(user?.role);
   const { options: assignableOptions, canonicalFor, hasAccounts } = useAssignableUsers(canAssignFromRoster);
   /**
    * The selection carries the WHOLE VIEW it was made in, not just the measure.
@@ -562,8 +564,8 @@ export default function CompliancePage() {
         <div>
           <h1 className="text-xl font-semibold">Individual Compliance Status</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            {`Every ${SUBJECT.singular} across the selected panel — compliant and excluded included. The inverse of the worklist.`}
-            {canAssignFromRoster ? (
+            {`Every ${SUBJECT.singular} on the panel and where they stand on each measure, met or not.`}
+            {canWorkGaps ? (
               <>
                 {" "}
                 {/* The open gaps to work are on the work list (#698); the measure and a gap status carry over. */}

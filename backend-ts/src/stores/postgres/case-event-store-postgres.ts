@@ -239,6 +239,14 @@ export class PgCaseEventStore implements CaseEventStore {
   }
 
   async outreachSentCounts(caseIds: readonly string[]): Promise<Record<string, number>> {
+    return this.actionCounts(caseIds, ["OUTREACH_SENT"]);
+  }
+
+  async contactAttemptCounts(caseIds: readonly string[]): Promise<Record<string, number>> {
+    return this.actionCounts(caseIds, ["OUTREACH_SENT", "CONTACT_LOGGED"]);
+  }
+
+  private async actionCounts(caseIds: readonly string[], actionTypes: readonly string[]): Promise<Record<string, number>> {
     const ids = caseIds.filter(isUuid); // drop non-uuid ids so ANY($1::uuid[]) can't 500 (Fable M14)
     if (ids.length === 0) return {};
     const out: Record<string, number> = {};
@@ -247,9 +255,9 @@ export class PgCaseEventStore implements CaseEventStore {
     for (let start = 0; start < ids.length; start += OUTREACH_STATUS_CHUNK) {
       const { rows } = await this.pool.query<{ case_id: string; n: string }>(
         `SELECT case_id, COUNT(*) AS n FROM ${SPIKE_SCHEMA}.case_actions
-          WHERE action_type = 'OUTREACH_SENT' AND case_id = ANY($1::uuid[])
+          WHERE action_type = ANY($2::text[]) AND case_id = ANY($1::uuid[])
           GROUP BY case_id`,
-        [ids.slice(start, start + OUTREACH_STATUS_CHUNK)],
+        [ids.slice(start, start + OUTREACH_STATUS_CHUNK), [...actionTypes]],
       );
       for (const r of rows) out[r.case_id] = Number(r.n);
     }

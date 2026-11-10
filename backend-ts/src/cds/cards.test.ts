@@ -181,8 +181,8 @@ test("cms122 and cms125 get NO suggestion under the real approved set — the do
   // own "representative (demo, not billing-certified)" caveat applies and they must not be offered for
   // one-click creation in a certified EHR. If a mapping is later APPROVED this test SHOULD fail — it is
   // pinning the rule's consequence, so the rule changing is exactly when someone should look.
-  assert.equal(ORDER_CATALOG["cms125"]?.code, "77067", "guard: the catalog still maps cms125");
-  assert.equal(ORDER_CATALOG["cms122"]?.code, "83036", "guard: the catalog still maps cms122");
+  assert.equal(ORDER_CATALOG["cms125"]?.options[0]?.code, "77067", "guard: the catalog still maps cms125");
+  assert.equal(ORDER_CATALOG["cms122"]?.options[0]?.code, "83036", "guard: the catalog still maps cms122");
   for (const measureId of ["cms122", "cms125"]) {
     const cards = await buildComplianceCards([row(measureId, "OVERDUE")], opts());
     assert.equal(cards.length, 1);
@@ -370,4 +370,72 @@ test("a measure whose latest run's data was too thin to trust gets no card; anot
 
   // The next sufficient run's row carries no flag, and the card is back.
   assert.equal((await buildComplianceCards([row("audiogram", "OVERDUE")], opts())).length, 1);
+});
+
+test("#880: an OVERDUE card's headline says what the patient needs, naming the CMS measure only over CMS's own logic", async () => {
+  const pop = { ipp: true, denom: true, numer: true, denex: false, denexcep: false };
+  // CMS122 is inverse: in the numerator is the miss.
+  const cms = row("cms122", "OVERDUE", {
+    evidence: { expressionResults: [{ define: "official:numerator", result: true }], official: { ecqmId: "122FHIR", version: "1.0.000", populationResults: pop } },
+  });
+  const translation = row("cms122", "OVERDUE", {
+    evidence: {
+      expressionResults: [{ define: "official:numerator", result: true }],
+      official: { kind: "derived", label: "WorkWell translation of CMS122v14", version: "ww-2027.1", populationResults: pop },
+    },
+  });
+  const [cmsCard] = await buildComplianceCards([cms], opts());
+  const [translationCard] = await buildComplianceCards([translation], opts());
+  assert.equal(cmsCard!.summary, "Needs an HbA1c (or GMI) of 9% or less this year (CMS122)");
+  assert.ok(cmsCard!.summary.length <= 140);
+  assert.equal(translationCard!.summary, "Needs an HbA1c (or GMI) of 9% or less this year", "no CMS identity over a WorkWell translation");
+  assert.doesNotMatch(translationCard!.summary, /CMS/);
+  // An authored row keeps "<measure> — <state>".
+  const [authored] = await buildComplianceCards([row("audiogram", "OVERDUE")], opts());
+  assert.match(authored!.summary, / — overdue$/);
+});
+
+// --- #620 / #640: choice measures, per-code approval, the clinic's code ------------------------------
+
+const COLONOSCOPY = `${CPT}|45378`;
+const FIT = `${CPT}|82274`;
+const cms130Row = () => row("cms130", "OVERDUE", { evidence: {} });
+const codesOf = (cards: Awaited<ReturnType<typeof buildComplianceCards>>) =>
+  (cards[0]!.suggestions ?? []).map((s) => (s.actions[0]!.resource as { code: { coding: Array<{ code: string }> } }).code.coding[0]!.code);
+
+test("a choice measure: no suggestion while every code is PROPOSED, one per approved option after", async () => {
+  const none = await buildComplianceCards([cms130Row()], opts(new Set()));
+  assert.equal(none[0]!.suggestions, undefined);
+  assert.match(none[0]!.detail ?? "", /the clinician chooses one/, "the card still lists the whole order set (B29)");
+  assert.match(none[0]!.detail ?? "", /Colonoscopy/);
+  assert.doesNotMatch(none[0]!.detail ?? "", /every \d|G0121/, "no interval or billing note on a card");
+
+  assert.deepEqual(codesOf(await buildComplianceCards([cms130Row()], opts(new Set([FIT])))), ["82274"]);
+  const two = await buildComplianceCards([cms130Row()], opts(new Set([FIT, COLONOSCOPY])));
+  assert.deepEqual(codesOf(two).sort(), ["45378", "82274"]);
+  assert.equal(two[0]!.selectionBehavior, "at-most-one");
+  assert.ok(two[0]!.suggestions!.every((s) => !("isRecommended" in s) || s.isRecommended !== true), "no option is the default");
+  assert.equal(new Set(two[0]!.suggestions!.map((s) => s.uuid)).size, 2, "each option has its own suggestion id");
+});
+
+test("a LOCAL option is listed but never a suggestion, even if its code were approved", async () => {
+  const noReading = { official: { ecqmId: "165FHIR", version: "1.0.000", populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } }, cqlFacts: { spec: 1, values: [] } };
+  const cards = await buildComplianceCards(
+    [row("cms165", "OVERDUE", { evidence: noReading })],
+    opts(new Set(["urn:workwell:orders|bp-recheck-visit", `${CPT}|99473`])),
+  );
+  assert.deepEqual(codesOf(cards), ["99473"]);
+  assert.match(cards[0]!.detail ?? "", /Blood pressure recheck visit/);
+});
+
+test("the clinic's approved code rides as a second coding; a urn:workwell code never does", async () => {
+  const clinic = new Map([[FIT, { system: "urn:oid:2.16.840.1.113883.3.999.1", code: "LAB-FIT", display: "FIT (clinic)" }]]);
+  const withClinic = await buildComplianceCards([cms130Row()], { ...opts(new Set([FIT])), clinicCodes: clinic });
+  const coding = (withClinic[0]!.suggestions![0]!.actions[0]!.resource as { code: { coding: Array<{ system: string; code: string }> } }).code.coding;
+  assert.deepEqual(coding.map((c) => c.code), ["82274", "LAB-FIT"]);
+});
+
+test("a protocol suggestion keeps its three-part uuid, so feedback ids issued before choices still resolve", async () => {
+  const cards = await buildComplianceCards([row("audiogram", "OVERDUE")], opts());
+  assert.equal(cards[0]!.suggestions![0]!.uuid, await suggestionUuid(RUN, "emp-006", "audiogram"));
 });

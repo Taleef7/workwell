@@ -41,9 +41,10 @@ test("resolveDeploymentProfile is pure, normalized, and defaults safely", () => 
   assert.deepEqual(maui, {
     id: "maui",
     visibleTenantIds: ["maui"],
-    runnableMeasureIds: ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"],
+    runnableMeasureIds: ["cms122", "cms125", "cms2", "cms130", "cms165"],
+    retiredMeasureIds: ["cms137"],
     subjectTerm: "patient",
-    practiceTimeZone: "America/New_York",
+    practiceTimeZone: "Pacific/Honolulu",
   });
   assert.equal(resolveDeploymentProfile(undefined).practiceTimeZone, null);
   assert.equal(resolveDeploymentProfile(undefined).subjectTerm, "employee");
@@ -263,7 +264,7 @@ test("a fresh Maui process wires the profile into counts and /api/tenants", asyn
   assert.deepEqual(output.tenants, ["maui"]);
   assert.equal(output.evaluable, 48);
   assert.deepEqual(output.excluded, ["twh", "ihn", "mhn"]);
-  assert.deepEqual(output.runnable, ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
+  assert.deepEqual(output.runnable, ["cms122", "cms125", "cms2", "cms130", "cms165"]);
   assert.equal(output.audiogramRunnable, false);
   assert.deepEqual(output.tenantRoute, [{ id: "maui", name: "Maui Pilot Clinic" }]);
 });
@@ -341,8 +342,20 @@ test("classifyRunnable: authored, official, official-pending, invalid — env re
   assert.deepEqual(classifyRunnable("cms122", { WORKWELL_OFFICIAL_MEASURES: "cms122" }), { kind: "official" });
 });
 
-test("the Maui profile lists exactly the six ACO measures, and hypertension is gone", () => {
-  assert.deepEqual([...resolveDeploymentProfile("maui").runnableMeasureIds], ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
+test("the Maui profile lists exactly the five ACO measures, retires cms137 (#889), and hypertension is gone", () => {
+  const maui = resolveDeploymentProfile("maui");
+  assert.deepEqual([...maui.runnableMeasureIds], ["cms122", "cms125", "cms2", "cms130", "cms165"]);
+  assert.deepEqual([...maui.retiredMeasureIds], ["cms137"]);
+  assert.deepEqual([...resolveDeploymentProfile(undefined).retiredMeasureIds], [], "the default profile retires nothing");
+});
+
+test("a retired id must be a known measure and may not also be runnable (#889)", () => {
+  const validate = (deploymentProfile as unknown as {
+    validateRetiredMeasureIds: (retired: readonly string[], runnable: readonly string[]) => readonly string[];
+  }).validateRetiredMeasureIds;
+  assert.deepEqual(validate(["cms137"], ["cms122"]), ["cms137"]);
+  assert.throws(() => validate(["cms137"], ["cms122", "cms137"]), /both runnable and retired: cms137/);
+  assert.throws(() => validate(["not-a-real-measure"], []), /not-a-real-measure: not authored and not vendored/);
 });
 
 test("on the maui profile an unrouted official-only id is NOT runnable; a routed one is", () => {
@@ -353,7 +366,7 @@ test("on the maui profile an unrouted official-only id is NOT runnable; a routed
   const unrouted = runProfileChild("maui", script) as { cms165: boolean; cms122: boolean; listed: string[] };
   assert.equal(unrouted.cms165, false);
   assert.equal(unrouted.cms122, true); // authored fallback exists for cms122
-  assert.deepEqual(unrouted.listed, ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"]);
+  assert.deepEqual(unrouted.listed, ["cms122", "cms125", "cms2", "cms130", "cms165"]);
   process.env.WORKWELL_OFFICIAL_MEASURES = "cms122,cms125,cms2,cms130,cms165";
   try {
     const routed = runProfileChild("maui", script) as { cms165: boolean };

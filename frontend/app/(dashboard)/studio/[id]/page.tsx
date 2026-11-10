@@ -153,6 +153,12 @@ export default function StudioMeasurePage() {
               {measure.identity.executed.status === "draft" ? " (CMS draft)" : ""}
             </p>
           ) : null}
+          {/* Item 13: a measure WorkWell's own CQL scores says so, so it is never read as a CMS measure. */}
+          {!measure?.identity?.executed && measure?.authoredLogic ? (
+            <p data-testid="studio-runs-authored" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+              Runs: {measure.authoredLogic}, not a CMS measure
+            </p>
+          ) : null}
           {measure?.identity?.executed && measure.identity.translation ? (
             <p data-testid="studio-translation" className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
               {formatTranslationLogic(measure.identity.translation)}

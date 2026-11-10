@@ -20,6 +20,9 @@ import { isOfficialRouted } from "../wiring/official-routing.ts";
 import { multiRateExclusionActive, officialDisplayFor } from "../compliance/official-display.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { describeCaseEvent } from "./case-event-text.ts";
+import { cqlFindingsOf, type CaseCqlFindings } from "./case-findings.ts";
+import { cycleCalendarYear, isEarlierCycle } from "../run/compliance-period.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 export interface CaseDetail {
   caseId: string;
@@ -55,10 +58,29 @@ export interface CaseDetail {
   closedAt: string | null;
   closedReason: string | null;
   closedBy: string | null;
+  /**
+   * Whether the case's cycle has ended on the practice's date (#882, `isEarlierCycle`, the rollover's own
+   * comparison). A closed case of an ended cycle takes no outreach (409 `earlier_cycle_closed`) and its
+   * re-check never reopens it. Sent so the page asks the server's rule, not a calendar of its own: a
+   * season or a multi-year cycle is not the calendar year.
+   */
+  cycleEnded: boolean;
+  /**
+   * The calendar year the case's period is, or null when it is a half-year, a season or not a cycle's
+   * first day (#882, `cycleCalendarYear`). The page names a year that has ended only from this.
+   */
+  cycleYear: number | null;
   exclusionReason: string | null;
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
   evidenceJson: Record<string, unknown>;
+  /**
+   * What the measure's own CQL found for the case's rate (#880): the list report's `evidenceStatus`
+   * and its values, from `evidenceJson.cqlFacts`. Built here, in the one builder every case route
+   * returns through, so an action's response keeps it. Null with no cited outcome. Chart values, so
+   * MCP `get_case` drops it with `cqlFacts` (AI_GUARDRAILS §6).
+   */
+  cqlFindings: CaseCqlFindings | null;
   outcomeStatus: string;
   outcomeSummary: string;
   outcomeEvaluatedAt: string;
@@ -235,6 +257,8 @@ export function toCaseDetail(
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     closedAt: c.closedAt,
+    cycleEnded: isEarlierCycle(c.measureId, c.evaluationPeriod, practiceToday()),
+    cycleYear: cycleCalendarYear(c.measureId, c.evaluationPeriod),
     closedReason: c.closedReason,
     closedBy: c.closedBy,
     exclusionReason: null,
@@ -244,6 +268,7 @@ export function toCaseDetail(
       ...evidence,
       why_flagged: deriveWhyFlagged(outcome?.evidence, c.measureId, c.evaluationPeriod, c.currentOutcomeStatus),
     },
+    cqlFindings: cqlFindingsOf(c.measureId, outcome),
     outcomeStatus: c.currentOutcomeStatus,
     outcomeSummary: outcomeSummaryFor(c.currentOutcomeStatus),
     outcomeEvaluatedAt: outcome?.evaluatedAt ?? c.updatedAt,

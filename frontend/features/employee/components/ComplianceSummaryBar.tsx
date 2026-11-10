@@ -4,7 +4,7 @@ import { COMPLIANCE_STATUS_LABELS, complianceStatusClass, labelFor as statusLabe
 
 /**
  * The status to SHOW: the server's display status, the same one the roster table on this page uses, so
- * a patient outside a measure's population reads "Not in population" here too, not "Missing Data"
+ * a patient outside a measure's population reads "Not eligible" here too, not "Missing Data"
  * (#671). The stored bucket is the fallback for a server that predates the field.
  */
 export const shownStatusOf = (o: Pick<MeasureOutcomeSummary, 'displayStatus' | 'outcomeStatus'>): string =>

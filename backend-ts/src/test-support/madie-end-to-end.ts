@@ -37,7 +37,8 @@ import { handleRuns } from "../routes/runs.ts";
 import { PROFILE_DEFAULT_PANEL } from "../compliance/panels.ts";
 import { expectedCase, expectedStatus, membershipOf, type DisplayStatus } from "./madie-oracle.ts";
 
-export const MAUI_MEASURES = ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"] as const;
+// The five Maui routes; cms137 was retired on 2026-11-05 (#889), and its deck stays gated by the official-cases gate.
+export const MAUI_MEASURES = ["cms122", "cms125", "cms2", "cms130", "cms165"] as const;
 export type MauiMeasure = (typeof MAUI_MEASURES)[number];
 
 /** Every deck resolves to the 2026 calendar year; an evaluation date inside it scores that year. */
@@ -130,7 +131,7 @@ export function installDeckDirectory(cases: readonly DeckCase[]): readonly Emplo
 /**
  * Each measure evaluates ITS deck's patients with ITS deck's bundles, and nothing else. No
  * `bundleForSubject`: a deck patient's record is written for one measure, and the pipeline would reuse
- * a whole-record bundle across all six. A request for a patient under another measure throws, so a
+ * a whole-record bundle across all five. A request for a patient under another measure throws, so a
  * cross-measure leak fails loudly instead of evaluating somebody else's test patient.
  */
 export function deckBundleSource(cases: readonly DeckCase[], employees: readonly EmployeeProfile[]): SubjectBundleSource {
@@ -268,6 +269,7 @@ async function checkSurfaces(
     assert.equal(rows.filter((x) => x.measureId !== m).length, list.length * (MAUI_MEASURES.length - 1), `${m} list: one missing row per other measure`);
     const own = rows.filter((x) => x.measureId === m);
     assert.ok(own.every((r) => members.has(r.patientExternalId ?? "")), `${m} list: rows only for its members`);
+    const evidenceSeen = new Map<string, number>();
     for (const c of list) {
       const mine = own.filter((r) => r.patientExternalId === c.patientId);
       assert.equal(mine.length, c.rates.length, `${caseLabel(c)}: one report row per rate, got ${mine.map((r) => r.rowStatus).join(",")}`);
@@ -289,12 +291,39 @@ async function checkSurfaces(
           want,
           `${caseLabel(c)} rate ${i + 1}: populations`,
         );
+        // #875: what the measure's own CQL found, from the define values THIS run recorded. A deck that met
+        // a numerator through a define the spec does not name would read NOT_EXPOSED_BY_LOGIC and fail here,
+        // and so would an fqm whose debug output stopped keying values by define name (nothing recorded).
+        const label = `${caseLabel(c)} rate ${i + 1}: evidenceStatus`;
+        const scored = want.ipp && want.denom && !want.denex && !want.denexcep && c.status !== "OUT_OF_POPULATION";
+        if (!scored) {
+          assert.equal(row.evidenceStatus, "NOT_APPLICABLE", label);
+        } else if (m === "cms125") {
+          assert.equal(row.evidenceStatus, "NOT_EXPOSED_BY_LOGIC", `${label}: no define names a mammogram`);
+        } else if (want.numer) {
+          const allowed = m === "cms122" ? ["NUMERATOR_EVIDENCE", "NONE_FOUND"] : ["NUMERATOR_EVIDENCE"];
+          assert.ok(allowed.includes(row.evidenceStatus ?? ""), `${label}: numerator met, got ${row.evidenceStatus}`);
+        } else {
+          const allowed = m === "cms122" ? ["LATEST_NOT_QUALIFYING"] : ["LATEST_NOT_QUALIFYING", "NONE_FOUND"];
+          assert.ok(allowed.includes(row.evidenceStatus ?? ""), `${label}: numerator not met, got ${row.evidenceStatus}`);
+        }
+        const found = row.evidenceStatus === "NUMERATOR_EVIDENCE" || row.evidenceStatus === "LATEST_NOT_QUALIFYING";
+        const dateDefine = m === "cms122" ? "Most Recent Glycemic Status Date" : m === "cms165" ? "Most Recent Blood Pressure Day" : null;
+        if (found && dateDefine) {
+          assert.match(row.evidenceDate ?? "", /^\d{4}-\d{2}-\d{2}/, `${label}: a reading found has its date`);
+          assert.ok((row.evidenceDateSource ?? "").startsWith(`${dateDefine} (`), `${label}: the date names its define and logic`);
+        } else {
+          assert.equal(row.evidenceDate, "", `${label}: a date only where a date define found something`);
+        }
+        evidenceSeen.set(row.evidenceStatus ?? "", (evidenceSeen.get(row.evidenceStatus ?? "") ?? 0) + 1);
       });
       // A two-rate measure's rows must carry two different labels, in the steward's group order.
       if (c.rates.length > 1) {
         assert.equal(new Set(mine.map((r) => r.rate)).size, c.rates.length, `${caseLabel(c)}: one label per rate`);
       }
     }
+    // Not vacuous: every measure whose logic exposes evidence showed some on its own deck.
+    if (m !== "cms125") assert.ok((evidenceSeen.get("NUMERATOR_EVIDENCE") ?? 0) > 0, `${m}: some deck patient's evidence was found (${[...evidenceSeen]})`);
   }
 
   // 3. The roster: each patient's cell for its measure, and "not evaluated" for the other five.
@@ -375,7 +404,7 @@ async function checkSurfaces(
 }
 
 /**
- * Runs the six decks through one ALL_PROGRAMS run on the stores `env` selects, checks every surface
+ * Runs the five decks through one ALL_PROGRAMS run on the stores `env` selects, checks every surface
  * against the oracle, then runs again, checks nothing changed, and checks every surface again against
  * the newer run. Returns a per-measure summary for the evidence file.
  */
@@ -387,6 +416,8 @@ export async function runMadieEndToEnd(env: MadieEnv): Promise<Summary> {
   const segments = (await stores.segments.listSegments()).filter((s) => s.enabled);
   const engine = await routedEngineForEnv(env as never);
   const deps: RunPipelineDeps = {
+    // Planned on the day it scores, so the deck's 2026 runs open cases in any year (#882).
+    today: EVALUATION_DATE,
     runStore: stores.runs,
     outcomeStore: stores.outcomes,
     caseStore: stores.cases,

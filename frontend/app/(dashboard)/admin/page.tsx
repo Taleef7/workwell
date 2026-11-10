@@ -13,6 +13,7 @@ import type { RowData, TableColumn } from "datavis/src/components/table/types";
 import { SegmentsAdmin } from "@/features/segments/SegmentsAdmin";
 import { McpAccessAdmin } from "@/features/mcp-tokens/McpAccessAdmin";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
+import { OrderCodesAdmin } from "@/features/orders/OrderCodesAdmin";
 import { formatMeasureLabel, type MeasureIdentity } from "@/lib/measure-identity";
 
 type IntegrationHealth = {
@@ -843,6 +844,13 @@ export default function AdminPage() {
           </div>
         )}
       </article>
+
+      <OrderCodesAdmin
+        measureLabel={(id) => {
+          const m = measures.find((x) => x.id === id);
+          return m ? formatMeasureLabel(m.identity, m.name) : id;
+        }}
+      />
 
       <article className="rounded-3xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-3">

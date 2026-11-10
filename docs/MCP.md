@@ -211,6 +211,8 @@ WorkWell is also an OAuth 2.1 authorization server for its MCP endpoint, as MCP 
   or `null` for authored CQL, an errored row or no row. Their `measureVersion` / `measure_version` /
   `version` is that row's version: `""` for an errored or missing row, never the authored library's for a
   row CMS's artifact scored. On a `staff_closed` row `logic` describes the frozen status, not `live_*`.
+- **No tool returns an outcome's `cqlFacts`** (#875, the recorded CQL define values): `get_case` drops
+  them from `evidenceJson` and `evidence_payload`, and no other tool returns raw evidence (AI_GUARDRAILS §6).
 - `list_runs` `measure_version` is the run read model's, as on the run detail and the runs CSV.
 
 ## Tool inventory (server 3.0.0)
@@ -227,7 +229,7 @@ The table below shows **tool-execution** roles (transport access is separate —
 |------|---------------------------|-----------------|
 | `get_case` | CASE_MANAGER, ADMIN | Restricted — employee/case data |
 | `list_cases` | CASE_MANAGER, ADMIN | Restricted — employee/case data |
-| `get_run_summary` | CASE_MANAGER, ADMIN | Restricted — run/outcome data. `pass_rate` is `null` and `data_insufficient` names the measures when the run's data was too thin to trust (#853) |
+| `get_run_summary` | CASE_MANAGER, ADMIN | Restricted — run/outcome data. `pass_rate` is `null` and `data_insufficient` names the measures when the run's data was too thin to trust (#853). With no `runId` it is the newest run that is not a re-score of an ended year (#882) |
 | `list_runs` | CASE_MANAGER, ADMIN | Restricted — run/outcome data. `compliance_rate` is `null` when nobody is in the workflow denominator (e.g. a queued run, or the first days of a measurement year), and when `data_insufficient` names a measure whose data was too thin to trust (#853) |
 | `explain_outcome` | CASE_MANAGER, ADMIN | Restricted — employee/case evidence |
 | `get_employee` | CASE_MANAGER, ADMIN | Restricted — employee/compliance data |
@@ -325,7 +327,12 @@ Invalid arguments or missing records return a structured error — no stack trac
 }
 ```
 
-Error codes used: `ACCESS_DENIED`, `EMPLOYEE_NOT_FOUND`, `MEASURE_NOT_FOUND`, `CASE_NOT_FOUND`, `INVALID_ARGUMENT`
+Error codes used: `ACCESS_DENIED`, `EMPLOYEE_NOT_FOUND`, `MEASURE_NOT_FOUND`, `MEASURE_AMBIGUOUS`, `CASE_NOT_FOUND`, `INVALID_ARGUMENT`
+
+`MEASURE_AMBIGUOUS` (item 13): a `measureName` that names several records. Of those, the one record not
+`Deprecated` is used (older stacks keep deprecated legacy rows under an active measure's name); with no single
+such record the tool answers this code with the ids it could mean, never an arbitrary pick. `get_measure_version`
+reports it as a tool error, as it does a missing measure. Ask by `measureId` instead.
 
 ## Audit record (MCP_TOOL_CALLED)
 

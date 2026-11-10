@@ -35,7 +35,7 @@ import {
   useSidebar,
 } from "@mieweb/ui";
 import { useAuth } from "@/components/auth-provider";
-import { ROLES, canManageCases, hasAnyRole, normRole } from "@/lib/rbac";
+import { ROLES, canExportData, canManageCases, hasAnyRole, homeRouteFor, normRole } from "@/lib/rbac";
 import { useApi } from "@/lib/api/hooks";
 import { GlobalFilterProvider, useGlobalFilters } from "@/components/global-filter-context";
 import { GlobalFilterGroup } from "@/components/global-filter-group";
@@ -57,22 +57,22 @@ const APP_SUBTITLE = appRest.join(" ") || "Measure Studio";
 // (Cases, Worklist, Campaigns) are scoped to the roles whose API calls won't 403.
 const nav = [
   { href: "/programs", label: "Programs", icon: BarChart3 },
-  // Each provider's rates by location (#852). CM/ADMIN, as /api/scorecard is, and on the patient
+  // Each provider's rates by location (#852). CM, QS and ADMIN, as /api/scorecard is, and on the patient
   // deployment only: the occupational deployment's "providers" are clinicians assigned round-robin. A
   // VIEWER whose sign-in is linked to a provider gets it too, under `linkedViewerLabel` (#870): the
   // server answers them with their own row beside the practice total, and an unlinked one with a 403.
-  { href: "/scorecard", label: "Scorecard", icon: Table2, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN], patientOnly: true, linkedViewerLabel: "My scorecard" },
-  // The work list is the case manager's daily screen, so it comes first; Cases is the same gaps one
-  // row per gap (#698).
-  { href: "/worklist", label: "Worklist", icon: ClipboardList, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
-  { href: "/cases", label: "Cases", icon: Shield, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
+  { href: "/scorecard", label: "Scorecard", icon: Table2, roles: [ROLES.CASE_MANAGER, ROLES.QUALITY_STAFF, ROLES.ADMIN], patientOnly: true, linkedViewerLabel: "My scorecard" },
+  // The work list is the lead's daily screen, so it comes first; Cases is the same gaps one row per gap
+  // (#698). The staff seat's day starts on its own cases, so for it the two swap (`casesBeforeWorklist`, #880).
+  { href: "/worklist", label: "Worklist", icon: ClipboardList, roles: [ROLES.CASE_MANAGER, ROLES.QUALITY_STAFF, ROLES.ADMIN] },
+  { href: "/cases", label: "Cases", icon: Shield, roles: [ROLES.CASE_MANAGER, ROLES.QUALITY_STAFF, ROLES.ADMIN] },
   { href: "/compliance", label: "Compliance", icon: ListChecks },
   { href: "/people", label: "People", icon: Users, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   // The ACO's attributed lists (ADR-082). CM/ADMIN because EVERY method on /api/subject-lists is —
   // a member row is a raw identifier another system asserted, so the reads are gated too.
   { href: "/lists", label: "Lists", icon: ListOrdered, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
   { href: "/campaigns", label: "Campaigns", icon: Send, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
-  { href: "/orders", label: "Orders", icon: ClipboardCheck, roles: [ROLES.CASE_MANAGER, ROLES.ADMIN] },
+  { href: "/orders", label: "Orders", icon: ClipboardCheck, roles: [ROLES.CASE_MANAGER, ROLES.QUALITY_STAFF, ROLES.ADMIN] },
   { href: "/measures", label: "Measures", icon: BookOpen },
   { href: "/studio", label: "Studio", icon: FileClock, roles: [ROLES.AUTHOR, ROLES.APPROVER, ROLES.ADMIN] },
   { href: "/runs", label: "Runs", icon: Activity },
@@ -100,6 +100,25 @@ const dateRangeMeaning = (pathname: string | null, tab: string | null): "Opened"
     : pathname === "/cases" ? "Opened"
     : pathname === "/runs" ? "Started"
     : null;
+
+/**
+ * Whether the header's site picker changes anything on this page (#655, #880). Six screens read the
+ * site: the work list (not its Panels tab), the Cases list, the roster, Programs, Admin's waivers, and
+ * Runs, where only the outcomes CSV reads it, so only for a seat that may download that CSV. Shown
+ * anywhere else, it was a control that changed nothing (a case page, a patient, the scorecard).
+ */
+const siteFilterApplies = (pathname: string | null, tab: string | null, role: string | null | undefined): boolean =>
+  pathname === "/worklist" ? tab !== "panels"
+    : pathname === "/runs" ? canExportData(role)
+    : pathname === "/cases" || pathname === "/compliance" || pathname === "/programs" || pathname === "/admin";
+
+/** The staff seat's nav lists Cases just before the Worklist (#880): its day starts on its own cases. */
+function casesBeforeWorklist<T extends { href: string }>(items: readonly T[]): T[] {
+  const cases = items.find((item) => item.href === "/cases");
+  const rest = items.filter((item) => item !== cases);
+  const at = rest.findIndex((item) => item.href === "/worklist");
+  return cases && at >= 0 ? [...rest.slice(0, at), cases, ...rest.slice(at)] : [...items];
+}
 
 const DATE_PRESETS = [
   { value: "7d", label: "last 7 days", short: "7 days" },
@@ -247,16 +266,21 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     };
   }, [api, token]);
 
+  // The staff seat (#880) works its own cases: Cases leads its nav and opens on "mine", and it gets no
+  // practice-wide count of uncontacted gaps, which is the lead's number to act on, not its.
+  const staffSeat = normRole(user?.role) === ROLES.QUALITY_STAFF;
+  const showsWorklistBadge = canManageCases(user?.role) && !staffSeat;
+
   useEffect(() => {
-    // The Worklist gap badge only exists for case-managing roles (the Worklist nav item is gated to
-    // them), so don't pull the full open-cases list on every navigation/filter change for everyone.
-    // (No setState here: non-managers never render the badge and the initial count is already 0.)
-    if (!token || !canManageCases(user?.role)) return;
+    // The Worklist gap badge only exists for the lead's roles, so don't pull the open-cases count on every
+    // navigation/filter change for everyone. (No setState here: those roles never render the badge and
+    // the initial count is already 0.)
+    if (!token || !showsWorklistBadge) return;
     let mounted = true;
     async function loadWorklistGapCount() {
       try {
         // The badge is a COUNT, so ask the server for one: `outreach=none` narrows to open cases with
-        // no OUTREACH_SENT record and `X-Total-Count` carries the full filtered match, while `limit=1`
+        // no contact attempt (an OUTREACH_SENT or a logged CONTACT_LOGGED, #886) and `X-Total-Count` carries the full filtered match, while `limit=1`
         // keeps the body to a single row. Counting rows client-side capped the badge at the server's
         // default page (50) and made the backend load every open case on every navigation.
         const params = new URLSearchParams();
@@ -277,7 +301,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [api, siteId, token, user]);
+  }, [api, siteId, token, showsWorklistBadge]);
 
   const sharedFilterQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -292,7 +316,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     [sites],
   );
 
-  const navItems = nav.filter((item) => {
+  const visibleItems = nav.filter((item) => {
     if (ENGINEERING_HREFS.has(item.href) && !canSeeEngineering(user?.role)) {
       return false;
     }
@@ -300,6 +324,14 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
     if ("linkedViewerLabel" in item && linkedProvider) return true;
     return !("roles" in item && item.roles) || hasAnyRole(user?.role, item.roles);
   });
+  const navItems = staffSeat ? casesBeforeWorklist(visibleItems) : visibleItems;
+  /** The link a nav item opens, with the shared filters; the staff seat's Cases opens on "mine". */
+  const navTarget = (href: string): string => {
+    const params = new URLSearchParams(sharedFilterQuery);
+    if (staffSeat && href === "/cases") params.set("view", "mine");
+    const query = params.toString();
+    return query ? `${href}?${query}` : href;
+  };
   const navLabel = (item: (typeof nav)[number]) =>
     "linkedViewerLabel" in item && linkedProvider ? item.linkedViewerLabel : item.label;
 
@@ -334,6 +366,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   const dateMeaning = dateRangeMeaning(pathname, searchParams.get("tab"));
+  const showSite = siteFilterApplies(pathname, searchParams.get("tab"), user?.role);
 
   return (
     <SidebarProvider>
@@ -352,7 +385,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           <SidebarHeader>
             <button
               type="button"
-              onClick={() => router.push("/programs")}
+              onClick={() => router.push(homeRouteFor(user?.role))}
               className="flex items-center gap-2.5 rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-600 text-[10px] font-bold tracking-[0.2em] text-white">
@@ -370,8 +403,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               {navItems.map((item) => {
                 const active = isNavActive(pathname, item.href);
                 const Icon = item.icon;
-                const hasGap = item.href === "/worklist" && worklistGapCount > 0;
-                const target = sharedFilterQuery ? `${item.href}?${sharedFilterQuery}` : item.href;
+                const hasGap = showsWorklistBadge && item.href === "/worklist" && worklistGapCount > 0;
+                const target = navTarget(item.href);
                 return (
                   <SidebarNavItem
                     key={item.href}
@@ -383,9 +416,9 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                     // like a mismatch (#698).
                     badge={
                       hasGap ? (
-                        <span title={`${worklistGapCount.toLocaleString()} open gaps with no outreach yet`} data-testid="worklist-badge">
+                        <span title={`${worklistGapCount.toLocaleString()} open gaps not contacted yet`} data-testid="worklist-badge">
                           {worklistGapCount.toLocaleString()}
-                          <span className="sr-only"> open gaps with no outreach yet</span>
+                          <span className="sr-only"> open gaps not contacted yet</span>
                         </span>
                       ) : undefined
                     }
@@ -439,14 +472,16 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
             </AppHeaderSection>
             <AppHeaderSection align="right" className="gap-2">
               <GlobalFilterGroup className="hidden xl:flex">
-                <Select
-                  aria-label="Filter by site"
-                  value={siteId}
-                  onValueChange={setSiteId}
-                  options={siteOptions}
-                  size="sm"
-                  className="w-36"
-                />
+                {showSite ? (
+                  <Select
+                    aria-label="Filter by site"
+                    value={siteId}
+                    onValueChange={setSiteId}
+                    options={siteOptions}
+                    size="sm"
+                    className="w-36"
+                  />
+                ) : null}
                 {dateMeaning ? (
                   <Select
                     aria-label={dateMeaning === "Opened" ? "Date range: when the gap was opened" : "Date range: when the run started"}
@@ -465,16 +500,20 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 
           {/* Filters bar below xl. The header's own filters start at xl: between 1024 and 1279px the
               search, both filters, the run pill and the theme controls did not fit one row (#700). */}
+          {/* No bar at all where neither control applies: an empty strip cost a phone a row. */}
+          {showSite || dateMeaning ? (
           <div className="border-b border-neutral-200 bg-white px-4 py-2 xl:hidden dark:border-neutral-800 dark:bg-neutral-900">
             <GlobalFilterGroup className="w-full">
-              <Select
-                aria-label="Filter by site"
-                value={siteId}
-                onValueChange={setSiteId}
-                options={siteOptions}
-                size="sm"
-                className="flex-1"
-              />
+              {showSite ? (
+                <Select
+                  aria-label="Filter by site"
+                  value={siteId}
+                  onValueChange={setSiteId}
+                  options={siteOptions}
+                  size="sm"
+                  className="flex-1"
+                />
+              ) : null}
               {dateMeaning ? (
                 <Select
                   aria-label={dateMeaning === "Opened" ? "Date range: when the gap was opened" : "Date range: when the run started"}
@@ -487,6 +526,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               ) : null}
             </GlobalFilterGroup>
           </div>
+          ) : null}
 
           {/* tabIndex=-1 so the skip link actually MOVES keyboard focus here (a non-focusable target
               only scrolls in some browsers, leaving focus back in the nav — defeating WCAG 2.4.1). */}

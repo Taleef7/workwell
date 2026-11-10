@@ -26,6 +26,10 @@ const A = "ROLE_ADMIN";
 const APPROVER = "ROLE_APPROVER";
 const AUTHOR = "ROLE_AUTHOR";
 const CM = "ROLE_CASE_MANAGER";
+// The staff seat (#880, LOCKED §4A.9): works single cases like a case manager, but the practice-wide
+// levers (campaigns, attributed lists, panel owners, bulk assign, population runs, People and identity,
+// QRDA/MeasureReport files, MCP) stay with the lead. Every rule that does not name it refuses it.
+const QS = "ROLE_QUALITY_STAFF";
 const MCP = "ROLE_MCP_CLIENT";
 const VIEWER = "ROLE_VIEWER"; // read-only (public /sandbox); may GET but never write
 
@@ -105,17 +109,17 @@ const RULES: Rule[] = [
   // authority, matching /mcp/** and CDS invoke.
   { pattern: rx("/$cql"), access: [A, CM, MCP] },
 
-  // Outreach templates: the picker on the case-detail outreach action is the CASE_MANAGER's
-  // primary consumer, so READING the template list/preview is CM/ADMIN (Fable M23). Writes
+  // Outreach templates: the picker on the case-detail outreach action is the case worker's
+  // primary consumer, so READING the template list/preview is CM/QS/ADMIN (Fable M23). Writes
   // (create/update/delete) stay ADMIN via the /api/admin/** rule below. First-match-wins, so
   // these GET rules must precede the generic admin gate.
-  { method: "GET", pattern: rx("/api/admin/outreach-templates"), access: [CM, A] },
-  { method: "GET", pattern: rx("/api/admin/outreach-templates/*/preview"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/admin/outreach-templates"), access: [CM, QS, A] },
+  { method: "GET", pattern: rx("/api/admin/outreach-templates/*/preview"), access: [CM, QS, A] },
   { pattern: rx("/api/admin/**"), access: [A] },
 
-  { method: "POST", pattern: rx("/api/cases/*/evidence"), access: [CM, A] },
-  { method: "GET", pattern: rx("/api/cases/*/evidence"), access: [CM, A] },
-  { method: "GET", pattern: rx("/api/evidence/*/download"), access: [CM, A] },
+  { method: "POST", pattern: rx("/api/cases/*/evidence"), access: [CM, QS, A] },
+  { method: "GET", pattern: rx("/api/cases/*/evidence"), access: [CM, QS, A] },
+  { method: "GET", pattern: rx("/api/evidence/*/download"), access: [CM, QS, A] },
 
   { method: "POST", pattern: rx("/api/measures/*/approve"), access: [APPROVER, A] },
   { method: "POST", pattern: rx("/api/measures/*/activate"), access: [APPROVER, A] },
@@ -135,24 +139,35 @@ const RULES: Rule[] = [
   // AI authoring surfaces (draft-spec/draft-cql/test-fixtures) are author work. The measure-scoped
   // forms match /api/measures/** above; the BARE POST /api/ai/draft-spec otherwise fell through to
   // the AUTHENTICATED /api/** fallback, letting any signed-in role (CM/APPROVER) drive billed OpenAI
-  // calls (Fable M4). Gate all /api/ai/** writes to AUTHOR/ADMIN. (Case/run AI live under
-  // /api/cases/** and /api/runs/**, already CM/ADMIN.)
+  // calls (Fable M4). Gate all /api/ai/** writes to AUTHOR/ADMIN. (Case AI lives under /api/cases/**,
+  // CM/QS/ADMIN; run AI under /api/runs/**, CM/ADMIN.)
   { method: "POST", pattern: rx("/api/ai/**"), access: [AUTHOR, A] },
+  // Population runs, imports and run AI are the lead's (#880). A case's re-check is
+  // `POST /api/cases/:id/rerun-to-verify`, under the cases rule below, so staff keep it.
   { method: "POST", pattern: rx("/api/runs/**"), access: [CM, A] },
-  { method: "POST", pattern: rx("/api/cases/**"), access: [CM, A] },
+  // Bulk assign moves up to 500 cases in one call, so it is the lead's (#880, LOCKED §4A.9). It must
+  // precede the cases rule below, which would otherwise answer first. Single assign
+  // (`/api/cases/:id/assign`) stays with staff, so this is a limit on volume, not on authority.
+  { method: "POST", pattern: rx("/api/cases/bulk-assign"), access: [CM, A] },
+  // One case's work: assign, outreach, escalate, resolve, appointment, re-check, the patient's one
+  // message, a logged contact (#886), AI explain. The staff seat's job.
+  { method: "POST", pattern: rx("/api/cases/**"), access: [CM, QS, A] },
   // Batch outreach campaigns (#75 E5) multiply per-case outreach over up to 100k cases —
   // they carry the same operational case/PII data, so ALL methods on /api/campaigns and
   // /api/campaigns/:id are gated to CASE_MANAGER/ADMIN (matching per-case outreach), not
   // left to the generic AUTHENTICATED /api/** fallback below. Any-method (no `method`),
   // `/api/campaigns/**` matches both the bare collection and sub-paths (AntPathMatcher).
+  // Campaigns are the lead's (#880): one send reaches every targeted patient.
   { pattern: rx("/api/campaigns/**"), access: [CM, A] },
-  // Order proposals (#77 E7) — clinical decision support over case/PII data; gated like campaigns.
-  { pattern: rx("/api/orders/**"), access: [CM, A] },
+  // Order proposals (#77 E7) — clinical decision support over case/PII data, read on a case's own page,
+  // so staff read them too.
+  { pattern: rx("/api/orders/**"), access: [CM, QS, A] },
 
   // Identity (#187 E15) — the cross-system person directory exposes national/MRN ids + DOB and the
   // reconcile write mis-merges medical records if wrong, so ALL methods on /api/identity/** are
   // CASE_MANAGER/ADMIN (not left to the AUTHENTICATED /api/** fallback — which the public read-only
   // VIEWER sandbox would otherwise use to enumerate everyone's PII). Writes are additionally audited.
+  // Not the staff seat's (#880): no staff task needs a national id, and a reconcile is the lead's call.
   { pattern: rx("/api/identity/**"), access: [CM, A] },
 
   // Segments (#183 E11.3) — risk-group config. Writes are ADMIN; reads (list + preview) fall through
@@ -164,26 +179,26 @@ const RULES: Rule[] = [
   { method: "GET", pattern: rx("/api/measures/*/traceability"), access: "AUTHENTICATED" },
   { method: "GET", pattern: rx("/api/measures/*/versions/*/export/mat"), access: [APPROVER, A] },
 
-  // Auditor packets: run/case packets are case-operational (CM/ADMIN); measure-version
+  // Auditor packets: run/case packets are case-operational (CM/QS/ADMIN, #880); measure-version
   // packets carry authoring/governance detail (APPROVER/ADMIN). Mirrors AuditorController.
-  { method: "GET", pattern: rx("/api/auditor/runs/*/packet"), access: [CM, A] },
-  { method: "GET", pattern: rx("/api/auditor/cases/*/packet"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/auditor/runs/*/packet"), access: [CM, QS, A] },
+  { method: "GET", pattern: rx("/api/auditor/cases/*/packet"), access: [CM, QS, A] },
   { method: "GET", pattern: rx("/api/auditor/measure-versions/*/packet"), access: [APPROVER, A] },
-  // Assignable case-assignee pick list: only CASE_MANAGER/ADMIN (matches the hard-coded frontend
+  // Assignable case-assignee pick list: only the roles that work cases (matches the hard-coded frontend
   // suggestions it replaces, minus the accounts the Maui profile refuses). Must precede the
-  // generic AUTHENTICATED /api/** rule so the CM/ADMIN gate actually fires.
-  { method: "GET", pattern: rx("/api/users/assignable"), access: [CM, A] },
+  // generic AUTHENTICATED /api/** rule so the gate actually fires.
+  { method: "GET", pattern: rx("/api/users/assignable"), access: [CM, QS, A] },
   // The patient work list reads the SAME cases `GET /api/cases` serves, so it carries the same gate:
   // AUTHENTICATED. Stated explicitly rather than left to the catch-all below, because the next reader
   // asking "who can see a whole practice's gaps?" should find an answer here and not have to derive
   // it. Gating it to CM/ADMIN instead was tried and reverted: it would let the read-only VIEWER role
   // open /api/cases and be refused the same rows on /worklist, which is a difference nobody chose.
-  // (The bulk assign it drives is a POST under /api/cases/** and is already CM/ADMIN by that rule —
-  // a second rule for it here would sit after that one and never fire.)
+  // (The bulk assign it drives is `POST /api/cases/bulk-assign`, the lead's by its own rule above the
+  // cases rule.)
   // Provider panels (MM-2 PR 2, ADR-080). READING who works which panel is AUTHENTICATED — the same
   // gate the provider list and the work list carry, and a clinician who can see the work list should
   // be able to see who owns it. WRITING re-routes a whole provider's patients and moves their open
-  // cases, which is case-management authority, so PUT/DELETE are CM/ADMIN. Two rules because the
+  // cases, which is the lead's authority (#880), so PUT/DELETE are CM/ADMIN. Two rules because the
   // VIEWER guard blocks non-GET globally but a single [CM, A] rule would also block VIEWER's READ.
   // Both must precede the /api/** catch-alls below, which would otherwise answer first.
   { method: "GET", pattern: rx("/api/panels/**"), access: "AUTHENTICATED" },
@@ -194,23 +209,29 @@ const RULES: Rule[] = [
   // claims, and the report carries names, memberships, providers and payers. The public /sandbox
   // signs in as a read-only VIEWER that may browse every AUTHENTICATED GET, and on Maui the clinician
   // seat is a VIEWER too, so leaving the reads to the /api/** catch-all would expose all of it. The
-  // identity routes are restricted for exactly this reason. Must precede the catch-alls below.
+  // identity routes are restricted for exactly this reason. Must precede the catch-alls below. The staff
+  // seat is refused too (#880): the lead works the list and assigns its gaps.
   { pattern: rx("/api/subject-lists/**"), access: [CM, A] },
   // The provider scorecard (#852): every provider's rates are the practice's own performance figures, so
-  // only CM/ADMIN read the practice card. A VIEWER may GET the exact path, because the route itself answers
+  // only the practice's quality seats (CM, QS, ADMIN) read the practice card. A VIEWER may GET the exact path, because the route itself answers
   // a clinician seat linked to a provider with that provider's row and the practice total only, and every
   // other VIEWER (the public /sandbox) with 403 (#870). That guarantee is the scorecard's alone: the roster,
   // the case list and the hierarchy rollup stay practice-wide for every signed-in role, as before (owner
-  // decision, 2026-10-30). Any sub-path stays CM/ADMIN, so a later `/api/scorecard/…` read never opens to the
+  // decision, 2026-10-30). Any sub-path stays CM/QS/ADMIN, so a later `/api/scorecard/…` read never opens to the
   // VIEWER by accident. Before the catch-alls.
-  { method: "GET", pattern: rx("/api/scorecard"), access: [CM, A, VIEWER] },
-  { pattern: rx("/api/scorecard/**"), access: [CM, A] },
+  { method: "GET", pattern: rx("/api/scorecard"), access: [CM, QS, A, VIEWER] },
+  { pattern: rx("/api/scorecard/**"), access: [CM, QS, A] },
   // Bulk downloads (production-readiness review 2026-10-15, owner decision D5). Every patient's rows in one
   // file is a minimum-necessary question, so the CSV exports, the per-patient QRDA I documents, the QRDA III
   // and MeasureReport files are CM/ADMIN, and the audit-ledger export is ADMIN. BROWSING the same rows in the
   // app stays AUTHENTICATED (the work-list decision above); what changes is who can carry them away in bulk.
   // The read-only VIEWER is the public /sandbox and the Maui clinician seat. Must precede the catch-alls.
-  { pattern: rx("/api/exports/**"), access: [CM, A] },
+  // The CSVs are the staff seat's too (owner decision 2026-11-02); the QRDA and MeasureReport files are
+  // the lead's (#880), the files a report is filed from.
+  // A subject's contact preference (#886): the staff seat and the lead set it (LOCKED §4A.9). Reading it
+  // rides on the profile, which stays AUTHENTICATED; writing it changes which channel every send uses.
+  { pattern: rx("/api/employees/*/contact-preference"), access: [CM, QS, A] },
+  { pattern: rx("/api/exports/**"), access: [CM, QS, A] },
   { pattern: rx("/api/audit-events/**"), access: [A] },
   { method: "GET", pattern: rx("/api/runs/*/qrda1"), access: [CM, A] },
   { method: "GET", pattern: rx("/api/runs/*/qrda"), access: [CM, A] },

@@ -60,15 +60,20 @@ describe("DashboardLayout date range (#699, #661)", () => {
   // query would find nothing on every page and pass the "hidden" cases for the wrong reason.
   const ranges = () => screen.queryAllByLabelText(/^Date range/);
 
-  it.each(["/programs", "/programs/hierarchy", "/programs/cms125", "/compliance", "/people", "/cases/abc", "/programsx"])(
-    "hides the date range on %s, which it does not filter",
-    (path) => {
-      renderAt(path);
-      expect(ranges()).toHaveLength(0);
-      // Only the range goes; the site selector is untouched.
-      expect(screen.getAllByLabelText("Filter by site")).toHaveLength(2);
-    },
-  );
+  it.each([
+    ["/programs", 2],
+    ["/compliance", 2],
+    // The site picker goes too where nothing on the page reads it (#655, #880).
+    ["/programs/hierarchy", 0],
+    ["/programs/cms125", 0],
+    ["/people", 0],
+    ["/cases/abc", 0],
+    ["/programsx", 0],
+  ] as const)("hides the date range on %s, which it does not filter", (path, sitePickers) => {
+    renderAt(path);
+    expect(ranges()).toHaveLength(0);
+    expect(screen.queryAllByLabelText("Filter by site")).toHaveLength(sitePickers);
+  });
 
   it("hides the date range on the work list's Panels tab, a provider table it does not filter", () => {
     renderAt("/worklist", "tab=panels");
@@ -97,5 +102,37 @@ describe("the sidebar's open-gap badge ignores the date range (#661)", () => {
     const badge = apiMock.getWithHeaders.mock.calls.map((c) => String(c[0])).find((u) => u.includes("outreach=none"))!;
     expect(badge).toContain("site=Kihei");
     expect(badge).not.toMatch(/[?&](from|to)=/);
+  });
+});
+
+describe("the site picker shows only where the page reads the site (#655, #880)", () => {
+  const sitePickers = () => screen.queryAllByLabelText("Filter by site");
+  const ranges = () => screen.queryAllByLabelText(/^Date range/);
+
+  it.each(["/worklist", "/cases", "/compliance", "/programs", "/admin", "/runs"])("shows on %s, which reads it", (path) => {
+    user.role = "ROLE_ADMIN";
+    renderAt(path);
+    expect(sitePickers()).toHaveLength(2);
+  });
+
+  it.each(["/scorecard", "/cases/abc", "/patients/pat-1", "/lists", "/orders", "/measures"])("is gone on %s, which ignores it", (path) => {
+    user.role = "ROLE_ADMIN";
+    renderAt(path);
+    expect(sitePickers()).toHaveLength(0);
+  });
+
+  it("is gone on the work list's Panels tab, a provider table", () => {
+    user.role = "ROLE_ADMIN";
+    renderAt("/worklist", "tab=panels");
+    expect(sitePickers()).toHaveLength(0);
+  });
+
+  it("on Runs follows the outcomes CSV, the only thing there that reads it", () => {
+    user.role = "ROLE_VIEWER";
+    renderAt("/runs");
+    expect(sitePickers()).toHaveLength(0);
+    // The date range still applies to the run list.
+    expect(ranges()).toHaveLength(2);
+    user.role = "ROLE_ADMIN";
   });
 });

@@ -7,6 +7,7 @@
  * LOCKED`) must produce identical observable behaviour. Each `freshStore*` factory
  * hands back an isolated, empty store so ordering assertions are deterministic.
  */
+import type { ContactPreferenceStore } from "./contact-preference-store.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CreateRunInput, RunStore } from "./run-store.ts";
@@ -72,6 +73,16 @@ export function runStoreContract(label: string, freshStore: () => Promise<RunSto
     // Newest-first by started_at, because the caller takes the first that holds its measure's rows.
     const startedAts = found.map((r) => r.startedAt);
     assert.deepEqual(startedAts, [...startedAts].sort().reverse());
+    // #882: a re-score of the year started in the next one is still that year's, and is selected.
+    const rescore = await store.createRun({
+      ...sampleRun("cms122"), scopeType: "ALL_PROGRAMS", ...period(2027),
+      requestedScope: { evaluationDate: "2027-12-31", today: "2028-01-04", earlierCycle: true },
+    });
+    await store.finalizeRun(rescore.id, "COMPLETED");
+    assert.ok(
+      (await store.listPopulationRunsForPeriod("2027-01-01T00:00:00.000Z", "2028-01-01T00:00:00.000Z", 50)).some((r) => r.id === rescore.id),
+      "the scorecard and the list report select the re-score by its period",
+    );
     // The window is half-open: a run whose period starts exactly at the upper bound is the NEXT year's.
     assert.equal(
       (await store.listPopulationRunsForPeriod("2028-01-01T00:00:00.000Z", "2029-01-01T00:00:00.000Z", 50))
@@ -742,6 +753,59 @@ export function outcomeStoreContract(
     assert.deepEqual(await outcomeStore.listLatestFinalizedOutcomePerMeasure("emp-404"), [], "unknown subject → []");
   });
 
+  test(`[${label}] a run marked earlierCycle is nobody's latest; a later unmarked run still wins, and only the JSON boolean marks (#882)`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    // The January shape: the 2027 nightly, then the lead's re-score of 2026 started hours LATER, with
+    // rows evaluated later. Unfiltered, the re-score wins every "latest" read.
+    const mkRun = (startedAt: string, requestedScope: Record<string, unknown>) =>
+      runStore.createRun({ ...sampleRun("all"), scopeType: "ALL_PROGRAMS", status: "COMPLETED", startedAt, requestedScope });
+    const nightly = await mkRun("2027-01-04T12:00:00.000Z", { evaluationDate: "2027-01-04" });
+    const rescore = await mkRun("2027-01-04T20:00:00.000Z", { evaluationDate: "2026-12-31", today: "2027-01-04", earlierCycle: true });
+    // A JSON string and a number are not the marker: these runs are ordinary, and newest for hazwoper.
+    const plain = await mkRun("2027-01-04T12:00:00.000Z", {});
+    const stringy = await mkRun("2027-01-04T21:00:00.000Z", { earlierCycle: "true" });
+    const numeric = await mkRun("2027-01-04T22:00:00.000Z", { earlierCycle: 1 });
+    const rec = (runId: string, measureId: string, status: string, evaluationPeriod: string, evaluatedAt: string) =>
+      outcomeStore.recordOutcome({ runId, subjectId: "emp-006", measureId, evaluationPeriod, status, evidence: {}, evaluatedAt });
+    await rec(nightly.id, "audiogram", "OVERDUE", "2027-01-01", "2027-01-04T12:30:00.000Z");
+    await rec(rescore.id, "audiogram", "COMPLIANT", "2026-01-01", "2027-01-04T20:30:00.000Z");
+    await rec(plain.id, "hazwoper", "OVERDUE", "2027-01-01", "2027-01-04T12:30:00.000Z");
+    await rec(stringy.id, "hazwoper", "DUE_SOON", "2027-01-01", "2027-01-04T21:30:00.000Z");
+    await rec(numeric.id, "noise", "OVERDUE", "2027-01-01", "2027-01-04T22:30:00.000Z");
+
+    const winners = async () =>
+      new Map((await outcomeStore.listLatestPopulationRuns(["audiogram", "hazwoper", "noise"], {})).map((w) => [w.measureId, w.runId]));
+    const latestRows = async (measureId: string) =>
+      new Set((await outcomeStore.listLatestPopulationOutcomes({ measureId })).map((r) => r.runId));
+    const finalized = async () =>
+      new Map((await outcomeStore.listLatestFinalizedOutcomePerMeasure("emp-006")).map((r) => [r.measureId, r.runId]));
+
+    assert.equal((await winners()).get("audiogram"), nightly.id, "listLatestPopulationRuns skips the re-score");
+    assert.deepEqual(await latestRows("audiogram"), new Set([nightly.id]), "listLatestPopulationOutcomes skips it");
+    assert.equal((await finalized()).get("audiogram"), nightly.id, "listLatestFinalizedOutcomePerMeasure skips it");
+    // Not a marker: the newest run wins as before.
+    assert.equal((await winners()).get("hazwoper"), stringy.id, 'a string "true" marks nothing');
+    assert.deepEqual(await latestRows("hazwoper"), new Set([stringy.id]));
+    assert.equal((await finalized()).get("hazwoper"), stringy.id);
+    assert.equal((await winners()).get("noise"), numeric.id, "nor does the number 1");
+    assert.equal((await finalized()).get("noise"), numeric.id);
+
+    // The run-joined read keeps every row and says which run is marked, for the JS reductions.
+    const joined = await outcomeStore.listOutcomesWithRun({ measureId: "audiogram" });
+    assert.deepEqual(
+      joined.map((r) => [r.runId, r.runEarlierCycle ?? false]).sort(),
+      [[nightly.id, false], [rescore.id, true]].sort(),
+    );
+    assert.equal((await outcomeStore.listOutcomesWithRun({ measureId: "hazwoper" })).some((r) => r.runEarlierCycle), false);
+
+    // A later unmarked run still wins: the marker hides a run, never what comes after it.
+    const nextNightly = await mkRun("2027-01-05T12:00:00.000Z", { evaluationDate: "2027-01-05" });
+    await rec(nextNightly.id, "audiogram", "DUE_SOON", "2027-01-01", "2027-01-05T12:30:00.000Z");
+    assert.equal((await winners()).get("audiogram"), nextNightly.id);
+    assert.deepEqual(await latestRows("audiogram"), new Set([nextNightly.id]));
+    assert.equal((await finalized()).get("audiogram"), nextNightly.id);
+  });
+
   test(`[${label}] hasOutcomes distinguishes no-rows-at-all from rows-awaiting-finalization (#470)`, async () => {
     const { runStore, outcomeStore } = await fresh();
     const run = await runStore.createRun(sampleRun("audiogram"));
@@ -1340,6 +1404,44 @@ export function outcomeStoreContract(
     assert.equal(full.length, 621, "the unnarrowed read is unchanged");
   });
 
+  // #875: the list report's CSV asks for each row's recorded CQL define values. They come back BESIDE the
+  // narrowed evidence, only when asked, absent on a row that has none, and never inside `evidence`, so
+  // rows whose evidence differs only in their facts still narrow to the same evidence (and, where the
+  // store shares one object between equal narrowed evidences, to that one object).
+  test(`[${label}] listOutcomeSubjectMembershipsForRun returns cqlFacts beside the evidence, only when asked`, async () => {
+    const { runStore, outcomeStore } = await fresh();
+    const run = await runStore.createRun({ ...sampleRun("all"), status: "COMPLETED", scopeType: "ALL_PROGRAMS" });
+    const official = { ecqmId: "122FHIR", populationResults: { ipp: true, denom: true, numer: true } };
+    const factsOf = (date: string) => ({ spec: 1, values: [{ define: "Most Recent Glycemic Status Date", value: date }] });
+    const evidences: Record<string, Record<string, unknown>> = {
+      "emp-001": { official, cqlFacts: factsOf("2026-02-01") },
+      "emp-002": { official, cqlFacts: factsOf("2026-03-01") },
+      "emp-003": { official, cqlFacts: { spec: 1, values: [] } },
+      "emp-004": { official },
+      "emp-005": { official },
+    };
+    await outcomeStore.recordOutcomes(
+      Object.entries(evidences).map(([subjectId, evidence]) => ({ runId: run.id, subjectId, measureId: "audiogram", status: "COMPLIANT", evidence })),
+    );
+
+    const plain = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram");
+    assert.equal(plain.some((r) => "cqlFacts" in r), false, "not asked: no facts on any row");
+    const asked = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram", undefined, { cqlFacts: true });
+    const of = (subjectId: string) => asked.find((r) => r.subjectId === subjectId)!;
+    for (const [subjectId, evidence] of Object.entries(evidences)) {
+      const r = of(subjectId);
+      assert.deepEqual(r.evidence, { official }, `${subjectId}: the narrowed evidence never carries the facts`);
+      if (evidence.cqlFacts) assert.deepEqual(r.cqlFacts, evidence.cqlFacts, `${subjectId}: its own facts`);
+      else assert.equal("cqlFacts" in r, false, `${subjectId}: absent where the row has none, never null`);
+    }
+    if (of("emp-004").evidence === of("emp-005").evidence) {
+      assert.equal(of("emp-001").evidence, of("emp-004").evidence, "facts never split a shared narrowed evidence");
+      assert.equal(of("emp-002").evidence, of("emp-004").evidence);
+    }
+    const narrowed = await outcomeStore.listOutcomeSubjectMembershipsForRun(run.id, "audiogram", ["emp-002", "emp-004"], { cqlFacts: true });
+    assert.deepEqual(narrowed.map((r) => [r.subjectId, r.cqlFacts ?? null]).sort(), [["emp-002", factsOf("2026-03-01")], ["emp-004", null]]);
+  });
+
   // #874: "does this run hold this measure?" reads one row, any row, of that run and that measure.
   test(`[${label}] anyOutcomeForMeasure returns a row of that run and measure, or null`, async () => {
     const { runStore, outcomeStore } = await fresh();
@@ -1813,6 +1915,29 @@ export function caseStoreContract(label: string, freshStore: () => Promise<CaseS
     const reopened = await upsert(store, "OVERDUE");
     assert.equal(reopened?.disposition, "REOPENED", "back in the population with a gap → the system closure reopens");
     assert.equal(reopened?.id, opened?.id);
+  });
+
+  test(`[${label}] an ended cycle's outcome opens and reopens nothing, single or batched; an active case still moves (#882)`, async () => {
+    const store = await freshStore();
+    const at = (subjectId: string, outcomeStatus: string, earlierCycle = true) => ({
+      runId: crypto.randomUUID(), subjectId, measureId: "audiogram", evaluationPeriod: "2026-01-01", outcomeStatus, earlierCycle,
+    });
+    assert.equal(await store.upsertFromOutcome(at("emp-1", "OVERDUE")), null, "single: no case is inserted");
+    assert.deepEqual(await store.upsertFromOutcomes([at("emp-2", "OVERDUE")]), [null], "batch: no case is inserted");
+
+    await store.upsertFromOutcome(at("emp-3", "OVERDUE", false));
+    assert.equal((await store.upsertFromOutcome(at("emp-3", "COMPLIANT", false)))?.status, "RESOLVED");
+    assert.equal(await store.upsertFromOutcome(at("emp-3", "OVERDUE")), null, "single: a system closure is not reopened");
+    assert.deepEqual(await store.upsertFromOutcomes([at("emp-3", "OVERDUE")]), [null], "batch: nor here");
+
+    await store.upsertFromOutcome(at("emp-4", "OVERDUE", false));
+    await store.upsertFromOutcome(at("emp-5", "OVERDUE", false));
+    assert.equal((await store.upsertFromOutcome(at("emp-4", "COMPLIANT")))?.status, "RESOLVED", "single: an active case resolves as before");
+    assert.equal((await store.upsertFromOutcomes([at("emp-5", "COMPLIANT")]))[0]?.status, "RESOLVED", "batch: as before");
+    assert.deepEqual(
+      (await store.listCases({ limit: 100 })).map((c) => `${c.employeeId}:${c.status}`).sort(),
+      ["emp-3:RESOLVED", "emp-4:RESOLVED", "emp-5:RESOLVED"],
+    );
   });
 
   // ---- upsertFromOutcomes (the batched case pass) -----------------------------------------------
@@ -2890,6 +3015,34 @@ export function caseEventStoreContract(
     assert.deepEqual(await eventStore.outreachSentCounts([]), {}, "empty input → {}");
   });
 
+  test(`[${label}] contactAttemptCounts counts sends AND logged contacts; the outreach filter reads it (#886)`, async () => {
+    const { caseStore, eventStore } = await fresh();
+    const a = (await newCase(caseStore))!;
+    const b = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-007", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+    }))!;
+    const c = (await caseStore.upsertFromOutcome({
+      runId: crypto.randomUUID(), subjectId: "emp-008", measureId: "audiogram", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE",
+    }))!;
+    await eventStore.insertAction({ caseId: a.id, actionType: "OUTREACH_SENT", actor: "cm@x", payload: {} });
+    await eventStore.insertAction({ caseId: a.id, actionType: "CONTACT_LOGGED", actor: "cm@x", payload: {} });
+    await eventStore.insertAction({ caseId: b.id, actionType: "CONTACT_LOGGED", actor: "cm@x", payload: {} });
+    await eventStore.insertAction({ caseId: c.id, actionType: "OUTREACH_DELIVERY_UPDATED", actor: "cm@x", payload: {} });
+
+    const attempts = await eventStore.contactAttemptCounts([a.id, b.id, c.id]);
+    assert.equal(attempts[a.id], 2);
+    assert.equal(attempts[b.id], 1, "a logged contact alone is an attempt");
+    assert.equal(attempts[c.id] ?? 0, 0, "a delivery update is not");
+    assert.deepEqual(await eventStore.contactAttemptCounts([]), {});
+    assert.equal((await eventStore.outreachSentCounts([b.id]))[b.id] ?? 0, 0, "the send count stays sends");
+    assert.equal(await eventStore.hasOutreachSent(b.id), false);
+
+    const none = (await caseStore.listCases({ outreach: "none", limit: 100 })).map((x) => x.id);
+    assert.deepEqual(none, [c.id], "only the case nobody contacted");
+    assert.equal((await caseStore.listCasesPage({ outreach: "none" }, { limit: 10, offset: 0 })).total, 1, "the page path agrees");
+    assert.equal((await caseStore.listCasesPage({ outreach: "any" }, { limit: 10, offset: 0 })).total, 2);
+  });
+
   test(`[${label}] latestOutreachDeliveryStatuses answers for a SET exactly as the per-case read does`, async () => {
     // The case CSV asked per case — ~15,300 queries on the pilot, through a ten-connection pool, which
     // answered 504 and held the pool while it did. The batched form must agree with the per-case one
@@ -3445,6 +3598,33 @@ export function valueSetStoreContract(label: string, freshStore: () => Promise<V
     assert.equal(list.length, 2);
     assert.equal(list[0]!.mappingStatus, "APPROVED", "status ASC (APPROVED before PROPOSED)");
     assert.equal(list[1]!.mappingConfidence, 0.7);
+  });
+
+  test(`[${label}] terminology mappings: a review is a compare-and-set on the status the reviewer saw (#640)`, async () => {
+    const store = await freshStore();
+    await store.createTerminologyMapping({
+      id: "tm-r",
+      localCode: "LAB-1",
+      localDisplay: null,
+      localSystem: "urn:oid:1.2.3",
+      standardCode: "83036",
+      standardDisplay: null,
+      standardSystem: "http://www.ama-assn.org/go/cpt",
+      mappingStatus: "PROPOSED",
+      mappingConfidence: null,
+      notes: null,
+    });
+    assert.equal(await store.getTerminologyMapping("nope"), null);
+    const at = "2026-11-04T10:00:00.000Z";
+    const approved = await store.updateTerminologyMappingStatus("tm-r", "PROPOSED", "APPROVED", "admin@x", at);
+    assert.equal(approved?.mappingStatus, "APPROVED");
+    assert.equal(approved?.reviewedBy, "admin@x");
+    assert.equal(approved?.reviewedAt, at);
+    // A second reviewer who also saw PROPOSED loses: nothing changes, and the caller is told.
+    assert.equal(await store.updateTerminologyMappingStatus("tm-r", "PROPOSED", "REJECTED", "other@x", at), null);
+    assert.equal((await store.getTerminologyMapping("tm-r"))?.mappingStatus, "APPROVED");
+    assert.equal((await store.getTerminologyMapping("tm-r"))?.reviewedBy, "admin@x");
+    assert.equal(await store.updateTerminologyMappingStatus("gone", "PROPOSED", "APPROVED", "admin@x", at), null);
   });
 }
 
@@ -4117,5 +4297,55 @@ export function subjectListStoreContract(label: string, freshStore: () => Promis
     assert.equal(counts.get(a.id)!.MATCHED, 1);
     assert.equal(counts.get(b.id)!.NOT_FOUND, 1);
     assert.equal(counts.size, 2, "a list id with no members has no key rather than a zeroed one");
+  });
+}
+
+/**
+ * `ContactPreferenceStore` (#886): one row per subject id; the declined set round-trips in canonical
+ * order; upsert replaces; remove returns what it removed.
+ */
+export function contactPreferenceStoreContract(label: string, freshStore: () => Promise<ContactPreferenceStore>): void {
+  test(`[${label}] contact preferences: none is null, and removing none is not an error`, async () => {
+    const store = await freshStore();
+    assert.equal(await store.get("maui-pat-0001"), null);
+    assert.deepEqual(await store.getMany(["maui-pat-0001"]), {});
+    assert.deepEqual(await store.getMany([]), {});
+    assert.equal(await store.remove("maui-pat-0001"), null);
+  });
+
+  test(`[${label}] contact preferences: upsert stores, replaces, and getMany keys by subject`, async () => {
+    const store = await freshStore();
+    const first = await store.upsert({
+      subjectId: "maui-pat-0001", preferredChannel: "SMS", declinedChannels: ["PHONE", "EMAIL"],
+      updatedBy: "quality-staff@workwell.dev", updatedAt: "2026-11-03T10:00:00.000Z",
+    });
+    assert.equal(first.preferredChannel, "SMS");
+    assert.deepEqual(first.declinedChannels, ["EMAIL", "PHONE"], "canonical order, whatever order was given");
+    assert.equal(first.updatedAt, "2026-11-03T10:00:00.000Z");
+    const second = await store.upsert({
+      subjectId: "maui-pat-0001", preferredChannel: null, declinedChannels: ["EMAIL"],
+      updatedBy: "cm@workwell.dev", updatedAt: "2026-11-04T10:00:00.000Z",
+    });
+    assert.equal(second.preferredChannel, null);
+    assert.deepEqual(second.declinedChannels, ["EMAIL"]);
+    assert.equal(second.updatedBy, "cm@workwell.dev");
+    await store.upsert({
+      subjectId: "maui-pat-0002", preferredChannel: "PHONE", declinedChannels: [],
+      updatedBy: "cm@workwell.dev", updatedAt: "2026-11-04T10:00:00.000Z",
+    });
+    const many = await store.getMany(["maui-pat-0001", "maui-pat-0002", "maui-pat-0003", "maui-pat-0001"]);
+    assert.deepEqual(Object.keys(many).sort(), ["maui-pat-0001", "maui-pat-0002"]);
+    assert.deepEqual(many["maui-pat-0002"]!.declinedChannels, []);
+  });
+
+  test(`[${label}] contact preferences: remove returns the row it removed`, async () => {
+    const store = await freshStore();
+    await store.upsert({
+      subjectId: "maui-pat-0001", preferredChannel: "EMAIL", declinedChannels: ["SMS"],
+      updatedBy: "cm@workwell.dev", updatedAt: "2026-11-04T10:00:00.000Z",
+    });
+    const removed = await store.remove("maui-pat-0001");
+    assert.equal(removed?.preferredChannel, "EMAIL");
+    assert.equal(await store.get("maui-pat-0001"), null);
   });
 }

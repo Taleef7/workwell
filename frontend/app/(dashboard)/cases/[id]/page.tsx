@@ -5,23 +5,31 @@ import { ReactNode, useCallback, useEffect, useEffectEvent, useMemo, useState } 
 import { useParams } from "next/navigation";
 import { Button, Input, Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle, Select, Textarea } from "@mieweb/ui";
 import { emitToast } from "@/lib/toast";
-import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
+import { CASE_STATUS_LABELS, OUTCOME_LABELS, PRIORITY_LABELS, caseStatusClass, closedReasonLabel, labelFor, normalizeEnumValue, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
 import { subjectPath } from "@/lib/subject-path";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases } from "@/lib/rbac";
+import { canManageCases, canViewOrders } from "@/lib/rbac";
+import { CaseOrdersPanel } from "@/features/orders/CaseOrdersPanel";
 import { canSeeEngineering } from "@/lib/public-demo";
 import { AuditPacketExportButton } from "@/components/audit-packet-export-button";
 import { CopyableId } from "@/components/copyable-id";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CqlExpressionResults, CqlWhyFlagged } from "@/features/evidence/CqlEvidence";
+import { CqlFindings, type CaseCqlFindings } from "@/features/evidence/CqlFindings";
+import { OtherOpenGaps } from "@/features/employee/components/OtherOpenGaps";
+import { LogContactModal } from "@/features/outreach/LogContactModal";
+import { channelOptions as preferenceChannelOptions, declinedAll, defaultChannel, preferenceLine } from "@/features/employee/contact-preference";
+import type { ContactPreference, OpenCaseSummary } from "@/features/employee/hooks/useEmployeeProfile";
 import { EvidenceDropzone } from "@/features/evidence/EvidenceDropzone";
 import { LocalOnlyNotice } from "@/features/common/LocalOnlyNotice";
 import { DeliveryChip } from "@/features/outreach/DeliveryChip";
 import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
 import { formatEvaluationPeriod } from "@/lib/format";
+import { localYear } from "@/lib/local-date";
+import { ApiError } from "@/lib/api/errors";
 
 const EMPLOYEE_APPOINTMENT_TYPE_OPTIONS = [
   { value: "Audiogram", label: "Audiogram" },
@@ -74,6 +82,10 @@ type CaseDetail = {
   closedAt: string | null;
   closedReason: string | null;
   closedBy: string | null;
+  /** The server's answer to "has this case's cycle ended?" (#882): its rule, never the browser's calendar. */
+  cycleEnded?: boolean;
+  /** The calendar year the period is, or null for a half-year or a season (#882): the server's, never parsed here. */
+  cycleYear?: number | null;
   exclusionReason: string | null;
   waiverExpiresAt: string | null;
   waiverExpired: boolean;
@@ -96,6 +108,8 @@ type CaseDetail = {
   outcomeSummary: string;
   outcomeEvaluatedAt: string;
   latestOutreachDeliveryStatus: string | null;
+  /** What the measure's CQL found, for the gap this case is about (#880); null with no cited outcome. */
+  cqlFindings?: CaseCqlFindings | null;
   timeline: AuditEvent[];
   immunizationForecast?: {
     subjectId: string;
@@ -168,11 +182,18 @@ type LinkedValueSet = {
 
 export default function CaseDetailPage() {
   const params = useParams<{ id: string }>();
-  const caseId = params.id;
+  // Keyed by the case (#880): the other-gaps panel moves between cases of one patient, and a previous
+  // case's outreach preview, AI explanation or typed note must never carry over to the next.
+  return <CaseDetailView key={params.id} caseId={params.id} />;
+}
+
+function CaseDetailView({ caseId }: { caseId: string }) {
   const api = useApi();
   const { user } = useAuth();
-  // Case write actions (outreach/rerun/assign/escalate/delivery/evidence) are CASE_MANAGER/ADMIN on the
-  // backend; read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
+  // The case page's orders panel reads /api/orders/** (lead, staff, admin); the clinician seat never asks.
+  const mayViewOrders = canViewOrders(user?.role);
+  // Case write actions (outreach/rerun/assign/escalate/delivery/evidence) are CASE_MANAGER, QUALITY_STAFF
+  // and ADMIN on the backend (#880); read-only roles previously saw every control and got a guaranteed 403 (Fable H9). Mirror
   // the API gate so those controls simply don't render for read roles.
   const canManage = canManageCases(user?.role);
   // Rerun to Verify and Escalate are case work, so they render wherever the case actions do (`canManage`)
@@ -194,8 +215,13 @@ export default function CaseDetailPage() {
   const [explaining, setExplaining] = useState(false);
   const [templates, setTemplates] = useState<OutreachTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
-  // Outreach channel: EMAIL is the default so existing behavior is unchanged (#75 E5).
+  // Outreach channel (#75 E5): opens on the person's preferred channel once it is known (#886), else Email.
   const [outreachChannel, setOutreachChannel] = useState<string>("EMAIL");
+  const [channelTouched, setChannelTouched] = useState(false);
+  // The person's other gaps and contact preference, as Other open gaps read them (#886).
+  const [gapsInfo, setGapsInfo] = useState<{ openCases: OpenCaseSummary[]; contactPreference: ContactPreference | null } | null>(null);
+  const [gapsVersion, setGapsVersion] = useState(0);
+  const [logContactOpen, setLogContactOpen] = useState(false);
   const [outreachPreview, setOutreachPreview] = useState<OutreachPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [showRawEvidence, setShowRawEvidence] = useState(false);
@@ -243,8 +269,14 @@ export default function CaseDetailPage() {
       ? storedAssignee === ""
       : assigneeValue.toLowerCase() === storedAssignee.toLowerCase());
   const caseStatus = caseDetail ? normalizeEnumValue(caseDetail.status) : "";
+  // An official outcome's evidence is population flags (`official:<population>`), not authored defines.
+  const officialPopulations = (caseDetail?.evidenceJson.expressionResults ?? []).some((row) => String(row.define ?? "").startsWith("official:"));
   // Escalating a finished case would reopen it (the API refuses it too), so neither layout offers it.
   const caseIsFinished = caseStatus === "CLOSED" || caseStatus === "RESOLVED" || caseStatus === "EXCLUDED";
+  const endedClosure = caseDetail ? endedClosureOf(caseDetail) : null;
+  const noOutreachReason = endedClosure
+    ? `${endedClosure.year ?? "Its measurement period"} has ended and this case is closed, so it takes no outreach.`
+    : null;
   const deliveryState = caseDetail?.latestOutreachDeliveryStatus ? normalizeEnumValue(caseDetail.latestOutreachDeliveryStatus) : null;
 
   // Option lists for @mieweb/ui Select controls.
@@ -257,14 +289,11 @@ export default function CaseDetailPage() {
     ],
     [templates],
   );
-  const channelOptions = useMemo(
-    () => [
-      { value: "EMAIL", label: "Email" },
-      { value: "SMS", label: "SMS" },
-      { value: "PHONE", label: "Phone" },
-    ],
-    [],
-  );
+  // Declined channels are shown and disabled (#886): the server refuses a send on one.
+  const contactPreference = gapsInfo?.contactPreference ?? null;
+  const channelOptions = useMemo(() => preferenceChannelOptions(contactPreference), [contactPreference]);
+  const noContactReason = declinedAll(contactPreference) ? `This ${SUBJECT.singular} declined all contact.` : null;
+  const otherOpenCaseIds = gapsInfo ? gapsInfo.openCases.filter((c) => c.caseId !== caseId).map((c) => c.caseId) : null;
   const appointmentTypeOptions = isPatientTerm ? PATIENT_APPOINTMENT_TYPE_OPTIONS : EMPLOYEE_APPOINTMENT_TYPE_OPTIONS;
 
   const loadCase = useCallback(async () => {
@@ -335,11 +364,13 @@ export default function CaseDetailPage() {
     if (action === "outreach") {
       const params = new URLSearchParams();
       if (selectedTemplateId) params.set("templateId", selectedTemplateId);
-      // EMAIL is the default; forward channel so SMS/PHONE selections reach the backend (#75 E5).
+      // Forward the channel so SMS/PHONE selections reach the backend (#75 E5).
       params.set("channel", outreachChannel);
       const qs = params.toString();
       templateQuery = qs ? `?${qs}` : "";
     }
+    // Read before the call: an open case of an ended year that the re-check resolves did not "stay" closed.
+    const wasEndedClosure = caseDetail ? endedClosureOf(caseDetail) : null;
     try {
       const updated = await api.post<undefined, CaseDetail>(`/api/cases/${caseId}/${endpoint}${templateQuery}`);
       setCaseDetail(updated);
@@ -347,13 +378,30 @@ export default function CaseDetailPage() {
         setOutreachPreview(null);
         emitToast("Outreach sent");
       } else {
-        emitToast("Case rerun verification completed");
+        // A closed case of an ended year stays closed (#882): the re-check only records the year's result.
+        const ended = wasEndedClosure && endedClosureOf(updated);
+        emitToast(
+          ended
+            ? `Re-checked: the ${ended.year ?? "period's"} result is recorded; the case stays closed.`
+            : "Case rerun verification completed",
+        );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      refuse(err);
     } finally {
       setActing(null);
     }
+  }
+
+  /**
+   * An action's failure, said. The server's refusal of outreach on a closed case of an ended year (#882) is
+   * its own sentence, and the case is read again: the page was opened before the year's first nightly
+   * closed it, so its buttons still offered what the case no longer takes.
+   */
+  function refuse(err: unknown) {
+    const refusal = earlierCycleRefusal(err);
+    setError(refusal ?? (err instanceof Error ? err.message : "Unknown error"));
+    if (refusal) void loadCase();
   }
 
   async function previewOutreach() {
@@ -361,11 +409,13 @@ export default function CaseDetailPage() {
     setPreviewing(true);
     setError(null);
     try {
-      const templateQuery = selectedTemplateId ? `?templateId=${encodeURIComponent(selectedTemplateId)}` : "";
-      const data = await api.get<OutreachPreview>(`/api/cases/${caseId}/actions/outreach/preview${templateQuery}`);
+      // The channel too (#886), so a preview on a channel the person declined is refused as the send would be.
+      const params = new URLSearchParams({ channel: outreachChannel });
+      if (selectedTemplateId) params.set("templateId", selectedTemplateId);
+      const data = await api.get<OutreachPreview>(`/api/cases/${caseId}/actions/outreach/preview?${params.toString()}`);
       setOutreachPreview(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      refuse(err);
     } finally {
       setPreviewing(false);
     }
@@ -539,13 +589,10 @@ export default function CaseDetailPage() {
           <Link href="/cases" className="text-sm font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100">
             ← Back to cases
           </Link>
-          <h2 className="mt-2 text-2xl font-semibold sm:text-3xl">Case detail</h2>
-          <p className="mt-2 text-neutral-600 dark:text-neutral-400">Structured Why Flagged evidence for the selected case and its {isPatientTerm ? "exclusion" : "waiver"} context.</p>
+          <h2 className="mt-2 text-2xl font-semibold sm:text-3xl">Case</h2>
+          <p className="mt-2 text-neutral-600 dark:text-neutral-400">One gap for one {SUBJECT.singular}: why the measure flagged it and what to do next.</p>
         </div>
         <div className="flex flex-col items-start gap-2 sm:items-end">
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            Case: <code className="break-all">{caseId}</code>
-          </p>
           <AuditPacketExportButton
             api={api}
             path={`/api/auditor/cases/${caseId}/packet`}
@@ -608,21 +655,32 @@ export default function CaseDetailPage() {
                   value={isPatientTerm ? formatEvaluationPeriod(caseDetail.evaluationPeriod) : caseDetail.evaluationPeriod}
                 />
                 <Info label="Outcome summary" value={caseDetail.outcomeSummary} />
+                {/* When the measure last looked at this gap; the run itself is engineering detail (#880). */}
                 <Info
-                  label="Last run"
-                  value={<CopyableId id={caseDetail.lastRunId} href={`/runs?runId=${encodeURIComponent(caseDetail.lastRunId)}`} label="run id" />}
+                  label="Last checked"
+                  value={
+                    <>
+                      {new Date(caseDetail.outcomeEvaluatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                      {canEngineering ? (
+                        <span className="mt-1 block">
+                          <CopyableId id={caseDetail.lastRunId} href={`/runs?runId=${encodeURIComponent(caseDetail.lastRunId)}`} label="run id" />
+                        </span>
+                      ) : null}
+                    </>
+                  }
                 />
               </dl>
 
               <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">Next action</p>
-                <p className="mt-2 text-sm text-amber-950 dark:text-amber-100">{caseDetail.nextAction}</p>
+                <p className="mt-2 text-sm text-amber-950 dark:text-amber-100">{rolledOverLine(caseDetail) ?? caseDetail.nextAction}</p>
                 {/* Who wrote this line, shown only when the answer is "a person" (ADR-076 d2). Without it
                     the rule is invisible: an operator who escalates cannot tell that their words now
                     outrank the nightly wording, nor that the measure changing its mind hands the line
                     back. A badge on every case would just be furniture, so the system-owned default —
-                    which is nearly every case — says nothing at all. */}
-                {caseDetail.nextActionSource === "OPERATOR" ? (
+                    which is nearly every case — says nothing at all. A rolled-over case's line is the
+                    page's, not the person's, so it says nothing either. */}
+                {caseDetail.nextActionSource === "OPERATOR" && rolledOverLine(caseDetail) === null ? (
                   <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
                     Written by a person. Nightly runs leave it alone until the outcome changes.
                   </p>
@@ -697,9 +755,18 @@ export default function CaseDetailPage() {
                   <Select
                     label="Channel"
                     value={outreachChannel}
-                    onValueChange={setOutreachChannel}
+                    onValueChange={(v) => {
+                      setChannelTouched(true);
+                      setOutreachChannel(v);
+                      setOutreachPreview(null);
+                    }}
                     options={channelOptions}
                   />
+                  {preferenceLine(contactPreference) ? (
+                    <p className="text-xs text-neutral-600 dark:text-neutral-400" data-testid="case-contact-preference">
+                      {preferenceLine(contactPreference)}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700 dark:text-amber-300">Assignee</span>
@@ -731,7 +798,8 @@ export default function CaseDetailPage() {
                     type="button"
                     variant="outline"
                     onClick={() => void previewOutreach()}
-                    disabled={previewing || caseStatus === "EXCLUDED"}
+                    disabled={previewing || caseStatus === "EXCLUDED" || noOutreachReason !== null || noContactReason !== null}
+                    title={noOutreachReason ?? noContactReason ?? undefined}
                     isLoading={previewing}
                     loadingText="Previewing..."
                   >
@@ -741,8 +809,8 @@ export default function CaseDetailPage() {
                     type="button"
                     variant="primary"
                     onClick={() => void runAction("outreach")}
-                    disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null}
-                    title={outreachPreview === null ? "Preview the message before sending" : undefined}
+                    disabled={acting !== null || caseStatus === "CLOSED" || caseStatus === "EXCLUDED" || outreachPreview === null || noOutreachReason !== null || noContactReason !== null}
+                    title={noOutreachReason ?? noContactReason ?? (outreachPreview === null ? "Preview the message before sending" : undefined)}
                     isLoading={acting === "outreach"}
                     loadingText="Sending outreach..."
                   >
@@ -785,6 +853,15 @@ export default function CaseDetailPage() {
                   >
                     Schedule Appointment
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setLogContactOpen(true)}
+                    disabled={caseIsFinished}
+                    title={caseIsFinished ? "Only an open case takes a logged contact." : "Record a call, text or visit you made yourself; nothing is sent."}
+                  >
+                    Log contact
+                  </Button>
                 </div>
                 {/* §8E on the DESKTOP path. The first version of this change put the notice only in
                     the phone layout this page used to have, so every desktop user — which is most of them — saw
@@ -795,6 +872,19 @@ export default function CaseDetailPage() {
                 <LocalOnlyNotice action="Outreach" className="mt-3" />
                 </>
                 )}
+                {canManage && caseId ? (
+                  <LogContactModal
+                    open={logContactOpen}
+                    onClose={() => setLogContactOpen(false)}
+                    caseId={caseId}
+                    otherCaseIds={otherOpenCaseIds}
+                    preference={contactPreference}
+                    onLogged={() => {
+                      void loadCase();
+                      setGapsVersion((v) => v + 1);
+                    }}
+                  />
+                ) : null}
                 <Modal open={appointmentModalOpen} onOpenChange={(open) => { if (!open) setAppointmentModalOpen(false); }} size="md">
                   <ModalHeader>
                     <ModalTitle>Schedule Appointment</ModalTitle>
@@ -889,7 +979,9 @@ export default function CaseDetailPage() {
                     <p className="mt-2 whitespace-pre-wrap">{outreachPreview.bodyText}</p>
                   </div>
                 ) : canManage ? (
-                  <p className="mt-3 text-xs text-amber-800 dark:text-amber-300">Preview the outreach message before sending.</p>
+                  <p className="mt-3 text-xs text-amber-800 dark:text-amber-300" data-testid="outreach-hint">
+                    {noOutreachReason ?? "Preview the outreach message before sending."}
+                  </p>
                 ) : null}
                 {canManage && canEngineering && (
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -909,9 +1001,24 @@ export default function CaseDetailPage() {
 
             <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Why Flagged</p>
-              <h4 className="mt-2 text-xl font-semibold">What the measure found</h4>
-              <div className="mt-4">
-                <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} official={caseDetail.evidenceJson.official} />
+              <h4 className="mt-2 text-xl font-semibold">Why this was flagged</h4>
+              {/* In reading order (#880): the measure's own sentence, then what its CQL found (the result
+                  and its date), then the population flags, folded on an official outcome: they say which
+                  groups the patient is in, which the sentence above already puts in words. */}
+              <div className="mt-4 space-y-4">
+                <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
+                <CqlFindings findings={caseDetail.cqlFindings} />
+                {mayViewOrders ? <CaseOrdersPanel caseId={caseId} revision={`${caseDetail.updatedAt}|${caseDetail.status}|${caseDetail.lastRunId}`} /> : null}
+                {officialPopulations ? (
+                  <details className="group">
+                    <summary className="cursor-pointer text-sm font-medium text-neutral-700 dark:text-neutral-300">Measure populations</summary>
+                    <div className="mt-3">
+                      <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} official={caseDetail.evidenceJson.official} />
+                    </div>
+                  </details>
+                ) : (
+                  <CqlExpressionResults results={caseDetail.evidenceJson.expressionResults} official={caseDetail.evidenceJson.official} />
+                )}
               </div>
 
               {/* Raw value-set OIDs, the raw evidence and the evaluated resource are engineering detail: a
@@ -942,7 +1049,6 @@ export default function CaseDetailPage() {
 
               <div className="mt-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 p-4">
                 <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Evidence details</p>
-                <CqlWhyFlagged whyFlagged={caseDetail.evidenceJson.why_flagged} />
                 {!isPatientTerm ? (
                   <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-neutral-700 dark:text-neutral-300">
                     {JSON.stringify(caseDetail.evidenceJson.why_flagged ?? {}, null, 2)}
@@ -1004,16 +1110,29 @@ export default function CaseDetailPage() {
           </div>
 
           <div className="min-w-0 space-y-4 sm:space-y-6">
+            <OtherOpenGaps
+              key={gapsVersion}
+              subjectId={caseDetail.employeeId}
+              caseId={caseId}
+              canMessage={canManage}
+              onLoaded={(data) => {
+                setGapsInfo(data);
+                // Open on the person's channel (#886), unless staff already chose one.
+                const preferred = defaultChannel(data?.contactPreference);
+                if (!channelTouched && preferred) setOutreachChannel(preferred);
+              }}
+            />
             <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500 dark:text-neutral-400">Metadata</p>
               <dl className="mt-4 space-y-3 text-sm">
                 <Row label="Created" value={new Date(caseDetail.createdAt).toLocaleString()} />
                 <Row label="Updated" value={new Date(caseDetail.updatedAt).toLocaleString()} />
                 <Row label="Closed" value={caseDetail.closedAt ? new Date(caseDetail.closedAt).toLocaleString() : "Open"} />
-                <Row label="Closed reason" value={caseDetail.closedReason ?? "-"} />
+                <Row label="Closed reason" value={closedReasonLabel(caseDetail.closedReason)} />
                 <Row label="Closed by" value={caseDetail.closedBy ?? "-"} />
                 <Row label="Assignee" value={caseDetail.assignee ?? "Unassigned"} />
                 <Row label="Outcome evaluated" value={new Date(caseDetail.outcomeEvaluatedAt).toLocaleString()} />
+                <Row label="Case ID" value={caseId} />
               </dl>
             </div>
 
@@ -1066,7 +1185,7 @@ export default function CaseDetailPage() {
               </div>
             </div>
 
-            {/* Evidence list + upload is CASE_MANAGER/ADMIN on the backend; a read role 403s on the list
+            {/* Evidence list + upload is CASE_MANAGER, QUALITY_STAFF and ADMIN on the backend; a read role 403s on the list
                 and would see a misleading "No evidence uploaded" (Fable H9). Gate the whole section. */}
             {canManage && (
             <div className="min-w-0 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:rounded-3xl sm:p-6 dark:border-neutral-800 dark:bg-neutral-900">
@@ -1227,6 +1346,45 @@ export default function CaseDetailPage() {
   );
 }
 
+const FINISHED_STATUSES = new Set(["CLOSED", "RESOLVED", "EXCLUDED"]);
+
+/**
+ * A finished case whose cycle has ended (#882), or null: the server says which (`cycleEnded`). Such a case
+ * takes no outreach (409 `earlier_cycle_closed`), and a re-check records the result without reopening it.
+ * `year` names a calendar-year period ("2026"), from the server's `cycleYear`; a half-year or a season has
+ * none, and is said in words.
+ */
+function endedClosureOf(detail: Pick<CaseDetail, "status" | "cycleEnded" | "cycleYear">): { year: number | null } | null {
+  if (detail.cycleEnded !== true || !FINISHED_STATUSES.has(normalizeEnumValue(detail.status))) return null;
+  return { year: detail.cycleYear ?? null };
+}
+
+/**
+ * The next action of a case the first run of a new cycle closed because its own ended (#882,
+ * `CYCLE_ROLLED_OVER`), or null for any other case. Its stored next action still names the gap's work,
+ * which a closed cycle no longer takes. The work list's year is never earlier than the one that began:
+ * a rehearsal on a copy rolls the year over before the calendar does.
+ */
+function rolledOverLine(detail: Pick<CaseDetail, "closedReason" | "cycleYear">): string | null {
+  if (normalizeEnumValue(detail.closedReason ?? "") !== "CYCLE_ROLLED_OVER") return null;
+  const year = detail.cycleYear ?? null;
+  return year !== null
+    ? `${year} has ended, so this gap closed when ${year + 1} began. A re-check records the ${year} result here and leaves the case closed. This ${SUBJECT.singular}'s ${Math.max(year + 1, localYear())} gaps are on the work list.`
+    : `This measurement period has ended, so this gap closed when the next one began. A re-check records that period's result here and leaves the case closed. This ${SUBJECT.singular}'s current gaps are on the work list.`;
+}
+
+/** The server's own sentence for outreach refused on a closed case of an ended year (#882), else null. */
+function earlierCycleRefusal(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  try {
+    const body = JSON.parse(err.body) as { error?: unknown; message?: unknown };
+    if (body.error !== "earlier_cycle_closed") return null;
+    return typeof body.message === "string" && body.message ? body.message : err.message;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The fallback label for an entry the server sent no `label` for. Only a LEADING prefix is stripped: the
  * old chain of `replace`s also cut "RUN_" out of the middle, so `CASE_RERUN_VERIFIED` read "Reverified".
@@ -1246,6 +1404,7 @@ function eventIcon(eventType: string) {
   if (normalized.includes("APPOINTMENT")) return "📅";
   if (normalized.includes("EVIDENCE")) return "📎";
   if (normalized.includes("OUTREACH")) return "✉";
+  if (normalized.includes("CONTACT")) return "☎";
   if (normalized.includes("RERUN") || normalized.includes("RUN")) return "↻";
   if (normalized.includes("CREATED")) return "+";
   if (normalized.includes("RESOLVED") || normalized.includes("CLOSED")) return "✓";
@@ -1270,6 +1429,14 @@ function timelineNotificationBadge(event: AuditEvent) {
     return {
       label: "Auto",
       className: "border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-300"
+    };
+  }
+
+  // A contact staff made themselves and logged (#886): nothing was sent.
+  if (eventType.includes("CONTACT_LOGGED")) {
+    return {
+      label: "Logged",
+      className: "border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
     };
   }
 

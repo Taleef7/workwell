@@ -24,7 +24,8 @@ export const ACTIVE_CASE_STATUSES = ["OPEN", "IN_PROGRESS"] as const;
  * `STAFF` is every closure a person made: a manual close (`MANUAL_RESOLVE`, which CQL does not
  * corroborate — the patient is still a gap) AND a rerun-to-verify close (`RERUN_VERIFIED` /
  * `RERUN_EXCLUDED`, which CQL does corroborate). `SYSTEM` is every closure the run made
- * (`AUTO_RESOLVED`, `EXCLUDED`, `OUT_OF_POPULATION`, `CYCLE_ROLLED_OVER`). `NONE` is an active case.
+ * (`AUTO_RESOLVED`, `EXCLUDED`, `OUT_OF_POPULATION`, `CYCLE_ROLLED_OVER`, `MEASURE_RETIRED`). `NONE` is an
+ * active case.
  *
  * `closed_by` is the ONLY trustworthy discriminator: `planCaseUpsert` respects a closure iff it is set
  * (a human closure is never reopened by a run; a system closure is), `status` is an untyped string
@@ -268,8 +269,14 @@ export function planCaseUpsert(
   existing: ExistingCaseState | null,
   outcomeStatus: string,
   now: string,
-  opts: { outOfPopulation?: boolean } = {},
+  opts: { outOfPopulation?: boolean; earlierCycle?: boolean } = {},
 ): CaseUpsertPlan {
+  // An outcome of a cycle that has already ended (#882, LOCKED_DECISIONS §4A.10): last year re-scored in
+  // January, or a re-check of a rolled-over case. Its outcome is recorded, but it never opens a case and
+  // never reopens a closed one: the rollover closed that year's work when the new one began, and the work
+  // list stays on the new year. A case still active in that cycle (a run before the rollover) is moved as
+  // any run moves it, so a COMPLIANT result still resolves it.
+  if (opts.earlierCycle && (!existing || (existing.status !== "OPEN" && existing.status !== "IN_PROGRESS"))) return { op: "noop" };
   // A subject the official logic evaluated and found OUTSIDE the measure's initial population has
   // nothing to chase: MISSING_DATA there is a result, not a gap (ADR-078). Never opens a case; a case
   // that exists (the subject was in the population last period, or was carded before this rule) is

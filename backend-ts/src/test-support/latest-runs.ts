@@ -2,7 +2,7 @@
  * Test support: a fake outcome store's `listLatestPopulationRuns`, derived from the rows the fake
  * serves through `listOutcomesWithRun`. It is the reference reduction the store contract pins the
  * real stores to (population scope, terminal status, the started-day window, the trigger
- * exclusions, newest first by started_at then run id), so a read-model test that hands a fake a row
+ * exclusions, the earlier-cycle marker, newest first by started_at then run id), so a read-model test that hands a fake a row
  * set gets the same winners the SQL would name — and a fake that returns rows regardless of
  * `runIds` still exercises the read model's own (measure, run) filter.
  */
@@ -19,6 +19,7 @@ export function latestRunsFromRows(
       const byRun = new Map<string, OutcomeWithRun>();
       for (const r of source) {
         if (r.measureId !== measureId || !isPopulationRun(r.runScopeType) || !isCompletedRun(r.runStatus)) continue;
+        if (r.runEarlierCycle === true) continue; // #882: an earlier cycle's re-score is nobody's latest
         if (filter.excludeScale && r.runTriggeredBy === "seed:scale") continue;
         if (filter.excludeTrendHistory && r.runTriggeredBy === "seed:trend-history") continue;
         const day = r.runStartedAt.slice(0, 10);

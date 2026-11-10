@@ -191,6 +191,25 @@ test("get_run_summary by id, and latest when omitted", async () => {
   assert.equal((latest.payload as JsonRecord).run_id, runId);
 });
 
+test("get_run_summary with no runId skips a re-score of an ended year, and names one when asked (#882)", async () => {
+  const rescore = await deps.runStore.createRun({
+    scopeType: "ALL_PROGRAMS",
+    triggeredBy: "test",
+    requestedScope: { evaluationDate: "2025-12-31", today: "2026-01-05", earlierCycle: true },
+    measurementPeriodStart: "2025-01-01T00:00:00.000Z",
+    measurementPeriodEnd: "2025-12-31T23:59:59.999Z",
+  });
+  await deps.runStore.finalizeRun(rescore.id, "COMPLETED");
+  try {
+    const listed = (await deps.runStore.listRuns(1))[0]!;
+    assert.equal(listed.id, rescore.id, "the re-score is the newest run");
+    assert.equal((await call("get_run_summary", {})).payload.run_id, runId, "the default stays on the current year");
+    assert.equal((await call("get_run_summary", { runId: rescore.id })).payload.run_id, rescore.id);
+  } finally {
+    await deps.runStore.finalizeRun(rescore.id, "FAILED");
+  }
+});
+
 test("get_run_summary rejects a non-UUID runId", async () => {
   const { payload } = await call("get_run_summary", { runId: "nope" });
   assert.equal(payload.code, "INVALID_ARGUMENT");
@@ -776,4 +795,84 @@ test("list_runs and get_run_summary state no rate for a run whose data was too t
   // A run whose data met its floors states its rate and no thin measure.
   const trusted = ((await call("list_runs", { measureId: "audiogram" })).payload.results as JsonRecord[])[0]!;
   assert.deepEqual(trusted.data_insufficient, []);
+});
+
+test("#875: no case or patient tool hands an MCP client the outcome's recorded CQL define values", async () => {
+  // Chart values reach no AI client without an owner decision (AI_GUARDRAILS §6); staff see them on the
+  // case page. get_case carries the evidence twice (evidenceJson and evidence_payload): both are stripped.
+  const run = await deps.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms125",
+    triggeredBy: "test",
+    requestedScope: { measureId: "cms125" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await deps.runStore.finalizeRun(run.id, "COMPLETED");
+  await deps.outcomeStore.recordOutcome({
+    runId: run.id, subjectId: "emp-030", measureId: "cms125", evaluationPeriod: "2026-06-13", status: "OVERDUE",
+    evidence: {
+      expressionResults: [{ define: "official:numerator", result: false }],
+      official: { ecqmId: "125FHIR", version: "1.0.000", populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } },
+      cqlFacts: { spec: 1, values: [{ define: "Some Define", value: "SENTINEL-FACT" }] },
+    },
+  });
+  const c = (await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "emp-030", measureId: "cms125", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }))!;
+  for (const [name, args] of [
+    ["get_case", { caseId: c.id }],
+    ["explain_outcome", { caseId: c.id }],
+    ["get_employee", { employeeExternalId: "emp-030" }],
+    ["check_compliance", { employeeExternalId: "emp-030", measureName: "Breast Cancer Screening" }],
+  ] as const) {
+    const res = await callTool(name, args as JsonRecord, ctx());
+    assert.equal(res.isError, false, `${name} answered`);
+    assert.doesNotMatch(res.content[0]!.text, /SENTINEL-FACT|cqlFacts|cqlFindings/, `${name} carries no facts`);
+  }
+  const { payload } = await call("get_case", { caseId: c.id });
+  assert.ok((payload.evidence_payload as JsonRecord).official, "the rest of the evidence is served as before");
+});
+
+test("#880: get_case drops the case page's reading of the facts (`cqlFindings`) as well as the facts", async () => {
+  // CMS165 names its defines, so a case built from these facts reads them back as findings on the page:
+  // the strip must take that copy too, not only `evidenceJson.cqlFacts`.
+  const run = await deps.runStore.createRun({
+    scopeType: "MEASURE",
+    scopeId: "cms165",
+    triggeredBy: "test",
+    requestedScope: { measureId: "cms165" },
+    measurementPeriodStart: "2026-06-13T00:00:00.000Z",
+    measurementPeriodEnd: "2026-06-13T00:00:00.000Z",
+  });
+  await deps.runStore.finalizeRun(run.id, "COMPLETED");
+  await deps.outcomeStore.recordOutcome({
+    runId: run.id, subjectId: "emp-031", measureId: "cms165", evaluationPeriod: "2026-06-13", status: "OVERDUE",
+    evidence: {
+      expressionResults: [{ define: "official:numerator", result: false }],
+      official: { ecqmId: "165FHIR", version: "1.0.000", populationResults: { ipp: true, denom: true, numer: false, denex: false, denexcep: false } },
+      cqlFacts: { spec: 1, values: [{ define: "Lowest Systolic Reading on Most Recent Blood Pressure Day", value: "SENTINEL-READING" }] },
+    },
+  });
+  const c = (await deps.caseStore.upsertFromOutcome({ runId: run.id, subjectId: "emp-031", measureId: "cms165", evaluationPeriod: "2026-06-13", outcomeStatus: "OVERDUE" }))!;
+  const res = await callTool("get_case", { caseId: c.id }, ctx());
+  assert.equal(res.isError, false);
+  assert.doesNotMatch(res.content[0]!.text, /SENTINEL-READING|cqlFacts|cqlFindings/);
+});
+
+test("item 13: a measureName shared by several records resolves to the one not Deprecated, else MEASURE_AMBIGUOUS", async () => {
+  // Older stacks keep deprecated legacy rows under an active measure's name; a by-name lookup must
+  // answer about the live one, and with two live ones it must not pick whichever the store listed first.
+  const a = await deps.measureStore.createMeasure({ name: "Twin Measure", policyRef: "Practice policy", owner: "a@b.c" });
+  const b = await deps.measureStore.createMeasure({ name: "twin measure", policyRef: "Practice policy", owner: "a@b.c" });
+  for (const tool of ["list_cases", "list_noncompliant", "explain_rule", "get_measure_traceability", "list_data_quality_gaps"]) {
+    const { payload } = await call(tool, { measureName: "Twin Measure" });
+    assert.equal(payload.code, "MEASURE_AMBIGUOUS", tool);
+    assert.match(String(payload.message), new RegExp(`${[a.measureId, b.measureId].sort().join(", ")}`), tool);
+  }
+  const versionCall = await callTool("get_measure_version", { measureName: "Twin Measure" }, ctx());
+  assert.equal(versionCall.isError, true);
+  assert.match(versionCall.content[0]!.text, /More than one measure is named/);
+  await deps.measureStore.setVersionStatus(b.measureId, b.versionId, { status: "Deprecated" });
+  const resolved = await call("explain_rule", { measureName: "TWIN MEASURE" });
+  assert.equal(resolved.payload.error, undefined);
+  assert.equal(resolved.payload.measureName, "Twin Measure", "the live record (a), never the deprecated one (b, 'twin measure')");
 });

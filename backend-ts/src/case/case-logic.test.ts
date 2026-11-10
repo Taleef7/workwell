@@ -260,3 +260,41 @@ test("planCaseUpsert: a subject OUTSIDE the initial population never opens a cas
   // Without the flag the same status keeps opening cases: in-population MISSING_DATA is still a gap.
   assert.equal(planCaseUpsert(null, "MISSING_DATA", NOW).op, "insert");
 });
+
+// --- #882: an earlier cycle's outcome acts only on an active case ------------------------------------
+test("planCaseUpsert earlierCycle: never inserts, whatever the outcome", () => {
+  for (const status of ["OVERDUE", "DUE_SOON", "MISSING_DATA", "EXCLUDED", "COMPLIANT"]) {
+    assert.deepEqual(planCaseUpsert(null, status, NOW, { earlierCycle: true }), { op: "noop" }, status);
+  }
+  assert.deepEqual(planCaseUpsert(null, "MISSING_DATA", NOW, { earlierCycle: true, outOfPopulation: true }), { op: "noop" });
+});
+
+test("planCaseUpsert earlierCycle: never reopens or rewrites a closed case, a system closure included", () => {
+  const closed = [
+    st("RESOLVED", "OVERDUE"), // rolled over (CYCLE_ROLLED_OVER is a system closure)
+    st("RESOLVED", "COMPLIANT"), // auto-resolved
+    st("EXCLUDED", "EXCLUDED"), // a system exclusion
+    st("RESOLVED", "COMPLIANT", "cm@workwell.dev"), // a person's closure
+    st("CLOSED", "OVERDUE", "cm@workwell.dev"),
+  ];
+  for (const existing of closed) {
+    for (const status of ["OVERDUE", "MISSING_DATA", "EXCLUDED", "COMPLIANT"]) {
+      assert.deepEqual(planCaseUpsert(existing, status, NOW, { earlierCycle: true }), { op: "noop" }, `${existing.status}/${existing.closedBy} ← ${status}`);
+    }
+  }
+  // The same system closure without the flag reopens, which is what the flag is for.
+  assert.equal(planCaseUpsert(st("RESOLVED", "OVERDUE"), "OVERDUE", NOW).disposition, "REOPENED");
+});
+
+test("planCaseUpsert earlierCycle: an ACTIVE case of that cycle is moved as any run moves it", () => {
+  for (const s of ["OPEN", "IN_PROGRESS"]) {
+    for (const status of ["OVERDUE", "COMPLIANT", "EXCLUDED", "DUE_SOON"]) {
+      assert.deepEqual(planCaseUpsert(st(s, "DUE_SOON"), status, NOW, { earlierCycle: true }), planCaseUpsert(st(s, "DUE_SOON"), status, NOW), `${s} ← ${status}`);
+    }
+    assert.deepEqual(
+      planCaseUpsert(st(s, "OVERDUE"), "MISSING_DATA", NOW, { earlierCycle: true, outOfPopulation: true }),
+      planCaseUpsert(st(s, "OVERDUE"), "MISSING_DATA", NOW, { outOfPopulation: true }),
+    );
+  }
+  assert.equal(planCaseUpsert(st("OPEN", "OVERDUE"), "COMPLIANT", NOW, { earlierCycle: true }).disposition, "RESOLVED");
+});

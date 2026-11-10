@@ -36,7 +36,8 @@
  * 4. **Every derived row is computed before anything is serialised.** A streamed CSV cannot change
  *    its status after the first byte, so a compaction intent landing between page reads would yield a
  *    truncated 200. Only the derived per-member fields are held — never the evidence blob — which the
- *    50,000-member cap bounds at a few tens of megabytes.
+ *    50,000-member cap bounds at a few tens of megabytes. The CSV's recorded define values (#875) are held
+ *    too, as capped text (≤600 bytes a value; 100-400 bytes a row measured), so about as much again.
  *
  * The score is `numer / (denom − denex − denexcep)`, which is what `createRateAggregator` already
  * computes and what the eCQM proportion-measure convention specifies. `status=EXCLUDED` is the
@@ -51,9 +52,10 @@ import { createRateAggregator, reportingPeriod, type OfficialReportIdentity, typ
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 import { compactionExposure } from "../run/compaction-evidence.ts";
 import type { MeasureRateGroup } from "../program/measure-rate.ts";
-import { ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import { authoredLogicLabel, authoredLogicVersion, ecqmIdOf, type ScoringLogic } from "../measure/measure-identity.ts";
 import type { SufficiencyCheck } from "../run/data-sufficiency.ts";
 import { PAGE, foldGroups, rateGroupsOf, readMeasureYearRows, selectRunForYear, type Buckets } from "./measure-year-rates.ts";
+import type { CqlFacts } from "../wiring/official-facts.ts";
 
 export interface SubjectListReportDeps {
   lists: SubjectListStore;
@@ -76,6 +78,11 @@ export interface ReportRow {
   /** One entry per rate the measure declares; empty where nothing was evaluated. */
   rates: ReportRowRate[];
   evaluationError: boolean;
+  /**
+   * The outcome's recorded CQL define values (#875), on an EVALUATED row of a report built with
+   * `cqlFacts`: null where the outcome recorded none. Absent otherwise (the JSON summary never reads them).
+   */
+  cqlFacts?: CqlFacts | null;
 }
 
 export interface ReportRowRate {
@@ -145,6 +152,9 @@ export type ReportResult =
  *
  * `measureIds` is the caller's runnable ∩ official-routed set: an authored measure has status-derived
  * membership rather than populations, so there is no numerator to report for one.
+ *
+ * `cqlFacts` (the CSV only, #875) also reads each evaluated row's recorded define values, for the
+ * evidence columns; the JSON summary does not carry rows, so it never asks.
  */
 export async function subjectListReport(
   deps: SubjectListReportDeps,
@@ -152,6 +162,7 @@ export async function subjectListReport(
   measurementYear: number,
   measureIds: readonly string[],
   now: () => string = () => new Date().toISOString(),
+  opts: { cqlFacts?: boolean } = {},
 ): Promise<ReportResult> {
   const list = await deps.lists.getList(listId);
   if (!list) return { ok: false, status: 404, body: { error: "not_found", parameter: "listId", listId } };
@@ -208,7 +219,7 @@ export async function subjectListReport(
       continue;
     }
 
-    const read = await readMeasure(deps, winner.runId, measureId, matchedIds, measurementYear, rawIdentifierOf);
+    const read = await readMeasure(deps, winner.runId, measureId, matchedIds, measurementYear, rawIdentifierOf, opts.cqlFacts === true);
     if (read.periodMismatch) {
       // A run that MIXES measurement periods cannot be reported as one year's numbers, and picking
       // either would be a silent choice. ADR-072 says the outcome-level period is the only place that
@@ -263,8 +274,10 @@ export async function subjectListReport(
       measureId,
       // One spelling on every served eCQM id, and none for a translation, whatever its rows carried.
       ecqmId: read.identity?.ecqmId && read.identity.kind !== "derived" ? ecqmIdOf(read.identity.ecqmId) : null,
-      version: read.identity?.version ?? null,
-      executedLogic: executedLogicOf(read.identity ?? null),
+      // WorkWell's own CQL scored the rows (a winning run from before the measure was routed): named as
+      // such, with its library's version, so the CSV row never leaves the logic blank beside counts (item 13).
+      version: read.identity?.version ?? (read.authored ? authoredLogicVersion(measureId) : null),
+      executedLogic: executedLogicOf(read.identity ?? null) ?? (read.authored ? authoredLogicLabel(measureId) : null),
       logic: read.logic,
       runId: winner.runId,
       runStartedAt: winner.startedAt,
@@ -408,6 +421,8 @@ const emptyEntry = (
 interface MeasureRead {
   aggregate: RateAggregate;
   identity: OfficialReportIdentity | null;
+  /** WorkWell's own CQL scored the evaluated kept rows (`MeasureYearRead.authored`). */
+  authored: boolean;
   seen: Set<string>;
   rows: ReportRow[];
   /** The four DISJOINT buckets every seen subject falls into (`bucketOf`), classified per row in a stated order. */
@@ -441,9 +456,10 @@ async function readMeasure(
    * against the file they sent, and nothing would report the loss.
    */
   rawIdentifierOf: (subjectId: string) => string,
+  cqlFacts: boolean,
 ): Promise<MeasureRead> {
   // The member SET, so the store reads only the members' rows (#874).
-  const read = await readMeasureYearRows(deps.outcomes, runId, measureId, measurementYear, matchedIds);
+  const read = await readMeasureYearRows(deps.outcomes, runId, measureId, measurementYear, matchedIds, { cqlFacts });
   // The run's declared rate count, not the list's: a list whose rows all errored still reports every
   // rate the run declares (two zero rates for CMS137), and a member with fewer rates is unmeasured here
   // exactly as it is in the run's own MeasureReport.
@@ -465,10 +481,12 @@ async function readMeasure(
       numer: m.numer,
     })),
     evaluationError: row.errored,
+    ...(cqlFacts ? { cqlFacts: row.cqlFacts ?? null } : {}),
   }));
   return {
     aggregate: counted?.aggregate ?? createRateAggregator(measureId, { declaredRates: read.declaredRates }).finish(),
     identity: read.identity,
+    authored: read.authored,
     seen: new Set(read.rows.map((row) => row.subjectId)),
     rows,
     buckets: counted?.buckets ?? { scored: 0, unmeasured: 0, evaluationErrors: 0, outOfPopulation: 0 },

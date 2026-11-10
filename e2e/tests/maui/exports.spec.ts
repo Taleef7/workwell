@@ -111,7 +111,7 @@ test.describe("Maui case CSV export", () => {
       expect(fromLogic, `row ${i}: '${logic}' is a CMS artifact or a WorkWell translation by name`).not.toBeNull();
       expect(version, `row ${i}: measureVersion is the version '${logic}' names`).toBe(fromLogic);
     }
-    // All six measures are routed on this stack, so the cases its runs opened cite rows a named logic scored.
+    // All five measures are routed on this stack, so the cases its runs opened cite rows a named logic scored.
     expect(named, "at least one case names the logic that scored it").toBeGreaterThan(0);
 
     // §6.2's header, exactly. A run id no run has returns the header alone, which keeps this a header

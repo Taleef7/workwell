@@ -54,6 +54,12 @@ export interface OfficialRunAggregate extends RateAggregate {
    */
   identityConflict: boolean;
   /**
+   * True when the evaluated rows were scored by WorkWell's own authored CQL: at least one row was
+   * evaluated, none carried an official identity, and they agree. False for an all-errored run, which
+   * nothing scored, so a report over it says "not computed by CMS's logic" rather than "authored" (item 13).
+   */
+  authored: boolean;
+  /**
    * The distinct logics that scored this measure's evaluated rows, named (`scoringLogicOf`), one entry
    * per distinct {@link scoringLogicKeyOf} and sorted ({@link distinctScoringLogics}). More than one entry
    * means the rows were scored by more than one logic or measurement period, so there is no one rate.
@@ -227,6 +233,7 @@ export async function aggregateOfficialRun(
     official: identity,
     producedOfficialEvidence,
     identityConflict,
+    authored: firstKey === scoringIdentityKey(null) && !identityConflict,
     scoringLogics: distinctScoringLogics(logicEvidence.values()),
     dataInsufficient: dataInsufficient ? [...dataInsufficient].sort() : null,
   };

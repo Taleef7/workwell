@@ -72,6 +72,7 @@ import { RUNNABLE_MEASURE_IDS, classifyRunnable } from "./config/deployment-prof
 import { isWebChartConfigured, webChartConfigFromEnv } from "./engine/ingress/data-source.ts";
 import { classifyDbFailure } from "./stores/postgres/pg-database.ts";
 import { recordRoutingHealth, runtimeDetail, runtimeHealth, trackRequest } from "./admin/runtime-health.ts";
+import { practiceToday } from "./config/practice-date.ts";
 
 /** Runtime bindings (wrangler.jsonc) + config. Injected per target; app code
  *  only ever sees these Cloudflare-shaped contracts, never a concrete driver. */
@@ -357,7 +358,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   if (campaignsResponse) return campaignsResponse;
 
   // Employees — directory profile + search over the synthetic directory + outcomes/cases (#107).
-  const employeesResponse = await handleEmployees(req, env);
+  const employeesResponse = await handleEmployees(req, env, actor);
   if (employeesResponse) return employeesResponse;
 
   // Programs — compliance KPI overview + site list over runs/outcomes/cases (#107).
@@ -387,7 +388,7 @@ async function route(req: Request, env: Env, ctx: CloudExecutionContext): Promis
   const subjectListsResponse = await handleSubjectLists(req, env, actor);
   if (subjectListsResponse) return subjectListsResponse;
 
-  // The provider × measure scorecard (#852): CM/ADMIN, and a linked clinician seat's own row (#870);
+  // The provider × measure scorecard (#852): CM/QS/ADMIN, and a linked clinician seat's own row (#870);
   // aggregates only, counted as the list report counts. The role, and whether sign-in is enforced, decide
   // which card, so both are passed.
   const scorecardResponse = await handleScorecard(req, env, actor, principalRole, enforceAuth);
@@ -562,7 +563,7 @@ function logSeamInventoryOnce(env: Env): void {
   // operator sees the vintage gap before the first run reports it.
   // The artifact chosen by the SAME rule a run uses, so the boot line describes the logic this year's
   // runs will execute: CMS's draft, or a WorkWell translation covering the year (decision 3).
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   const derivedIds = derivedMeasureIds(env as unknown as Record<string, unknown>);
   for (const measureId of officialMeasureIds(env as unknown as Record<string, unknown>)) {
     const period = officialMeasurementPeriod(measureId, today);

@@ -10,6 +10,7 @@ import { routedEngineForEnv } from "../wiring/executor-router.ts";
 import type { StoresEnv } from "../stores/factory.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
 import { simulateComplianceAsOf } from "../run/employee-compliance-snapshot.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -35,7 +36,7 @@ export async function handleComplianceSimulation(req: Request, env: StoresEnv): 
     throw err;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   const engine = await routedEngineForEnv(env);
   const snapshot = await simulateComplianceAsOf(externalId, asOf ?? today, { engine, today });
   if (!snapshot) return json({ error: "not_found", externalId }, 404);

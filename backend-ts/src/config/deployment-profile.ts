@@ -31,6 +31,13 @@ export interface DeploymentProfile {
   readonly visibleTenantIds: VisibleTenantSelection;
   readonly runnableMeasureIds: readonly string[];
   /**
+   * Measures this deployment ran once and has retired (#889). Never runnable here; an all-programs run
+   * closes their still-active cases (`closeRetiredMeasureCases`). An explicit list, never "whatever is
+   * not runnable": runnability also reads the routing env, and a routing slip must never close a
+   * measure's cases.
+   */
+  readonly retiredMeasureIds: readonly string[];
+  /**
    * The zone the deployment's users read its screens in, or null for none in particular. The post-run
    * warm asks for each measure's trend in it (#615): a trend collapses runs to one point per calendar
    * day, so a late-evening run can share a local day with the nightly while sitting on its own UTC
@@ -84,24 +91,49 @@ export function validateRunnableMeasureIds(ids: readonly string[]): readonly str
 }
 
 /**
- * The ACO's six computable measures (locked decision §4A.2, ADR-072 D1 for cms137). Listing a measure
- * here makes it RUNNABLE ONCE ROUTED; the routing is the per-measure flip in the Maui workflows'
- * `WORKWELL_OFFICIAL_MEASURES`, and an official-only measure that is listed and not routed is
- * `official-pending` — visible in the catalog, evaluated by nobody (ADR-072).
+ * A retired id must be a measure the codebase knows (authored, or vendored with semantics), so a typo
+ * cannot silently close nothing, and must not also be in the profile's runnable list.
  */
-const MAUI_MEASURE_IDS = ["cms122", "cms125", "cms2", "cms130", "cms165", "cms137"] as const;
+export function validateRetiredMeasureIds(retired: readonly string[], runnable: readonly string[]): readonly string[] {
+  validateRunnableMeasureIds(retired);
+  const both = retired.filter((id) => runnable.includes(id));
+  if (both.length > 0) throw new Error(`[workwell] Measure id(s) both runnable and retired: ${both.join(", ")}`);
+  return retired;
+}
+
+/**
+ * The ACO's five computable measures (locked decision §4A.2). Listing a measure here makes it RUNNABLE
+ * ONCE ROUTED; the routing is the per-measure flip in the Maui workflows' `WORKWELL_OFFICIAL_MEASURES`,
+ * and an official-only measure that is listed and not routed is `official-pending` — visible in the
+ * catalog, evaluated by nobody (ADR-072).
+ *
+ * CMS137 was the sixth until 2026-11-05 (#889): the CY2027 final rule (CMS-1848-F) removed Quality ID 305
+ * from APP Plus, and the owner retired it on Maui. Its artifacts and 2027 translation stay vendored and
+ * gated, routed nowhere.
+ */
+const MAUI_MEASURE_IDS = ["cms122", "cms125", "cms2", "cms130", "cms165"] as const;
+const MAUI_RETIRED_MEASURE_IDS = ["cms137"] as const;
 const DEFAULT_MEASURE_IDS = Object.keys(MEASURES);
 validateRunnableMeasureIds(MAUI_MEASURE_IDS);
 validateRunnableMeasureIds(DEFAULT_MEASURE_IDS);
+validateRetiredMeasureIds(MAUI_RETIRED_MEASURE_IDS, MAUI_MEASURE_IDS);
 
 /** Pure profile resolution. Input normalization is deliberately separate from warning side effects. */
 export function resolveDeploymentProfile(name: string | undefined): DeploymentProfile {
   const normalized = (name ?? "").trim().toLowerCase();
   if (normalized === "maui") {
-    // The pilot group's practice keeps US Eastern time.
-    return { id: "maui", subjectTerm: "patient", visibleTenantIds: ["maui"], runnableMeasureIds: MAUI_MEASURE_IDS, practiceTimeZone: "America/New_York" };
+    // The pilot group's practice is in Hawaii (#847, #882); WebChart's server keeps US Eastern time, which
+    // is the zone its `Z` instants were converted from, not the zone the practice's day turns in.
+    return {
+      id: "maui",
+      subjectTerm: "patient",
+      visibleTenantIds: ["maui"],
+      runnableMeasureIds: MAUI_MEASURE_IDS,
+      retiredMeasureIds: MAUI_RETIRED_MEASURE_IDS,
+      practiceTimeZone: "Pacific/Honolulu",
+    };
   }
-  return { id: "default", subjectTerm: "employee", visibleTenantIds: "all", runnableMeasureIds: DEFAULT_MEASURE_IDS, practiceTimeZone: null };
+  return { id: "default", subjectTerm: "employee", visibleTenantIds: "all", runnableMeasureIds: DEFAULT_MEASURE_IDS, retiredMeasureIds: [], practiceTimeZone: null };
 }
 
 /**
@@ -219,7 +251,11 @@ export const enterpriseForTenant = (tenantId: string, env?: DataSourceEnv): Ente
   getDeploymentDirectory().enterpriseForTenant(tenantId, env);
 export const employeesForTenant = (tenantId: string): EmployeeProfile[] => getDeploymentDirectory().employeesForTenant(tenantId);
 export const providersForLocation = (location: string): Provider[] => getDeploymentDirectory().providersForLocation(location);
-export const RUNNABLE_MEASURE_IDS = DEPLOYMENT_PROFILE.runnableMeasureIds;
+/**
+ * A live binding, not a frozen const, only so `__setRunnableMeasureIdsForTest` can reach it. Modules that
+ * read it at their own load (`run-pipeline.ts`) see the override only when imported after the call.
+ */
+export let RUNNABLE_MEASURE_IDS: readonly string[] = DEPLOYMENT_PROFILE.runnableMeasureIds;
 
 /** Lazy + memoized per (id): the routing env is read at first call, matching official-routing.ts. */
 const runnableMemo = new Map<string, boolean>();
@@ -234,6 +270,16 @@ export const isRunnableMeasure = (measureId: string): boolean => {
 };
 /** Test seam only — clears the memo so a test can change WORKWELL_OFFICIAL_MEASURES in-process. */
 export const __resetRunnableMemo = (): void => runnableMemo.clear();
+/**
+ * Test seam only (#889) — replaces this process's runnable list. CMS137, the one multi-rate measure, is
+ * runnable on no profile since its retirement, and its code paths stay live; the tests that exercise
+ * multi-rate behaviour list it back here before importing what they test. Call before importing any
+ * module that reads `RUNNABLE_MEASURE_IDS` at load.
+ */
+export const __setRunnableMeasureIdsForTest = (ids: readonly string[]): void => {
+  RUNNABLE_MEASURE_IDS = ids;
+  runnableMemo.clear();
+};
 
 /** True for every subject on the default profile; scoped profiles require a directory match. */
 export const profileSubjectMatcher = (employeeLookup: (externalId: string) => EmployeeProfile | null) =>

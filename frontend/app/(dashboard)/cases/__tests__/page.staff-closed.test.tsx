@@ -149,10 +149,10 @@ describe("CasesPage — the Closed-by-staff tab (#569)", () => {
     navHolder.current.setUrl("/cases?status=staff_closed");
     render(<CasesPage />);
 
-    expect((await screen.findAllByText(/outside this measure's population/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/not eligible for this measure/)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/verified compliant/)).not.toBeInTheDocument();
     // And the chip agrees with the sentence beside it rather than showing the frozen OVERDUE.
-    expect(screen.getAllByText("Not in population").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Not eligible").length).toBeGreaterThan(0);
     expect(screen.queryByText("Missing Data")).not.toBeInTheDocument();
   });
 

@@ -416,6 +416,17 @@ CREATE TABLE IF NOT EXISTS panel_assignments (
 );
 CREATE INDEX IF NOT EXISTS panel_assignments_assignee_idx ON panel_assignments (assignee);
 
+/* Contact preferences (#886). Floor analogue of contact_preferences: one row per subject id (cases.employee_id)
+   with a preferred channel and the channels not to use (comma-separated). ISO-8601 UTC TEXT timestamp.
+   OWNER-APPROVED DDL (#886, 2026-11-03); additive (CREATE IF NOT EXISTS), reversible (DROP TABLE). */
+CREATE TABLE IF NOT EXISTS contact_preferences (
+  subject_id         TEXT PRIMARY KEY,
+  preferred_channel  TEXT,
+  declined_channels  TEXT NOT NULL DEFAULT '',
+  updated_by         TEXT NOT NULL,
+  updated_at         TEXT NOT NULL
+);
+
 /* Login families (#688). Floor analogue of auth_refresh_families: each refresh-token family's current
    jti, so a restart no longer signs every user out. ISO-8601 UTC TEXT timestamps. OWNER-APPROVED DDL
    (2026-09-24); additive, reversible. */

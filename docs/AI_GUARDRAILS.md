@@ -16,7 +16,8 @@ it the surface where the non-negotiable rule matters most. Three consequences, a
 
 - **Every clinical statement in a card is the CQL outcome verbatim** — the status, the display method and the
   next-action line come from `deriveCell` / `deriveWhyFlagged` / `nextActionFor`, the same readers the roster
-  and case detail use. **No AI surface contributes to a card**, and none may: an `AiAssistService` explanation
+  and case detail use. The headline's need (#880, `needFor`) is a fixed per-measure phrase of what closes an
+  OVERDUE gap, chosen by the CQL status and never stating a value. **No AI surface contributes to a card**, and none may: an `AiAssistService` explanation
   is assistive text for an operator reading a case, not something to put in front of a clinician mid-encounter
   as a finding.
 - **`systemActions` is never emitted.** In CDS Hooks it is the array a client auto-applies with no user
@@ -34,7 +35,8 @@ action.
 
 **A measure whose latest run's data was too thin to trust returns no card** (#853, owner decision
 2026-10-20): its outcome would be low because the data is missing, and a card would state that as a finding
-in the encounter. See `CDS_HOOKS.md`.
+in the encounter. Nor does a measure the deployment no longer runs (#889): its last stored outcome is
+history, not a finding. See `CDS_HOOKS.md`.
 
 ## 2) Active AI Surfaces
 All prompts are implemented in `backend-ts/src/ai/ai-assist.ts`; endpoint wiring lives in
@@ -97,6 +99,10 @@ All fallback branches keep core workflows functional and do not mutate complianc
 - Persisted AI data is limited to:
   - user-visible transient response payloads,
   - audit metadata proving invocation and fallback behavior.
+- An official outcome's `evidence_json.cqlFacts` (#875: chart values such as dates, readings and codings)
+  is given to no AI client: the explain prompt and MCP `get_case` drop it (`withoutCqlFacts`). Giving it to
+  one is an owner decision. Staff read it on the case page (`cqlFindings`, #880, which MCP `get_case` drops
+  too) and the lead in the list report's CSV.
 
 ## 7) Human-in-the-Loop Contract
 The following actions remain explicitly human-controlled:

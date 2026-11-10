@@ -21,6 +21,7 @@
  * - **Outreach counts only when someone renders them OR filters on them.** `outreachSentCounts` is a
  *   grouped query over every returned case id; the patient work list does not show the badge, so it
  *   does not pay for it — but an `outreach=` filter reads the count, so the filter asks for it too.
+ *   The filter itself reads `contactAttemptCounts` (a send or a logged contact, #886).
  *
  * **The pre-filter is GATED, and the gate is not an optimisation detail.** It is only applied when the
  * caller says its roster is the COMPLETE set of subjects that can appear on a case. On a
@@ -43,6 +44,7 @@ import {
   hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters,
 } from "../compliance/subject-filters.ts";
 import { liveAnswerForCase, liveCellsFor, liveFieldsFor, type LiveCellDeps } from "../compliance/live-cell.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 /** Every filter the work list understands. `subjects` carries the panel filters (PCP, payer, age, sex). */
 export interface WorklistFilters {
@@ -352,7 +354,7 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
     // Each measure's CURRENT cycle by today + its cadence: exact and cadence-correct, so a stale row
     // at another cadence's anchor cannot appear and a rolled-over cycle with no open cases does not
     // fall back to a prior cycle's opens.
-    const today = (deps.today ?? (() => new Date().toISOString().slice(0, 10)))();
+    const today = (deps.today ?? (() => practiceToday()))();
     summaries = summaries.filter((c) => c.evaluationPeriod === bucketPeriodForMeasure(c.measureVersionId, today));
   }
   // The post-filters stay authoritative even where the pre-filter ran: they are the same predicate over
@@ -389,12 +391,16 @@ export async function loadWorklistCases(deps: WorklistDeps, filters: WorklistFil
   // without asking for counts would otherwise see every row at 0: `outreach=none` would return
   // everything and `outreach=any` nothing, both under a heading claiming the opposite. No caller does
   // that today; a filter that cannot fail is how one starts.
+  //
+  // The filter reads contact ATTEMPTS (a send or a logged contact, #886) and the badge reads sends: a case
+  // staff called and logged is "contacted" without showing a send it never had.
+  if (filters.outreach) {
+    const attempts = await deps.events.contactAttemptCounts(summaries.map((c) => c.caseId));
+    summaries = summaries.filter((c) => (filters.outreach === "none") === ((attempts[c.caseId] ?? 0) === 0));
+  }
   if (deps.withOutreachCounts || filters.outreach) {
     const counts = await deps.events.outreachSentCounts(summaries.map((c) => c.caseId));
     summaries = summaries.map((c) => ({ ...c, outreachRecordCount: counts[c.caseId] ?? 0 }));
-  }
-  if (filters.outreach) {
-    summaries = summaries.filter((c) => (filters.outreach === "none") === ((c.outreachRecordCount ?? 0) === 0));
   }
   return summaries;
 }
@@ -501,7 +507,7 @@ export async function loadWorklistPage(
   if (sqlPageBlockedBy(deps, filters, preFilter) !== null) return slow();
   if (!(await directoryHoldsEveryCaseSubject(deps))) return slow();
 
-  const today = (deps.today ?? (() => new Date().toISOString().slice(0, 10)))();
+  const today = (deps.today ?? (() => practiceToday()))();
   const wantCurrentCycle = isCurrentCycleDefault(filters);
   const query: CaseQuery = {
     ...worklistQueryFor(filters.status, { blank: "active" }),
@@ -540,6 +546,8 @@ export async function loadWorklistPage(
   // caller that filtered on outreach without asking for counts would otherwise get a list of cases that
   // provably have outreach with every badge reading 0 — a field-level divergence the conformance test
   // cannot see, because it compares totals and ids.
+  //
+  // The SQL predicate reads contact attempts (a send or a logged contact, #886); this count stays sends.
   //
   // EXCEPT under `outreach=none`, where the page statement ALREADY answered this and reading it again
   // would be a SECOND snapshot of a table operators write to all day. An `OUTREACH_SENT` landing

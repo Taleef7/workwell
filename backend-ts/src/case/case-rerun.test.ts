@@ -98,3 +98,80 @@ test("rerunToVerify — the year rule follows the rerun's own engine, not proces
   assert.deepEqual(asked, ["2025-12-31"]);
   assert.equal((created as Record<string, unknown> | null)?.measurementPeriodStart, "2025-01-01T00:00:00.000Z", "the official calendar year, not a one-day window");
 });
+
+// ---- #882: a case whose cycle has ended ---------------------------------------------------------
+
+/** A re-check over fakes that logs, in order, every audit and patch, and keeps the run it created. */
+function earlierCycleHarness(c: CaseRecord, outcome: string) {
+  const calls: string[] = [];
+  const audits: Array<{ eventType: string; payload: Record<string, unknown> }> = [];
+  let created: Record<string, unknown> | null = null;
+  let finalStatus = "";
+  let current = c;
+  const noop = async () => undefined;
+  const deps = {
+    cases: {
+      getCase: async () => current,
+      patchCase: async (_id: string, patch: Record<string, unknown>) => {
+        calls.push(`patch:${Object.keys(patch).sort().join(",")}`);
+        current = { ...current, ...patch } as CaseRecord;
+        return current;
+      },
+    },
+    events: {
+      recordCaseEvent: async (e: { audit: { eventType: string; payload: Record<string, unknown> } }) => { calls.push(`audit:${e.audit.eventType}`); audits.push(e.audit); },
+      appendAudit: async (a: { eventType: string; payload: Record<string, unknown> }) => { calls.push(`audit:${a.eventType}`); audits.push(a); },
+      caseTimeline: async () => [],
+      latestOutreachDeliveryStatus: async () => null,
+    },
+    outcomes: { recordOutcome: noop, listOutcomes: async () => [] },
+    runStore: {
+      createRun: async (input: Record<string, unknown>) => { created = input; return { id: "run-verify" }; },
+      markRunning: noop,
+      appendLog: noop,
+      finalizeRun: async (_id: string, status: string) => { finalStatus = status; },
+    },
+    engine: { evaluate: async () => ({ outcome, evidence: { expressionResults: [] } }) },
+  } as unknown as RerunDeps;
+  return { deps, calls, audits, created: () => created as Record<string, unknown> | null, finalStatus: () => finalStatus, current: () => current };
+}
+
+// 2025 has ended in any year this suite runs.
+const rolledOver: CaseRecord = {
+  ...existing, id: "case-2025", employeeId: "emp-001", evaluationPeriod: "2025-01-01", status: "RESOLVED",
+  closedAt: "2026-01-01T12:05:00.000Z", closedReason: "CYCLE_ROLLED_OVER", closedBy: null, currentOutcomeStatus: "OVERDUE",
+};
+
+test("rerunToVerify (#882) — a rolled-over case found in a gap stays closed and shows the result, audit first", async () => {
+  const h = earlierCycleHarness({ ...rolledOver, currentOutcomeStatus: "DUE_SOON" }, "OVERDUE");
+  const detail = await rerunToVerify(h.deps, rolledOver.id, "lead@example.test");
+  assert.deepEqual(h.calls, ["audit:CASE_RERUN_VERIFIED", "patch:currentOutcomeStatus,lastRunId"], "recorded before the case moves, and never reopened");
+  assert.equal(h.current().status, "RESOLVED");
+  assert.equal(h.current().closedReason, "CYCLE_ROLLED_OVER");
+  assert.equal(h.current().currentOutcomeStatus, "OVERDUE", "the case shows what the re-check found");
+  assert.equal(h.current().lastRunId, "run-verify");
+  assert.equal(h.audits[0]!.payload.earlierCycle, true);
+  assert.equal(h.audits[0]!.payload.verifiedStatus, "OVERDUE");
+  assert.equal(h.audits[0]!.payload.caseUnchanged, undefined);
+  assert.equal((h.created()!.requestedScope as Record<string, unknown>).earlierCycle, true, "its run is marked");
+  assert.equal(h.finalStatus(), "COMPLETED");
+  assert.ok(detail);
+});
+
+test("rerunToVerify (#882) — a staff closure of a cycle that has ended is not touched; the timeline has the result", async () => {
+  const staffClosed: CaseRecord = { ...rolledOver, status: "CLOSED", closedReason: "MANUAL_RESOLVE", closedBy: "nurse@example.test" };
+  const h = earlierCycleHarness(staffClosed, "OVERDUE");
+  await rerunToVerify(h.deps, staffClosed.id, "lead@example.test");
+  assert.deepEqual(h.calls, ["audit:CASE_RERUN_VERIFIED"], "no patch: its outcome is frozen at closure");
+  assert.deepEqual(h.current(), staffClosed);
+  assert.equal(h.audits[0]!.payload.caseUnchanged, true);
+  assert.equal(h.audits[0]!.payload.verifiedStatus, "OVERDUE");
+});
+
+test("rerunToVerify (#882) — an ACTIVE case of a cycle that has ended still resolves as before", async () => {
+  const h = earlierCycleHarness({ ...rolledOver, status: "OPEN", closedAt: null, closedReason: null }, "COMPLIANT");
+  await rerunToVerify(h.deps, rolledOver.id, "lead@example.test");
+  assert.equal(h.current().status, "RESOLVED");
+  assert.ok(h.calls.includes("audit:CASE_RESOLVED"), "the ordinary resolution, audited");
+  assert.equal((h.created()!.requestedScope as Record<string, unknown>).earlierCycle, true, "the run is still marked");
+});

@@ -36,6 +36,7 @@ import {
   DIRECTORY,
 } from "../config/deployment-profile.ts";
 import { batchPhaseTiming, emitPhaseTiming, type PhaseTimingSink } from "./phase-timing.ts";
+import { closeRetiredMeasureCases, retiredClosureTouched } from "./retired-measures.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
@@ -84,6 +85,8 @@ import {
   resolveAlertChannels,
   type AlertChannel,
 } from "./alert-channel.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { earlierCycleMeasures, earlierCycleScope } from "./earlier-cycle.ts";
 
 export type RunScopeType = "ALL_PROGRAMS" | "MEASURE" | "SITE" | "EMPLOYEE" | "CASE";
 
@@ -191,10 +194,18 @@ export interface RunPipelineDeps {
   valueSets?: Pick<ValueSetStore, "listAll">;
   /** Subject-bundle seam (Task 2): injectable for tests; defaults to the env-composed composite. */
   bundleSource?: SubjectBundleSource;
+  /** #889 — tests only: the deployment profile's `retiredMeasureIds` otherwise. */
+  retiredMeasureIds?: readonly string[];
   /** #789 — tests only: `DEFAULT_INDIVIDUAL_RETRY_FAILURE_LIMIT` otherwise. */
   individualRetryFailureLimit?: number;
   /** #789 — tests only: `DEFAULT_INDIVIDUAL_RETRY_BUDGET` otherwise. */
   individualRetryBudget?: number;
+  /**
+   * The practice's date the run is planned on (#882). Server-side only: the year-change rehearsal sets it
+   * through `SchedulerTickDeps.today`; every other caller leaves it to `practiceToday()`. Never read from a
+   * request body. It decides which cycles have ended, so which outcomes may open or reopen a case.
+   */
+  today?: string;
 }
 
 /**
@@ -442,6 +453,8 @@ export interface PlannedRun {
   scopeLabel: string;
   scopeType: RunScopeType;
   evalDate: string;
+  /** The practice's date the run was planned on (#882); an outcome of a cycle that had ended by then never opens or reopens a case. */
+  today: string;
   livePopulation?: LivePopulationDescriptor;
   /**
    * What the run has actually done so far, updated at each chunk boundary.
@@ -459,7 +472,8 @@ export interface PlannedRun {
 export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest): Promise<PlannedRun> {
   const employees = deps.employees ?? evaluableEmployees();
   const bundleSource = deps.bundleSource ?? compositeBundleSource(process.env as Record<string, unknown>);
-  const evalDate = req.evaluationDate ?? new Date().toISOString().slice(0, 10);
+  const today = deps.today ?? practiceToday();
+  const evalDate = req.evaluationDate ?? today;
   const webChartEnv = deps.webChartEnv ?? {};
   const webChartConfigured = isWebChartConfigured(webChartEnv);
   if (webChartConfigured && req.scopeType === "SITE" && req.site?.trim() === "WebChart") {
@@ -493,14 +507,19 @@ export async function planManualRun(deps: RunPipelineDeps, req: ManualRunRequest
     triggeredBy: req.triggeredBy ?? "manual",
     // Persist the resolved evaluationDate so a rerun reuses the same evaluation period
     // (and the case upsert stays idempotent rather than opening a fresh-period case).
-    requestedScope: pruneUndefined({ measureId: req.measureId, employeeExternalId: req.employeeExternalId, site: req.site, evaluationDate: evalDate }),
+    // `today` and the earlier-cycle marker are the server's (#882): a run scoring a cycle that has ended
+    // is never anyone's "latest" (`run/earlier-cycle.ts`).
+    requestedScope: pruneUndefined({
+      measureId: req.measureId, employeeExternalId: req.employeeExternalId, site: req.site, evaluationDate: evalDate, today,
+      ...earlierCycleScope(measureIds, evalDate, today),
+    }),
     measurementPeriodStart: period.start,
     measurementPeriodEnd: period.end,
   });
   await deps.runStore.markRunning(run.id);
   await deps.runStore.appendLog(run.id, "INFO", `${scopeLabel} — evaluating ${items.length} subject(s)`);
   return {
-    run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate,
+    run, items, measureIds, scopeLabel, scopeType: req.scopeType, evalDate, today,
     progress: { evaluated: 0, compliant: 0, nonCompliant: 0, failures: 0 },
     ...(livePopulation ? { livePopulation } : {}),
   };
@@ -673,6 +692,10 @@ async function prepareLivePopulation(
 export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun): Promise<ManualRunResponse> {
   const runId = planned.run.id;
   const { measureIds, scopeLabel, scopeType, evalDate } = planned;
+  // #882: the measures whose cycle at `evalDate` had ended when the run was planned. Their outcomes are
+  // recorded; their upserts may move only a case still active in that cycle (`planCaseUpsert`).
+  const earlierCycle = new Set(earlierCycleMeasures(measureIds, evalDate, planned.today));
+  let heldToActive = 0;
   const bundleSource = deps.bundleSource ?? compositeBundleSource(process.env as Record<string, unknown>);
 
   // ADR-072: surface a stale vendored effectivePeriod ON THE RUN, not just in the console. Only
@@ -1435,7 +1458,9 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // `wc|` subjects are excluded deliberately, not by oversight: they never open cases at all (the
       // rerun-to-verify 409 above), so counting them here would report a gap no segment edit can close.
       // A failed evaluation needed no follow-up we know of, so it is not counted as gated by a segment.
-      if (!evaluationFailed && !closeOnly && !outOfPopulation && !isLiveWebChartSubject && NON_COMPLIANT.has(status) && !segmentApplicable()) {
+      // An earlier cycle's outcome opens no case whatever the segment says (#882), so it is not counted.
+      const ofEarlierCycle = earlierCycle.has(item.measureId);
+      if (!evaluationFailed && !closeOnly && !outOfPopulation && !ofEarlierCycle && !isLiveWebChartSubject && NON_COMPLIANT.has(status) && !segmentApplicable()) {
         gatedBySegment.evaluations++;
         gatedBySegment.subjects.add(item.employee.externalId);
         if (gatedBySegment.sites.size < 12) gatedBySegment.sites.add(item.employee.site ?? "(no site)");
@@ -1455,6 +1480,7 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       // it still counts as answered for the cycle rollover (DATA_MODEL_CONTRACTS §4).
       const withheldAsThin = outOfPopulation === true && insufficient.has(item.measureId);
       if (deps.caseStore && !evaluationFailed && !withheldAsThin && (closeOnly || (!isLiveWebChartSubject && segmentApplicable()))) {
+        if (ofEarlierCycle) heldToActive++;
         pendingCaseUpserts.push({
           input: {
             runId: runId,
@@ -1464,6 +1490,8 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
             outcomeStatus: status,
             evidence,
             outOfPopulation,
+            // #882: a cycle that had ended when the run was planned moves only a case still active in it.
+            ...(ofEarlierCycle ? { earlierCycle: true } : {}),
             // Applied by the store on the INSERT branch only, so this names the owner of a case this
             // run OPENS and never re-owns one that already exists (ADR-080 d2).
             panelAssignee: panelMap.get(item.employee.providerId),
@@ -1632,6 +1660,19 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           `If a site here should be in scope, the segment needs the audited repair in DEPLOY.md ` +
           `("One-time segment repair") — segment seeding creates but never mutates, so a roster that grew ` +
           `past its segment stays gated until a person widens it.`,
+      )
+      .catch(() => {});
+  }
+
+  // #882: say what an earlier cycle's outcomes did, since the work list will not show it.
+  if (earlierCycle.size > 0) {
+    await deps.runStore
+      .appendLog(
+        runId,
+        "INFO",
+        `Scored a cycle that has ended (${[...earlierCycle].sort().join(", ")}): its outcomes are recorded and ` +
+          `count toward that year's scorecard and list report; ${heldToActive} case update(s) could move only a case ` +
+          `still active in that cycle, and none opened or reopened a case. The roster, Programs and cards stay on the current year's run.`,
       )
       .catch(() => {});
   }
@@ -1843,10 +1884,24 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
       .catch(() => {});
   }
 
+  // #889: close the still-active cases of a measure this deployment retired (CMS137 on Maui). Only an
+  // all-programs run (the nightly, or the lead's manual one) does it, so a SITE, EMPLOYEE, MEASURE or CASE
+  // run never closes another measure's cases. Its own counts: `rollover` is checked for equality by the
+  // year-change rehearsal, and these are not cases of an executed measure.
+  const retiredIds = deps.retiredMeasureIds ?? DEPLOYMENT_PROFILE.retiredMeasureIds;
+  const retired =
+    scopeType === "ALL_PROGRAMS" && retiredIds.length > 0 && deps.caseStore && deps.events
+      ? await closeRetiredMeasureCases(
+          { caseStore: deps.caseStore, events: deps.events, runStore: deps.runStore },
+          { retiredMeasureIds: retiredIds, runId, actor: auditActor },
+        )
+      : null;
+
   // #853: a measure scored on data too thin to trust is a partial failure, with no new status (D12).
   const terminalStatus = failures > 0 || insufficient.size > 0 ? "PARTIAL_FAILURE" : "COMPLETED";
   await deps.runStore.finalizeRun(runId, terminalStatus);
-  if (isPopulationRun(scopeType)) {
+  // An earlier cycle's run is not the latest population run /health describes (#882).
+  if (isPopulationRun(scopeType) && earlierCycle.size === 0) {
     recordRunSufficiency({ runId, status: terminalStatus, dataInsufficient: sufficiencyVerdicts.map((v) => v.measureId) });
   }
   // A run is the only thing that creates cases, so it is the only thing that can introduce a case
@@ -1878,9 +1933,13 @@ export async function finishManualRun(deps: RunPipelineDeps, planned: PlannedRun
           // when the incremental cache was active, so a normal run's payload is unchanged.
           ...(incremental ? { evaluated: items.length - skipped, skippedUnchanged: skipped } : {}),
           measuresExecuted: measureIds,
+          // #882: the measures this run scored over a cycle that had ended when it was planned.
+          ...(earlierCycle.size > 0 ? { earlierCycle: [...earlierCycle].sort() } : {}),
           ...(liveTenant ? { liveTenant } : {}),
           // #854: present only on a run that closed, failed to close or could not read an earlier cycle's cases.
           ...(rolledOver ? { rollover } : {}),
+          // #889: present only on a run that closed, or tried to close, a retired measure's cases.
+          ...(retired && retiredClosureTouched(retired) ? { retired } : {}),
           // #853: what was measured on a live run, and which measures fell short and why. The run detail
           // page reads it; the reports refuse from the rows, so a lost write here cannot let a rate out.
           ...(liveSufficiency

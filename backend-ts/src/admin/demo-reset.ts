@@ -29,6 +29,9 @@ const VOLATILE_TABLES = [
   // volatile data so a demo reset returns to the auto-resolved baseline — otherwise a CM/Admin split or
   // merge would persist while its `audit_events` rows are wiped, leaving an inconsistent baseline. No FK.
   "person_links",
+  // Contact preferences (#886): their CONTACT_PREFERENCE_* audit rows are wiped with the rest, so a kept
+  // preference would have no ledger entry explaining it — the person_links reasoning. No FK.
+  "contact_preferences",
   "run_logs",
   "runs",
   "audit_events",

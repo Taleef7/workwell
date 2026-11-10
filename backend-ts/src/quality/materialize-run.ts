@@ -20,6 +20,7 @@ import { SCALE_TENANT } from "../engine/synthetic/scale-structure.ts";
 import { SCALE_TRIGGER } from "../run/backfill-scale.ts";
 import { isCompletedRun, isPopulationRun } from "../program/rollup-shared.ts";
 import { dataInsufficientChecks } from "../run/data-sufficiency.ts";
+import { isEarlierCycleRun } from "../run/earlier-cycle.ts";
 
 export const QUALITY_SNAPSHOT_MATERIALIZED_EVENT = "QUALITY_SNAPSHOT_MATERIALIZED";
 
@@ -57,6 +58,8 @@ export async function materializeRun(runId: string, deps: MaterializeDeps): Prom
   if (run.triggeredBy === SCALE_TRIGGER) return skip("scale seed run (never listed per-subject)");
   if (!isPopulationRun(run.scopeType)) return skip(`scope ${run.scopeType} is not a population run`);
   if (!isCompletedRun(run.status)) return skip(`run not terminal (${run.status})`);
+  // A re-score of a cycle that has ended describes that cycle, not the month it ran in (#882).
+  if (isEarlierCycleRun(run)) return skip("scores a cycle that has ended (#882)");
 
   const period = run.startedAt.slice(0, 7);
   const { start: periodStart, end: periodEnd } = monthBounds(period);
@@ -158,7 +161,9 @@ export interface RebuildResult {
  */
 export async function rebuildSnapshotHistory(deps: MaterializeDeps): Promise<RebuildResult> {
   const newestFirst = (await deps.runStore.listRuns(100_000))
-    .filter((run) => run.triggeredBy !== SCALE_TRIGGER && isPopulationRun(run.scopeType) && isCompletedRun(run.status))
+    // An earlier cycle's re-score is never a month's pick (#882): `materializeRun` skips it, so picking it
+    // would leave the month's own nightly unreplayed.
+    .filter((run) => run.triggeredBy !== SCALE_TRIGGER && isPopulationRun(run.scopeType) && isCompletedRun(run.status) && !isEarlierCycleRun(run))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
   // Only the runs that are some measure's NEWEST in their month change the result, so only they are
   // replayed: on a deployment with a run a night, each reading every subject's outcomes, replaying all

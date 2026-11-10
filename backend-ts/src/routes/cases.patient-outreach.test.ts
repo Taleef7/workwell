@@ -163,6 +163,7 @@ test("a case whose dispatch throws is reported failed (it may have gone out), an
       },
     },
     outcomes: { listOutcomes: async () => [] },
+    contactPreferences: { get: async () => null },
   };
   const out = await sendPatientOutreachMessages(deps as never, cases as never, { actor: "cm@workwell.dev" });
   assert.deepEqual(recorded, ["c1", "c3"]);
@@ -247,6 +248,7 @@ test("Maui: when one case's record fails after the message went out, it alone co
       cases: { getCase: async (id) => cases.find((c) => c.id === id), patchCase: async () => null },
       events: { recordCaseEvent: async () => { calls++; if (calls === 2) throw new Error("ledger down"); } },
       outcomes: { listOutcomes: async () => [] },
+      contactPreferences: { get: async () => null },
     };
     console.log(JSON.stringify(await sendPatientOutreachMessages(deps, cases, { actor: "cm@pilot.test" })));
   `);

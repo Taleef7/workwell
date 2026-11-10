@@ -1,6 +1,6 @@
 # WorkWell Measure Catalog
 
-WorkWell is one product with several instances. The TWH instance (employees) runs the OSHA, wellness and immunization measures, plus CMS122 and CMS125 on CMS's FHIR drafts. The Maui sandbox (patients) runs six CMS measures on those drafts. The catalog below is seeded on startup, and each instance runs its own subset of it.
+WorkWell is one product with several instances. The TWH instance (employees) runs the OSHA, wellness and immunization measures, plus CMS122 and CMS125 on CMS's FHIR drafts. The Maui sandbox (patients) runs five CMS measures on those drafts. The catalog below is seeded on startup, and each instance runs its own subset of it.
 
 ## Catalog summary
 
@@ -12,7 +12,8 @@ WorkWell is one product with several instances. The TWH instance (employees) run
 | Permanent immunization panel — fully evaluated | 3 | Active | Full CQL, runnable (series-completion; MMR, Varicella, Hep B) |
 | CMS eCQM — authored CQL kept beside the official artifact | 2 | Active | WorkWell's own CQL for CMS125 and CMS122; TWH and Maui both run CMS's FHIR drafts for these |
 | CMS eCQM — official-only (no authored CQL) | 4 | Active | CMS2, CMS130, CMS165, CMS137 — the vendored artifact IS the logic (ADR-072) |
-| CMS eCQM catalog (2026 performance period) | 43 | Draft | Catalog entry only — CQL authoring pending |
+| CMS eCQM catalog (2026 performance period) | 41 | Draft | Catalog entry only — CQL authoring pending |
+| CMS eCQM catalog — surgical, not used by primary or occupational care | 2 | Deprecated | CMS56 (hip replacement), CMS133 (cataract surgery); never run (owner decision 2026-11-02, #880) |
 | **Total** | **63** | | |
 
 Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS eCQM. Hepatitis B was promoted from an Approved catalog entry to Active (E10.6).
@@ -21,9 +22,9 @@ Runnable (full CQL): **14** — 4 OSHA + 5 HEDIS + 3 immunization panel + 2 CMS 
 (`cms2`, `cms130`, `cms165`, and since 2026-09-06 `cms137` — the Draft `cms137v14` placeholder was retired
 into it by the ADR-071 seed, the way `cms2v15` was) have no authored CQL and no synthetic binding: they are
 runnable only where the deployment names them in `WORKWELL_OFFICIAL_MEASURES`, and `classifyRunnable`
-reports them as `official-pending` everywhere else. **Since 2026-09-08 the Maui sandbox routes all
-six** (ADR-078, owner decision): cms122, cms125, cms2, cms130, cms165 and cms137, so CMS2, CMS130,
-CMS165 and CMS137 are Active, gated AND executing there; TWH still routes cms122 and cms125 only. All
+reports them as `official-pending` everywhere else. **Since 2026-09-08 the Maui sandbox routes the
+ACO's set** (ADR-078, owner decision): cms122, cms125, cms2, cms130, cms165, and cms137 until its retirement
+on 2026-11-05 (below), so CMS2, CMS130 and CMS165 are Active, gated AND executing there; TWH still routes cms122 and cms125 only. All
 four pass their full MADiE deck against the runtime (36/36, 64/64, 68/68 and 45/45, zero errors); cms2's
 whole-roster gate reads 17,795 of 20,000 in the initial population and 5,413 actionable
 (`docs/evidence/FLIP_GATE_2026-09-08_CMS2.md`); cms130's, run through the credentialed
@@ -44,10 +45,11 @@ banked (2026-09-07):** `flip-gate --measure cms137 --subjects all` over all 20,0
 both rates alive (numerators 231 and 81) and the effectivePeriod covering the measured year — evidence
 FOR the flip on the full roster, not a 2,000-subject sample
 (`docs/evidence/FLIP_GATE_2026-09-07_CMS137.md`).
-Its flip landed with the others on 2026-09-08 (ADR-078); it is un-routed, if the final rule removes Quality
-ID 305, by removing it from both `WORKWELL_OFFICIAL_MEASURES` and `WORKWELL_DERIVED_MEASURES` (DEPLOY.md,
-"Turning a translation on or off"). For 2027, Maui scores it with WorkWell's translation of CMS137v15
-(ww-2027.1, #767), never under a CMS eCQM id.
+Its flip landed with the others on 2026-09-08 (ADR-078). **It was retired on Maui on 2026-11-05** (#889,
+owner decision): the CY2027 final rule (CMS-1848-F) removed Quality ID 305 from APP Plus, so it is in
+neither routing list, the Maui profile names it retired, and an all-programs run closes its open cases as
+`MEASURE_RETIRED` (DEPLOY.md, "Retiring a measure"). Its artifact, its MADiE gate and WorkWell's
+translation of CMS137v15 (ww-2027.1, #767) stay in the repository, routed nowhere.
 
 **Every cross-engine disagreement is run to a cause (2026-10-19, #846).** On a Java image pinned by
 digest (cqf-fhir-cr 4.13.0), the second engine agrees on **397 of 455** MADiE cases across all nine
@@ -435,7 +437,7 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 | What we ship | Count | Relationship to eCQI | How we prove it |
 |---|---|---|---|
 | **Runnable Active CMS CQL** | **2** — CMS122v14, CMS125v14 | Faithful official-subset production CQL: 12-month MP, age/sex/visit, VSAC OIDs, GMI, Oct-1 mammogram window, hospice/palliative/mastectomy. Residual Phase 2: 66+ LTC + frailty/AI. Dual-coded synthetic data. | Structural fidelity both; CMS122 also estimate + subset + literal fqm |
-| **Draft CMS catalog entries** | **47** | Metadata only — correct CMS ID, **v14 = 2026**, MIPS ID, title | Terminology audit 2026-07-08 |
+| **Draft CMS catalog entries** | **41** | Metadata only — correct CMS ID, **v14 = 2026**, MIPS ID, title | Terminology audit 2026-07-08 |
 | **OSHA / HEDIS / permanent vax** | 12 | Not CMS eCQMs | Separate authorities |
 
 **Demo claim that is honest:**
@@ -444,13 +446,24 @@ Outcome mapping (lower-is-better eCQM rate; NUMER maps to OVERDUE):
 
 **Remaining accuracy work:** Phase 2 DENEX (LTC/frailty); optional CMS125 literal ELM; annual roll-forward to v15/2027 when product targets that year.
 
+### The year's edges are UTC (a known limitation, #847, #882)
+
+The measurement period is the calendar year in UTC, and the practice is not: Maui is in Hawaii (UTC−10),
+and WebChart states its times in UTC from a server in US Eastern. Which year a run scores follows the
+practice's date (#882), but the comparisons the logic makes against the year's edges are UTC's. Most read a
+date and are unaffected; four compare an exact time against the year: CMS125's mastectomy, CMS165's ESRD
+and its diagnosis windows, and CMS137's first episode. An event stated within ten hours of midnight on
+31 December can fall in the other year. Converting WebChart's times waits for MIE to confirm both zones
+(OPEN_QUESTIONS 4.16). `fqm-execution` 1.8.5, the version in use, also drops a stated offset (fqm#376); the
+fix is merged on its master (#375) but not released.
+
 ## Category 4 — CMS eCQM Catalog (2026 Performance Period)
 
 > **Id convention (ADR-071, 2026-09-01):** an official-vendored measure's catalog id is the vendored
 > manifest's bare `catalogId` (`cms2`, `cms130`, `cms165`, like `cms122`/`cms125`); the CMS version
 > lives in `policyRef`. Legacy versioned rows on an existing database are deprecated once by the seed.
 
-**49** official CMS electronic Clinical Quality Measures are seeded as v1.0 catalog entries, of which **43 remain Draft**: CMS125 and CMS122 are Active with full authored CQL (Category 3b), and CMS2, CMS130, CMS165 and CMS137 are Active official-only, where the vendored artifact IS the logic (ADR-072, ADR-078). The counts in the Category table at the top of this file are the same six and forty-three; **49** is also the number §"Terminology & standards currency" and the seeding note below both cite, so all four agree. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
+**49** official CMS electronic Clinical Quality Measures are seeded as v1.0 catalog entries, of which **41 remain Draft**: CMS125 and CMS122 are Active with full authored CQL (Category 3b), CMS2, CMS130, CMS165 and CMS137 are Active official-only, where the vendored artifact IS the logic (ADR-072, ADR-078), and CMS56 and CMS133 are Deprecated: surgical measures no deployment's users perform (owner decision 2026-11-02, #880). A database seeded before then retires the two Draft rows once, audited `MEASURE_DEPRECATED` by `system`, and leaves alone a row someone edited. The counts in the Category table at the top of this file are the same six, forty-one and two; **49** is also the number §"Terminology & standards currency" and the seeding note below both cite, so all four agree. The `policy_ref` field stores the CMS eCQM ID (e.g., `CMS128v14`). The `spec_json` stores `cmsEcqmId` and `mipsQualityId` for downstream tooling. CQL authoring for the remaining catalog entries is future work.
 
 The measures page renders CMS IDs as blue mono badges to distinguish them from OSHA CFR citations and HEDIS references. Since #769 every surface that shows a **result** names the logic that scored it, read from that result's own evidence, never from today's routing: in full `MIPS 112 · CMS125FHIR v1.0.000 (from CMS125v14)` (its title adds that it is a CMS draft), as the chip `MIPS 112 · CMS125FHIR (from CMS125v14)`, and for a translated year `MIPS 305 · WorkWell translation of CMS137v15 (ww-2027.1)` (chip `MIPS 305 · WW translation of CMS137v15`), which never carries a CMS id. A result no named logic scored (authored CQL, an errored row) keeps the unversioned crosswalk (`MIPS 112 · CMS125`). Selection surfaces (pickers, filters, the grid's identity column) stay unversioned because a measure spans years; the grid's Version column for a routed measure is the artifact's (`1.0.000`), not the catalog's `v1.0`, which stays in the version ids.
 
@@ -468,8 +481,8 @@ Two new measures added in 2026 vs 2025: CMS146v14 (Appropriate Testing for Phary
 | Pediatric / Immunization | CMS74v15, CMS75v14, CMS117v14 |
 | HIV / Infectious Disease | CMS314v3, CMS349v8, CMS1157v2, CMS1188v3 |
 | Oncology | CMS129v15, CMS157v14, CMS645v9, CMS646v6 |
-| Ophthalmology | CMS133v14, CMS143v14 |
-| Functional Status / Orthopedic | CMS56v14 |
+| Ophthalmology | CMS133v14 (Deprecated), CMS143v14 |
+| Functional Status / Orthopedic | CMS56v14 (Deprecated) |
 | Medication Safety | CMS68v15, CMS156v14 |
 | Care Coordination | CMS50v14 |
 | Urology | CMS771v7 |
@@ -565,7 +578,10 @@ Each outcome evidence payload includes:
   crosswalk-shaped mammogram, authored says COMPLIANT and official says **OVERDUE** — a false
   non-compliance on a screened patient. A LOINC `Observation` alone does not fix it (no `category`), and
   with `category` it flips the error to authored. The remedy is **dual-stamping** both representations, as
-  the synthetic corpus does. All four states are pinned in `devdb-official-eval.test.ts`.
+  the synthetic corpus does. All four states are pinned in `devdb-official-eval.test.ts`. **Withdrawn for
+  WebChart data on 2026-11-05 (owner decision):** a billed mammogram is not a result, so no mapper derives
+  the LOINC Observation from it and a billed-only screening reads OVERDUE in official CMS125, as in
+  WebChart's own report (`WEBCHART_FHIR_MAPPING.md`).
 - **Terminology & standards currency (2026 audit, 2026-07-08 — `docs/archive/TERMINOLOGY_AUDIT_2026-07-08.md`).** A three-way verification (our implementation vs MIE's WebChart dev DB vs the current 2026 authorities — CMS eCQI, CDC CVX, LOINC, VSAC, AMA CPT, eCFR) confirmed everything load-bearing is correct and current: all 49 CMS catalog versions/MIPS IDs (**v14 = 2026** confirmed), all OSHA CFR citations, and all runnable LOINC/CPT codes. The one defect class — **vaccine CVX currency** on the WebChart crosswalk — was fixed: influenza matching expanded from `141`/`140`-only to the full active seasonal CVX set (VSAC "Influenza Vaccine" OID `2.16.840.1.113883.3.526.3.1254`); the **inactive** Td code `139` supplemented with active `09`/`113`/`196`; MMRV `94` now counts toward varicella; deleted HCPCS `G0202` marked read-only. All fixes are additive to the WebChart read path (`engine/ingress/webchart/terminology.ts`) — **synthetic outcomes are unchanged** (the synthetic CQL matches `urn:workwell:*` codes, not CVX numbers). Inactive codes are matched on read for legacy records, never emitted. Durable follow-up: resolve flu membership from the VSAC value set via the ADR-023 resolver rather than the hardcoded active list.
 - All active CQL measures now use inline code-filter expressions on both the qualifying event (Procedure or Immunization) and the enrollment/exemption Conditions, matching the system/code stamped by `SyntheticFhirBundleBuilder`. This replaces the earlier `exists([Condition])` / `Count([Condition]) > 1` pattern that was semantically correct but not code-scoped. **HAZWOPER (`hazwoper.cql`) and TB Screening (`tb_surveillance.cql`) were the last two still on the un-scoped pattern; the Fable H3 hardening fix (2026-07-03) brought them into line** — a patient with unrelated Conditions no longer false-positives as enrolled/exempt on the arbitrary-bundle path (`evaluateBundle`/`pnpm evaluate`), where the synthetic per-measure bundles had masked it. A `foreign-condition-scoping.test.ts` golden regression guards it; the ELM was recompiled (`pnpm compile-measures`); synthetic outcomes are unchanged. True ValueSet token expansion (resolving `urn:workwell:vs:*` OIDs via the VSAC or a local expansion service) is a known evaluator limitation of the in-memory CQF path; the inline-code pattern is the stable workaround until a resolver is wired.
   **(E3.2 / #90 update)** A `ValueSetResolver` seam now supports real value-set expansion: the engine
@@ -642,7 +658,7 @@ Each outcome evidence payload includes:
   canonical + the required structural elements (#92 / E3.4). Structural alignment (JVM-free), not
   IG/validator-validated — `meta.profile` is metadata, so evaluation outcomes are unchanged. See
   `docs/STANDARDS_CONFORMANCE.md`.
-- All 49 CMS eCQM catalog entries (2026 performance period) are seeded via `ensureCmsEcqmCatalogSeed()` for the same instance values. They are Draft-only and do not participate in CQL evaluation runs until CQL is authored and compiled. On re-seed, existing measures are looked up by CMS ID prefix (`LIKE 'CMSNNNv%'`) and updated in-place so version bumps (e.g., v13→v14) do not create duplicate DB rows.
+- All 49 CMS eCQM catalog entries (2026 performance period) are seeded via `ensureCmsEcqmCatalogSeed()` for the same instance values. They are Draft-only (CMS56 and CMS133 Deprecated, #880) and do not participate in CQL evaluation runs until CQL is authored and compiled. On re-seed, existing measures are looked up by CMS ID prefix (`LIKE 'CMSNNNv%'`) and updated in-place so version bumps (e.g., v13→v14) do not create duplicate DB rows.
 - A headless CLI (`pnpm evaluate --patient <bundle.json> --measure <id>`, `backend-ts/src/engine/cli/`)
   evaluates one FHIR R4 patient bundle against a measure with no server or DB — the same
   `CqlExecutionEngine` the run pipeline uses. Golden regression over `backend-ts/spike/synthetic`
@@ -672,8 +688,10 @@ Each outcome evidence payload includes:
 - **E7 action-evaluator order map (#77):** `backend-ts/src/order/order-catalog.ts` maps a measure to
   the order it proposes. Codes reuse the `terminology_mappings` seed standards where present: audiogram
   → CPT 92557; tb_surveillance → CPT 86580; flu_vaccine → CVX 141; hazwoper → `hazwoper-exam` in
-  `urn:workwell:vs:hazwoper-exams`. Others use a representative standard code (cms122 → CPT 83036, cms125
-  → CPT 77067) or a LOCAL `urn:workwell:orders` code (BMI). A measure absent from the catalog proposes
-  nothing; on Maui that is cms2, cms130, cms165 and cms137, and the route names them in
-  `measuresWithoutOrder` (#621). `GET /api/orders/proposals` returns `ProposedOrder` records
+  `urn:workwell:vs:hazwoper-exams`. Others use a representative standard code or a LOCAL `urn:workwell:orders`
+  code (BMI). All six pilot measures have an order set (#620, #640): protocol (cms122 CPT 83036, cms125 CPT
+  77067) or choice (cms2, cms130, cms165, cms137: the clinician picks; no default). An order is proposed
+  only when the measure's CQL found nothing qualifying, and is card-ready only once an admin approves the
+  code. The table is in `CDS_HOOKS.md`. A measure absent from the catalog proposes nothing, and the route
+  names it in `measuresWithoutOrder` (#621). `GET /api/orders/proposals` returns `ProposedOrder` records
   (or FHIR R4 `ServiceRequest` bundles) for at-risk subjects; proposals are advisory only.

@@ -34,6 +34,7 @@ import { generateTraceability } from "../measure/measure-traceability.ts";
 import { computeDataReadiness } from "../measure/data-readiness.ts";
 import { complianceRateOf } from "../program/rollup-shared.ts";
 import { thinMeasuresOfRun } from "../run/data-sufficiency.ts";
+import { isEarlierCycleRun } from "../run/earlier-cycle.ts";
 import { AGE_BANDS, hasActiveSubjectFilters, isAgeBand, isSex, matchesSubjectFilters, payerCodesOf } from "../compliance/subject-filters.ts";
 import { ACTIVE_CASE_STATUSES } from "../case/case-logic.ts";
 import type { JsonRecord } from "./tool-audit.ts";
@@ -42,6 +43,7 @@ import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { latestPopulationSnapshot } from "../program/latest-population.ts";
 import type { SubjectListStore } from "../stores/subject-list-store.ts";
 import { resolveListFilter } from "../compliance/subject-list-filter.ts";
+import { withoutCqlFacts } from "../wiring/official-facts.ts";
 
 export interface McpToolDeps {
   caseStore: CaseStore;
@@ -146,14 +148,34 @@ function measureFilterRef(args: JsonRecord): string | null {
   return name || null;
 }
 
-/** Resolve a measure record from measureId (slug) or measureName (case-insensitive); null if unresolved. */
-async function resolveMeasure(deps: McpToolDeps, args: JsonRecord): Promise<MeasureRecord | null> {
+/** A measureName that names more than one record: the ids it could mean, none of them chosen. */
+interface AmbiguousMeasure {
+  ambiguous: string[];
+}
+
+/** The structured error for a name that names several measures (item 13): never an arbitrary pick. */
+function ambiguousMeasureError(name: string, found: AmbiguousMeasure): JsonRecord {
+  return safeError("MEASURE_AMBIGUOUS", `More than one measure is named "${name}" (${found.ambiguous.join(", ")}); ask by measureId`);
+}
+
+const isAmbiguous = (r: MeasureRecord | AmbiguousMeasure | null): r is AmbiguousMeasure => r != null && "ambiguous" in r;
+
+/**
+ * Resolve a measure record from measureId (slug) or measureName (case-insensitive); null if unresolved.
+ * A name matching several records (item 13: older stacks keep deprecated legacy rows under an active
+ * measure's name) resolves to the one record that is not Deprecated; with no single such record it is
+ * AMBIGUOUS, so a client is never answered about whichever record the store listed first.
+ */
+async function resolveMeasure(deps: McpToolDeps, args: JsonRecord): Promise<MeasureRecord | AmbiguousMeasure | null> {
   const rawId = args.measureId != null ? String(args.measureId).trim() : "";
   if (rawId) return deps.measureStore.getLatest(rawId);
   const rawName = args.measureName != null ? String(args.measureName).trim() : "";
   if (rawName) {
     const all = await deps.measureStore.listLatest();
-    return all.find((m) => m.name.toLowerCase() === rawName.toLowerCase()) ?? null;
+    const named = all.filter((m) => m.name.toLowerCase() === rawName.toLowerCase());
+    if (named.length <= 1) return named[0] ?? null;
+    const live = named.filter((m) => m.status !== "Deprecated");
+    return live.length === 1 ? live[0]! : { ambiguous: named.map((m) => m.measureId).sort() };
   }
   return null;
 }
@@ -231,10 +253,14 @@ async function getCase(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   if (!profileSubjectMatcher(directory.employeeById)(c.employeeId)) return safeError("CASE_NOT_FOUND", "Case not found");
   const outcome = await outcomeForCase(deps.outcomeStore, c.lastRunId, c.employeeId, c.measureId, c.evaluationPeriod);
   const detail = toCaseDetail(c, outcome, [], null, undefined, directory.employeeById);
-  const evidence = detail.evidenceJson ?? {};
+  // Without the recorded CQL define values (#875), in both places the evidence appears, nor the case
+  // page's reading of them (`cqlFindings`, #880): chart values reach no AI client without an owner
+  // decision (AI_GUARDRAILS §6). The case page shows them to staff.
+  const evidence = withoutCqlFacts(detail.evidenceJson ?? {});
   const whyFlagged = (evidence as JsonRecord).why_flagged ?? {};
+  const { cqlFindings: _findings, ...rest } = detail;
   // `detail` carries the cited row's `measureVersion` and `logic` (#769), as the case page does.
-  return { ...detail, evidence_payload: evidence, why_flagged: whyFlagged };
+  return { ...rest, evidenceJson: evidence, evidence_payload: evidence, why_flagged: whyFlagged };
 }
 
 async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
@@ -243,6 +269,7 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
   // unrelated restricted cases) — error instead. Java throws "Measure not found"; we return safeError.
   const ref = measureFilterRef(args);
   const measure = ref ? await resolveMeasure(deps, args) : null;
+  if (isAmbiguous(measure)) return ambiguousMeasureError(ref!, measure);
   if (ref && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${ref}`);
   let rows = await deps.caseStore.listCases({ ...caseStatusQueryFor(status), measureId: measure?.measureId, limit: 100000, offset: 0 });
   const directory = directoryForSubjects(deps, rows.map((c) => c.employeeId));
@@ -298,7 +325,11 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
 async function getRunSummary(args: JsonRecord, deps: McpToolDeps): Promise<unknown> {
   const rawRunId = args.runId != null && String(args.runId).trim() ? String(args.runId).trim() : null;
   if (rawRunId && !UUID_RE.test(rawRunId)) return safeError("INVALID_ARGUMENT", "runId must be a valid UUID");
-  const run = rawRunId ? await deps.runStore.getRun(rawRunId) : (await deps.runStore.listRuns(1))[0] ?? null;
+  // Omitted, it is the newest run that is not a re-score of a cycle that has ended (#882): MCP stays on the
+  // current year. Named, any run is summarized.
+  const run = rawRunId
+    ? await deps.runStore.getRun(rawRunId)
+    : (await deps.runStore.listRuns(200)).find((r) => !isEarlierCycleRun(r)) ?? null;
   if (!run) throw new ToolArgError(rawRunId ? `Run not found: ${rawRunId}` : "No runs found");
   const totalCases = await deps.caseStore.countByLastRun(run.id);
   // Counts-based (bounded GROUP BY) — never materialize a seed:scale run's 120k rows for the summary.
@@ -351,6 +382,7 @@ async function getMeasureVersion(args: JsonRecord, deps: McpToolDeps): Promise<u
     throw new ToolArgError("measureId or measureName is required");
   }
   const rec = await resolveMeasure(deps, args);
+  if (isAmbiguous(rec)) throw new ToolArgError(String(ambiguousMeasureError(String(args.measureName), rec).message));
   if (!rec) throw new ToolArgError("Measure not found");
   const detail = toMeasureDetail(rec);
   const cqlText = detail.cqlText ?? "";
@@ -492,6 +524,7 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
   const mode = args.mode != null ? String(args.mode) : "latest";
   if (mode !== "latest" && mode !== "preview") return safeError("INVALID_ARGUMENT", "mode must be 'latest' or 'preview'");
   const rec = await resolveMeasure(deps, { measureName });
+  if (isAmbiguous(rec)) return ambiguousMeasureError(measureName, rec);
   // An unresolved measure is an ERROR, not a lookalike absence (review on #492): the NO_OUTCOME
   // message advises waiting for a run, which for a measure that does not exist sends an AI client
   // into an endless retry. Same rule as list_cases / list_noncompliant.
@@ -588,6 +621,7 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
     (panelFilters as { listSubjectIds?: ReadonlySet<string> }).listSubjectIds = resolved.subjectIds;
   }
   const measure = measureNameFilter ? await resolveMeasure(deps, { measureName: measureNameFilter }) : null;
+  if (isAmbiguous(measure)) return ambiguousMeasureError(measureNameFilter, measure);
   // Same leak guard as list_cases: an unresolved measure filter must error, not return all cases.
   if (measureNameFilter && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureNameFilter}`);
   // ACTIVE, not OPEN-only: an IN_PROGRESS case is still a non-compliant subject someone is working,
@@ -643,6 +677,7 @@ async function explainRule(args: JsonRecord, deps: McpToolDeps): Promise<unknown
     return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
   }
   const rec = await resolveMeasure(deps, args);
+  if (isAmbiguous(rec)) return ambiguousMeasureError(String(args.measureName), rec);
   if (!rec) return safeError("MEASURE_NOT_FOUND", "Measure not found");
   const detail = toMeasureDetail(rec);
   const cqlText = detail.cqlText ?? "";
@@ -690,6 +725,7 @@ async function getMeasureTraceability(args: JsonRecord, deps: McpToolDeps): Prom
     return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
   }
   const rec = await resolveMeasure(deps, args);
+  if (isAmbiguous(rec)) return ambiguousMeasureError(String(args.measureName), rec);
   if (!rec) return safeError("MEASURE_NOT_FOUND", "Measure not found");
   return generateTraceability(rec);
 }
@@ -699,6 +735,7 @@ async function listDataQualityGaps(args: JsonRecord, deps: McpToolDeps): Promise
     return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
   }
   const rec = await resolveMeasure(deps, args);
+  if (isAmbiguous(rec)) return ambiguousMeasureError(String(args.measureName), rec);
   if (!rec) return safeError("MEASURE_NOT_FOUND", "Measure not found");
   const readiness = await computeDataReadiness({ outcomes: deps.outcomeStore }, rec);
   return {
@@ -731,7 +768,7 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: "get_run_summary",
-    description: "Get run metadata and outcome counts by runId. If runId is omitted, returns latest run.",
+    description: "Get run metadata and outcome counts by runId. If runId is omitted, returns the latest run that is not a re-score of an ended year.",
     inputSchema: { type: "object", properties: { runId: { type: "string" } } },
     roles: [CM, ADMIN],
     sensitivity: "internal",

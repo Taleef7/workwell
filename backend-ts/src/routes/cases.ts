@@ -8,12 +8,14 @@
  *   GET  /api/cases/:id         case detail + evidence/why_flagged + timeline → 200 | 404
  *   POST /api/cases/:id/assign  ?assignee=…  set/clear the case owner    → 200 CaseDetail | 404
  *   POST /api/cases/:id/escalate              force HIGH/OPEN            → 200 CaseDetail | 400 | 404
- *   GET  /api/cases/:id/actions/outreach/preview ?templateId=…           → 200 OutreachPreview | 404
+ *   GET  /api/cases/:id/actions/outreach/preview ?templateId=…&channel=… → 200 OutreachPreview | 404 | 409
  *   POST /api/cases/:id/actions/outreach         ?templateId=…  send     → 200 CaseDetail | 404
  *   POST /api/cases/:id/actions/outreach/delivery ?deliveryStatus=…      → 200 CaseDetail | 400 | 404
  *   POST /api/cases/:id/rerun-to-verify    re-evaluate + transition      → 200 CaseDetail | 404
  *   POST /api/cases/patient-outreach  { caseIds, channel?, templateId?, dryRun? }  one message for one
  *        patient's gaps (#868)                                            → 200 | 400 | 404 | 409
+ *   POST /api/cases/contact-log  { caseIds, channel, result, note? }  a contact staff made themselves;
+ *        nothing is sent (#886)                                           → 200 | 400 | 404 | 409
  *
  * Each mutating action writes a case_action + an audit_event; the detail timeline is
  * the merged ledger. evidence/appointments/ai are later slices.
@@ -30,7 +32,16 @@ import { loadWorklistCases, loadWorklistPage, withLiveStatus, staffClosedCounts,
 import { rosterCellCache } from "../compliance/roster-read-model.ts";
 import { toCaseDetail } from "../case/case-detail-read-model.ts";
 import { assignCase, escalateCase, resolveCase, CaseActionError, type CaseActionDeps } from "../case/case-actions.ts";
-import { previewOutreach, sendOutreach, updateOutreachDelivery, OutreachError } from "../case/case-outreach.ts";
+import {
+  previewOutreach,
+  sendOutreach,
+  sendChannelFor,
+  updateOutreachDelivery,
+  OutreachError,
+  EarlierCycleClosedError,
+  type OutreachDeps,
+} from "../case/case-outreach.ts";
+import { ContactPreferenceError } from "../case/contact-preference.ts";
 import {
   loadPatientOutreachCases,
   previewPatientOutreachMessages,
@@ -51,6 +62,14 @@ import {
   type EvidenceDeps,
 } from "../case/evidence-service.ts";
 import { scheduleAppointment, listAppointments, AppointmentError, type AppointmentDeps } from "../case/appointment-service.ts";
+import {
+  logContact,
+  ContactLogError,
+  isContactLogChannel,
+  isContactLogResult,
+  CONTACT_LOG_MAX_CASES,
+  CONTACT_NOTE_MAX,
+} from "../case/contact-log.ts";
 import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts";
 import { resolveBucket } from "../case/resolve-bucket.ts";
 import { isWebChartConfigured } from "../engine/ingress/data-source.ts";
@@ -59,6 +78,7 @@ import { DIRECTORY, employeeById, employees, providerById, profileSubjectMatcher
 import { assignableUsers, resolveAssignable } from "../auth/demo-users.ts";
 import { outcomeForCase } from "../case/case-outcome.ts";
 import { caseWindowFrom, calendarDayErrorBody } from "./query-dates.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 interface CasesEnv {
   DB: CloudDatabase;
@@ -93,12 +113,20 @@ async function caseStore(env: CasesEnv): Promise<CaseStore> {
 async function outcomeStore(env: CasesEnv): Promise<OutcomeStore> {
   return (await getStores(env)).outcomes;
 }
-async function actionDeps(env: CasesEnv): Promise<CaseActionDeps & { channels: (type: ChannelType) => OutreachChannel }> {
+async function actionDeps(env: CasesEnv): Promise<CaseActionDeps & OutreachDeps & { channels: (type: ChannelType) => OutreachChannel }> {
   const s = await getStores(env);
   // Thread the real worker env so single-case outreach honors the EMAIL provider (simulated default;
   // inert SendGrid stub when configured) and DataChaser — the same selection campaigns already use (H2).
-  return { cases: s.cases, events: s.events, outcomes: s.outcomes, channels: (t) => resolveChannel(t, env) };
+  // The contact preferences decide the default channel and refuse a declined one (#886).
+  return {
+    cases: s.cases, events: s.events, outcomes: s.outcomes, contactPreferences: s.contactPreferences,
+    channels: (t) => resolveChannel(t, env),
+  };
 }
+
+/** 409 for a send or preview on a channel the subject declined, or when they declined every channel (#886). */
+const preferenceRefused = (err: ContactPreferenceError): Response =>
+  json({ error: err.code, message: err.message, ...(err.channel ? { channel: err.channel } : {}) }, err.status);
 async function rerunDeps(env: CasesEnv): Promise<RerunDeps> {
   const s = await getStores(env);
   const engine = await routedEngineForEnv(env);
@@ -117,6 +145,10 @@ async function appointmentDeps(env: CasesEnv): Promise<AppointmentDeps> {
 
 const json = (data: unknown, status = 200, extraHeaders: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...extraHeaders } });
+
+/** 409 for outreach on a closed case whose cycle has ended (#882): sending would reopen it. */
+const earlierCycleClosed = (err: EarlierCycleClosedError): Response =>
+  json({ error: err.code, message: err.message, id: err.caseId, evaluationPeriod: err.evaluationPeriod }, err.status);
 
 /**
  * POST /api/cases/patient-outreach `{ caseIds, channel?, templateId?, dryRun? }` (#868). `dryRun` returns
@@ -150,12 +182,15 @@ async function patientOutreach(req: Request, env: CasesEnv, actor: string): Prom
   const deps = await actionDeps(env);
   try {
     const cases = await loadPatientOutreachCases(deps, caseIds);
+    // The channel, resolved ONCE and before anything is sent or recorded (#886): a declined channel or a
+    // subject who declined every channel is a 409 here, never a per-case failure inside the send loop.
+    const channel = await sendChannelFor(deps, cases[0]!.employeeId, isChannelType(input.channel) ? input.channel : undefined);
     if (input.dryRun === true) {
-      return json({ dryRun: true, messages: await previewPatientOutreachMessages(deps, cases, templateId) });
+      return json({ dryRun: true, channel, messages: await previewPatientOutreachMessages(deps, cases, templateId, channel) });
     }
-    const channel = isChannelType(input.channel) ? input.channel : undefined; // absent → EMAIL
-    return json({ dryRun: false, ...(await sendPatientOutreachMessages(deps, cases, { channel, templateId, actor })) });
+    return json({ dryRun: false, channel, ...(await sendPatientOutreachMessages(deps, cases, { channel, templateId, actor })) });
   } catch (err) {
+    if (err instanceof ContactPreferenceError) return preferenceRefused(err);
     if (err instanceof PatientOutreachError) {
       return json({ error: err.code, message: err.message, ...(err.caseId ? { id: err.caseId } : {}) }, err.status);
     }
@@ -163,6 +198,49 @@ async function patientOutreach(req: Request, env: CasesEnv, actor: string): Prom
   }
 }
 
+
+/**
+ * POST /api/cases/contact-log `{ caseIds, channel, result, note? }` (#886): staff record a contact they made
+ * themselves; nothing is sent (`case/contact-log.ts`). Every field is checked before a case is read.
+ */
+async function contactLog(req: Request, env: CasesEnv, actor: string): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "invalid_request", message: "a JSON body is required" }, 400);
+  }
+  const input = (body ?? {}) as { caseIds?: unknown; channel?: unknown; result?: unknown; note?: unknown };
+  const bad = (parameter: string, message: string) => json({ error: "invalid_request", parameter, message }, 400);
+  if (!Array.isArray(input.caseIds) || !input.caseIds.every((id): id is string => typeof id === "string")) {
+    return bad("caseIds", "caseIds must be an array of case ids");
+  }
+  const caseIds = input.caseIds.map((id) => id.trim());
+  if (caseIds.length === 0 || caseIds.includes("")) return bad("caseIds", "caseIds must name at least one case, and no blank one");
+  if (caseIds.length > CONTACT_LOG_MAX_CASES) return bad("caseIds", `one contact covers at most ${CONTACT_LOG_MAX_CASES} gaps`);
+  if (new Set(caseIds).size !== caseIds.length) return bad("caseIds", "caseIds names a case more than once");
+  if (!isContactLogChannel(input.channel)) return bad("channel", "channel must be PHONE, SMS, EMAIL, IN_PERSON or LETTER");
+  if (!isContactLogResult(input.result)) {
+    return bad("result", "result must be REACHED, NO_ANSWER, LEFT_MESSAGE, WRONG_NUMBER or DECLINED");
+  }
+  if (input.note !== undefined && input.note !== null && typeof input.note !== "string") return bad("note", "note must be a string");
+  const note = typeof input.note === "string" ? input.note.trim() : "";
+  if (note.length > CONTACT_NOTE_MAX) return bad("note", `note is at most ${CONTACT_NOTE_MAX} characters`);
+
+  const s = await getStores(env);
+  try {
+    const out = await logContact(
+      { cases: s.cases, events: s.events },
+      { caseIds, channel: input.channel, result: input.result, note: note || null, actor },
+    );
+    return json(out);
+  } catch (err) {
+    if (err instanceof ContactLogError) {
+      return json({ error: err.code, message: err.message, ...(err.caseId ? { id: err.caseId } : {}) }, err.status);
+    }
+    throw err;
+  }
+}
 
 export async function handleCases(req: Request, env: CasesEnv, actor = "system"): Promise<Response | null> {
   const url = new URL(req.url);
@@ -175,6 +253,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     // One message about several of one patient's gaps (#868). No case-action pattern below matches a single
     // trailing segment, but it is matched first so that a later `/api/cases/*` action cannot capture it.
     if (url.pathname === "/api/cases/patient-outreach") return patientOutreach(req, env, actor);
+    if (url.pathname === "/api/cases/contact-log") return contactLog(req, env, actor);
     const assignId = url.pathname.match(/^\/api\/cases\/([^/]+)\/assign$/)?.[1];
     if (assignId) {
       // An absent/blank `assignee` clears the assignment (the unassign path). Anything else must be
@@ -233,9 +312,16 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const sendId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions\/outreach$/)?.[1];
     if (sendId) {
       const channelParam = url.searchParams.get("channel");
-      const channel = isChannelType(channelParam) ? channelParam : undefined; // invalid/absent → undefined → EMAIL default
-      const detail = await sendOutreach(await actionDeps(env), sendId, actor, url.searchParams.get("templateId"), channel);
-      return detail ? json(detail) : json({ error: "not_found", id: sendId }, 404);
+      // Invalid/absent → undefined → the subject's preference, else the first channel not declined (#886).
+      const channel = isChannelType(channelParam) ? channelParam : undefined;
+      try {
+        const detail = await sendOutreach(await actionDeps(env), sendId, actor, url.searchParams.get("templateId"), channel);
+        return detail ? json(detail) : json({ error: "not_found", id: sendId }, 404);
+      } catch (err) {
+        if (err instanceof EarlierCycleClosedError) return earlierCycleClosed(err);
+        if (err instanceof ContactPreferenceError) return preferenceRefused(err);
+        throw err;
+      }
     }
     const rerunId = url.pathname.match(/^\/api\/cases\/([^/]+)\/rerun-to-verify$/)?.[1];
     if (rerunId) {
@@ -347,8 +433,16 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // Outreach preview (GET) — render the default template for the case (no state change).
   const previewId = url.pathname.match(/^\/api\/cases\/([^/]+)\/actions\/outreach\/preview$/)?.[1];
   if (previewId && req.method === "GET") {
-    const preview = await previewOutreach(await actionDeps(env), previewId, url.searchParams.get("templateId"));
-    return preview ? json(preview) : json({ error: "not_found", id: previewId }, 404);
+    try {
+      const channelParam = url.searchParams.get("channel");
+      const channel = isChannelType(channelParam) ? channelParam : undefined; // as the send reads it (#886)
+      const preview = await previewOutreach(await actionDeps(env), previewId, url.searchParams.get("templateId"), channel);
+      return preview ? json(preview) : json({ error: "not_found", id: previewId }, 404);
+    } catch (err) {
+      if (err instanceof EarlierCycleClosedError) return earlierCycleClosed(err);
+      if (err instanceof ContactPreferenceError) return preferenceRefused(err);
+      throw err;
+    }
   }
 
   // Case detail — the case row + its evidence (the outcome from the case's last run) + timeline.
@@ -361,7 +455,7 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
     const events = (await getStores(env)).events;
     const timeline = await events.caseTimeline(detailId);
     const latest = await events.latestOutreachDeliveryStatus(detailId);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = practiceToday();
     const immunizationForecast =
       c.measureId === "adult_immunization" ? await resolveForecaster(env).forecast(c.employeeId, today) : undefined;
     return json(toCaseDetail(c, outcome, timeline, latest, immunizationForecast, employeeLookup));
@@ -423,8 +517,8 @@ export async function handleCases(req: Request, env: CasesEnv, actor = "system")
   // "why flagged" axis, distinct from case *status* (OPEN/CLOSED/…). Post-filtered in JS like
   // site/search so X-Total-Count stays exact for paging.
   const outcome = q.get("outcome")?.trim().toUpperCase().replace(/[\s-]+/g, "_") || undefined;
-  // Outreach filter — `none` keeps the cases with no OUTREACH_SENT record (the worklist-gap badge's
-  // definition), `any` the rest. The dashboard shell used to pull the whole open list to count the
+  // Outreach filter — `none` keeps the cases with no contact attempt, neither an OUTREACH_SENT nor a
+  // CONTACT_LOGGED record (#886, the worklist-gap badge's "not contacted yet"), `any` the rest. The dashboard shell used to pull the whole open list to count the
   // gaps client-side over the first page it was handed, so the badge read "50" on the pilot whatever
   // the true count; it now asks for `outreach=none&limit=1` and reads X-Total-Count. An unrecognised
   // token is a 400 naming the accepted values, like the panel filters — never a silently dropped filter.

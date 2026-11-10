@@ -91,6 +91,7 @@ export class PgCaseStore implements CaseStore {
     const planFrom = (row: CaseRow | null) =>
       planCaseUpsert(row ? { status: row.status, currentOutcomeStatus: row.current_outcome_status, closedBy: row.closed_by } : null, input.outcomeStatus, now, {
         outOfPopulation: input.outOfPopulation,
+        earlierCycle: input.earlierCycle,
       });
     // An operator's instruction outlives a run that learned nothing new (`planNextAction`).
     const actionFrom = (row: CaseRow | null) =>
@@ -318,7 +319,7 @@ export class PgCaseStore implements CaseStore {
         existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
         input.outcomeStatus,
         now,
-        { outOfPopulation: input.outOfPopulation },
+        { outOfPopulation: input.outOfPopulation, earlierCycle: input.earlierCycle },
       );
       if (plan.op === "noop") continue; // stays null in `results`, exactly as the per-row call returns
       const action = planNextAction(
@@ -657,10 +658,10 @@ export class PgCaseStore implements CaseStore {
       binds.push(query.outcome);
     }
     if (query.outreach) {
-      // The same definition `outreachSentCounts` uses — `action_type = 'OUTREACH_SENT'` — as a
+      // The same definition `contactAttemptCounts` uses — a send or a logged contact (#886) — as a
       // correlated EXISTS, so the badge stops counting outreach for rows it is about to discard.
       const exists = `EXISTS (SELECT 1 FROM ${SPIKE_SCHEMA}.case_actions ca
-                               WHERE ca.case_id = ${T}.id AND ca.action_type = 'OUTREACH_SENT')`;
+                               WHERE ca.case_id = ${T}.id AND ca.action_type IN ('OUTREACH_SENT', 'CONTACT_LOGGED'))`;
       where.push(query.outreach === "none" ? `NOT ${exists}` : exists);
     }
     // `created_at` is TIMESTAMPTZ here and an ISO-Z string on the floor, so both sides compare the UTC

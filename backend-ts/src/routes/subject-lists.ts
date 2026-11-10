@@ -126,6 +126,9 @@ async function getReport(
     id,
     measurementYear,
     measureIds,
+    undefined,
+    // The evidence columns (#875) are the CSV's; the JSON summary carries no rows to put them on.
+    { cqlFacts: format === "csv" },
   );
   if (!result.ok) return json(result.body, result.status);
   const { report } = result;

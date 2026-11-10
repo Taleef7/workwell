@@ -50,6 +50,11 @@ test("run-created events: opened, re-checked, reopened, and each way a case clos
     say("CASE_RESOLVED", { reason: "CYCLE_ROLLED_OVER", priorPeriod: "2026-01-01", currentPeriod: "2027-01-01" }).summary,
     "Closed: a new measurement period began (2026-01-01 to 2027-01-01)",
   );
+  // #889: a retired measure's closure says so, never that a re-check found the measure met.
+  assert.equal(
+    say("CASE_RESOLVED", { reason: "MEASURE_RETIRED", measureId: "cms137", priorStatus: "OPEN" }).summary,
+    "Closed: this measure is no longer reported (CMS removed it from the ACO's set)",
+  );
   assert.equal(say("CASE_EXCLUDED", { exclusionReason: "Excluded on verification rerun." }).summary, "Excluded on verification rerun.");
   assert.equal(say("CASE_EXCLUDED", { disposition: "EXCLUDED" }).summary, "Closed as excluded");
 });
@@ -75,6 +80,19 @@ test("outreach reads its detail from the nested action, and says when it was aut
     "Sent by sms (automatic)",
   );
   assert.equal(say("CASE_OUTREACH_DELIVERY_UPDATED", { deliveryStatus: "FAILED" }).summary, "Delivery failed");
+});
+
+test("a logged contact (#886) says how and what came of it, and keeps the note staff typed", () => {
+  assert.deepEqual(say("CASE_CONTACT_LOGGED", { channel: "PHONE", result: "NO_ANSWER", note: "" }), {
+    label: "Contact Logged",
+    summary: "Called — no answer",
+  });
+  assert.equal(
+    say("CASE_CONTACT_LOGGED", { channel: "IN_PERSON", result: "REACHED", note: "at the front desk" }).summary,
+    "Spoke in person — reached, with the note: at the front desk",
+  );
+  assert.equal(say("CASE_CONTACT_LOGGED", { channel: "LETTER" }).summary, "Sent a letter", "no result recorded: none stated");
+  assert.equal(say("CASE_CONTACT_LOGGED", { channel: "FAX", result: "MAYBE" }).summary, "Contacted", "unknown values are left out");
 });
 
 test("appointments name the practice's zone; an unreadable time is left out, never printed raw", () => {

@@ -22,7 +22,7 @@ const json = (data: unknown, status = 200): Response =>
 async function deps(env: CampaignsEnv): Promise<CampaignDeps> {
   const s = await getStores(env);
   return {
-    cases: s.cases, events: s.events, outcomes: s.outcomes, campaigns: s.campaigns,
+    cases: s.cases, events: s.events, outcomes: s.outcomes, campaigns: s.campaigns, contactPreferences: s.contactPreferences,
     channels: (type: ChannelType) => resolveChannel(type, env),
   };
 }

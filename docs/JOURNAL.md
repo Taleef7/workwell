@@ -5,8 +5,112 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-06
+
+- **Custom measures kept apart from the CMS set (item 13).** Authored runs still export, now labelled:
+  QRDA III and MeasureReport say "not a CMS measure", and the CSVs' `executedLogic` names
+  `WorkWell-authored <Library> <version>`. The Measures grid and Studio label authored and unrunnable rows.
+  Studio refuses CMS eCQM / MIPS ids in a name or policy reference, and duplicate names; MCP's by-name lookup
+  answers `MEASURE_AMBIGUOUS` rather than pick. No schema change; authored cms122/cms125 keep the CMS id.
+
+## 2026-11-05
+
+- **CMS137 retired on Maui (#889).** The CY2027 final rule (CMS-1848-F) removed Quality IDs 305 (CMS137) and
+  493 from APP Plus, and the owner retired CMS137 on Maui: the stack routes five measures, and the profile's
+  new `retiredMeasureIds` names it. Un-routing alone would have left its open cases open for good (the
+  rollover closes only measures a run evaluated), so an all-programs run now closes a retired measure's
+  active cases, audit-first, as `MEASURE_RETIRED` (a system closure; counts in `RUN_COMPLETED.retired`).
+  Cards skip a measure the deployment does not run. The artifact, its MADiE gate and the 2027 translation
+  stay, routed nowhere. Standing correction 1 now says the final rule left the FHIR timeline unproposed.
+  No schema change. A rollback to a six-measure image reopens the closed cases (DEPLOY.md).
+- **A billed mammogram is not a result (owner decision).** CMS125's Mammography value set is LOINC only, and
+  WebChart's own report does not count a bill, so the shim, the dev-DB export and live ingest no longer derive
+  a LOINC imaging Observation from a CPT 77067 / HCPCS G0202 Procedure (ADR-044/057's mammogram half
+  withdrawn; us-core-sex stays). No deployed outcome moves: TWH and Maui run on the corpus, and staging runs
+  authored cms125. Over the dev-DB sample official CMS125 now retrieves nothing and refuses the batch. Open
+  questions: where WebChart charts a result, and whether a mapper may supply `category` (#892).
+- **Housekeeping.** Filed #892 (MIE's answers to the 24 data asks) and #893 (live payer and site); Coverage
+  comments cite #893, not #533/#591. E22 is recorded in LOCKED §4A.9 and the API-limit answer in
+  OPEN_QUESTIONS 4.2. #626 and #584 were re-scoped to what remains.
+
+## 2026-11-04
+
+- **Order options for all six pilot measures, each code approved by an admin (#620, #640).** Every measure
+  has an order set, one order or a choice the clinician makes (no default), and an order is offered only
+  where the measure's CQL found nothing qualifying: no HbA1c for a result over 9%, no order for an
+  uncontrolled blood pressure or for CMS137's engagement rate. Codes start PROPOSED; an admin approves,
+  rejects or revokes each on Admin → Order codes, audited, and a new mapping can only be created PROPOSED.
+  Cards offer each approved option and list the whole set; the case page shows the options, or why none
+  applies; Orders lists the choices. An approved clinic code rides as a second coding. No schema change.
+- **Log a contact, and each patient's preferred channel (#886).** Staff log a call, text, email, visit or
+  letter they made themselves on the case page (by default on the patient's other open gaps too); nothing is
+  sent, Open moves to In progress, and the gap leaves the "not contacted yet" count. A send now keeps a worked
+  case In progress. A new `contact_preferences` table (owner-approved DDL) holds a preferred channel and the
+  channels not to use: pickers open on it, a send on a declined channel is refused before anything is
+  recorded, and campaigns skip and count those patients. The staff seat may do both (LOCKED_DECISIONS §4A.9).
+
+## 2026-11-03
+
+- **The scorecard loads from what the worker kept (#884).** Each finished population run's per-measure read
+  is kept in the worker (three years of every scorecard measure, the working years evicted last), and the
+  warm after every population run and at boot fills it first. Compaction is still checked on every request,
+  and a compaction pass drops what is kept. At Maui's shape locally (20,000 patients, Postgres at 0.25 CPU) a
+  load went from 5.1–5.3 s to about 0.25 s with the same body. The practice view says a failed load in words
+  with Retry, as the clinician's did, and a slow first load says why. Restart after hand SQL on runs or
+  outcomes (DEPLOY.md).
+
+## 2026-11-02
+
+- **The year change (#882, LOCKED_DECISIONS §4A.10).** The 1 January rollover stays, and a cycle that has
+  ended now opens nothing: a run, re-check or outreach over it leaves its cases closed (outreach answers 409),
+  and campaigns skip it. A run scoring an ended cycle is marked by the server and is never anyone's "latest";
+  the lead re-scores last year from the scorecard, January to March. "Today" is the practice's date, and
+  Maui's zone is `Pacific/Honolulu` (MIE to confirm, OPEN_QUESTIONS 4.16); the nightly stays at 12:00 UTC,
+  not the "06 UTC" #882 first said. One population run at a time (409 `run_in_progress`). The rehearsal
+  takes `--today`; the exact-time year edges stay UTC (MEASURES.md). Rehearsed in three steps on 1,000
+  patients on a local Postgres: 31 December opened 783 cases, 1 January rolled all 783 over, and the
+  re-score of 2026 planned on 4 January opened and reopened none, while Programs stayed on 1 January's run.
+  - Off the plan: the global date filter keeps UTC days, because the server reads `from`/`to` as UTC days;
+    only the scorecard's Maui suite runs at a shifted clock, the other two read no date. Two older tests fail
+    whenever the clock is in January (the store contract's non-calendar `createdFrom`, the cases-CSV parity
+    guard): a follow-up.
+  - From review: MCP `get_run_summary` with no run skips a re-score; a queued planned run holds the button
+    too; the case page takes the year from the server (`cycleYear`), so a half-year starting 1 January is
+    not "2026"; the January list note is Maui's only. On TWH a run is marked when any of its measures' cycles
+    ended, so a backdated run's current-cycle rows are nobody's "latest" either.
+- **The lead and the staff seat differ (#880, LOCKED_DECISIONS §4A.9).** `quality-staff@` is a new role,
+  `ROLE_QUALITY_STAFF`: it lands on Cases → Assigned to you, works one case at a time, exports the CSVs and
+  reads the scorecard. Bulk assign, campaigns, attributed lists, panel owners, runs, People, QRDA/MeasureReport
+  and MCP stay with the lead; a rule that does not name the role refuses it, so a missed gate is a 403.
+  - **Rollout:** a signed-in staff session keeps its old role for at most one 15-minute access token (a
+    refresh re-reads it, and the browser now stores the new role). An MCP grant the seat holds is refused at
+    once; the admin revokes it at deploy.
+- **The case page says what CQL found and what else is due.** "Why this was flagged" shows the result and
+  its date (`cqlFindings`, the list CSV's own reading; MCP drops it). "Other open gaps" lists the patient's
+  other cases from the new `GET /api/employees/:id/open-cases`, with a way to message about all of them.
+- An OVERDUE card on an official measure leads with what closes the gap (`needFor`, AI_GUARDRAILS §1.1).
+- CMS56 and CMS133 (surgical) are Deprecated: a seeded Draft row retires once, audited, and an edited one is
+  left with a WARN. "Not in population" reads "Not eligible". The site picker shows only where a page reads
+  the site. The screens say what each is for; the practice's own terms are OPEN_QUESTIONS 1.5.
+
 ## 2026-10-30
 
+- **The list report says what CQL found for each patient: the result and its date (#875).** fqm already
+  computes every define. A run now keeps the values of a few named ones per measure as
+  `evidence_json.cqlFacts`, rendered as text where they are computed, for patients the measure scores. The
+  report CSV gains `evidenceStatus`, `evidenceDate`, `evidenceDateSource` and `evidenceDetail` (§6.6). The
+  date comes from CMS122's and CMS165's own date defines. CMS2, CMS130 and CMS137 show their values verbatim.
+  CMS125 says its logic exposes no such define (#876 adds one for 2027). Rows recorded before this say
+  `NOT_RECORDED_BY_RUN`.
+  - **Gate:** on a local 20k run, the facts add about 100-400 bytes per fact-bearing row. The scorecard, run
+    aggregate and scoring-logic reads stay within 2-7%, against an A/A noise floor of about 2%. A first
+    measurement showed 15-30% only because the loader copied pre-compressed values, a measurement artifact.
+    A 500-patient batch evaluates within noise of a batch that records nothing (−5% to +1.4%), since fqm
+    computes every define either way; only patients in an initial population are rendered.
+  - The renderer leaves out References however stated (an identifier or a name alone), and writes
+    well-formed, one-line text. The report CSV's file name carries the day it was generated.
+  - Kept out of the AI explain prompt and MCP (AI_GUARDRAILS §6). The MADiE end-to-end test checks the
+    status of every deck patient's rates.
 - **The ACO's attributed list on the work screens, and its report no longer times out live (#874).**
   - **The timeout:** on Maui the report ran past the 30 s statement limit. Measured locally at 2.4M rows, most
     of its time was choosing each measure's run: a one-row read that still sorted by time, so Postgres walked

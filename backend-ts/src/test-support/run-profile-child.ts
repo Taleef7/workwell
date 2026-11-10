@@ -10,11 +10,15 @@ const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
  * observed rather than simulated. `extraEnv` sets further variables before any import — which is the
  * only way to test something read at first access, since an in-process test has already imported the
  * module by the time it could set the variable.
+ *
+ * `opts.now` starts the child's clock at that instant (`shift-now.ts`, loaded right after tsx, before the script's imports), so a
+ * suite can run where the practice's date and the UTC date differ (#882).
  */
 export function runProfileChild(
   instance: string | undefined,
   source: string,
   extraEnv: Record<string, string | undefined> = {},
+  opts: { now?: string } = {},
 ): Record<string, unknown> {
   const env = { ...process.env };
   if (instance === undefined) delete env.WORKWELL_INSTANCE;
@@ -28,8 +32,8 @@ export function runProfileChild(
   }
   const result = spawnSync(
     process.execPath,
-    ["--import", "tsx", "--input-type=module", "-e", source],
-    { cwd: backendRoot, env, encoding: "utf8" },
+    ["--import", "tsx", ...(opts.now ? ["--import", "./src/test-support/shift-now.ts"] : []), "--input-type=module", "-e", source],
+    { cwd: backendRoot, env: opts.now ? { ...env, WORKWELL_TEST_NOW: opts.now } : env, encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr);
   return { ...(JSON.parse(result.stdout.trim()) as Record<string, unknown>), stderr: result.stderr };

@@ -14,6 +14,11 @@ const testScript = `
   const env = { DB: db };
   const runStore = new SqliteRunStore(db);
   const outcomes = new SqliteOutcomeStore(db);
+  // cms122 proposes an HbA1c only where its CQL found no assessment (#620), as a run records it (#875).
+  const noRecord = {
+    official: { ecqmId: "122FHIR", version: "1.0.000", populationResults: { ipp: true, denom: true, numer: true, denex: false, denexcep: false } },
+    cqlFacts: { spec: 1, values: [{ define: "Has No Record Of Glycemic Status Assessment", value: "true" }] },
+  };
 
   const olderRun = await runStore.createRun({
     scopeType: "ALL_PROGRAMS",
@@ -23,7 +28,7 @@ const testScript = `
     measurementPeriodStart: "2026-06-19T00:00:00.000Z",
     measurementPeriodEnd: "2026-06-19T00:00:00.000Z",
   });
-  await outcomes.recordOutcome({ runId: olderRun.id, subjectId: "pat-001", measureId: "cms122", status: "OVERDUE", evidence: {} });
+  await outcomes.recordOutcome({ runId: olderRun.id, subjectId: "pat-001", measureId: "cms122", status: "OVERDUE", evidence: noRecord });
   await outcomes.recordOutcome({ runId: olderRun.id, subjectId: "pat-001", measureId: "audiogram", status: "OVERDUE", evidence: {} });
   await runStore.finalizeRun(olderRun.id, "COMPLETED");
 
@@ -35,8 +40,8 @@ const testScript = `
     measurementPeriodStart: "2026-06-19T00:00:00.000Z",
     measurementPeriodEnd: "2026-06-19T00:00:00.000Z",
   });
-  await outcomes.recordOutcome({ runId: newerRun.id, subjectId: "emp-001", measureId: "cms122", status: "OVERDUE", evidence: {} });
-  await outcomes.recordOutcome({ runId: newerRun.id, subjectId: "cypress-mrn-foreign", measureId: "cms122", status: "OVERDUE", evidence: {} });
+  await outcomes.recordOutcome({ runId: newerRun.id, subjectId: "emp-001", measureId: "cms122", status: "OVERDUE", evidence: noRecord });
+  await outcomes.recordOutcome({ runId: newerRun.id, subjectId: "cypress-mrn-foreign", measureId: "cms122", status: "OVERDUE", evidence: noRecord });
   await runStore.finalizeRun(newerRun.id, "COMPLETED");
 
   const res = await handleOrders(new Request("http://x/api/orders/proposals"), env);

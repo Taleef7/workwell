@@ -166,7 +166,7 @@ describe("CaseDetailPage pilot mode controls", () => {
       expect(screen.getAllByText("Alice Walker").length).toBeGreaterThan(0);
     });
 
-    expect(screen.getByText("What the measure found")).toBeInTheDocument();
+    expect(screen.getByText("Why this was flagged")).toBeInTheDocument();
     expect(screen.queryAllByRole("button", { name: "View Raw Evidence" }).length > 0).toBe(shown);
     expect(screen.queryAllByText("Evaluated resource").length > 0).toBe(shown);
   });

@@ -14,14 +14,13 @@
  */
 import { getStores } from "../stores/factory.ts";
 import type { CloudDatabase, CloudBucket } from "@mieweb/cloud";
-import { employeeById, providerById, isRunnableMeasure, DIRECTORY } from "../config/deployment-profile.ts";
+import { employeeById, providerById, DIRECTORY } from "../config/deployment-profile.ts";
 import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data-source.ts";
 import { profileForId } from "../engine/ingress/webchart/live-directory.ts";
 import { providerIdsOwnedBy } from "../case/panel-assignment.ts";
-import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
-import { isOfficialRouted } from "../wiring/official-routing.ts";
-import { buildScorecard } from "../compliance/scorecard.ts";
+import { buildScorecard, scorecardMeasures, scorecardRows } from "../compliance/scorecard.ts";
 import { linkedProviderOf } from "./providers.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 export interface ScorecardEnv extends DataSourceEnv {
   DB: CloudDatabase;
@@ -32,8 +31,8 @@ export interface ScorecardEnv extends DataSourceEnv {
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-/** The roles that read the whole practice's card. */
-const PRACTICE_ROLES: ReadonlySet<string> = new Set(["ROLE_CASE_MANAGER", "ROLE_ADMIN"]);
+/** The roles that read the whole practice's card: the lead, the staff seat (#880) and the admin. */
+const PRACTICE_ROLES: ReadonlySet<string> = new Set(["ROLE_CASE_MANAGER", "ROLE_QUALITY_STAFF", "ROLE_ADMIN"]);
 
 export async function handleScorecard(
   req: Request,
@@ -55,7 +54,7 @@ export async function handleScorecard(
   }
   const q = url.searchParams;
   const now = clock();
-  const today = now.toISOString().slice(0, 10);
+  const today = practiceToday(now);
 
   // The year defaults to the current one, unlike the attributed-list report: that report is a file the
   // ACO keeps for a year, while this page opens on what the practice is working now and says which year.
@@ -88,11 +87,12 @@ export async function handleScorecard(
       // The scoped lookup, with the env: on a deployment showing the live WebChart tenant, its patients'
       // PCP is that tenant's provider, which the static list does not hold.
       providerOf: (id) => providerById(id, env),
+      // The worker's kept reads (#884), which the warm fills after each population run and at boot.
+      rowsCache: scorecardRows,
     },
     {
       measurementYear,
-      // The attributed-list report's set: runnable and official-routed, the measures with populations.
-      measures: MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id) && isOfficialRouted(m.id)),
+      measures: scorecardMeasures(),
       providerIds: !linked && panel === "me" ? new Set(owned) : null,
       onlyProvider: linked?.id ?? null,
       ownsPanel: owned.length > 0,

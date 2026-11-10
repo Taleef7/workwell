@@ -136,8 +136,17 @@ export class SqliteCaseEventStore implements CaseEventStore {
   }
 
   async outreachSentCounts(caseIds: readonly string[]): Promise<Record<string, number>> {
+    return this.actionCounts(caseIds, ["OUTREACH_SENT"]);
+  }
+
+  async contactAttemptCounts(caseIds: readonly string[]): Promise<Record<string, number>> {
+    return this.actionCounts(caseIds, ["OUTREACH_SENT", "CONTACT_LOGGED"]);
+  }
+
+  private async actionCounts(caseIds: readonly string[], actionTypes: readonly string[]): Promise<Record<string, number>> {
     if (caseIds.length === 0) return {};
     const out: Record<string, number> = {};
+    const types = actionTypes.map((t) => `'${t}'`).join(", "); // fixed literals, never caller input
     // Chunked (2026-09-13): this bound one placeholder per id, so a work list wide enough — the panel
     // pre-filter hands it every open case — would have hit SQLite's parameter cap and failed the whole
     // read. The ceiling never notices, because it binds the set as one array.
@@ -146,7 +155,7 @@ export class SqliteCaseEventStore implements CaseEventStore {
       const { results } = await this.db
         .prepare(
           `SELECT case_id, COUNT(*) AS n FROM case_actions
-            WHERE action_type = 'OUTREACH_SENT' AND case_id IN (${placeholders})
+            WHERE action_type IN (${types}) AND case_id IN (${placeholders})
             GROUP BY case_id`,
         )
         .bind(...slice)

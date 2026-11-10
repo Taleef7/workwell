@@ -10,6 +10,8 @@
  * ordering as the other actions (recordCaseEvent writes the case_action + audit_event
  * atomically before the case row is patched) — upholding the hard audit invariant.
  */
+import type { ContactPreferenceStore } from "../stores/contact-preference-store.ts";
+import { resolveSendChannel } from "./contact-preference.ts";
 import type { CaseStore, CaseRecord } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
@@ -18,6 +20,9 @@ import { resolveChannel, type ChannelType, type ChannelEnv, type OutreachChannel
 import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 import { outcomeForCase } from "./case-outcome.ts";
 import { NEUTRAL_CARE_ITEM, careItemFor, joinCareItems } from "./care-item.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { ACTIVE_CASE_STATUSES } from "./case-logic.ts";
+import { isEarlierCycle } from "../run/compliance-period.ts";
 
 interface OutreachTemplateContent {
   id: string | null;
@@ -134,6 +139,8 @@ export interface OutreachPreview {
   bodyText: string;
   employeeName: string;
   measureName: string;
+  /** The channel the send would use (#886): the one asked for, else the subject's preference. */
+  channel: ChannelType;
   dueDate?: string;
 }
 
@@ -141,7 +148,22 @@ export interface OutreachDeps {
   cases: CaseStore;
   events: CaseEventStore;
   outcomes: OutcomeStore;
+  /** How each subject wants to be reached (#886): a send defaults to it and refuses a declined channel. */
+  contactPreferences: ContactPreferenceStore;
   channels?: (type: ChannelType) => OutreachChannel; // default: resolveChannel(type, {}) = all simulated
+}
+
+/**
+ * The channel a send to this subject uses (#886): the one asked for unless the subject declined it (409
+ * `channel_declined`), else their preferred one, else the first of EMAIL, SMS, PHONE not declined (409
+ * `all_channels_declined` when none is left). Every send and preview asks here BEFORE any audit or send.
+ */
+export async function sendChannelFor(
+  deps: Pick<OutreachDeps, "contactPreferences">,
+  subjectId: string,
+  requested: ChannelType | undefined,
+): Promise<ChannelType> {
+  return resolveSendChannel(await deps.contactPreferences.get(subjectId), requested);
 }
 
 /** Channel picker: caller-provided factory, else all-simulated via resolveChannel (#75 E5). */
@@ -180,7 +202,7 @@ function computeDueDate(evidence: Record<string, unknown>, evaluationPeriod: str
   const due = d.toISOString().slice(0, 10);
   // #150 M13: an OVERDUE case's due date (last_exam + window) is already in the past — never render a
   // past "due by" date in outreach; clamp to today ("due now"). Parity with Java computeDueDate.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   return due < today ? today : due;
 }
 
@@ -217,9 +239,13 @@ export async function previewOutreach(
   deps: OutreachDeps,
   caseId: string,
   templateId?: string | null,
+  channel?: ChannelType,
 ): Promise<OutreachPreview | null> {
   const c = await deps.cases.getCase(caseId);
   if (!c) return null;
+  refuseEarlierCycleClosed(c);
+  // The same answer the send would give (#886): a preview of a message that could not be sent is refused.
+  const sendChannel = await sendChannelFor(deps, c.employeeId, channel);
   const { employeeName, measureName, dueDate } = await renderContext(deps, c);
   const isPatient = DEPLOYMENT_PROFILE.subjectTerm === "patient";
   const careItem = careItemFor(c.measureId);
@@ -231,13 +257,14 @@ export async function previewOutreach(
     bodyText: renderTemplate(t.bodyText, employeeName, measureName, dueDate, c.currentOutcomeStatus, careItem),
     employeeName,
     measureName,
+    channel: sendChannel,
     ...(isPatient ? {} : { dueDate }),
   };
 }
 
 /** Options for a single channel-aware dispatch (#75 E5). */
 export interface DispatchOptions {
-  channel?: ChannelType; // default "EMAIL"
+  channel?: ChannelType; // default: the subject's preference, else the first not declined (#886)
   templateId?: string | null;
   campaignId?: string | null;
   actor: string;
@@ -261,7 +288,7 @@ export interface DispatchResult {
 
 /**
  * Shared channel-aware dispatch core (#75 E5): render → send via the resolved channel →
- * record action+audit (event-before-patch) → set the case OPEN with a follow-up next action.
+ * record action+audit (event-before-patch) → set the case OPEN (IN_PROGRESS stays, #886) with a follow-up next action.
  * Powers both the single-case send and (later) campaign fan-out. EMAIL is the default channel;
  * its behavior is unchanged from the pre-refactor send.
  */
@@ -270,7 +297,8 @@ export async function dispatchOutreach(
   existing: CaseRecord,
   opts: DispatchOptions,
 ): Promise<DispatchResult> {
-  const channelType: ChannelType = opts.channel ?? "EMAIL";
+  // Before any audit or send (#886): a declined channel is refused, an absent one follows the preference.
+  const channelType: ChannelType = await sendChannelFor(deps, existing.employeeId, opts.channel);
   const { employeeName, measureName, dueDate } = await renderContext(deps, existing);
   const careItem = careItemFor(existing.measureId);
   const t = forCareItem(resolveTemplate(opts.templateId, existing.currentOutcomeStatus, measureName), careItem);
@@ -358,7 +386,9 @@ export async function dispatchPatientOutreach(
   cases: readonly CaseRecord[],
   opts: DispatchOptions,
 ): Promise<DispatchResult[]> {
-  const channelType: ChannelType = opts.channel ?? "EMAIL";
+  if (cases.length === 0) throw new OutreachError("dispatchPatientOutreach takes one patient's cases");
+  // Before any audit or send (#886): a declined channel is refused, an absent one follows the preference.
+  const channelType: ChannelType = await sendChannelFor(deps, cases[0]!.employeeId, opts.channel);
   const { template: t, subject, body } = await renderPatientMessage(deps, cases, opts.templateId);
   const delivery = sendMessage(deps, channelType, cases[0]!.employeeId, subject, body);
   // The message is out: each case is recorded on its own, so one case's failed record never turns the
@@ -391,6 +421,9 @@ async function recordDispatch(
   const { actor } = opts;
   const { singular } = subjectNoun(DEPLOYMENT_PROFILE);
   const nextAction = `Wait for ${singular} follow-up, then rerun to verify closure.`;
+  // A case staff are already working (IN_PROGRESS: a logged contact, an appointment) stays so (#886); any
+  // other status opens, as before (a send on a current-cycle closed case reopens it).
+  const caseStatus = (existing.status ?? "").toUpperCase() === "IN_PROGRESS" ? "IN_PROGRESS" : "OPEN";
   const actionPayload: Record<string, unknown> = {
     autoTriggered: false,
     channel: channelType,
@@ -418,14 +451,14 @@ async function recordDispatch(
       refCaseId: existing.id,
       refMeasureVersionId: existing.measureId,
       payload: {
-        caseStatus: "OPEN",
+        caseStatus,
         nextAction,
         outcomeStatus: existing.currentOutcomeStatus,
         action: actionPayload,
       },
     },
   });
-  await deps.cases.patchCase(existing.id, { status: "OPEN", nextAction });
+  await deps.cases.patchCase(existing.id, { status: caseStatus, nextAction });
   return {
     caseId: existing.id,
     employeeId: existing.employeeId,
@@ -448,6 +481,8 @@ export async function sendOutreach(
 ): Promise<CaseDetail | null> {
   const existing = await deps.cases.getCase(caseId);
   if (!existing) return null;
+  // Before any audit or send: `dispatchOutreach` reopens the case it messages.
+  refuseEarlierCycleClosed(existing);
   await dispatchOutreach(deps, existing, { channel, templateId, actor });
   return buildDetail(deps, caseId);
 }
@@ -502,3 +537,23 @@ export async function updateOutreachDelivery(
 
 /** A bad-request-class outreach failure (the route maps this to HTTP 400). */
 export class OutreachError extends Error {}
+
+/**
+ * A closed case whose cycle has ended (#882, LOCKED_DECISIONS §4A.10): messaging the patient about a year
+ * that is over would reopen it (`dispatchOutreach` sets it OPEN). The routes answer 409 with this code.
+ * The case's current-year gap, if any, is its own case on the work list.
+ */
+export class EarlierCycleClosedError extends Error {
+  readonly status = 409;
+  readonly code = "earlier_cycle_closed";
+  constructor(readonly caseId: string, readonly evaluationPeriod: string) {
+    super(`The case's cycle (${evaluationPeriod}) has ended and the case is closed, so no outreach is sent for it.`);
+    this.name = "EarlierCycleClosedError";
+  }
+}
+
+/** Refuse outreach on a closed case of a cycle that has ended; a closed current-cycle case is unaffected. */
+function refuseEarlierCycleClosed(c: { id: string; status: string; measureId: string; evaluationPeriod: string }): void {
+  if ((ACTIVE_CASE_STATUSES as readonly string[]).includes(c.status)) return;
+  if (isEarlierCycle(c.measureId, c.evaluationPeriod, practiceToday())) throw new EarlierCycleClosedError(c.id, c.evaluationPeriod);
+}

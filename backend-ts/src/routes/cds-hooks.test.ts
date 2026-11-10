@@ -87,6 +87,10 @@ before(async () => {
   await outcomes.recordOutcome({ runId: completed.id, subjectId: "emp-006", measureId: "flu_vaccine", status: "COMPLIANT", evaluationPeriod: "2026-06-12", evidence: {} });
   // emp-007: evaluated and clean — the ONLY subject that legitimately gets an empty card list.
   await outcomes.recordOutcome({ runId: completed.id, subjectId: "emp-007", measureId: "audiogram", status: "COMPLIANT", evaluationPeriod: "2026-06-12", evidence: {} });
+  // emp-008 (#889): clean on what this deployment runs, OVERDUE on a measure it does not (cms137 is routed
+  // nowhere here, as on Maui since its retirement). That stored row is history, never a card.
+  await outcomes.recordOutcome({ runId: completed.id, subjectId: "emp-008", measureId: "audiogram", status: "COMPLIANT", evaluationPeriod: "2026-06-12", evidence: {} });
+  await outcomes.recordOutcome({ runId: completed.id, subjectId: "emp-008", measureId: "cms137", status: "OVERDUE", evaluationPeriod: "2026-01-01", evidence: { expressionResults: [] } });
   // wc|4821: the live-namespace subject, reachable only if a bare hook patientId is tried as `wc|<id>`.
   await outcomes.recordOutcome({ runId: completed.id, subjectId: "wc|4821", measureId: "audiogram", status: "OVERDUE", evaluationPeriod: "2026-06-12", evidence: OVERDUE_EVIDENCE });
 
@@ -192,6 +196,11 @@ test("an evaluated-and-clean subject gets an EMPTY card list — the only correc
   assert.deepEqual(cards, []);
 });
 
+test("a measure this deployment does not run returns no card, though its stored outcome is OVERDUE (#889)", async () => {
+  const { cards } = (await (await post(INVOKE, hookBody("emp-008")))!.json()) as { cards: unknown[] };
+  assert.deepEqual(cards, [], "only the runnable measure counts, and it is met");
+});
+
 test("an unknown patient, and a mid-run patient, each get a CARD saying so — never silence", async () => {
   for (const patientId of ["nobody-at-all", "emp-mid"]) {
     const { cards } = (await (await post(INVOKE, hookBody(patientId)))!.json()) as {
@@ -230,6 +239,17 @@ test("every invocation writes an audit event carrying the uuids it emitted", asy
   const forThatCall = after[after.length - 1]!.payload as Record<string, unknown>;
   const recorded = (forThatCall["cards"] as Array<{ uuid: string; measureId: string | null }>).map((c) => c.uuid);
   assert.deepEqual(recorded, returned, "the ledger must record exactly the uuids the client received");
+  // #640: and every suggestion it offered, with its code, so an accepted suggestion id resolves to the
+  // order it proposed without recomputing against a catalog that may have changed since.
+  const returnedSuggestions = ((await (await post(INVOKE, hookBody("emp-006")))!.json()) as {
+    cards: Array<{ suggestions?: Array<{ uuid: string }> }>;
+  }).cards.flatMap((c) => (c.suggestions ?? []).map((s) => s.uuid));
+  const latest = (await stores.events.listAuditEvents(1000)).filter((e) => e.eventType === "CDS_HOOKS_INVOKED").at(-1)!.payload as {
+    suggestions: Array<{ uuid: string; measureId: string | null; system: string | null; code: string | null }>;
+  };
+  assert.ok(returnedSuggestions.length > 0, "fixture: the audiogram card carries a suggestion");
+  assert.deepEqual(latest.suggestions.map((s) => s.uuid), returnedSuggestions);
+  assert.equal(latest.suggestions[0]!.code, "92557");
   // And the run, so recovering a measure from a feedback uuid is one recomputation per measure rather than a
   // search over every run in the subject's history.
   assert.equal(forThatCall["runId"], completedRunId);

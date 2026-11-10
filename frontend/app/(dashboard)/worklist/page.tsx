@@ -26,6 +26,7 @@ import { ChevronRight, SlidersHorizontal } from "lucide-react";
 import { emitToast } from "@/lib/toast";
 import { OUTCOME_LABELS, PRIORITY_LABELS, labelFor, outcomeStatusClass } from "@/lib/status";
 import { SUBJECT } from "@/lib/terminology";
+import { newYearListNote } from "@/lib/local-date";
 import { subjectPath } from "@/lib/subject-path";
 import { dueSoonPossible, useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { ScrollRegion } from "@/components/scroll-region";
@@ -33,7 +34,7 @@ import { useGlobalFilters } from "@/components/global-filter-context";
 import { useApi } from "@/lib/api/hooks";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases } from "@/lib/rbac";
+import { canActInBulk, canManageCases, canManagePanels, canUseLists, normRole, ROLES } from "@/lib/rbac";
 import { casesHref } from "@/lib/worklist-links";
 import { providerFilterLabel, usePanelProviders } from "@/features/panel/use-panel-providers";
 import { UNASSIGN_VALUE, useAssignableUsers } from "@/features/panel/use-assignable-users";
@@ -87,7 +88,7 @@ function gapClosureNote(gap: WorklistGap): string | null {
     // The DISPLAY state decides the word: out-of-population is canonical MISSING_DATA and is not a
     // verification of anything.
     const display = (gap.liveDisplayStatus ?? gap.liveOutcomeStatus ?? "").toUpperCase();
-    if (display === "OUT_OF_POPULATION") return `${who} — outside this measure's population`;
+    if (display === "OUT_OF_POPULATION") return `${who} — not eligible for this measure`;
     if (display === "EXCLUDED") return `verified excluded by ${gap.closedBy}${when ? ` on ${when}` : ""}`;
     if (display === "COMPLIANT") return `verified compliant by ${gap.closedBy}${when ? ` on ${when}` : ""}`;
     return `${who} — no longer counted by CQL`;
@@ -223,7 +224,9 @@ export default function WorklistPage() {
   const searchFilter = searchParams.get("search")?.trim() ?? "";
   // The ACO's attributed list (#874). Sent only by a seat the server accepts it from.
   const { listId, refused: listRefused } = listParam(searchParams, user?.role);
-  const listFilter = useListFilter(listId, canManage);
+  // Lists are the lead's (#880): the staff seat gets no picker and fetches none.
+  const mayUseLists = canUseLists(user?.role);
+  const listFilter = useListFilter(listId, mayUseLists);
   const payerFilter = useMemo(
     () => searchParams.getAll("payer").flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean),
     [searchParams],
@@ -242,7 +245,10 @@ export default function WorklistPage() {
    * writes `status: "OPEN"` (`case-actions.ts`) and silently reopens a case somebody deliberately
    * closed with a reason.
    */
-  const canBulkAct = canManage && statusView === "open";
+  // Bulk actions are the lead's (#880): the staff seat works one patient at a time, so it gets no checkboxes.
+  const canBulkAct = canActInBulk(user?.role) && statusView === "open";
+  // January to March (#882) the open list is the new year's: last year's gaps closed when it began.
+  const newYearNote = newYearListNote();
   /**
    * Which view the URL asks for: "me", "all", or nothing said yet.
    *
@@ -621,7 +627,7 @@ export default function WorklistPage() {
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
             {statusView === "staff_closed"
               ? `One row per ${SUBJECT.singular}, with every gap staff closed and what CQL says about it today.`
-              : `One row per ${SUBJECT.singular}, with every open gap.`}{" "}
+              : `One row per ${SUBJECT.singular}, with every open gap: one call or message covers them all.`}{" "}
             {/* The count only once there is one: "0 patients with open gaps" while the list is still
                 coming, or after it failed, reads as an empty practice (the /cases fix in #696). A list
                 that has loaded keeps its count while it reloads. */}
@@ -671,7 +677,8 @@ export default function WorklistPage() {
           rows={panelRows}
           loading={panelsLoading}
           error={panelsError}
-          canManage={canManage}
+          canManage={canManagePanels(user?.role)}
+          readOnlyNote={normRole(user?.role) === ROLES.QUALITY_STAFF ? "Your lead sets panel owners." : undefined}
           assignableOptions={assignableOptions}
           canonicalFor={canonicalFor}
           onSave={async (providerId, assignee) => {
@@ -699,7 +706,7 @@ export default function WorklistPage() {
       </button>
       <div id="worklist-filters" className={`${filtersOpen ? "flex" : "hidden"} flex-col gap-3 md:flex`}>
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
-        {canManage ? (
+        {mayUseLists ? (
           <Select
             label={LIST_FILTER_LABEL}
             size="sm"
@@ -1041,7 +1048,7 @@ export default function WorklistPage() {
                     ? `Nothing to show: the ${SUBJECT.plural} could not be loaded.`
                     : statusView === "staff_closed"
                     ? `No ${SUBJECT.plural} with gaps closed by staff match these filters.`
-                    : `No ${SUBJECT.plural} with open gaps match these filters.`}
+                    : `No ${SUBJECT.plural} with open gaps match these filters.${newYearNote ? ` ${newYearNote}` : ""}`}
                 </td>
               </tr>
             ) : (

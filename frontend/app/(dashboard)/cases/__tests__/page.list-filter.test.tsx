@@ -73,3 +73,14 @@ it("a VIEWER never fetches the lists, never sends a list, and is told the link's
   expect(listFetches()).toEqual([]);
   expect(screen.queryByRole("combobox", { name: "Attributed list" })).toBeNull();
 });
+
+it("the staff seat (#880) never fetches the lists and is told its lead assigns the list's gaps", async () => {
+  auth.role = "ROLE_QUALITY_STAFF";
+  navHolder.current.setUrl("/cases?listId=list-q3");
+  render(<CasesPage />);
+  await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+  expect(await screen.findByTestId("list-filter-note")).toHaveTextContent(/Your lead can assign the list's gaps to you/);
+  for (const call of listCalls()) expect(call).not.toContain("listId");
+  expect(listFetches()).toEqual([]);
+  expect(screen.queryByRole("combobox", { name: "Attributed list" })).toBeNull();
+});

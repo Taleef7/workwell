@@ -68,3 +68,16 @@ test("scoringOfRows: one logic, two logics, authored beside named, errored rows 
 
   assert.deepEqual(scoringOfRows([]), { logics: [], conflict: false });
 });
+
+test("authored is true only when WorkWell's own CQL scored the evaluated rows (item 13)", async () => {
+  assert.equal((await aggregateOfficialRun(storeOf([AUTHORED, AUTHORED, ERRORED]), "run-a", "cms125")).authored, true);
+  // Nothing evaluated: nothing scored the counts, so neither "authored" nor an identity.
+  const errored = await aggregateOfficialRun(storeOf([ERRORED, ERRORED]), "run-e", "cms125");
+  assert.equal(errored.authored, false);
+  assert.equal(errored.official, null);
+  assert.equal((await aggregateOfficialRun(storeOf([{ official: { ...CMS125, populationResults: POPULATIONS, measurementPeriod: Y2026 } }]), "run-o", "cms125")).authored, false);
+  // Mixed rows are refused upstream (identityConflict) and are not "authored" either.
+  const mixed = await aggregateOfficialRun(storeOf([AUTHORED, { official: { ...CMS125, populationResults: POPULATIONS, measurementPeriod: Y2026 } }]), "run-m", "cms125");
+  assert.equal(mixed.identityConflict, true);
+  assert.equal(mixed.authored, false);
+});

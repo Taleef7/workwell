@@ -5,6 +5,7 @@
  * "SMS" channel is carried through to the payload.
  *   node --import tsx --test src/case/case-outreach.test.ts
  */
+import { SqliteContactPreferenceStore } from "../stores/sqlite/contact-preference-store-sqlite.ts";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
@@ -17,7 +18,9 @@ import { SqliteCaseStore } from "../stores/sqlite/case-store-sqlite.ts";
 import { SqliteOutcomeStore } from "../stores/sqlite/outcome-store-sqlite.ts";
 import { SqliteRunStore } from "../stores/sqlite/run-store-sqlite.ts";
 import { SqliteCaseEventStore } from "../stores/sqlite/case-event-store-sqlite.ts";
-import { sendOutreach, updateOutreachDelivery, previewOutreach, type OutreachDeps } from "./case-outreach.ts";
+import { sendOutreach, updateOutreachDelivery, previewOutreach, EarlierCycleClosedError, type OutreachDeps } from "./case-outreach.ts";
+import { bucketPeriodForMeasure } from "../run/compliance-period.ts";
+import { practiceToday } from "../config/practice-date.ts";
 import { runCampaign } from "./outreach-campaign.ts";
 import { runProfileChild } from "../test-support/run-profile-child.ts";
 
@@ -76,6 +79,7 @@ before(async () => {
     cases: new SqliteCaseStore(db),
     events: new SqliteCaseEventStore(db),
     outcomes: new SqliteOutcomeStore(db),
+    contactPreferences: new SqliteContactPreferenceStore(db),
   };
 });
 
@@ -132,6 +136,7 @@ test("patient profile renders clinic wording with no compliance phrasing or due-
       cases: new SqliteCaseStore(db),
       events: new (await import("./src/stores/sqlite/case-event-store-sqlite.ts")).SqliteCaseEventStore(db),
       outcomes: new SqliteOutcomeStore(db),
+      contactPreferences: new (await import("./src/stores/sqlite/contact-preference-store-sqlite.ts")).SqliteContactPreferenceStore(db),
     };
     const run = await new SqliteRunStore(db).createRun({
       scopeType: "MEASURE",
@@ -229,6 +234,7 @@ test("patient campaign resolves an employee template id against patient template
       events: { recordCaseEvent: async ({ audit }) => actions.push(audit) },
       outcomes: { listOutcomes: async () => [] },
       campaigns: { recordCampaign: async () => {} },
+      contactPreferences: { get: async () => null, getMany: async () => ({}) },
       channels: () => ({ type: "EMAIL", send: (message) => ({ channel: "EMAIL", provider: "simulated", status: "SIMULATED", messageId: "msg-1", to: message.to, sentAt: "2026-01-01T00:00:00.000Z", errorDetail: null }) }),
     };
     const result = await runCampaign(deps, { measureId: "cms122", channel: "EMAIL", templateId: "11111111-0000-0000-0000-000000000003" }, "cm@pilot.test");
@@ -265,6 +271,7 @@ test("Q1: a patient campaign sends one message per patient listing every gap, an
       events: { recordCaseEvent: async ({ audit }) => audits.push(audit) },
       outcomes: { listOutcomes: async () => [] },
       campaigns: { recordCampaign: async () => {} },
+      contactPreferences: { get: async () => null, getMany: async () => ({}) },
       channels: () => ({ type: "EMAIL", send: (m) => { sends.push(m); return { channel: "EMAIL", provider: "simulated", status: "SIMULATED", messageId: "msg-" + sends.length, to: m.to, sentAt: "2026-01-01T00:00:00.000Z", errorDetail: null }; } }),
     };
     const result = await runCampaign(deps, { channel: "EMAIL" }, "cm@pilot.test");
@@ -310,6 +317,7 @@ test("Q1: when one case's record fails after its patient's message went out, the
       events: { recordCaseEvent: async ({ audit }) => { calls++; if (calls === 2) throw new Error("ledger down"); audits.push(audit.refCaseId); } },
       outcomes: { listOutcomes: async () => [] },
       campaigns: { recordCampaign: async () => {} },
+      contactPreferences: { get: async () => null, getMany: async () => ({}) },
       channels: () => ({ type: "EMAIL", send: (m) => ({ channel: "EMAIL", provider: "simulated", status: "SIMULATED", messageId: "msg-" + m.to, to: m.to, sentAt: "2026-01-01T00:00:00.000Z", errorDetail: null }) }),
     };
     const result = await runCampaign(deps, { channel: "EMAIL" }, "cm@pilot.test");
@@ -324,4 +332,39 @@ test("Q1: when one case's record fails after its patient's message went out, the
   assert.equal(row("c3").status, "SIMULATED");
   assert.equal(result.sent, 2);
   assert.equal(result.failed, 1);
+});
+
+// ---- #882: a closed case whose cycle has ended ---------------------------------------------------
+
+/** A system-closed audiogram case of `period`, as the rollover leaves one. */
+async function closedCase(subjectId: string, period: string): Promise<string> {
+  const run = await new SqliteRunStore(db).createRun({
+    scopeType: "MEASURE", scopeId: "audiogram", triggeredBy: "test", requestedScope: { measureId: "audiogram" },
+    measurementPeriodStart: `${period}T00:00:00.000Z`, measurementPeriodEnd: `${period}T00:00:00.000Z`,
+  });
+  const cases = new SqliteCaseStore(db);
+  const c = await cases.upsertFromOutcome({ runId: run.id, subjectId, measureId: "audiogram", evaluationPeriod: period, outcomeStatus: "OVERDUE" });
+  await new SqliteOutcomeStore(db).recordOutcome({
+    runId: run.id, subjectId, measureId: "audiogram", evaluationPeriod: period, status: "OVERDUE", evidence: { expressionResults: [] },
+  });
+  await cases.patchCase(c!.id, { status: "RESOLVED", closedAt: new Date().toISOString(), closedReason: "CYCLE_ROLLED_OVER", closedBy: null });
+  return c!.id;
+}
+
+test("outreach on a closed case of a cycle that has ended is refused before any audit or send (#882)", async () => {
+  const caseId = await closedCase("emp-882", "2025-01-01"); // 2025 has ended in any year this runs
+  await assert.rejects(() => previewOutreach(deps, caseId), (err: unknown) => err instanceof EarlierCycleClosedError && err.code === "earlier_cycle_closed");
+  await assert.rejects(() => sendOutreach(deps, caseId, "cm@workwell.dev"), EarlierCycleClosedError);
+  assert.deepEqual(
+    (await deps.events.caseTimeline(caseId)).filter((t) => t.eventType === "CASE_OUTREACH_SENT"),
+    [],
+    "nothing was sent or recorded",
+  );
+  assert.equal((await deps.cases.getCase(caseId))?.status, "RESOLVED", "and the case was not reopened");
+});
+
+test("a closed case of the CURRENT cycle can still be messaged, as before (#882)", async () => {
+  const caseId = await closedCase("emp-883", bucketPeriodForMeasure("audiogram", practiceToday()));
+  const detail = await sendOutreach(deps, caseId, "cm@workwell.dev");
+  assert.equal(detail?.latestOutreachDeliveryStatus, "SIMULATED");
 });

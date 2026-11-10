@@ -1,5 +1,6 @@
 /**
- * Warm the dashboard's read models after a population run finishes.
+ * Warm the dashboard's read models, and the scorecard's kept reads (#884), after a population run
+ * finishes and at boot.
  *
  * Every one of those read models is memoized under the winning runs' key, and a nightly recompute
  * invalidates all of them at once — so the first person to open `/programs` after the nightly pays
@@ -24,6 +25,8 @@ import { recordWarm, type WarmRecord } from "../admin/runtime-health.ts";
 import { DEPLOYMENT_PROFILE } from "../config/deployment-profile.ts";
 import { runCandidates } from "../run/read-models.ts";
 import { runOutcomeCountsFor } from "../run/run-counts.ts";
+import { scorecardMeasures, scorecardRows, scorecardWorkingYears } from "../compliance/scorecard.ts";
+import { selectRunForYear } from "../compliance/measure-year-rates.ts";
 
 /**
  * The filter set the dashboard opens with — no site, no tenant, no date window. Deliberately the
@@ -77,15 +80,17 @@ export interface WarmResult {
  * the answer, so "did last night's warm run?" had no answer anywhere an operator could read.
  *
  * `trendTimeZone` is the zone each measure's trend is warmed in: the deployment's practice zone unless
- * a test names one.
+ * a test names one. `scorecardYears` are read for the scorecard beside the years the practice is working:
+ * a finished manual run names its own, so a re-score of last year made after March is warm too.
  */
 export async function warmReadModels(
   deps: ProgramDeps,
   trigger: WarmRecord["trigger"] = "run",
   trendTimeZone: string | null = DEPLOYMENT_PROFILE.practiceTimeZone,
+  opts: { scorecardYears?: readonly number[] } = {},
 ): Promise<WarmResult> {
   const started = Date.now();
-  const result = await warmPass(deps, trendTimeZone);
+  const result = await warmPass(deps, trendTimeZone, opts.scorecardYears ?? []);
   const finished = Date.now();
   recordWarm({
     trigger,
@@ -99,7 +104,17 @@ export async function warmReadModels(
   return result;
 }
 
-async function warmPass(deps: ProgramDeps, trendTimeZone: string | null): Promise<WarmResult> {
+async function warmPass(deps: ProgramDeps, trendTimeZone: string | null, scorecardYears: readonly number[]): Promise<WarmResult> {
+  // The scorecard first (#884): it is what the practice opens, and on the pilot the minute after a deploy is
+  // when a visitor would otherwise read every measure alone beside the dashboard's warm (about 70 s). A
+  // visitor who opens it during this step joins its read. It stops at its first failure with one WARN and
+  // never counts toward the panels' failure limit, so a database that is down costs one pool wait here and
+  // the panels below still make their own decision.
+  try {
+    await warmScorecard(deps, scorecardYears);
+  } catch (err) {
+    console.warn(`[workwell] read-model warm failed for the scorecard: ${String((err as Error)?.message ?? err)}`);
+  }
   let error: string | undefined;
   let measureIds: string[];
   try {
@@ -129,8 +144,8 @@ async function warmPass(deps: ProgramDeps, trendTimeZone: string | null): Promis
       // measure, and every measure on Maui) this fills the per-run trend memo, which serves the
       // measure page in any time zone (#615). It is asked in the practice's zone first, so the memo is
       // widened until that zone has ten days: warmed in UTC, four of Maui's six measures were a run
-      // short in US Eastern (a late-evening manual run shares a local day with a nightly), and their
-      // first visitor read twenty runs (6-7 s). Then with no zone, as the dashboard asks: usually a memo
+      // short in the practice's zone (a late-evening manual run shares a local day with a nightly), and
+      // their first visitor read twenty runs (6-7 s). Maui's zone is Hawaii since #882. Then with no zone, as the dashboard asks: usually a memo
       // hit, and a read only where UTC's days fall short of the zone's. Another zone that comes up
       // short still reads on at request time, as it did before. Where the monthly series can apply,
       // the page's per-run trend is left cold, because warming it would double this pass for a page
@@ -173,4 +188,17 @@ async function warmPass(deps: ProgramDeps, trendTimeZone: string | null): Promis
     }
   }
   return error ? { ok: false, error, failedMeasures } : { ok: true, failedMeasures };
+}
+
+/** Each scorecard measure's run for each working year (and `extraYears`), read into `scorecardRows`. */
+async function warmScorecard(deps: ProgramDeps, extraYears: readonly number[]): Promise<void> {
+  const measures = scorecardMeasures();
+  if (measures.length === 0) return;
+  const selection = { runs: deps.runStore, outcomes: deps.outcomeStore };
+  for (const year of new Set([...scorecardWorkingYears(), ...extraYears])) {
+    for (const m of measures) {
+      const run = await selectRunForYear(selection, m.id, year);
+      if (run) await scorecardRows.rows(deps.outcomeStore, run, m.id, year);
+    }
+  }
 }

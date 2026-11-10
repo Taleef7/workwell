@@ -91,7 +91,7 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
     expect(await screen.findByText("Compliant: 16.9% of everyone evaluated (3,388 of 20,000)")).toBeInTheDocument();
     expect(within(await screen.findByTestId("run-reconciliation")).getByText(/CMS measure rate 41\.9% of the measure's population/)).toBeInTheDocument();
     expect(screen.getByText("Missing Data: 0")).toBeInTheDocument();
-    expect(screen.getByText("Not in population: 11543")).toBeInTheDocument();
+    expect(screen.getByText("Not eligible: 11543")).toBeInTheDocument();
     expect(screen.queryByText(/^Missing Data: 11543$/)).not.toBeInTheDocument();
     expect(screen.getByText("Cases last updated by this run: 0")).toBeInTheDocument();
   });
@@ -100,7 +100,7 @@ describe("RunsPage says what a run is and what its numbers mean (#668)", () => {
     render(<RunsPage />);
     expect(await screen.findByTestId("outcomes-capped")).toHaveTextContent("Showing 2 of 20,000. The outcomes CSV has every row.");
     const cells = (await screen.findAllByTestId("outcome-cell")).map((c) => c.textContent);
-    expect(cells).toEqual(["Not in population", "Missing Data"]);
+    expect(cells).toEqual(["Not eligible", "Missing Data"]);
   });
 
   it("shows a running run's elapsed time, not '0s', when this page did not start it (#644)", async () => {

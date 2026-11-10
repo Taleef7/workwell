@@ -16,6 +16,9 @@ import { compileCql } from "./cql-translator.ts";
 import { validateTests } from "./measure-read-models.ts";
 import { generateCql, type Rule, type CodegenBindings } from "@work-well/measure-codegen";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
+import { MEASURE_CATALOG } from "./measure-catalog.ts";
+import { cmsIdentityRefusal } from "./measure-naming.ts";
+import { MeasureError } from "./measure-lifecycle.ts";
 
 export interface MeasureAuthoringDeps {
   measures: MeasureStore;
@@ -144,6 +147,13 @@ export async function updateMeasureSpec(deps: MeasureAuthoringDeps, measureId: s
     ...(current.spec.ruleBindings !== undefined ? { ruleBindings: current.spec.ruleBindings } : {}),
   };
   const policyRef = body.policyRef !== undefined ? s(body.policyRef).trim() : undefined;
+  // Item 13: a Studio-created measure may not take a CMS identity through its policy reference. The seeded
+  // catalog's rows are the CMS crosswalk and keep theirs (a v14 -> v15 bump saves), and an unchanged
+  // reference (a legacy row's) is never judged. Before the write, so a refused save changes nothing.
+  if (policyRef !== undefined && policyRef !== current.policyRef && !MEASURE_CATALOG.some((m) => m.id === measureId)) {
+    const refusal = cmsIdentityRefusal("policyRef", policyRef);
+    if (refusal) throw new MeasureError(refusal);
+  }
   const updated = await deps.measures.updateSpec(measureId, spec, policyRef);
   if (!updated) return false;
   await auditDraftSaved(deps, updated, actor, { field: "spec", measureId, policyRef: policyRef ?? "", oshaReferenceId: body.oshaReferenceId ?? "" });

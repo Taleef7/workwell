@@ -133,5 +133,21 @@ describe("StudioMeasurePage names what runs apart from the authoring record (#76
     measureHolder.current = { ...RECORD, id: "audiogram", name: "Annual Audiogram Completed", identity: null };
     render(<StudioMeasurePage />);
     expect(screen.queryByTestId("studio-runs")).toBeNull();
+    expect(screen.queryByTestId("studio-runs-authored")).toBeNull();
+  });
+
+  it("an authored-runnable measure names WorkWell's own logic and says it is not a CMS measure (item 13)", () => {
+    measureHolder.current = {
+      ...RECORD,
+      id: "audiogram",
+      name: "Annual Audiogram Completed",
+      identity: null,
+      authoredLogic: "WorkWell-authored AnnualAudiogramCompleted 1.0.0",
+    };
+    render(<StudioMeasurePage />);
+    expect(screen.getByTestId("studio-runs-authored").textContent).toBe(
+      "Runs: WorkWell-authored AnnualAudiogramCompleted 1.0.0, not a CMS measure",
+    );
+    expect(screen.queryByTestId("studio-runs")).toBeNull();
   });
 });

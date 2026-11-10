@@ -55,8 +55,8 @@ Browser -> <stack>.os.mieweb.org          Next.js frontend (MIE Create-a-Contain
   - both: `WORKWELL_SCHEDULER_ENABLED=true`, `WORKWELL_BUCKET_S3_*`.
   - TWH: `WORKWELL_INSTANCE=twh`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125` and
     `WORKWELL_DERIVED_MEASURES=cms125,cms122`.
-  - Maui: `WORKWELL_INSTANCE=maui`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165,cms137`
-    and `WORKWELL_DERIVED_MEASURES=cms137,cms130,cms125,cms165,cms122,cms2`;
+  - Maui: `WORKWELL_INSTANCE=maui`; image `WORKWELL_OFFICIAL_MEASURES=cms122,cms125,cms2,cms130,cms165`
+    and `WORKWELL_DERIVED_MEASURES=cms130,cms125,cms165,cms122,cms2` (cms137 retired, #889);
     `WORKWELL_MAUI_CORPUS_SIZE`, `WORKWELL_RUN_CHUNK_SIZE`, `WORKWELL_SCHEDULER_ANCHOR_HOUR_UTC`,
     `WORKWELL_SCHEDULER_DAYS=1-5`; `WORKWELL_OUTCOME_RETENTION_DAYS` unset (retention paused 2026-10-15).
 - Other workflows: `ci.yml`, `flip-gate.yml`, `cross-engine-sweep.yml`, `vendor-official-measure.yml`,
@@ -206,11 +206,12 @@ needs a clean compile and well-formed test fixtures. `validateTests`
 ### 5.4 Outcomes -> Cases
 `CaseStore.upsertFromOutcome` applies `planCaseUpsert` on the key
 `(employee_id, measure_version_id, evaluation_period)`. The rules are in `DATA_MODEL_CONTRACTS.md` §4.
-After the loop: older-cycle cases close as `CYCLE_ROLLED_OVER`, `RUN_COMPLETED` is written, and the
+After the loop: older-cycle cases close as `CYCLE_ROLLED_OVER`, on an all-programs run a retired
+measure's open cases close as `MEASURE_RETIRED` (#889), `RUN_COMPLETED` is written, and the
 quality snapshot is materialized (`materializeRun`, best-effort).
 
 ### 5.5 Cases -> Actions
-Operators assign (single or `POST /api/cases/bulk-assign`), escalate, send outreach
+Operators assign (single, or `POST /api/cases/bulk-assign`, the lead's: CASE_MANAGER/ADMIN, #880), escalate, send outreach
 (`dispatchOutreach` via the `OutreachChannel` port; simulated by default), record delivery state,
 upload evidence, and rerun-to-verify. A rerun closes the case only on COMPLIANT or EXCLUDED.
 
@@ -273,6 +274,9 @@ Evidence downloads write `EVIDENCE_DOWNLOADED`.
 **Security and config**
 - Actor identity comes from `auth/authorize.ts`. Caller-supplied actor fields are ignored.
 - `ROLE_VIEWER` may GET and HEAD only; any write is 403.
+- `ROLE_QUALITY_STAFF` (the staff seat, #880, LOCKED_DECISIONS §4A.9) works single cases, exports the
+  CSVs and reads the scorecard; bulk assign, campaigns, attributed lists, panel owners, population runs,
+  identity, QRDA/MeasureReport and MCP stay CASE_MANAGER/ADMIN. A role a rule does not name is refused.
 - A production-like config that is unsafe makes every request answer 503 `unsafe_configuration`
   (`config/startup-safety.ts`): auth disabled, a weak JWT secret, an insecure cookie, or
   `WORKWELL_CORS_ALLOWED_ORIGINS` missing, blank, wildcard, localhost or invalid.

@@ -8,6 +8,7 @@
 import type { ForecastEnv } from "../engine/immunization/immunization-forecast.ts";
 import { resolveForecaster } from "../engine/immunization/resolve-forecaster.ts";
 import { parseQueryDate, QueryDateError } from "./query-dates.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -27,7 +28,7 @@ export async function handleImmunizationForecast(req: Request, env: ForecastEnv)
     if (err instanceof QueryDateError) return json({ error: "invalid_request", message: err.message }, 400);
     throw err;
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = practiceToday();
   const forecast = await resolveForecaster(env).forecast(subjectId, asOf ?? today);
   return json(forecast);
 }

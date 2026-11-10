@@ -50,7 +50,7 @@ test.describe("Maui terminology — the quality lead's pages", () => {
 
   // #671: opening a patient ran a simulation nobody asked for, and the posture named four measures by
   // their raw ids. The simulation is now a button, and every posture chip carries a measure name. (The
-  // posture's filter to the six measures is guarded by employees.maui.test.ts: CI's fresh stack never
+  // posture's filter to the routed measures is guarded by employees.maui.test.ts: CI's fresh stack never
   // ran the old Hypertension measure, so an e2e check for it could not fail.)
   test("the patient page runs no simulation on open, and names every measure", async ({ page }) => {
     const simulateCalls: string[] = [];

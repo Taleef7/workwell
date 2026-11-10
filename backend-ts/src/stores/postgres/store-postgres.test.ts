@@ -55,7 +55,9 @@ import {
   evalStateStoreContract,
   panelStoreContract,
   subjectListStoreContract,
+  contactPreferenceStoreContract,
 } from "../store-contract.ts";
+import { PgContactPreferenceStore } from "./contact-preference-store-postgres.ts";
 
 const url = process.env.WORKWELL_TEST_PG_URL ?? "postgres://workwell:workwell@localhost:5432/workwell";
 
@@ -103,7 +105,7 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
 
   const truncate = () =>
     pool.query(
-      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments, ${SPIKE_SCHEMA}.quality_snapshots, ${SPIKE_SCHEMA}.person_links, ${SPIKE_SCHEMA}.eval_state, ${SPIKE_SCHEMA}.panel_assignments, ${SPIKE_SCHEMA}.subject_list_members, ${SPIKE_SCHEMA}.subject_lists RESTART IDENTITY CASCADE`,
+      `TRUNCATE ${SPIKE_SCHEMA}.audit_events, ${SPIKE_SCHEMA}.case_actions, ${SPIKE_SCHEMA}.cases, ${SPIKE_SCHEMA}.outcomes, ${SPIKE_SCHEMA}.run_logs, ${SPIKE_SCHEMA}.runs, ${SPIKE_SCHEMA}.measure_versions, ${SPIKE_SCHEMA}.measures, ${SPIKE_SCHEMA}.evidence_attachments, ${SPIKE_SCHEMA}.scheduled_appointments, ${SPIKE_SCHEMA}.measure_value_set_links, ${SPIKE_SCHEMA}.value_sets, ${SPIKE_SCHEMA}.terminology_mappings, ${SPIKE_SCHEMA}.outreach_templates, ${SPIKE_SCHEMA}.waivers, ${SPIKE_SCHEMA}.segment_overrides, ${SPIKE_SCHEMA}.segment_measures, ${SPIKE_SCHEMA}.segments, ${SPIKE_SCHEMA}.quality_snapshots, ${SPIKE_SCHEMA}.person_links, ${SPIKE_SCHEMA}.eval_state, ${SPIKE_SCHEMA}.panel_assignments, ${SPIKE_SCHEMA}.contact_preferences, ${SPIKE_SCHEMA}.subject_list_members, ${SPIKE_SCHEMA}.subject_lists RESTART IDENTITY CASCADE`,
     );
 
   /**
@@ -249,6 +251,36 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
     assert.equal(await deprecatedEvents(), 1);
   });
 
+  test("[postgres] seedMeasureStore retires a surgical Draft row once, audited (#880)", async () => {
+    await truncate();
+    const store = new PgMeasureStore(pool);
+    const events = new PgCaseEventStore(pool);
+    const catalog = MEASURE_CATALOG.find((m) => m.id === "cms56v14")!;
+    // As the seed wrote it before #880: the catalog entry, Draft.
+    await store.seedMeasure({
+      measureId: catalog.id,
+      name: catalog.name,
+      policyRef: catalog.policyRef,
+      owner: catalog.owner,
+      tags: [...catalog.tags],
+      versionId: `${catalog.id}-${catalog.version}`,
+      version: catalog.version,
+      status: "Draft",
+      spec: catalog.spec,
+      cqlText: "",
+      compileStatus: catalog.compileStatus,
+      createdAt: "2026-02-01T00:00:00.000Z",
+      changeSummary: "Seeded measure version",
+    });
+    await seedMeasureStore(store, () => "", events);
+    assert.equal((await store.getLatest("cms56v14"))?.status, "Deprecated");
+    const retired = async () =>
+      (await events.auditEventsByMeasureVersion("cms56v14-v1.0")).filter((event) => event.eventType === "MEASURE_DEPRECATED").length;
+    assert.equal(await retired(), 1);
+    await seedMeasureStore(store, () => "", events);
+    assert.equal(await retired(), 1);
+  });
+
   evidenceStoreContract("postgres", async () => {
     await truncate();
     return new PgEvidenceStore(pool);
@@ -297,6 +329,11 @@ if (!reachable && process.env.WORKWELL_TEST_PG_URL) {
   panelStoreContract("postgres", async () => {
     await truncate();
     return new PgPanelStore(pool);
+  });
+
+  contactPreferenceStoreContract("postgres", async () => {
+    await truncate();
+    return new PgContactPreferenceStore(pool);
   });
 
   subjectListStoreContract("postgres", async () => {

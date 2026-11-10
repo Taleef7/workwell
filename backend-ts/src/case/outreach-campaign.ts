@@ -7,16 +7,21 @@ import type { CaseStore } from "../stores/case-store.ts";
 import type { CaseEventStore } from "../stores/case-event-store.ts";
 import type { OutcomeStore } from "../stores/outcome-store.ts";
 import type { CampaignStore, CampaignRecord, CampaignRecipientRecord } from "../stores/campaign-store.ts";
+import type { ContactPreferenceStore } from "../stores/contact-preference-store.ts";
 import { DEPLOYMENT_PROFILE, employeeById } from "../config/deployment-profile.ts";
 import { dispatchOutreach, dispatchPatientOutreach, type DispatchResult, type OutreachDeps } from "./case-outreach.ts";
 import { isSensitiveMeasure } from "./care-item.ts";
 import { isChannelType, type ChannelType, type OutreachChannel } from "./outreach-channel.ts";
+import { practiceToday } from "../config/practice-date.ts";
+import { isEarlierCycle } from "../run/compliance-period.ts";
 
 export interface CampaignDeps {
   cases: CaseStore;
   events: CaseEventStore;
   outcomes: OutcomeStore;
   campaigns: CampaignStore;
+  /** How each subject wants to be reached (#886): a campaign skips those who declined its channel. */
+  contactPreferences: ContactPreferenceStore;
   channels?: (type: ChannelType) => OutreachChannel; // default: all simulated (resolveChannel(type,{}))
 }
 
@@ -38,6 +43,12 @@ export interface CampaignResult {
   messages: number;
   /** Open cases left out because their measure is never sent automatically (CMS2, CMS137 on a patient deployment). */
   withheld: number;
+  /**
+   * Open cases left out because their subject declined the campaign's channel (#886). Reported in this
+   * result and the dry run only: campaigns write no audit event of their own, and the campaign record has no
+   * column for it.
+   */
+  skippedDeclined: number;
   recipients: CampaignRecipientRecord[];
 }
 
@@ -64,11 +75,22 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
   }
 
   const open = await deps.cases.listCases({ statuses: ["OPEN"], measureId, limit: 100000 });
+  // Never a cycle that has ended (#882): an OPEN case of a year that is over (one the rollover has not
+  // reached yet) is not something to message a patient about again. Compared as the rollover compares.
+  const today = practiceToday();
   const matching = open.filter(
-    (c) => (!site || eq(employeeById(c.employeeId)?.site ?? null, site)) && (!outcome || eq(c.currentOutcomeStatus, outcome)),
+    (c) =>
+      !isEarlierCycle(c.measureId, c.evaluationPeriod, today) &&
+      (!site || eq(employeeById(c.employeeId)?.site ?? null, site)) &&
+      (!outcome || eq(c.currentOutcomeStatus, outcome)),
   );
-  const eligible = patientDeployment ? matching.filter((c) => !isSensitiveMeasure(c.measureId)) : matching;
-  const withheld = matching.length - eligible.length;
+  const allowed = patientDeployment ? matching.filter((c) => !isSensitiveMeasure(c.measureId)) : matching;
+  const withheld = matching.length - allowed.length;
+  // A subject who declined this channel is skipped before anything is sent or recorded (#886), the dry run
+  // included, so its count matches the live one.
+  const prefs = await deps.contactPreferences.getMany(allowed.map((c) => c.employeeId));
+  const eligible = allowed.filter((c) => !prefs[c.employeeId]?.declinedChannels.includes(req.channel));
+  const skippedDeclined = allowed.length - eligible.length;
   // One message per patient on a patient deployment (every open gap in one message); one per case otherwise.
   const batches = patientDeployment ? groupByPatient(eligible) : eligible.map((c) => [c]);
 
@@ -78,11 +100,13 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
       channel: req.channel, toAddress: toAddressFor(req.channel, c.employeeId),
       status: "PREVIEW", messageId: null, sentAt: "",
     }));
-    return { campaignId: null, channel: req.channel, dryRun: true, total: recipients.length, sent: 0, failed: 0, simulated: 0, messages: batches.length, withheld, recipients };
+    return { campaignId: null, channel: req.channel, dryRun: true, total: recipients.length, sent: 0, failed: 0, simulated: 0, messages: batches.length, withheld, skippedDeclined, recipients };
   }
 
   const campaignId = crypto.randomUUID();
-  const outreachDeps: OutreachDeps = { cases: deps.cases, events: deps.events, outcomes: deps.outcomes, channels: deps.channels };
+  const outreachDeps: OutreachDeps = {
+    cases: deps.cases, events: deps.events, outcomes: deps.outcomes, contactPreferences: deps.contactPreferences, channels: deps.channels,
+  };
   const recipients: CampaignRecipientRecord[] = [];
   let sent = 0, failed = 0, simulated = 0;
   for (const batch of batches) {
@@ -122,7 +146,7 @@ export async function runCampaign(deps: CampaignDeps, req: CampaignRequest, acto
     total: recipients.length, sent, failed, simulated, createdBy: actor, createdAt: new Date().toISOString(),
   };
   await deps.campaigns.recordCampaign(campaign, recipients);
-  return { campaignId, channel: req.channel, dryRun: false, total: recipients.length, sent, failed, simulated, messages: batches.length, withheld, recipients };
+  return { campaignId, channel: req.channel, dryRun: false, total: recipients.length, sent, failed, simulated, messages: batches.length, withheld, skippedDeclined, recipients };
 }
 
 /** Cases grouped by patient, in first-seen order, so each patient gets one message. */

@@ -24,6 +24,7 @@
  * knowledge, and pushing it into SQL would put the directory in the database.
  */
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
+import { practiceToday } from "../config/practice-date.ts";
 
 export const AGE_BANDS = ["0-17", "18-44", "45-64", "65+"] as const;
 export type AgeBandFilter = (typeof AGE_BANDS)[number];
@@ -146,13 +147,13 @@ export class SubjectFilterError extends Error {
 /**
  * Age at a given instant, in whole years, from a `YYYY-MM-DD` date of birth.
  *
- * UTC throughout: the same patient must not change age band because the server moved timezone, and a
- * birthday is a calendar fact rather than an instant.
+ * Calendar dates throughout: a birthday is a calendar fact rather than an instant, so the instant is
+ * first read as the practice's date (#882), never the server's, and the two dates are compared as days.
  */
 export function ageAsOf(dateOfBirth: string, nowMs: number): number | null {
   const born = Date.parse(`${dateOfBirth.slice(0, 10)}T00:00:00.000Z`);
   if (!Number.isFinite(born)) return null;
-  const now = new Date(nowMs);
+  const now = new Date(`${practiceToday(new Date(nowMs))}T00:00:00.000Z`);
   const dob = new Date(born);
   let age = now.getUTCFullYear() - dob.getUTCFullYear();
   const monthDiff = now.getUTCMonth() - dob.getUTCMonth();

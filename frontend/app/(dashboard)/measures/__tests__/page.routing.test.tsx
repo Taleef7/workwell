@@ -60,10 +60,11 @@ describe("MeasuresPage routing badge", () => {
       measure("cms165", "Depression Screening", "official"),
       measure("cms125", "Breast Cancer Screening", "official-pending"),
       measure("audiogram", "Annual Audiogram Completed", "authored"),
+      measure("cms128", "Antidepressant Medication Management", "not-runnable"),
     ]);
   });
 
-  it("renders the official badge and the official-pending wording, and nothing for authored", async () => {
+  it("renders the official badge and the official-pending wording, and no official badge for authored", async () => {
     render(<MeasuresPage />);
     expect(await screen.findByText("Depression Screening")).toBeInTheDocument();
 
@@ -73,5 +74,16 @@ describe("MeasuresPage routing badge", () => {
     const authoredRow = screen.getByText("Annual Audiogram Completed").closest("tr");
     expect(within(authoredRow!).queryByText("Official")).toBeNull();
     expect(within(authoredRow!).queryByText("Official · not yet routed here")).toBeNull();
+  });
+
+  it("labels an authored row WorkWell-authored and a row that cannot run here Not runnable here (item 13)", async () => {
+    render(<MeasuresPage />);
+    const authoredRow = (await screen.findByText("Annual Audiogram Completed")).closest("tr");
+    expect(within(authoredRow!).getByText("WorkWell-authored")).toBeInTheDocument();
+    const notRunnableRow = screen.getByText("Antidepressant Medication Management").closest("tr");
+    expect(within(notRunnableRow!).getByText("Not runnable here")).toBeInTheDocument();
+    expect(within(notRunnableRow!).queryByText("WorkWell-authored")).toBeNull();
+    const officialRow = screen.getByText("Depression Screening").closest("tr");
+    expect(within(officialRow!).queryByText("WorkWell-authored")).toBeNull();
   });
 });

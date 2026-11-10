@@ -55,8 +55,32 @@ export function cycleKey(complianceWindowDays: number, seasonal: boolean, asOf: 
  * then return the cycle anchor for `asOf`. Unknown measures fall back to a 365-day annual cycle.
  */
 export function bucketPeriodForMeasure(measureId: string, asOf: string): string {
+  return cycleAnchor(cadenceForMeasure(measureId), asOf);
+}
+
+/** A measure's cycle cadence (unknown measures: annual). */
+export function cadenceForMeasure(measureId: string): Cadence {
   // ADR-072: official-only measures bucket to the calendar year by rule, not by the 365-day fallback.
-  if (!MEASURE_BINDINGS[measureId] && isVendoredOfficialMeasure(measureId)) return cycleAnchor("ANNUAL", asOf);
-  const window = MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365;
-  return cycleKey(window, SEASONAL_MEASURE_IDS.has(measureId), asOf);
+  if (!MEASURE_BINDINGS[measureId] && isVendoredOfficialMeasure(measureId)) return "ANNUAL";
+  return cadenceFor(MEASURE_BINDINGS[measureId]?.complianceWindowDays ?? 365, SEASONAL_MEASURE_IDS.has(measureId));
+}
+
+/**
+ * The calendar year that the case period `period` is (#882), or null when it is not one: a half-year or a
+ * season (`2026-01-01` of a twice-yearly measure is January to June), or a period that is not a cycle's
+ * first day. The case page says "2026 has ended" only of a year.
+ */
+export function cycleCalendarYear(measureId: string, period: string): number | null {
+  const match = /^(\d{4})-01-01$/.exec(period);
+  return match && cadenceForMeasure(measureId) === "ANNUAL" ? Number(match[1]) : null;
+}
+
+/**
+ * Whether `period` is a cycle that has already ended on `today` (#882): strictly older than the measure's
+ * current cycle, by cycle order, as the rollover compares (a non-date period is never earlier). An
+ * outcome of such a cycle is recorded but never opens or reopens a case (`planCaseUpsert`), and a run
+ * that scores one is never anyone's "latest" (`run/earlier-cycle.ts`).
+ */
+export function isEarlierCycle(measureId: string, period: string, today: string): boolean {
+  return Date.parse(period) < Date.parse(bucketPeriodForMeasure(measureId, today));
 }

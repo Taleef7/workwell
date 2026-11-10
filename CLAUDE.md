@@ -29,8 +29,10 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
 - AI never decides compliance (see docs/AI_GUARDRAILS.md). The CQL engine is the sole source of truth.
 - Nothing invents clinical data. Bundle preparation may add a missing system to a recognised code but never
   supplies or replaces a code (an absent field stays absent), and the synthetic corpus holds no fact dated
-  after its as-of. WebChart ingest's derivations from real rows (us-core-sex from gender, the mammogram
-  Observation from its Procedure) are mappings, not exceptions. So is the QRDA I importer's blood-pressure
+  after its as-of. WebChart ingest's derivation of us-core-sex from gender is a mapping, not an exception. A billed
+  mammogram is not a result: no ingest path derives the LOINC imaging Observation official CMS125 reads from
+  a CPT 77067 / HCPCS G0202 Procedure (owner decision 2026-11-05), so for official CMS125 a patient whose
+  only record is the bill is a gap until the result is charted. So is the QRDA I importer's blood-pressure
   panel (LOCKED_DECISIONS §4A.8): it supplies the panel code 85354-9 and the `vital-signs` category, and
   only under §4A.8's conditions. A blood pressure the document states as one Physical Exam coded 85354-9,
   its readings as QDM Components, is imported as that panel: only the `vital-signs` category (and the UCUM
@@ -89,17 +91,18 @@ reference to either anywhere (code comments, old docs) resolves from git history
 **The Maui pilot sandbox, before PY2027 starts on 2027-01-01.** The work is the "Ready for January"
 milestone; asks blocked on MIE, the practice or the ACO carry the `waiting` label; minor findings are the
 checklist in #655. The plan is `docs/ROADMAP_2026-08-30.md` (ADR-070) and the owner decisions are
-`LOCKED_DECISIONS.md` §4A. The sandbox routes all six ACO measures — cms122, cms125, cms2, cms130, cms165,
-cms137 (ADR-078). It is a sandbox: the pilot's real-data (PHI) phase is a separate decision gated by
+`LOCKED_DECISIONS.md` §4A. The sandbox routes five ACO measures — cms122, cms125, cms2, cms130, cms165
+(ADR-078); cms137 was retired on 2026-11-05, after the CY2027 final rule removed Quality ID 305 from APP
+Plus (§4A.2, #889). It is a sandbox: the pilot's real-data (PHI) phase is a separate decision gated by
 `PRODUCTION_READINESS`. Naming policy: repo documents say "Maui" and "the pilot group" only.
 
 ## Standing corrections
 Each is a claim the project got wrong once and would otherwise repeat.
-1. **The CMS FHIR-reporting timeline is an RFI.** The CY2027 PFS proposed rule (CMS-1848-P) *seeks comment
-   on* FHIR reporting voluntary PY2028–29, mandatory PY2030 for applicable APP Plus measures. Cite it as
-   **sought comment on**, never as proposed or final (final rule ~Nov 2026). MIPS CQMs are proposed to be
-   **extended** for PY2027+; sunsetting traditional MIPS after PY2028 is a *different* proposal. The same
-   rule proposes removing Quality IDs 305 (CMS137) and 493 from APP Plus for PY2027.
+1. **The CMS FHIR-reporting timeline is not a rule.** CMS-1848-P sought comment on FHIR reporting voluntary
+   PY2028–29 and mandatory PY2030 for applicable APP Plus measures; the final rule (CMS-1848-F, 2026-11-04)
+   says those policies would be proposed through future rulemaking. Cite it as **sought comment on; not yet
+   proposed**, never as final. CMS-1848-F did finalize: MIPS CQMs extended for PY2027+, a new Medicare eCQM
+   collection type (assigned beneficiaries only), and Quality IDs 305 (CMS137) and 493 removed from APP Plus.
 2. **"QI-Core STU7 = US Core 7 = WebChart's exact surface" is half right.** CMS's shipping content is
    authored on QI-Core 6; the direction of travel is US Quality Core 0.5.0 over US Core 6.1.0.
 3. **Cypress CVU+ is not the verification bar.** The bar is the FHIR-column verification set

@@ -18,13 +18,15 @@
  * those is the defect class ADR-031 exists to prevent, so there is none here.
  */
 import { deriveCell } from "../compliance/roster-vocabulary.ts";
+import { needFor } from "../compliance/official-display.ts";
+import { measureIdentityFor, scoringLogicOf } from "../measure/measure-identity.ts";
 import { deriveWhyFlagged } from "../case/case-detail-read-model.ts";
 import { dispositionFor, nextActionFor, priorityFor } from "../case/case-logic.ts";
 import { outsideEveryRate } from "../fhir/measure-report.ts";
 import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
 import { proposeOrders } from "../order/order-proposal.ts";
-import { dedupeKeyFor, toServiceRequest, type ProposedOrder } from "../order/proposed-order.ts";
-import { orderForMeasure } from "../order/order-catalog.ts";
+import { dedupeKeyFor, toServiceRequest, type OrderCode, type ProposedOrder } from "../order/proposed-order.ts";
+import { codeKey, isSuggestible, orderForMeasure, ordersForMeasure, type OrderOption } from "../order/order-catalog.ts";
 import type { StandingOrderProvider } from "../order/standing-order-provider.ts";
 import { DEPLOYMENT_PROFILE, subjectNoun } from "../config/deployment-profile.ts";
 import type { CdsCard, CdsSuggestion } from "./types.ts";
@@ -66,6 +68,11 @@ export interface CardOptions {
    * the seed array, so approving a mapping unlocks a suggestion without a code change.
    */
   approvedOrderCodes: ReadonlySet<string>;
+  /**
+   * The clinic's own code per approved national code (#640 item 2, `order/approved-codes.ts`), added to a
+   * suggested ServiceRequest as a second coding. Absent means the national code alone, as before.
+   */
+  clinicCodes?: ReadonlyMap<string, OrderCode>;
   standingOrders: StandingOrderProvider;
   /** Absolute origin of the Studio UI. When absent, cards carry no links (never a broken one). */
   studioBaseUrl?: string;
@@ -81,6 +88,20 @@ const isDeprecated = (measureId: string): boolean =>
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
+/**
+ * The card's headline (#880): what closes the gap, where the measure's wording names it (`needFor`), and
+ * otherwise the measure and its state as before. The CMS measure is named only beside a row CMS's own
+ * artifact scored; a WorkWell translation's row names none, so no CMS identity stands over our logic
+ * (LOCKED §4.3). An authored row (TWH) keeps "<measure> — <state>".
+ */
+function headlineFor(row: { measureId: string; evidence: unknown }, status: string, name: string): string {
+  const logic = scoringLogicOf(row.evidence);
+  const need = logic ? needFor(row.measureId, status, row.evidence) : null;
+  if (!need) return `${name} — ${humanState(status)}`;
+  const cmsId = logic?.kind === "cms-artifact" ? measureIdentityFor(row.measureId)?.cmsId : null;
+  return cmsId ? `${need} (${cmsId})` : need;
 }
 
 /** Sentence-case a display state for a card summary: `MISSING_DATA` → `missing data`. */
@@ -122,6 +143,14 @@ export const cardUuid = (runId: string, subjectId: string, measureId: string): P
 
 export const suggestionUuid = (runId: string, subjectId: string, measureId: string): Promise<string> =>
   deterministicUuid("suggestion", runId, subjectId, measureId);
+
+/**
+ * A choice measure's option (#640 item 3) has a suggestion of its own, so its uuid also names the code. A
+ * protocol measure keeps `suggestionUuid`'s three parts, so feedback ids issued before choices existed stay
+ * the same.
+ */
+export const optionSuggestionUuid = (runId: string, subjectId: string, measureId: string, optionKey: string): Promise<string> =>
+  deterministicUuid("suggestion", runId, subjectId, measureId, optionKey);
 
 /**
  * The card WorkWell returns when it has nothing measured for this patient.
@@ -178,9 +207,14 @@ function evaluationFailedCard(row: CardInput, studioBaseUrl?: string): CdsCard {
   };
 }
 
-function detailFor(row: CardInput, method: string): string {
+function detailFor(row: CardInput, method: string, orderOptions: readonly OrderOption[] | null): string {
   const wf = deriveWhyFlagged(row.evidence, row.measureId, row.evaluationPeriod, row.status);
   const lines = [`**${method}.** ${nextActionFor(row.status, row.measureId, row.evidence)}`];
+  // B29: the measure's order set, whole, even where only some codes are approved as suggestions. Names
+  // only: an interval or a billing note is WorkWell's catalog text, which a card does not state (1.1).
+  if (orderOptions && orderOptions.length > 0) {
+    lines.push(`Orders that could close this gap (the clinician chooses one): ${orderOptions.map((o) => o.display).join("; ")}.`);
+  }
   const facts: string[] = [];
   if (wf.last_exam_date) facts.push(`Last completed: ${wf.last_exam_date}`);
   if (wf.days_overdue != null && wf.days_overdue > 0) facts.push(`Days overdue: ${wf.days_overdue}`);
@@ -208,10 +242,12 @@ function suggestionFor(
   approvedOrderCodes: ReadonlySet<string>,
   uuid: string,
   patientId: string,
+  clinicCodes?: ReadonlyMap<string, OrderCode>,
 ): CdsSuggestion | undefined {
   if (!proposal) return undefined;
   const key = `${proposal.order.system}|${proposal.order.code}`;
   if (!approvedOrderCodes.has(key)) return undefined;
+  if (!isSuggestible({ ...proposal.order })) return undefined;
   return {
     label: `Order ${proposal.order.display}`,
     uuid,
@@ -221,7 +257,7 @@ function suggestionFor(
         description:
           `Draft order proposal for ${proposal.order.display} (${measureName(row.measureId)}). ` +
           `Advisory — a clinician reviews and submits; WorkWell orders nothing.`,
-        resource: withClientSubject(toServiceRequest(proposal), patientId),
+        resource: withClientSubject(toServiceRequest(proposal, clinicCodes?.get(key)), patientId),
       },
     ],
   };
@@ -273,11 +309,12 @@ export async function buildComplianceCards(
   // to the same order code (diabetes_hba1c and cms122 both → CPT 83036) collapse to a single proposal,
   // because one order is the correct clinical action. The measure that did not win the collapse gets an
   // information card — correct, and the reason a per-measure call would be wrong.
-  const { proposed } = proposeOrders(
-    open.map((r) => ({ subjectId: opts.subjectId, measureId: r.measureId, status: r.status })),
+  const { proposed, choices } = proposeOrders(
+    open.map((r) => ({ subjectId: opts.subjectId, measureId: r.measureId, status: r.status, evidence: r.evidence })),
     opts.standingOrders,
     opts.authoredOn,
   );
+  const choiceByMeasure = new Map(choices.map((c) => [c.measureId, c]));
   const proposalByKey = new Map(proposed.map((p) => [p.dedupeKey, p]));
   const claimed = new Set<string>();
 
@@ -298,23 +335,51 @@ export async function buildComplianceCards(
     // First measure to claim a collapsed proposal carries the suggestion; the rest do not re-offer it.
     const proposal = key && !claimed.has(key) ? proposalByKey.get(key) : undefined;
     if (proposal && key) claimed.add(key);
-    const suggestion = suggestionFor(
+    const suggestions: CdsSuggestion[] = [];
+    const protocolSuggestion = suggestionFor(
       row,
       proposal,
       opts.approvedOrderCodes,
       await suggestionUuid(row.runId, opts.subjectId, row.measureId),
       opts.patientId,
+      opts.clinicCodes,
     );
+    if (protocolSuggestion) suggestions.push(protocolSuggestion);
+    // A choice measure (#640 item 3): one suggestion per approved, suggestible option still open after
+    // dedupe, and the client lets the clinician accept at most one. No option is marked recommended: the
+    // choice is the clinician's.
+    const choice = choiceByMeasure.get(row.measureId);
+    const catalog = ordersForMeasure(row.measureId);
+    if (choice && catalog) {
+      for (const opt of catalog.options) {
+        const optKey = codeKey(opt);
+        // `suggestionFor` refuses an unapproved or non-suggestible (LOCAL) option.
+        if (!choice.optionKeys.includes(optKey)) continue;
+        const asProposal: ProposedOrder = {
+          subjectId: opts.subjectId,
+          measureId: row.measureId,
+          order: { code: opt.code, system: opt.system, display: opt.display },
+          reasonOutcome: choice.reasonOutcome,
+          priority: choice.priority,
+          status: "PROPOSED",
+          dedupeKey: dedupeKeyFor(opts.subjectId, opt),
+          authoredOn: choice.authoredOn,
+        };
+        const uuidForOption = await optionSuggestionUuid(row.runId, opts.subjectId, row.measureId, optKey);
+        const s = suggestionFor(row, asProposal, opts.approvedOrderCodes, uuidForOption, opts.patientId, opts.clinicCodes);
+        if (s) suggestions.push(s);
+      }
+    }
 
     cards.push({
-      summary: truncate(`${name} — ${humanState(cell.status)}`, SUMMARY_MAX),
+      summary: truncate(headlineFor(row, cell.status, name), SUMMARY_MAX),
       // `critical` is unrepresentable in `CdsCard` by design — see types.ts.
       indicator: priorityFor(row.status) === "HIGH" ? "warning" : "info",
       source: {
         label: SOURCE_LABEL,
         ...(opts.studioBaseUrl ? { url: `${opts.studioBaseUrl}/measures/${row.measureId}` } : {}),
       },
-      detail: detailFor(row, cell.method),
+      detail: detailFor(row, cell.method, choice && catalog ? catalog.options : null),
       uuid,
       ...(opts.studioBaseUrl
         ? {
@@ -327,7 +392,7 @@ export async function buildComplianceCards(
             ],
           }
         : {}),
-      ...(suggestion ? { suggestions: [suggestion], selectionBehavior: "at-most-one" as const } : {}),
+      ...(suggestions.length > 0 ? { suggestions, selectionBehavior: "at-most-one" as const } : {}),
     });
   }
   return cards;

@@ -38,7 +38,7 @@ export interface EmployeeProfile {
    *
    * Present on the patient corpus and absent everywhere else: the occupational directory has never
    * recorded one, and the LIVE WebChart directory still discards Coverage (extracting a primary
-   * coverage is a named follow-up with #533's ingest work). Optional and additive, so no existing
+   * coverage is a named follow-up, #893). Optional and additive, so no existing
    * row's identity changes and a deployment without payers filters to nothing rather than to
    * everything — the same rule `sex` follows.
    */

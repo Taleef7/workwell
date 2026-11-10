@@ -81,8 +81,8 @@ Maui also vendors the sidecar of each WorkWell translation it routes (`measures/
 per id, before `docker build`:
 
 ```bash
-node scripts/vendor-derived-terminology.mjs --catalog-id cms137 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
 node scripts/vendor-derived-terminology.mjs --catalog-id cms130 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
+node scripts/vendor-derived-terminology.mjs --catalog-id cms125 --verify-pin --fallback-dir "$RUNNER_TEMP/terminology"
 ```
 
 Every value set is re-expanded from VSAC at the release the committed manifest names. `--verify-pin`
@@ -168,7 +168,7 @@ measure to `OFFICIAL_GATED_MEASURES`, both deploy workflows' vendor lists and `f
 ### Flipping a measure to official execution — pre-flip checklist (ADR-043)
 
 Routing is `WORKWELL_OFFICIAL_MEASURES`: **TWH `cms122,cms125`; Maui
-`cms122,cms125,cms2,cms130,cms165,cms137`** (ADR-078). Pass a stack's current list to flip tooling.
+`cms122,cms125,cms2,cms130,cms165`** (ADR-078; cms137 retired 2026-11-05, #889). Pass a stack's current list to flip tooling.
 A missing artifact, sidecar or complete expansion refuses. A whole roster falling **outside the
 initial population** does not — it completes with MISSING_DATA and a `WARN`. This catches it:
 
@@ -205,8 +205,10 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
    engine-agreement check, not a roster forecast. No roster is needed: measures with an official
    artifact are never roster-stamped, so a tenant with no qualifying encounters reads INCONCLUSIVE.
 
-3. **Check the numerator, not just membership** (ADR-044: CPT vs LOINC mammograms made screened women
-   OVERDUE).
+3. **Check the numerator, not just membership.** For CMS125, authored and official disagree by design on
+   a billed-only mammogram: authored reads the CPT/HCPCS `Procedure`, official counts only a charted
+   LOINC imaging result (owner decision 2026-11-05, `WEBCHART_FHIR_MAPPING.md`). Expect it; it is not a
+   defect.
 
 4. **Edit the deploy workflow, never the container**: its `build-backend-ts` build args and the routing
    gate's `EXPECTED_*`. No container env array may carry the lists (#768). For Maui also `flip-gate.yml`'s
@@ -223,13 +225,23 @@ initial population** does not — it completes with MISSING_DATA and a `WARN`. T
 **Reversible:** remove the id where step 4 says and redeploy; `logic_version` carries the artifact's
 identity (ADR-040), so no cache cleanup is needed.
 
-**Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms137,cms130,cms125,cms165,cms122,cms2`; TWH: `cms125,cms122`) lets a committed WorkWell
+**Turning a translation on or off.** `WORKWELL_DERIVED_MEASURES` (Maui: `cms130,cms125,cms165,cms122,cms2`; TWH: `cms125,cms122`) lets a committed WorkWell
 translation score the one year it covers (2027); CMS's artifact still scores every other year. Each id
 must also be in `WORKWELL_OFFICIAL_MEASURES`. Edit it where step 4 says (the build arg and the gate's
 `EXPECTED_DERIVED`, same value), and keep the build job's `vendor-derived-terminology.mjs` lines
 naming the same ids (and, for Maui, `ROUTED_TRANSLATIONS` in CI's `e2e-maui`). `official-flip-config.test.ts` fails
 the build otherwise, and pins TWH and staging to none. `flip-gate.yml` does not read the key: a flip-gate
 run for a 2027 date scores CMS's 2026 artifact, not what Maui runs.
+
+**Retiring a measure (#889; cms137 on Maui, 2026-11-05).** Take it off both routing keys everywhere
+`official-flip-config.test.ts` checks (build args, `EXPECTED_*`, the derived vendor line, CI's `e2e-maui`
+lists, `flip-gate.yml`, `rebuild-quality-snapshots-maui.yml`), take it off the profile's measure list and
+add it to that profile's `retiredMeasureIds` (`config/deployment-profile.ts`; the two lists may not share
+an id). The first all-programs run after the deploy (the nightly, or the lead's manual one) closes its open
+cases `MEASURE_RETIRED`, one audited `CASE_RESOLVED` each, and `RUN_COMPLETED.retired.closed` counts them.
+**A rollback to an image that still routes the measure reopens those cases on its next run** (they are
+system closures, which `planCaseUpsert` reopens), each audited; roll forward instead. Its official
+terminology may stay vendored: an artifact nobody routes is not run.
 
 ### The deploy script and the Container Manager API
 
@@ -333,15 +345,17 @@ writes a `WARN` containing `no segment makes them applicable` when this is owed.
 ### 1 January 2027: the year change (#854)
 
 The scheduler runs Monday to Friday, so Thursday 31 December is the last 2026 nightly and **Friday 1 January,
-12:00 UTC (7:00 AM Eastern)**, the first 2027 one. Rehearsed with `pnpm rehearse:year-change` (2026-10-20, a
-1,000-patient corpus on a local Postgres; the December rehearsal on a copy of Maui adds Maui's own numbers).
-What that nightly does:
+12:00 UTC (2:00 AM in Hawaii)**, the first 2027 one. "Today" is the practice's date (Maui: `Pacific/Honolulu`,
+pending MIE's confirmation, #882), so a run started on the afternoon of 31 December in Hawaii still scores
+2026. Rehearsed with `pnpm rehearse:year-change` (2026-10-20, a 1,000-patient corpus on a local Postgres; the
+December rehearsal on a copy of Maui adds Maui's own numbers, in three steps: `--evaluation-date 2026-12-31`,
+then `2027-01-01`, then `2026-12-31 --today 2027-01-04`, the January re-score). What that nightly does:
 - every routed measure is scored by its 2027 translation (`WorkWell translation of CMS… (ww-2027.1)`);
 - every 2026 case still open for a patient it evaluates closes `RESOLVED` / `CYCLE_ROLLED_OVER`, one
   `CASE_RESOLVED` audit event each: 783 per 1,000 patients rehearsed, about 15,300 on Maui. The closes are
   sequential, two writes each (1.8 s for 783 locally), so on Neon the time is about 2 × the count × one round
   trip; the run log states it;
-- **the 2027 work list starts nearly empty and fills as patients are seen.** Each of the six measures counts
+- **the 2027 work list starts nearly empty and fills as patients are seen.** Each of the five measures counts
   only patients with a visit in 2027: 17 cases per 1,000 on the corpus (8 in 1,000 have a 1 January visit),
   none on real data. The rates rest on those few patients (Programs marks a denominator under 20 as small);
 - a measure nobody has entered yet logs `WARN … not one of N subjects entered the official initial
@@ -357,8 +371,19 @@ What that nightly does:
 4. `/health` is UP and its `lastPopulationRun` is that run, with no data-insufficient measure.
 5. Tell MIE the year changed, with N and the run's time.
 
-If the run FAILED, nothing rolled over (the closes come after the last chunk): start one ALL_PROGRAMS run from
-the Runs page (`POST /api/runs/manual`), which rolls over as the nightly does.
+If the run FAILED, nothing rolled over (the closes come after the last chunk): an admin starts one ALL_PROGRAMS
+run from the Runs page (`POST /api/runs/manual`) **that day**, which rolls over as the nightly does. Otherwise
+the work list, which shows 2027 from 1 January, stays empty until Monday's nightly. While a population run is in
+flight a second one is refused (`409 run_in_progress`): wait for it.
+
+**January to March: closing out 2026 (#882).** Records of 2026 care keep arriving after 1 January, and the
+2026 scorecard and attributed-list report read the newest run scored over 2026. The lead (or an admin)
+re-scores 2026 from the scorecard ("Closing out 2026", 2026 selected) when late records have arrived: an
+ALL_PROGRAMS run as of 2026-12-31, about as long as the nightly. The server marks it
+(`requestedScope.earlierCycle`), so it opens and reopens no case, is nobody's "latest" (the work list, roster,
+Programs, the trend, the cards and MCP stay on 2027), and writes no quality snapshot and no `/health`
+`lastPopulationRun`. Its outcomes are recorded and its run is on the Runs page. Re-checking a closed 2026 case
+records the 2026 result on it and leaves it closed; outreach on one is refused (`409 earlier_cycle_closed`).
 
 ### Which run scopes are SCHEDULED, and which answer in the request (ADR-085, #590)
 
@@ -445,13 +470,14 @@ From `backend-ts/`, with `DATABASE_URL` set. Idempotent and resumable. Undo SQL 
 | `pnpm seed:trend-history --weeks N --as-of <date>` | synthetic weekly runs | refuses under retention | `triggered_by='seed:trend-history'` |
 | `pnpm resolve-valuesets --manifest <canonical> [--official <id>]` | VSAC expansions into `value_sets` (descriptive) | TWH: done | `DELETE FROM value_sets WHERE source='VSAC'` |
 | `pnpm outcomes:compact` | one retention pass | also runs after each Maui nightly | none |
-| `pnpm rehearse:year-change --evaluation-date <date> --confirm-host <host> [--out <file.json>]` | the nightly as of that date: runs, outcomes, cases, audit; as of a new year it closes the old year's cases (#854) | a COPY only: refuses unless `--confirm-host` repeats `DATABASE_URL`'s host, and with WebChart configured | discard the copy |
+| `pnpm rehearse:year-change --evaluation-date <date> --confirm-host <host> [--today <date>] [--out <file.json>]` | the nightly as of that date: runs, outcomes, cases, audit; as of a new year it closes the old year's cases (#854); `--today` plans it on another practice date, so December can rehearse the January re-score of the old year, which must open or reopen no case (#882) | a COPY only: refuses unless `--confirm-host` repeats `DATABASE_URL`'s host, and with WebChart configured | discard the copy |
 
 A crashed `seed:scale` leaves RUNNING runs that are not auto-swept — roll back before resuming.
 
-These run in their own process, so the running backend keeps the Run History counts it had already read
-(kept until compaction or a restart, `run/run-counts.ts`). After `seed:scale`, `seed:trend-history` or
-`outcomes:compact` against a live database, restart the backend (the re-deploy below).
+These run in their own process, so the running backend keeps the Run History counts and the scorecard's
+rows it had already read (each finished run's, kept until compaction or a restart: `run/run-counts.ts`,
+`compliance/measure-year-rows-cache.ts`). After `seed:scale`, `seed:trend-history` or `outcomes:compact`
+against a live database, or any hand SQL on `runs` or `outcomes`, restart the backend (the re-deploy below).
 
 ### Manual re-deploy (force update existing containers)
 
@@ -460,7 +486,7 @@ Actions → the stack's deploy workflow → Run workflow, `replace_existing: tru
 ### Maui sandbox deployment
 
 The pilot group's sandbox (`deploy-maui-mieweb.yml`), with its own Neon project, JWT secret and R2 bucket
-(`workwell-evidence-maui`); env as above with `WORKWELL_INSTANCE=maui`, and an image that routes the six
+(`workwell-evidence-maui`); env as above with `WORKWELL_INSTANCE=maui`, and an image that routes the five
 measures.
 
 - **Isolation guard:** deploy and reconcile refuse when `DATABASE_URL_MAUI` has the same host as
@@ -477,7 +503,8 @@ measures.
 
 | Identifier | Role |
 |---|---|
-| `quality-lead@maui.workwell.dev`, `quality-staff@maui.workwell.dev` | `ROLE_CASE_MANAGER` |
+| `quality-lead@maui.workwell.dev` | `ROLE_CASE_MANAGER`: the lead |
+| `quality-staff@maui.workwell.dev` | `ROLE_QUALITY_STAFF`: the staff seat, one case at a time (#880, LOCKED_DECISIONS §4A.9) |
 | `clinician@maui.workwell.dev` | `ROLE_VIEWER`, linked to provider `maui-prov-011` (its scorecard row, #870) |
 | `admin@maui.workwell.dev` | `ROLE_ADMIN` |
 

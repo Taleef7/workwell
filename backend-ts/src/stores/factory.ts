@@ -65,6 +65,9 @@ import { PgEvalStateStore } from "./postgres/eval-state-store-postgres.ts";
 import type { PanelStore } from "./panel-store.ts";
 import { SqlitePanelStore } from "./sqlite/panel-store-sqlite.ts";
 import { PgPanelStore } from "./postgres/panel-store-postgres.ts";
+import type { ContactPreferenceStore } from "./contact-preference-store.ts";
+import { SqliteContactPreferenceStore } from "./sqlite/contact-preference-store-sqlite.ts";
+import { PgContactPreferenceStore } from "./postgres/contact-preference-store-postgres.ts";
 import type { SubjectListStore } from "./subject-list-store.ts";
 import { SqliteSubjectListStore } from "./sqlite/subject-list-store-sqlite.ts";
 import { PgSubjectListStore } from "./postgres/subject-list-store-postgres.ts";
@@ -95,6 +98,8 @@ export interface Stores {
   evalState: EvalStateStore;
   /** Provider-panel mappings (MM-2 PR 2) — which staff account works which provider's patients. */
   panels: PanelStore;
+  /** How each subject wants to be reached (#886): a preferred channel and the channels not to use. */
+  contactPreferences: ContactPreferenceStore;
   /** The ACO's attributed patient lists (MM-2 PR 3, ADR-082) — immutable, revisioned imports. */
   subjectLists: SubjectListStore;
   /** Audit-backed demo adapter; production drop-in = PgCampaignStore over outreach_campaigns + outreach_delivery_log. */
@@ -172,6 +177,7 @@ async function buildPostgres(url: string): Promise<Stores> {
     personLinks: new PgPersonLinkStore(pool),
     evalState: new PgEvalStateStore(pool),
     panels: new PgPanelStore(pool),
+    contactPreferences: new PgContactPreferenceStore(pool),
     subjectLists: new PgSubjectListStore(pool),
     campaigns: new AuditBackedCampaignStore(events),
     authFamilies: new PgAuthFamilyStore(pool),
@@ -216,6 +222,7 @@ async function buildSqlite(db: CloudDatabase): Promise<Stores> {
     personLinks: new SqlitePersonLinkStore(db),
     evalState: new SqliteEvalStateStore(db),
     panels: new SqlitePanelStore(db),
+    contactPreferences: new SqliteContactPreferenceStore(db),
     subjectLists: new SqliteSubjectListStore(db),
     campaigns: new AuditBackedCampaignStore(events),
     authFamilies: new SqliteAuthFamilyStore(db),

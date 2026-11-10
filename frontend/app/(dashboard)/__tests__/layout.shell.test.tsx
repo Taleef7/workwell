@@ -14,8 +14,9 @@ vi.mock("@/components/auth-provider", () => ({
 }));
 
 let pathname = "/worklist";
+const push = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push }),
   usePathname: () => pathname,
   useSearchParams: () => new URLSearchParams(),
 }));
@@ -66,6 +67,9 @@ beforeEach(() => {
   auth.token = "mock-token";
   auth.reconnecting = false;
   pathname = "/worklist";
+  user.role = "ROLE_CASE_MANAGER";
+  push.mockClear();
+  apiMock.getWithHeaders.mockClear();
   listeners.clear();
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -209,7 +213,50 @@ describe("DashboardLayout — the work list is the daily screen (#698)", () => {
     apiMock.getWithHeaders.mockResolvedValueOnce({ data: [], headers: new Headers({ "X-Total-Count": "15900" }) });
     renderShell();
     const badge = await screen.findByTestId("worklist-badge");
-    expect(badge).toHaveAttribute("title", "15,900 open gaps with no outreach yet");
-    expect(badge).toHaveTextContent("15,900 open gaps with no outreach yet");
+    expect(badge).toHaveAttribute("title", "15,900 open gaps not contacted yet");
+    expect(badge).toHaveTextContent("15,900 open gaps not contacted yet");
+  });
+});
+
+describe("DashboardLayout — the staff seat's day starts on its own cases (#880)", () => {
+  it("lists Cases before the Worklist, opens it on mine, and shows none of the lead's levers", async () => {
+    viewport(false);
+    user.role = "ROLE_QUALITY_STAFF";
+    renderShell();
+    const worklist = screen.getByTestId("nav-worklist");
+    const cases = screen.getByTestId("nav-cases");
+    expect(cases.compareDocumentPosition(worklist) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId("nav-orders")).toBeInTheDocument();
+    for (const lead of ["nav-lists", "nav-campaigns", "nav-people"]) expect(screen.queryByTestId(lead)).toBeNull();
+
+    fireEvent.click(cases);
+    expect(push).toHaveBeenLastCalledWith("/cases?view=mine");
+    // The practice-wide count of uncontacted gaps is the lead's number: never fetched, never shown.
+    await act(async () => {});
+    expect(apiMock.getWithHeaders).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("worklist-badge")).toBeNull();
+  });
+
+  it("the logo goes to each seat's home, not to Programs", () => {
+    viewport(false);
+    user.role = "ROLE_QUALITY_STAFF";
+    const view = renderShell();
+    fireEvent.click(screen.getByText("WW"));
+    expect(push).toHaveBeenLastCalledWith("/cases?view=mine");
+    view.unmount();
+
+    user.role = "ROLE_CASE_MANAGER";
+    renderShell();
+    fireEvent.click(screen.getByText("WW"));
+    expect(push).toHaveBeenLastCalledWith("/worklist");
+  });
+
+  it("the lead keeps the Worklist first, the badge, and an unfiltered Cases link", async () => {
+    viewport(false);
+    renderShell();
+    fireEvent.click(screen.getByTestId("nav-cases"));
+    expect(push).toHaveBeenLastCalledWith("/cases");
+    await act(async () => {});
+    expect(apiMock.getWithHeaders).toHaveBeenCalled();
   });
 });

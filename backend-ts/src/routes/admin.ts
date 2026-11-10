@@ -32,6 +32,15 @@ import { getSchedulerStatus, setSchedulerEnabled } from "../admin/scheduler.ts";
 import { ensureMeasureStore } from "./measures.ts";
 import { listTerminologyMappings, createTerminologyMapping, ValueSetError } from "../measure/value-set-governance.ts";
 import {
+  orderCodeViews,
+  parseDecision,
+  reviewOrderCode,
+  reviewTerminologyMapping,
+  TerminologyReviewError,
+} from "../order/order-code-review.ts";
+import { MEASURE_CATALOG } from "../measure/measure-catalog.ts";
+import { isRunnableMeasure } from "../config/deployment-profile.ts";
+import {
   seedOutreachTemplates,
   listTemplates,
   previewTemplate,
@@ -193,6 +202,52 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
       throw err;
     }
   }
+  // ---- reviewing a mapping, and the order catalog's codes (#640, owner decision 2026-11-04) ----
+  const reviewMatch = /^\/api\/admin\/terminology-mappings\/([^/]+)\/review$/.exec(pathname);
+  if (reviewMatch && req.method === "POST") {
+    await ensureMeasureStore(env);
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const sx = await getStores(env);
+      const updated = await reviewTerminologyMapping(
+        { valueSets: sx.valueSets, events: sx.events },
+        decodeURIComponent(reviewMatch[1]!),
+        parseDecision(body.decision),
+        noteOf(body.note),
+        actor,
+      );
+      return json(updated);
+    } catch (err) {
+      if (err instanceof TerminologyReviewError) return json({ error: err.code, message: err.message }, err.status);
+      throw err;
+    }
+  }
+  if (pathname === "/api/admin/order-codes" && req.method === "GET") {
+    await ensureMeasureStore(env);
+    const mappings = await (await getStores(env)).valueSets.listTerminologyMappings();
+    return json({ codes: orderCodeViews(runnableMeasureIds(), mappings) });
+  }
+  if (pathname === "/api/admin/order-codes/review" && req.method === "POST") {
+    await ensureMeasureStore(env);
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    try {
+      const sx = await getStores(env);
+      const reviewed = await reviewOrderCode(
+        { valueSets: sx.valueSets, events: sx.events },
+        runnableMeasureIds(),
+        String(body.system ?? "").trim(),
+        String(body.code ?? "").trim(),
+        parseDecision(body.decision),
+        noteOf(body.note),
+        actor,
+      );
+      return json({ reviewed });
+    } catch (err) {
+      if (err instanceof TerminologyReviewError) return json({ error: err.code, message: err.message }, err.status);
+      throw err;
+    }
+  }
+
   // ---- static / faithful reads --------------------------------------------
   if (pathname === "/api/admin/data-mappings" && req.method === "GET") return json(listDataMappings());
   if (pathname === "/api/admin/data-mappings/validate" && req.method === "POST") return json(validateDataMappings());
@@ -314,4 +369,15 @@ export async function handleAdmin(req: Request, env: AdminEnv, actor = "system")
   }
 
   return null;
+}
+
+/** The measures this deployment runs, whose order codes the Order codes panel lists. */
+function runnableMeasureIds(): string[] {
+  return MEASURE_CATALOG.filter((m) => m.status === "Active" && isRunnableMeasure(m.id)).map((m) => m.id);
+}
+
+/** A reviewer's optional note, bounded (it lands in the audit payload). */
+function noteOf(raw: unknown): string | null {
+  const note = typeof raw === "string" ? raw.trim() : "";
+  return note ? note.slice(0, 500) : null;
 }

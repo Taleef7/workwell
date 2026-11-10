@@ -12,7 +12,7 @@
  * ## The property under test
  *
  * **Agreement with the authored engine, subject by subject.** Where the two agree, routing a measure
- * officially is a configuration change. Where they diverge, the divergence is written into `EXPECTED`
+ * officially is a configuration change. Where they diverge, the divergence is written into the tests
  * with its measured cause — so a shift is either progress or a regression, and both are deliberate rather
  * than discovered later from a roster that quietly reads differently.
  *
@@ -53,9 +53,9 @@
  * for two of them: `Condition.onsetDateTime` genuinely does not apply (CMS125's IPP reads no Condition at
  * all — only its mastectomy exclusions do), but the LOINC mammography `Observation` and
  * `Observation.category` moved no outcome only because **no in-IPP subject here has a mammogram to find**.
- * Both are live NUMERATOR blockers, and the tests at the bottom of this file demonstrate that they produce
- * a **false OVERDUE on the first real screening**. Read "one fix, not four" as scoped to the initial
- * population; it is not a statement that the other gaps are retired.
+ * Both decide the NUMERATOR, which the tests at the bottom of this file pin: official counts only a
+ * charted LOINC result with `category ~ imaging`, never a billed Procedure. Read "one fix, not four" as
+ * scoped to the initial population.
  *
  * **cms122 — official puts all 56 out of the IPP, and authored returns MISSING_DATA for all 56.** The seed
  * carries zero Conditions and cms122 is deliberately absent from `ROSTER_ELIGIBLE_MEASURES` (its
@@ -92,17 +92,14 @@ const roster = parseEnrollmentRoster(JSON.parse(readFileSync(path.join(DIR, "enr
 const EVAL = "2024-06-01";
 
 /**
- * The measured baseline: official outcome distribution, and every subject where authored disagrees.
- *
- * `divergence` is the load-bearing field. Empty means official and authored agree subject-for-subject, so
- * routing the measure is inert for this data; a populated one names each subject whose roster row would
- * change the day the measure is routed, and what it changes from and to.
+ * The measured baseline over the sample as ingest serves it. It carries no Encounter, no CMS125 result and
+ * no billed mammogram inside an age band, so official CMS125 retrieves nothing for any of the 56 subjects
+ * and the executor refuses the batch (`official-executor-adapter.ts`, "retrieved NOTHING"), while authored
+ * reads all 56 as MISSING_DATA. Until 2026-11-05 the LOINC Observation derived from wc-49's 2015 billed
+ * mammogram was the one resource the artifact retrieved, which kept the guard quiet; the derivation is
+ * gone (a billed mammogram is not a result), so the refusal is the answer for this data.
  */
-const EXPECTED: Record<string, { official: Record<string, number>; divergence: Record<string, string> }> = {
-  // The real path: the sample carries no Encounter, so neither engine admits anyone to CMS125's
-  // population. That is the true answer for this data.
-  cms125: { official: { MISSING_DATA: 56 }, divergence: {} },
-};
+const AUTHORED_BASELINE = { MISSING_DATA: 56 };
 
 /** With a qualifying visit supplied as test data (`withPopulationFacts`), the two engines agree here. */
 const EXPECTED_WITH_POPULATION_FACTS = { official: { MISSING_DATA: 52, OVERDUE: 4 }, divergence: {} };
@@ -225,40 +222,20 @@ test("the fixture carries us-core-sex — the element official CMS125's IPP read
   assert.deepEqual(Object.fromEntries(codes), { "248152002": 12, "248153007": 16 });
 });
 
-for (const [measureId, expected] of Object.entries(EXPECTED)) {
-  test(`official ${measureId} over real WebChart data: the measured baseline`, { skip }, async () => {
-    const bundles = await liveBundles(measureId);
-    const official = await officialOutcomes(measureId, bundles);
-    const authored = await authoredOutcomes(measureId, bundles);
-
-    // Every subject must come back. `evaluateBatch` omits a subject fqm returned nothing for, and an
-    // omission read as "no outcome" is how a mis-keyed batch degrades silently (adapter docs, PR-8f).
-    assert.equal(official.size, 56, `official returned ${official.size} of 56 subjects`);
-    assert.equal(authored.size, 56, `authored returned ${authored.size} of 56 subjects`);
-
-    assert.deepEqual(distribution(official), expected.official, `official ${measureId} distribution moved`);
-
-    const divergence: Record<string, string> = {};
-    for (const [subjectId, officialOutcome] of official) {
-      const authoredOutcome = authored.get(subjectId);
-      if (authoredOutcome !== officialOutcome) divergence[subjectId] = `${authoredOutcome}→${officialOutcome}`;
-    }
-    assert.deepEqual(
-      divergence,
-      expected.divergence,
-      `official/authored divergence for ${measureId} changed — update EXPECTED deliberately, with the cause`,
-    );
-  });
-}
-
-test("ingest no longer puts the sample in CMS125's population: no Encounter is invented", { skip }, async () => {
-  // The roster used to stamp a CPT 99213 visit on every listed patient, which is what admitted the four
-  // below. Without it, nobody in this Encounter-less sample is in the initial population.
-  const official = await officialFull("cms125", await liveBundles("cms125"));
-  assert.equal(inIppCount(official), 0);
-  for (const bundle of await liveBundles("cms125")) {
+test("official cms125 over real WebChart data: nothing it reads, so the batch is refused", { skip }, async () => {
+  const bundles = await liveBundles("cms125");
+  // No Encounter is invented: the roster used to stamp a CPT 99213 visit on every listed patient.
+  for (const bundle of bundles) {
     assert.ok(!resources(bundle).some((r) => r["resourceType"] === "Encounter"), `${patientId(bundle)} gained an Encounter`);
   }
+  await assert.rejects(
+    officialOutcomes("cms125", bundles),
+    /retrieved NOTHING for any of 56 subjects/,
+    "a roster with nothing the artifact reads is refused, never reported as 56 people out of scope",
+  );
+  const authored = await authoredOutcomes("cms125", bundles);
+  assert.equal(authored.size, 56, `authored returned ${authored.size} of 56 subjects`);
+  assert.deepEqual(distribution(authored), AUTHORED_BASELINE);
 });
 
 test("official cms125 with a test-data visit: the two engines agree subject by subject", { skip }, async () => {
@@ -355,7 +332,7 @@ test("cms122 over real WebChart data: nobody in the IPP — a DATA gap, not a fl
 });
 
 /**
- * ## The NUMERATOR gap — still open, and it fails in the dangerous direction
+ * ## The NUMERATOR: a billed mammogram is not a result
  *
  * Everything above is a statement about **initial-population membership only**. All four discriminating
  * subjects are OVERDUE for the same reason — none has a mammogram — and the seed's single mammography
@@ -363,7 +340,7 @@ test("cms122 over real WebChart data: nobody in the IPP — a DATA gap, not a fl
  * the fixture as committed *cannot* exercise either engine's numerator, and the agreement above must not
  * be read as numerator parity.
  *
- * It is not. The two engines read different resource types:
+ * The two engines read different resource types:
  *   - authored `cms125.cql`: `exists([Procedure: "Mammography"] where status = 'completed' …)`
  *   - official CMS125 ELM: `isDiagnosticStudyPerformed([Observation: "Mammography"])`, where
  *     `Status.isDiagnosticStudyPerformed` requires `status in {final, amended, corrected}` **AND**
@@ -372,35 +349,23 @@ test("cms122 over real WebChart data: nobody in the IPP — a DATA gap, not a fl
  *     `G0202` on a **`Procedure`**
  *
  * And the official `Mammography` value set (OID …108.12.1018) is **92 LOINC codes and nothing else** — no
- * CPT, no HCPCS. So the shape WebChart actually produces is invisible to the official numerator.
+ * CPT, no HCPCS. So official CMS125 counts only a charted LOINC result, never a bill, which is also how
+ * WebChart's own report reads it. **Owner decision 2026-11-05:** no mapper derives the LOINC Observation
+ * from a billed Procedure any more (the dual stamp of ADR-044 is withdrawn for WebChart data), so on a
+ * billed-only screening the two engines disagree by design: authored reads the bill, official does not.
  *
- * The consequence is worse than an out-of-population read, which is why it is worth a test rather than a
- * doc line: official reports a **screened woman as OVERDUE**. That is a confident wrong answer on the
- * ordinary case, and via `case-logic.ts` it becomes a HIGH-priority case for a mammogram she already had.
+ * The four tests below inject resources directly and pin each engine's reading:
+ *   - Procedure alone → official OVERDUE, authored COMPLIANT (the bill is not a result)
+ *   - LOINC Observation without `category` → official still blind (the category gate)
+ *   - Observation alone → official COMPLIANT, authored OVERDUE (authored reads only the Procedure)
+ *   - both → the two engines agree COMPLIANT
  *
- * ## CLOSED by ADR-044 — but these tests stay, and are worth reading as a set
- *
- * The crosswalk now **dual-stamps**: a screening-mammogram procedure row emits the CPT/HCPCS `Procedure`
- * it always did AND a LOINC `Observation` carrying `category ~ imaging`
- * (`wcdb-fhir-shim/src/fhir-mapping.ts` + the by-design duplicate in `scripts/webchart-devdb-export.ts`).
- *
- * The four tests below are kept because each pins a DIFFERENT wrong answer, and three of them are the
- * ways a future "simplification" of the crosswalk would silently reopen the gap:
- *   - Procedure alone → official false-OVERDUE (the original bug)
- *   - LOINC Observation without `category` → still blind (the trap in the obvious fix)
- *   - Observation alone → the mirror image; authored now reports OVERDUE
- *   - both → the shipped behaviour; the two engines agree
- *
- * They inject resources directly rather than importing the crosswalk, because the mapping lives in a
- * separate package by design (ADR-034) and backend-ts must not import it. What guards the two copies from
- * drifting is the fixture assertion below — and ONLY the export-script side of the pair. `hapi-live.test.ts`
- * is named as that guard elsewhere and cannot be one: both its sides originate from the committed fixture,
- * so it never sees the shim or this script's SQL (review, #355). The shim side is covered by its own unit
- * tests; nothing compares the two emitters to each other.
+ * They inject resources rather than importing the crosswalk, because the mapping lives in a separate
+ * package by design (ADR-034) and backend-ts must not import it.
  */
 const MAMMO_DATE = "2023-09-15"; // inside the official MP (2023-06-01 .. 2024-06-01) for EVAL 2024-06-01
 
-/** The CPT/HCPCS half of what the crosswalk emits — on its own, invisible to the official numerator. */
+/** A billed mammogram, as the crosswalk emits it — on its own, not a result the official numerator reads. */
 const crosswalkProcedure = (subjectId: string) => ({
   resourceType: "Procedure",
   id: `${subjectId}-Procedure-mammo`,
@@ -430,45 +395,31 @@ async function withResourcesOn(subjectId: string, extra: readonly unknown[]): Pr
   });
 }
 
-test("ADR-044: the committed fixture carries the DUAL STAMP for its one real mammogram", { skip }, async () => {
-  // Proves the generator rule actually landed in the committed artifact, not just in the mapping code.
-  // wc-49 is the seed's only mammography record (HCPCS G0202, 2015) — she is 33 and outside the [42..74]
-  // IPP, so this moves no outcome, which is exactly why it needs asserting rather than inferring from
-  // the distribution being unchanged.
+test("the committed fixture carries its one billed mammogram as a Procedure, and no derived Observation", { skip }, async () => {
+  // wc-49 is the seed's only mammography record (HCPCS G0202, 2015). She is 33 and outside the [42..74]
+  // IPP, so this moves no outcome, which is why it is asserted rather than inferred from the distribution.
   const bundles = await liveBundles("cms125");
   const wc49 = bundles.find((b) => patientId(b) === "wc-49") as { entry: Array<{ resource: Record<string, unknown> }> };
   const resources = wc49.entry.map((e) => e.resource);
+  const code = (r: Record<string, unknown>) => (r.code as { coding: Array<{ code: string }> }).coding[0]!.code;
 
-  // Specifically the MAMMOGRAPHY procedure — wc-49 carries other procedures too, and matching the first
-  // one made this compare against an unrelated 2016 row.
-  const proc = resources.find(
-    (r) =>
-      r.resourceType === "Procedure" &&
-      ["77067", "G0202"].includes((r.code as { coding: Array<{ code: string }> }).coding[0]!.code),
+  assert.ok(
+    resources.some((r) => r.resourceType === "Procedure" && ["77067", "G0202"].includes(code(r))),
+    "the billed mammogram stays a Procedure",
   );
-  assert.ok(proc, "the source Procedure must remain — dual-stamping ADDS, never replaces");
-
-  const mammo = resources.find(
-    (r) =>
-      r.resourceType === "Observation" &&
-      (r.code as { coding: Array<{ code: string }> }).coding[0]!.code === "24606-6",
-  ) as Record<string, unknown> | undefined;
-  assert.ok(mammo, "and the LOINC imaging Observation must be beside it");
-  assert.equal(
-    (mammo!.category as Array<{ coding: Array<{ code: string }> }>)[0]!.coding[0]!.code,
-    "imaging",
-    "`isDiagnosticStudyPerformed` gates on this",
+  assert.ok(
+    !resources.some((r) => r.resourceType === "Observation" && code(r) === "24606-6"),
+    "and no LOINC Observation is derived from it (owner decision 2026-11-05)",
   );
-  assert.equal(mammo!.effectiveDateTime, proc!.performedDateTime, "derived from the row, not minted today");
 });
 
-test("one representation alone — a Procedure makes official report a screened woman OVERDUE", { skip }, async () => {
+test("a billed mammogram alone: official CMS125 does not count it; authored still reads it", { skip }, async () => {
   const bundles = await withResourcesOn("wc-8", [crosswalkProcedure("wc-8")]);
   const official = await officialOutcomes("cms125", bundles);
   const authored = await authoredOutcomes("cms125", bundles);
 
   assert.equal(authored.get("wc-8"), "COMPLIANT", "authored reads the Procedure and clears her");
-  assert.equal(official.get("wc-8"), "OVERDUE", "official cannot see a CPT Procedure — a FALSE overdue");
+  assert.equal(official.get("wc-8"), "OVERDUE", "a bill is not a result: official reads no mammogram");
   assert.deepEqual(distribution(authored), { MISSING_DATA: 52, COMPLIANT: 1, OVERDUE: 3 });
   assert.deepEqual(distribution(official), { MISSING_DATA: 52, OVERDUE: 4 });
 });
@@ -481,10 +432,9 @@ test("one representation alone — a LOINC Observation WITHOUT category=imaging 
   assert.equal(official.get("wc-8"), "OVERDUE", "a LOINC mammogram with no category is not a diagnostic study");
 });
 
-test("ADR-044 SHIPPED: dual-stamping both representations makes the two engines agree COMPLIANT", { skip }, async () => {
-  // Neither representation alone is enough, and they fail in opposite directions: the Procedure alone
-  // clears authored and not official; the Observation alone clears official and not authored. Emitting
-  // both is what the synthetic corpus already does (ADR-038) and what the crosswalk must do.
+test("a charted LOINC result beside the bill: both engines read COMPLIANT", { skip }, async () => {
+  // The Procedure alone clears authored and not official; the Observation alone clears official and not
+  // authored. A patient whose result is charted beside the bill is what the synthetic corpus holds.
   const bundles = await withResourcesOn("wc-8", [crosswalkProcedure("wc-8"), officialObservation("wc-8", true)]);
   const official = await officialOutcomes("cms125", bundles);
   const authored = await authoredOutcomes("cms125", bundles);
@@ -492,13 +442,12 @@ test("ADR-044 SHIPPED: dual-stamping both representations makes the two engines 
   assert.equal(official.get("wc-8"), "COMPLIANT");
   assert.equal(authored.get("wc-8"), "COMPLIANT");
   for (const [subjectId, officialOutcome] of official) {
-    assert.equal(officialOutcome, authored.get(subjectId), `${subjectId} diverged under the remedy`);
+    assert.equal(officialOutcome, authored.get(subjectId), `${subjectId} diverged with both recorded`);
   }
 });
 
 test("one representation alone — the Observation clears official while authored reports OVERDUE", { skip }, async () => {
-  // The mirror image, recorded so a future crosswalk change that emits only the official shape is caught
-  // as a divergence rather than celebrated as a fix.
+  // The mirror image: a charted result with no bill. Authored reads only the Procedure.
   const bundles = await withResourcesOn("wc-8", [officialObservation("wc-8", true)]);
   const official = await officialOutcomes("cms125", bundles);
   const authored = await authoredOutcomes("cms125", bundles);

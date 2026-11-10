@@ -105,6 +105,24 @@ test("a winner none of whose rows the caller can see falls back to the newest ru
   assert.deepEqual(new Set(windowed.rows.map((r) => r.runId)), new Set(["run-new", "run-old"]), "a window never falls back (stated edge): it keeps its N runs");
 });
 
+test("#882: a re-score of an ended cycle never reaches the rows, even from a store that elects it", async () => {
+  // A store without the marker's predicate names the January re-score as the winner. The row guard is
+  // the defense-in-depth layer: last year's rows are dropped rather than served as the latest.
+  const rescore = { runEarlierCycle: true as const };
+  const rows = [
+    row("run-jan", "2027-01-05T00:00:00.000Z", "emp-006", "audiogram", "OVERDUE"),
+    row("run-rescore", "2027-01-10T00:00:00.000Z", "emp-006", "audiogram", "COMPLIANT", rescore),
+  ];
+  const store = {
+    listLatestPopulationRuns: async () => [
+      { measureId: "audiogram", runId: "run-rescore", runStartedAt: "2027-01-10T00:00:00.000Z", runScopeType: "ALL_PROGRAMS", runStatus: "COMPLETED", runTriggeredBy: "manual" },
+    ],
+    listOutcomesWithRun: async (filter: { runIds?: string[] }) => rows.filter((r) => !filter.runIds || filter.runIds.includes(r.runId)),
+  } as unknown as OutcomeStore;
+  const snap = await latestPopulationSnapshot(store, ["audiogram"], {}, undefined, 1, { visible: () => true });
+  assert.deepEqual(snap.rows.map((r) => r.runId), [], "the re-score's rows are never the latest");
+});
+
 // Fakes for the programs read models: the rows are mutable so a test can "complete a nightly".
 function programDeps(rows: OutcomeWithRun[], counters: { rowReads: number }) {
   return {

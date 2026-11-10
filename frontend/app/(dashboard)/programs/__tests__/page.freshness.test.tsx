@@ -48,6 +48,18 @@ describe("ProgramsPage says when its numbers are stale (#623)", () => {
     expect(await screen.findByTestId("run-freshness-banner")).toHaveTextContent(/did not finish, so the numbers below are from earlier updates\. The last complete update of every measure started/);
   });
 
+  it("never reads a re-score of last year as the freshest update (#882)", async () => {
+    // The January re-score finished an hour ago; this year's newest nightly failed. The banner must say
+    // the nightly failed, not stay quiet because something whole-practice completed since.
+    answer([
+      { status: "COMPLETED", startedAt: new Date(Date.now() - 1 * 3600_000).toISOString(), earlierCycle: true },
+      { status: "FAILED", startedAt: new Date(Date.now() - 2 * 3600_000).toISOString() },
+      { status: "COMPLETED", startedAt: new Date(Date.now() - 26 * 3600_000).toISOString() },
+    ]);
+    render(<ProgramsPage />);
+    expect(await screen.findByTestId("run-freshness-banner")).toHaveTextContent(/did not finish, so the numbers below are from earlier updates/);
+  });
+
   it("stays quiet when the latest update completed, and when the read fails", async () => {
     answer([{ status: "COMPLETED", startedAt: new Date(Date.now() - 2 * 3600_000).toISOString() }]);
     const { unmount } = render(<ProgramsPage />);

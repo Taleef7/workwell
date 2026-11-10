@@ -22,6 +22,7 @@ import { MEASURES } from "../engine/cql/measure-registry.ts";
 import { DEPLOYMENT_PROFILE, employeeById, profileSubjectMatcher, subjectNoun } from "../config/deployment-profile.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
 import { loadOfficialManifest } from "../wiring/official-artifacts.ts";
+import { isEarlierCycleRun } from "./earlier-cycle.ts";
 
 export interface RunListItem {
   runId: string;
@@ -38,6 +39,11 @@ export interface RunListItem {
   totalEvaluated: number;
   compliantCount: number;
   nonCompliantCount: number;
+  /**
+   * The run scored a cycle that had ended (#882, `run/earlier-cycle.ts`): a re-score of last year. Present
+   * only when true. Programs' freshness banner skips such a run, as the read models do.
+   */
+  earlierCycle?: true;
 }
 
 export interface RunSummary extends RunListItem {
@@ -196,6 +202,7 @@ function buildListItem(run: RunRecord, t: Tally): RunListItem {
     totalEvaluated: t.total,
     compliantCount: t.compliant,
     nonCompliantCount: t.nonCompliant,
+    ...(isEarlierCycleRun(run) ? { earlierCycle: true as const } : {}),
   };
 }
 

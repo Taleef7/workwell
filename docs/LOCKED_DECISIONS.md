@@ -34,10 +34,12 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
    entering an MSSP ACO (PY2027 begins 2027-01-01). **Scope limit:** the milestones deliver a *sandbox*;
    the pilot running its real year on real data (PHI) is a separate, later, `PRODUCTION_READINESS`-gated
    decision nothing here authorizes.
-2. **The pilot's catalog is the ACO's computable set, and the sandbox routes all six** — cms122, cms125,
-   cms2, cms130, cms165, cms137 (ADR-078, owner decision 2026-09-08). Two conditions gate the **PHI phase**,
-   not the sandbox: cms137 stays only if Quality ID 305 survives the CY2027 final rule, and cms165 needs
-   real blood pressures profile-stamped at ingest (#591). The vendored artifacts are 2026-vintage; PY2027
+2. **The pilot's catalog is the ACO's computable set, and the sandbox routes all five** — cms122, cms125,
+   cms2, cms130, cms165 (ADR-078, owner decision 2026-09-08). **cms137 is retired on Maui** (owner decision
+   2026-11-05, #889): the CY2027 final rule (CMS-1848-F) removed Quality ID 305 from APP Plus. Its artifact
+   and 2027 translation stay vendored and gated, routed nowhere; the profile names it retired, and an
+   all-programs run closes its open cases. One condition gates the **PHI phase**, not the sandbox: cms165
+   needs real blood pressures profile-stamped at ingest (#591). The vendored artifacts are 2026-vintage; PY2027
    needs new content and a full re-gate (MM-1d). The MIPS↔CMS crosswalk is a first-class UI surface.
 3. **Cards resolve, not alert.** Order suggestions are gated on APPROVED terminology mappings, and **an
    order is a proposal that never changes compliance** — the gap closes only when the result arrives and
@@ -80,3 +82,22 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
    readings, which CMS165 cannot see, and is counted in the import diagnostics. No half-panel is emitted
    and no `Observation.encounter` is inferred. This does not lift the PHI gate: cms165 over real data still
    needs §4A.2's and §4A.5's conditions (#591, #572).
+9. **The lead and the staff seat are different roles** (owner decision, 2026-11-02, #880). The staff seat
+   (`ROLE_QUALITY_STAFF`) works one case at a time (assign, outreach, escalate, resolve, appointment,
+   re-check, the patient's one message), exports the CSVs and reads the scorecard. Bulk assign, campaigns,
+   attributed lists, panel owners, population runs, identity and the People directory, QRDA and
+   MeasureReport files, and MCP stay with the lead (`ROLE_CASE_MANAGER`) and admins. Single assign stays
+   with staff: the split limits the volume of a change, not who may make it. A rule that does not name the
+   staff role refuses it. Logging a contact and setting a patient's contact preference are the staff
+   seat's too (owner decision, 2026-11-03, #886). Close, escalate, schedule and evidence upload stay on the
+   case page; the patient page offers re-check and outreach per gap (owner decision, 2026-10-29, #868).
+10. **The year change** (owner decision, 2026-11-02, #882). The 1 January rollover stays: the year's first
+    run closes every open case of the year before. From then on a cycle that has ended never opens or reopens
+    a case: a run, a re-check or outreach over it records what it found and leaves its cases closed, and
+    campaigns target only a current cycle. A run that scores an ended cycle is marked by the server and is
+    never anyone's "latest", so the work list, roster, Programs, the trend, the cards and MCP stay on the
+    current year. The lead re-scores last year on demand from January to March, which the scorecard and the
+    list report read. "Today" is the practice's date everywhere it decides a year or a cycle; Maui's zone is
+    `Pacific/Honolulu`, pending MIE's confirmation, and the nightly stays at 12:00 UTC (2:00 AM in Hawaii).
+    The comparisons against the year's exact edges stay UTC, a documented limitation (MEASURES.md), until
+    MIE confirms WebChart's zone.

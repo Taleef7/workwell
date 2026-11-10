@@ -95,7 +95,7 @@ export class SqliteCaseStore implements CaseStore {
       existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
       input.outcomeStatus,
       now,
-      { outOfPopulation: input.outOfPopulation },
+      { outOfPopulation: input.outOfPopulation, earlierCycle: input.earlierCycle },
     );
     if (plan.op === "noop") return null;
 
@@ -139,7 +139,7 @@ export class SqliteCaseStore implements CaseStore {
         existing ? { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by } : null,
         input.outcomeStatus,
         now,
-        { outOfPopulation: input.outOfPopulation },
+        { outOfPopulation: input.outOfPopulation, earlierCycle: input.earlierCycle },
       );
       // The winner of the race may have written an operator-owned action between our read and theirs.
       action = planNextAction(
@@ -209,7 +209,7 @@ export class SqliteCaseStore implements CaseStore {
         { status: existing.status, currentOutcomeStatus: existing.current_outcome_status, closedBy: existing.closed_by },
         input.outcomeStatus,
         now,
-        { outOfPopulation: input.outOfPopulation },
+        { outOfPopulation: input.outOfPopulation, earlierCycle: input.earlierCycle },
       );
       if (plan.op !== "update") return null;
       action = planNextAction(
@@ -477,8 +477,9 @@ export class SqliteCaseStore implements CaseStore {
       binds.push(query.outcome);
     }
     if (query.outreach) {
-      // The same definition `outreachSentCounts` uses, as a correlated EXISTS.
-      const exists = "EXISTS (SELECT 1 FROM case_actions ca WHERE ca.case_id = cases.id AND ca.action_type = 'OUTREACH_SENT')";
+      // The same definition `contactAttemptCounts` uses (a send or a logged contact, #886), as a correlated EXISTS.
+      const exists =
+        "EXISTS (SELECT 1 FROM case_actions ca WHERE ca.case_id = cases.id AND ca.action_type IN ('OUTREACH_SENT', 'CONTACT_LOGGED'))";
       where.push(query.outreach === "none" ? `NOT ${exists}` : exists);
     }
     // `created_at` is an ISO-8601 Z string here and TIMESTAMPTZ on the ceiling; both compare the UTC

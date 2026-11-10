@@ -73,6 +73,8 @@ describe("LoginPage", () => {
     for (const [role, home] of [
       ["ROLE_CASE_MANAGER", "/worklist"],
       ["case_manager", "/worklist"],
+      // The staff seat lands on the gaps assigned to it (#880).
+      ["ROLE_QUALITY_STAFF", "/cases?view=mine"],
       ["ROLE_ADMIN", "/programs"],
       ["ROLE_VIEWER", "/programs"],
       ["ROLE_AUTHOR", "/programs"],

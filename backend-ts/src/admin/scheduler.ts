@@ -351,6 +351,12 @@ export interface SchedulerTickDeps {
    * the nightly evaluates as of today.
    */
   evaluationDate?: string;
+  /**
+   * The year-change rehearsal only (#882): the practice's date the run is planned on, so a January
+   * re-score of the old year can be rehearsed in December. Reaches `RunPipelineDeps.today`; the scheduler
+   * never sets it.
+   */
+  today?: string;
 }
 
 /**
@@ -440,6 +446,7 @@ export async function runNightlyRecompute(deps: SchedulerTickDeps, nowMs = Date.
   // Build run deps from the injected stores + engine + segments.
   const alertChannels = deps.alertChannels ?? resolveAlertChannels({});
   const runDeps: RunPipelineDeps = {
+    ...(deps.today ? { today: deps.today } : {}),
     runStore: deps.stores.runs,
     outcomeStore: deps.stores.outcomes,
     caseStore: deps.stores.cases,

@@ -65,7 +65,7 @@ test.describe("Maui status chips (jelly beans)", () => {
 
   // CHEAP pass over every routed measure: each one renders chips, and the chips are consistent with
   // the worklist link beside them. This replaces a per-measure drill-down that navigated and reloaded
-  // once per chip — six measures × three buckets × two page loads was most of the project's runtime.
+  // once per chip — five measures × three buckets × two page loads was most of the project's runtime.
   test("every routed measure renders status chips consistent with its worklist", async ({ page }) => {
     let compared = 0;
     for (const measure of ROUTED_MEASURES) {

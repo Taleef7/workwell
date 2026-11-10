@@ -6,6 +6,7 @@
  * assertions run against the Postgres ceiling in `../postgres/store-postgres.test.ts`.
  *   node --import tsx --test src/stores/sqlite/run-store-sqlite.test.ts
  */
+import { SqliteContactPreferenceStore } from "./contact-preference-store-sqlite.ts";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
@@ -46,6 +47,7 @@ import {
   personLinkStoreContract,
   evalStateStoreContract,
   panelStoreContract,
+  contactPreferenceStoreContract,
   subjectListStoreContract,
 } from "../store-contract.ts";
 
@@ -105,6 +107,7 @@ qualitySnapshotStoreContract("sqlite", async () => new SqliteQualitySnapshotStor
 personLinkStoreContract("sqlite", async () => new SqlitePersonLinkStore(await freshDb()));
 evalStateStoreContract("sqlite", async () => new SqliteEvalStateStore(await freshDb()));
 panelStoreContract("sqlite", async () => new SqlitePanelStore(await freshDb()));
+contactPreferenceStoreContract("sqlite", async () => new SqliteContactPreferenceStore(await freshDb()));
 subjectListStoreContract("sqlite", async () => new SqliteSubjectListStore(await freshDb()));
 
 test("getRun surfaces the measurement period", async () => {

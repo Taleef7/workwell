@@ -23,6 +23,7 @@ import {
   type DispatchResult,
   type OutreachDeps,
 } from "./case-outreach.ts";
+import type { ChannelType } from "./outreach-channel.ts";
 
 /** A patient has one gap per routed measure and cycle; more than this is not one patient's page. */
 export const PATIENT_OUTREACH_MAX_CASES = 20;
@@ -89,6 +90,7 @@ export async function previewPatientOutreachMessages(
   deps: OutreachDeps,
   cases: readonly CaseRecord[],
   templateId: string | null,
+  channel?: ChannelType,
 ): Promise<PatientOutreachMessage[]> {
   if (isPatientDeployment()) {
     const p = await previewPatientOutreach(deps, cases, templateId);
@@ -96,7 +98,7 @@ export async function previewPatientOutreachMessages(
   }
   const messages: PatientOutreachMessage[] = [];
   for (const c of cases) {
-    const p = await previewOutreach(deps, c.id, templateId);
+    const p = await previewOutreach(deps, c.id, templateId, channel);
     if (p) messages.push({ caseIds: [c.id], templateId: p.templateId, templateName: p.templateName, subject: p.subject, bodyText: p.bodyText });
   }
   return messages;
@@ -122,7 +124,7 @@ export async function sendPatientOutreachMessages(
       } catch {
         failed.push(c.id);
         results.push({
-          caseId: c.id, employeeId: c.employeeId, channel: opts.channel ?? "EMAIL", toAddress: "",
+          caseId: c.id, employeeId: c.employeeId, channel: opts.channel ?? "EMAIL", toAddress: "", // the route resolves it first (#886)
           status: "FAILED", messageId: "", templateName: "", recorded: false,
         });
       }

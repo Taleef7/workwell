@@ -5,7 +5,8 @@ import { useState } from 'react';
 import { Select } from '@mieweb/ui';
 import { useApi } from '@/lib/api/hooks';
 import { useAuth } from '@/components/auth-provider';
-import { canManageCases } from '@/lib/rbac';
+import { ROLES, canManageCases, normRole } from '@/lib/rbac';
+import { lastContactLine } from '@/features/employee/last-contact';
 import { canSeeEngineering } from '@/lib/public-demo';
 import { emitToast } from '@/lib/toast';
 import { UNASSIGN_VALUE, useAssignableUsers } from '@/features/panel/use-assignable-users';
@@ -13,6 +14,7 @@ import { SUBJECT } from "@/lib/terminology";
 import Link from 'next/link';
 import { useEmployeeProfile, type OpenCaseSummary } from '@/features/employee/hooks/useEmployeeProfile';
 import { GapOutreach } from '@/features/employee/components/GapOutreach';
+import { ContactPreferenceCard } from '@/features/employee/components/ContactPreferenceCard';
 import { isSensitiveMeasure } from '@/lib/sensitive-measures';
 import { ComplianceSummaryBar, shownStatusOf } from '@/features/employee/components/ComplianceSummaryBar';
 import { IndividualComplianceStatus } from '@/features/employee/components/IndividualComplianceStatus';
@@ -111,26 +113,6 @@ function assignedLine(c: OpenCaseSummary): string | null {
   return `Assigned ${day}${by}${c.assignedVia === 'BULK' ? ' (bulk)' : ''}`;
 }
 
-const CONTACT_VERBS: Record<string, string> = { EMAIL: 'Emailed', SMS: 'Texted', PHONE: 'Called' };
-const DELIVERY_LABELS: Record<string, string> = { SIMULATED: 'simulated', SENT: 'sent', QUEUED: 'queued', FAILED: 'delivery failed' };
-
-/**
- * When the gap was last contacted, how and by whom (#868), so staff do not message a patient twice
- * without knowing it. Null for a server from before the fields: absent is not "never contacted".
- */
-function lastContactLine(c: OpenCaseSummary): string | null {
-  if (c.lastOutreachAt === undefined) return null;
-  if (c.lastOutreachAt === null) return 'Not contacted yet';
-  const at = new Date(c.lastOutreachAt);
-  if (Number.isNaN(at.getTime())) return null;
-  const day = at.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  const verb = CONTACT_VERBS[c.lastOutreachChannel ?? ''] ?? 'Contacted';
-  const by = c.lastOutreachBy ? ` by ${c.lastOutreachBy}` : '';
-  const status = c.lastOutreachDeliveryStatus;
-  const delivery = status ? ` · ${DELIVERY_LABELS[status] ?? status.toLowerCase()}` : '';
-  return `${verb} ${day}${by}${delivery}`;
-}
-
 const CLOSED_STATUSES = new Set(['RESOLVED', 'CLOSED', 'EXCLUDED']);
 
 export default function EmployeeProfilePage() {
@@ -150,6 +132,7 @@ export default function EmployeeProfilePage() {
   // The evidence and simulation cards open by default only for the engineering seat; staff start from
   // the gaps and the actions, and open the evidence when they want it.
   const engineering = canSeeEngineering(user?.role);
+  const staffSeat = normRole(user?.role) === ROLES.QUALITY_STAFF;
   const api = useApi();
   // The gaps ticked for one message (#868): staff's own choices over the default, which is every gap but
   // CMS2 and CMS137 — a message never names those, and including them is a person's decision (Q1).
@@ -251,7 +234,8 @@ export default function EmployeeProfilePage() {
       <div className="min-w-0 space-y-6 xl:col-span-2">
       {/* Open cases FIRST (#865): the page is where staff act on one patient, so the gaps and who has
           them lead, and the evidence and the simulation wait below until someone opens them. */}
-      <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm" data-testid="open-cases">
+      {/* `id`: the case page's "Message about all N gaps" lands here (#880). */}
+      <div id="open-cases" className="scroll-mt-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm" data-testid="open-cases">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Open Cases</h2>
         {profile.openCases.length === 0 ? (
           <p className="text-sm text-neutral-600 dark:text-neutral-400">No open cases.</p>
@@ -370,6 +354,7 @@ export default function EmployeeProfilePage() {
           <GapOutreach
             cases={profile.openCases.filter(isTicked)}
             labelFor={(c) => compactLabelFor(c.measureId, c.measureName, c.logic)}
+            preference={profile.contactPreference ?? null}
             onSent={refetch}
           />
         ) : null}
@@ -429,7 +414,7 @@ export default function EmployeeProfilePage() {
                     href={`/cases/${o.openCaseId}`}
                     className="text-primary-600 dark:text-primary-400 hover:underline"
                   >
-                    View open case →
+                    Open case →
                   </Link>
                 )}
               </div>
@@ -460,6 +445,17 @@ export default function EmployeeProfilePage() {
       </div>
 
       <aside className="min-w-0 space-y-6 xl:sticky xl:top-6 xl:self-start">
+      {/* How this person wants to be reached (#886). Absent from a server from before it: no card. */}
+      {profile.contactPreference !== undefined ? (
+        <ContactPreferenceCard
+          key={profile.contactPreference?.updatedAt ?? 'none'}
+          subjectId={externalId}
+          preference={profile.contactPreference}
+          canEdit={canManageThisCase}
+          onSaved={refetch}
+        />
+      ) : null}
+
       {/* Recent activity timeline */}
       <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 shadow-sm">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Recent Activity</h2>
@@ -481,13 +477,14 @@ export default function EmployeeProfilePage() {
 
       {/* Back link */}
       <div>
-        {/* The work list is where staff reach a patient from, and the link says so ("Back to Cases" sent them
-            to /cases). A history-based "Back" could leave WorkWell when the page was opened from a link. */}
+        {/* The work list is where the lead reaches a patient from, and the link says so ("Back to Cases" sent
+            them to /cases); the staff seat comes from its own cases (#880). A history-based "Back" could
+            leave WorkWell when the page was opened from a link. */}
         <Link
-          href="/worklist"
+          href={staffSeat ? '/cases?view=mine' : '/worklist'}
           className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
         >
-          ← Back to the work list
+          {staffSeat ? '← Back to my cases' : '← Back to the work list'}
         </Link>
       </div>
       </aside>

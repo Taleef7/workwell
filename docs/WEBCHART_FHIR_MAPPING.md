@@ -181,57 +181,36 @@ date (patient 8's HbA1c read 2015-08-16; it was taken 2011-02-13).
 > **Open item — sparse coding.** In the dev seed only **1** `patient_procedures` row has a real CPT
 > (`G0202`, mammogram screening) across 99 rows; the rest are blank-coded. Confirm production density.
 
-#### Mammography is DUAL-STAMPED (ADR-044) — read this before adding another derived resource
+#### A billed mammogram is not a result (owner decision 2026-11-05)
 
-A screening-mammogram procedure row emits **two** resources: the CPT/HCPCS `Procedure` above, and a LOINC
-`Observation` (`24606-6`) carrying `status = final` and `category ~ imaging`, served from `/Observation`.
-`/Procedure` is unchanged.
+A screening-mammogram procedure row (`77067`, legacy `G0202`) is emitted as the CPT/HCPCS `Procedure` it
+is, and **nothing else**. No mapper derives a LOINC `Observation` from it: not the shim
+(`wcdb-fhir-shim/src/fhir-mapping.ts`), not the dev-DB export (`backend-ts/scripts/webchart-devdb-export.ts`),
+and not live ingest (`normalizeWebChartBundle`).
 
-> **The LIVE path gets it too, since 2026-08-03 (ADR-057).** The dual stamp above is applied by our SQL→FHIR
-> mappers, which a third-party FHIR server does not run — so over the live transport official CMS125 read a
-> woman who HAD been screened as OVERDUE, a false non-compliance `case-logic.ts` escalates to HIGH.
-> `normalizeWebChartBundle` now derives the same LOINC imaging `Observation` from a CPT/HCPCS mammography
-> `Procedure`: an explicit two-code allowlist, only from a `completed` Procedure, tagged
-> `derived-from-procedure`, and **suppressed entirely when the server already sends the Observation** — so a
-> server recording both is untouched and nothing is double-stamped. Both numerators are `exists(...)`, so it
-> cannot inflate either; for a COUNTING measure it would, which is why the allowlist is two codes rather
-> than a category sweep.
->
-> **Two limits, stated rather than implied.** (1) The suppression check matches the one canonical LOINC
-> `24606-6`, not the whole 92-member Mammography value set — a server recording the screening under one of
-> the other 91 still gets a derived duplicate. (2) Only **Procedure → Observation** is derived. A server
-> that records mammography as a LOINC `Observation` and no CPT `Procedure` leaves the **authored** engine
-> blind (the crosswalk has entries for 77067 and G0202 only), so authored `cms125` reads OVERDUE — and
-> staging carries eleven `WORKWELL_WEBCHART_*` vars with `WORKWELL_OFFICIAL_MEASURES` unset, which is
-> exactly that configuration. Still open.
->
-> **And a live tenant's QRDA Category I now carries the screening twice** — `qdm-entries.ts` routes an
-> imaging `Observation` to "Diagnostic Study, Performed" and the `Procedure` to "Procedure, Performed",
-> and the `meta.tag` provenance does not survive into CDA. Harmless for the `exists(...)` numerators a
-> receiver recalculates, and worth knowing before anyone counts entries.
+**Why.** Official CMS125 retrieves `isDiagnosticStudyPerformed([Observation: "Mammography"])` over a value
+set of **92 LOINC codes with no CPT and no HCPCS in it**, and requires `category ~ imaging`. So a
+CMS-reportable CMS125 counts only a charted result, and WebChart's own report would not count a bill. Until
+2026-11-05 all three mappers derived the LOINC imaging Observation from the bill (ADR-044 for the two
+dev-DB mappers, ADR-057 for live ingest), which made WorkWell count what CMS and WebChart do not. That
+derivation is withdrawn. ADR-057's `us-core-sex` derivation (§3.1) stands.
 
-**Why.** The two engines retrieve different resource types for the same clinical fact — authored
-`cms125.cql` reads `[Procedure: "Mammography"]` (CPT/HCPCS), official CMS125 reads
-`isDiagnosticStudyPerformed([Observation: "Mammography"])` over a value set of **92 LOINC codes with no
-CPT and no HCPCS in it**, and additionally requires `category ~ imaging`. Emitting only the Procedure made
-official report an **already-screened woman as OVERDUE**, which `case-logic.ts` escalates to a HIGH-priority
-"escalate mammogram follow-up immediately". A LOINC Observation *without* the category changes nothing,
-which is the trap in the obvious fix.
-
-**Why this is normalization and not fabrication (ADR-037).** One real recorded event is expressed in the
-two vocabularies the two engines read. No event is invented. Three properties keep that true, and each is
-tested — break any one and this becomes fabrication:
-
-1. **Derived strictly from a real row.** No procedure row ⇒ no Observation. The date is the procedure's own.
-2. **An explicit allowlist, not a category sweep.** Only codes meaning "a screening mammogram was
-   performed" (`77067`, legacy `G0202`) dual-stamp, so an unrelated CPT can never mint a diagnostic study.
-3. **Non-inflating — and this is the limit worth knowing.** Both numerators are `exists(...)`, so one event
-   in two vocabularies is still one event. **This pattern is NOT safe for a counting measure** (a "how many
-   screenings" measure would double-count), nor for one that reasons over `Observation` cardinality. Any
-   future dual-stamp must re-check this property against the measure that consumes it.
-
-Both mapping sites carry it — `wcdb-fhir-shim/src/fhir-mapping.ts` and the by-design duplicate
-`backend-ts/scripts/webchart-devdb-export.ts` — mirroring §3.1's `us-core-sex`.
+**What follows, stated rather than implied:**
+- **Authored and official cms125 disagree by design on a billed-only screening.** Authored `cms125.cql`
+  reads `[Procedure: "Mammography"]` (the crosswalk carries 77067 and G0202) and reads her COMPLIANT;
+  official reads her OVERDUE, which `case-logic.ts` makes a HIGH case. The mirror case is unchanged: a
+  server that sends only the LOINC result leaves the authored engine blind.
+- **Her card can propose the mammogram again.** The cms125 order option is CPT 77067 (`CDS_HOOKS.md`). It
+  is a draft only a clinician's action accepts, and the gap closes only when a result is charted and CQL
+  re-evaluates (LOCKED §4A.3), so the case text asks for a billed or outside study's result to be charted.
+- **Where WebChart charts a mammogram result is not known.** The candidates are `mammo_tracking`, scanned
+  `MAMMO` documents and the procedure row (asked in #892); over FHIR, scanned documents are untyped
+  DocumentReferences no CMS measure reads (`OPEN_QUESTIONS.md` 4.6).
+- **Even a charted 24606-6 from the dev DB cannot count today:** the shim and the export emit real
+  observation rows with no `category`, and official CMS125 requires `imaging`. Whether a mapper may supply
+  the category from the code is an owner question (`OPEN_QUESTIONS.md` 4.6).
+- **The synthetic corpus is unchanged:** it generates both resources for each mammogram, standing for an
+  EHR that charts the result beside the bill. Nothing in it is derived.
 
 ### 3.7 Immunization ← **NO dedicated CVX table — must be traced**
 There is no `immunizations` table. The only vaccine-adjacent table is `encounter_order_forecast` (19

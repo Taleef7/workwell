@@ -17,7 +17,7 @@
  * double) falls back to `listOutcomes`, with the same answer.
  */
 import type { OutcomeStore } from "../stores/outcome-store.ts";
-import { measureVersionOf, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
+import { executedLogicLabelOf, measureVersionOf, scoringLogicOf, type ScoringLogic } from "../measure/measure-identity.ts";
 import { citedRow } from "./case-outcome.ts";
 
 const SUBJECT_CHUNK = 900;
@@ -45,6 +45,13 @@ export interface CaseScoring {
   logic: ScoringLogic | null;
   /** `measureVersionOf` the cited row; "" when there is no row (no run, or the row is gone). */
   version: string;
+  /**
+   * `executedLogicLabelOf` the cited row (§6.3 `executedLogic`): CMS's artifact or a translation by name,
+   * WorkWell's own CQL as "WorkWell-authored <library> <version>" (item 13); "" when there is no row or it
+   * errored. The projection carries no seed marker, so a seeded row read through it names the authored
+   * library, as its version already did.
+   */
+  executedLogic: string;
 }
 
 /**
@@ -92,7 +99,7 @@ export async function scoringForCases(
   const out = new Map<string, CaseScoring>();
   const groups = new Map<string, { runId: string; measureId: string; refs: CaseOutcomeRef[]; subjects: Set<string> }>();
   for (const ref of refs) {
-    out.set(caseLogicKey(ref), { logic: null, version: "" });
+    out.set(caseLogicKey(ref), { logic: null, version: "", executedLogic: "" });
     if (!ref.lastRunId) continue;
     const g = `${ref.lastRunId}\u0000${ref.measureId}`;
     const group = groups.get(g) ?? { runId: ref.lastRunId, measureId: ref.measureId, refs: [], subjects: new Set<string>() };
@@ -117,7 +124,11 @@ export async function scoringForCases(
     for (const ref of groupRefs) {
       const row = citedRow(rowsBySubject.get(ref.employeeId) ?? [], ref.evaluationPeriod);
       if (!row) continue;
-      out.set(caseLogicKey(ref), { logic: scoringLogicOf(row.evidence), version: measureVersionOf(measureId, row.evidence) });
+      out.set(caseLogicKey(ref), {
+        logic: scoringLogicOf(row.evidence),
+        version: measureVersionOf(measureId, row.evidence),
+        executedLogic: executedLogicLabelOf(measureId, row.evidence),
+      });
     }
   }
   return out;

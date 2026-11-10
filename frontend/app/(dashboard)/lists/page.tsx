@@ -22,13 +22,15 @@ import { emitToast } from "@/lib/toast";
 import { SUBJECT } from "@/lib/terminology";
 import { useApi } from "@/lib/api/hooks";
 import { useAuth } from "@/components/auth-provider";
-import { canManageCases } from "@/lib/rbac";
+import { canManageCases, canUseLists } from "@/lib/rbac";
+import { AccessDenied } from "@/components/access-denied";
 import { SkeletonRow } from "@/components/skeleton-loader";
 import { ScrollRegion } from "@/components/scroll-region";
 import { useSubjectLists, type SubjectListRow } from "@/features/subject-list/use-subject-lists";
 import { useMeasureIdentities, type ScoringLogic } from "@/lib/measure-identity";
 import { RateEstimateNote } from "@/components/rate-estimate-note";
 import { casesHref, worklistHref } from "@/lib/worklist-links";
+import { localLongDate, localYear } from "@/lib/local-date";
 import { usePanelProviders } from "@/features/panel/use-panel-providers";
 import { usePanelPayers } from "@/features/panel/use-panel-payers";
 
@@ -60,6 +62,8 @@ interface MeasureEntry {
   /** The logic that scored the selected run's rows (#769); null or absent = the unversioned crosswalk. */
   logic?: ScoringLogic | null;
   runId: string | null;
+  /** When the selected run started; null where the measure has none. Absent from a server older than #882. */
+  runStartedAt?: string | null;
   measurementPeriod: { start: string; end: string } | null;
   /** `data_insufficient` (#853): the run's data for the measure was too thin to trust, so no rate is stated. */
   compactionStatus: "complete" | "compacted" | "no_run" | "data_insufficient";
@@ -88,15 +92,53 @@ const RESOLUTION_LABEL: Record<Resolution, string> = {
 };
 
 const pct = (score: number | null): string => (score === null ? "—" : `${(score * 100).toFixed(1)}%`);
+
+/**
+ * Which run the report's numbers are from, as the scorecard says it: the newest run any measure was read
+ * from, dated in the browser's own zone. One that started in a later year is the January re-score of the
+ * report's year (#882). Null where no measure had a run.
+ */
+function reportSourceOf(report: ReportSummary): string | null {
+  const newest = report.measures.map((m) => m.runStartedAt).filter((d): d is string => typeof d === "string" && d !== "").sort().at(-1);
+  if (!newest) return null;
+  const date = localLongDate(newest);
+  return localYear(new Date(newest)) > report.measurementYear
+    ? `From WorkWell's re-score of ${report.measurementYear} on ${date}.`
+    : `From WorkWell's run of ${date}.`;
+}
+
 const LINK_CLASS = "font-medium text-primary-700 hover:underline dark:text-primary-300";
 
 export default function ListsPage() {
   const api = useApi();
   const { user } = useAuth();
-  const mayManage = canManageCases(user?.role);
-  const { lists, loading, reload } = useSubjectLists();
+  // Lists are the lead's (#880). A pasted link from the staff seat mounts no fetch that would only be refused.
+  const mayManage = canUseLists(user?.role);
+  const { lists, loading, reload } = useSubjectLists({ enabled: mayManage });
   const [selectedId, setSelectedId] = useState<string>("");
   const selected = useMemo(() => lists.find((l) => l.id === selectedId) ?? null, [lists, selectedId]);
+
+  if (!mayManage) {
+    // A seat that works cases has somewhere to go instead: the gaps assigned to it.
+    const worksCases = canManageCases(user?.role);
+    return (
+      <AccessDenied
+        title="Attributed lists"
+        message={
+          worksCases
+            ? "Attributed lists are your lead's. Your lead can assign a list's gaps to you, and they show in your cases."
+            : "Attributed lists are managed by Case Managers and Admins — your role doesn’t have access."
+        }
+        action={
+          worksCases ? (
+            <Link href="/cases?view=mine" className={LINK_CLASS}>
+              Your cases →
+            </Link>
+          ) : undefined
+        }
+      />
+    );
+  }
 
   return (
     // No padding of its own: <main> already pads the page, and a second p-6 cost a phone 48px.
@@ -444,7 +486,8 @@ function ReportPanel({
     ) : (
       measureCell(measure).label
     );
-  const thisYear = new Date().getUTCFullYear();
+  // The browser's own year (#882): in Hawaii the UTC year turns at 2 PM on 31 December.
+  const thisYear = localYear();
   // The NEXT year is offered too. The pilot's target is PY2027 while the clock says 2026, and a run
   // can already be created with a 2027 evaluation date — so a list offering only past years would
   // make the one year the pilot exists for unreachable from this page until the clock caught up.
@@ -490,7 +533,10 @@ function ReportPanel({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${list.name.replace(/[^\w.-]+/g, "-")}-v${list.revision}-${year}.csv`;
+    // The day it was generated too: two downloads of one year's report differ once a later run lands,
+    // and both would otherwise carry one name.
+    const generated = new Date().toISOString().slice(0, 10);
+    a.download = `${list.name.replace(/[^\w.-]+/g, "-")}-v${list.revision}-${year}-generated-${generated}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }, [api, list.id, list.name, list.revision, year]);
@@ -536,6 +582,13 @@ function ReportPanel({
 
       {report ? (
         <>
+          {/* Which run the year's numbers are from (#882): from January the lead may re-score last year, and
+              the report for that year reads the newest run of it. */}
+          {reportSourceOf(report) ? (
+            <p data-testid="list-report-source" className="text-muted-foreground text-xs">
+              {reportSourceOf(report)}
+            </p>
+          ) : null}
           {report.compactedMeasures.length > 0 ? (
             <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               {report.compactedMeasures.join(", ")} cannot be reported for {report.measurementYear}: the

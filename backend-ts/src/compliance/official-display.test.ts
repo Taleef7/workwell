@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OFFICIAL_DISPLAY, officialDisplayFor } from "./official-display.ts";
+import { OFFICIAL_DISPLAY, needFor, officialDisplayFor } from "./official-display.ts";
 import { resolveDeploymentProfile } from "../config/deployment-profile.ts";
 import { officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 
@@ -12,12 +12,14 @@ import { officialMeasureSemantics } from "../wiring/official-measure-semantics.t
  * official-capable measure a deployment can run must have wording here, or the fallback prose is what a
  * clinician reads.
  */
-const IDS = [...resolveDeploymentProfile("maui").runnableMeasureIds].filter((id) => officialMeasureSemantics(id) !== undefined);
+// Retired measures too (#889): their stored outcomes and closed cases are still read.
+const MAUI = resolveDeploymentProfile("maui");
+const IDS = [...MAUI.runnableMeasureIds, ...MAUI.retiredMeasureIds].filter((id) => officialMeasureSemantics(id) !== undefined);
 const STATUSES = ["COMPLIANT", "OVERDUE", "EXCLUDED", "MISSING_DATA"] as const;
 
 test("every official measure the pilot can run has wording for every status — derived from the profile", () => {
-  assert.ok(IDS.includes("cms137"), "the set this derives from must include the pilot's sixth measure");
-  assert.ok(IDS.length >= 6, `expected the six ACO measures, got ${IDS.join(", ")}`);
+  assert.ok(IDS.includes("cms137"), "the set this derives from must include retired cms137");
+  assert.ok(IDS.length >= 6, `expected the five ACO measures and retired cms137, got ${IDS.join(", ")}`);
   for (const id of IDS) for (const s of STATUSES) {
     const d = officialDisplayFor(id, s);
     assert.ok(d, `${id}/${s}: no official display wording — the roster would fall back to authored prose`);
@@ -81,4 +83,34 @@ test("a WorkWell translation's exclusion is never credited to official logic; CM
   for (const id of ["cms122", "cms125", "cms2", "cms130", "cms165"]) {
     assert.doesNotMatch(officialDisplayFor(id, "EXCLUDED", translated)!.whyFlagged, /official/i, id);
   }
+});
+
+test("#880: an OVERDUE gap's `need` says what closes it, never the patient's current value, in a card's headline length", () => {
+  // The headline sits in front of a clinician mid-encounter (AI_GUARDRAILS §1.1). A patient with no
+  // reading at all lands in the same bucket as one above goal, so the phrase names the target only.
+  for (const id of IDS) {
+    const need = needFor(id, "OVERDUE", {});
+    if (id === "cms137") {
+      assert.equal(need, null, "CMS137 with no rates in hand: one sentence cannot say which rate");
+      continue;
+    }
+    assert.ok(need, `${id}: no need phrase`);
+    assert.match(need, /^Needs /, id);
+    assert.doesNotMatch(need, /(is|was|above|over|latest|most recent|your)/i, `${id} states a current value: "${need}"`);
+    assert.ok(need.length + " (CMS1234)".length <= 140, id);
+  }
+  const rate = (numer: boolean) => [
+    { populationType: "initial-population", result: true },
+    { populationType: "denominator", result: true },
+    { populationType: "numerator", result: numer },
+  ];
+  assert.match(needFor("cms137", "OVERDUE", { official: { rates: [rate(false), rate(false)] } })!, /started within 14 days/);
+  assert.match(needFor("cms137", "OVERDUE", { official: { rates: [rate(true), rate(false)] } })!, /continued within 34 days/);
+  // Only OVERDUE carries one.
+  for (const id of IDS) for (const s of ["COMPLIANT", "EXCLUDED", "MISSING_DATA", "DUE_SOON"]) {
+    assert.equal(needFor(id, s, {}), null, `${id}/${s}`);
+    assert.equal(officialDisplayFor(id, s)?.need, undefined, `${id}/${s} table entry`);
+  }
+  // A WorkWell translation's row keeps it: the phrase claims nothing about who wrote the logic.
+  assert.equal(needFor("cms165", "OVERDUE", { official: { kind: "derived" } }), "Needs a blood pressure below 140/90 this year");
 });
