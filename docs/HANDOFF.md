@@ -63,7 +63,7 @@ repository's Actions secrets; none is in the code.
 | GHCR `ghcr.io/taleef7/workwell-*` | The images the containers run and heal from | (Actions token) | New namespace after a transfer: change `ghcr.io/taleef7` in the deploy, reconcile and CI workflows and DEPLOY.md. Keep the old images until the new ones deploy |
 | MIE Create-a-Container (MIE) | The TWH, Maui and staging containers | `LAUNCHPAD_API_URL`, `LAUNCHPAD_API_KEY` | MIE issues a key to the new maintainer |
 | Neon | One Postgres 16 project per stack (TWH `workwell-twh`, Maui, staging) | `DATABASE_URL_TWH`, `_MAUI`, `_STAGING` | §4 step 2 |
-| Cloudflare R2 | `workwell-evidence-twh`, `workwell-evidence-maui` (also the terminology copies CI restores), `workwell-backups` (nightly dumps, 30 days) | `WORKWELL_BUCKET_S3_*_TWH`, `_MAUI`, `WORKWELL_BACKUP_S3_*`, `WORKWELL_R2_S3_ENDPOINT` | §4 step 3 |
+| Cloudflare R2 | `workwell-evidence-twh`, `workwell-evidence-maui` (uploaded evidence, and the value-set expansions each stack fetches at boot, `terminology/`), `workwell-backups` (nightly dumps, 30 days) | `WORKWELL_BUCKET_S3_*_TWH`, `_MAUI`, `WORKWELL_BACKUP_S3_*`, `WORKWELL_R2_S3_ENDPOINT` | §4 step 3 |
 | OpenAI | The three AI surfaces (each has a deterministic fallback) | `OPENAI_API_KEY` (required by the deploys) | A new key with a hard monthly limit |
 | NLM UMLS / VSAC | Value-set expansion at build and on TWH | `WORKWELL_VSAC_API_KEY_VENDOR`, `_TWH` | **Not transferable**: a UMLS licence is personal. Get your own (free, from NLM) |
 | npm `@work-well` | `@work-well/measure-engine` and `@work-well/measure-codegen` (`docs/PACKAGES.md`) | `NPM_TOKEN` | Ask to be added as a maintainer, or leave the published versions as they are |
@@ -84,8 +84,21 @@ steps then vendor without VSAC completion and say so.
    corpus included) are seeded from code. Outcomes and cases appear after the first run: the nightly at
    12:00 UTC, or `POST /api/runs/manual`. Run history, cases and the audit ledger come back only from a
    dump (BACKUP_DR_RUNBOOK §3.5). Keep the isolation guard: Maui's database must not share TWH's host.
-3. **Storage.** Create the three buckets in your own account, set the R2 secrets, and redeploy. The boot
-   probe fails loudly on a wrong bucket (`EVIDENCE_BUCKET_UNREACHABLE`).
+3. **Storage. Copy the objects before you switch.** Create the three buckets in your own account, then
+   copy every object across from the old ones while the old credentials still work, and only then set
+   the R2 secrets and redeploy. An empty bucket is not a fresh start: at boot the backend fetches each
+   routed measure's value-set expansions from the evidence bucket's `terminology/<sha256>.json` (current
+   images carry none, DEPLOY.md Step 1), and CI restores its fallback copies from Maui's. Without them,
+   every deploy and rollback depends on VSAC still reproducing each pinned expansion. The same buckets
+   hold uploaded evidence (a restored database still points at it) and the nightly dumps. Any S3 tool
+   works, for example the AWS CLI with each account's R2 endpoint, staging the copy outside the repository
+   (the expansions are licensed, and the repository is public):
+   ```bash
+   aws s3 sync s3://workwell-evidence-maui ~/r2-copy/evidence-maui --endpoint-url "<old endpoint>"
+   aws s3 sync ~/r2-copy/evidence-maui s3://workwell-evidence-maui --endpoint-url "<new endpoint>"
+   ```
+   Repeat for `workwell-evidence-twh` and `workwell-backups`. The boot probe fails loudly on a wrong bucket
+   (`EVIDENCE_BUCKET_UNREACHABLE`), and `/health` reports a missing sidecar as a routing problem.
 4. **Keys.** OpenAI, your own UMLS key, your own alert webhook; rotate the JWT secrets and the pilot
    password. Redeploy each stack after a secret changes: a restart in place keeps the old environment.
 5. **Check.** `/health` shows the deployed `build.sha` and routing problems 0; `scripts/smoke-shadow.sh`
@@ -110,7 +123,9 @@ and the nightly backup would open an incident issue every night.
    ```
 3. **Remove the containers** (TWH, Maui and staging, frontend and backend) in MIE's Create-a-Container
    manager, or ask MIE to.
-4. **Delete the Neon projects**, then empty and delete the R2 buckets and their API tokens.
+4. **Delete the Neon projects**, then empty and delete the R2 buckets and their API tokens. If anyone may
+   run the stacks again, copy the buckets out first (§4 step 3): the `terminology/` objects are what a
+   redeploy boots from when VSAC no longer reproduces a pin.
 5. **Revoke the keys:** OpenAI, the npm token, the UMLS API key (regenerate it in your UTS profile), the
    Apps Script deployment and the WebChart trial key. Then delete the repository secrets.
 6. **Update the links:** the repository homepage and the README's live-stack lines.
