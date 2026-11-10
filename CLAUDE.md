@@ -7,6 +7,7 @@
 ## Read first, every session
 The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready for January"`) is the work.
 `docs/JOURNAL.md` (newest entry on top) is the short log of recent changes; `README.md` is the public overview.
+New to the project? `docs/HANDOFF.md` first: what waits on whom, and the accounts the live stacks depend on.
 
 ## Tech stack (changed only by an owner decision, recorded in docs/LOCKED_DECISIONS.md)
 - Backend: TypeScript on `@mieweb/cloud` (`backend-ts/`) — a Cloudflare-style worker on a long-lived node-24 host; JVM-free CQL→ELM (build-time); PostgreSQL 16 (Neon, `Pg*Store` ceiling, `workwell_spike` schema; SQLite floor for tests/local)
@@ -40,12 +41,14 @@ The GitHub milestone **"Ready for January"** (`gh issue list --milestone "Ready 
   numeric value in mm[Hg] (§4A.8's value rule).
 - Every state change writes an `audit_event` — the rule, **not yet everywhere true**. Write new code **audit-first** (the event before the mutation). Some paths are still mutate-first: run-boundary ones by design, outreach and the identity links pending owner decisions — `DATA_MODEL_CONTRACTS` §4 lists them. The cross-store `applyCaseAction` primitive (for case actions and run-created transitions) does not exist, and no open issue tracks it (#598 was closed by a PR keyword on 2026-09-21).
 - No silent scope changes; if a plan's stop condition triggers, record the fallback in JOURNAL.md
-- Schema migrations are owned by Taleef — never written or applied by an agent without explicit instruction
+- Schema migrations are owned by the owner — never written or applied by an agent without explicit instruction
 
 ## Branch + ownership
-- Schema/DDL is Taleef's, never delegated — `backend-ts/src/stores/postgres/schema-pg.ts` + the SQLite floor `schema.ts`
+- **The owner** is the maintainer MIE names. Taleef built the project and held the role until the handoff
+  on 2026-11-15 (`docs/HANDOFF.md`); "owner decision" anywhere in the docs means this role
+- Schema/DDL is the owner's, never delegated — `backend-ts/src/stores/postgres/schema-pg.ts` + the SQLite floor `schema.ts`
 - Feature branch per task, named `feat/<slug>` or `fix/<slug>`; one PR per task (tightly coupled changes may share one)
-- Merge after Taleef's review — no auto-merge
+- Merge after the owner's review — no auto-merge
 
 ## Definition of done (every PR)
 - Tests pass (idempotency + audit invariants are mandatory; rest smoke-only) and CI is green
