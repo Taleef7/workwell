@@ -7,7 +7,7 @@
 import type { MeasureRecord } from "../stores/measure-store.ts";
 import type { MeasureSpec, MeasureStatus } from "./measure-catalog.ts";
 import { MEASURES } from "../engine/cql/measure-registry.ts";
-import { measureIdentityPayloadFor, type MeasureIdentityPayload } from "./measure-identity.ts";
+import { authoredLogicLabel, measureIdentityPayloadFor, type MeasureIdentityPayload } from "./measure-identity.ts";
 import { classifyRunnable } from "../config/deployment-profile.ts";
 import { routedTranslationYear } from "../wiring/translation-routing.ts";
 
@@ -109,6 +109,11 @@ export interface MeasureDetail {
   ruleBindings?: MeasureSpec["ruleBindings"];
   jurisdiction: string;
   identity: MeasureIdentityPayload | null;
+  /**
+   * What runs when WorkWell's own CQL scores this measure here (item 13): "WorkWell-authored <Library>
+   * <version>", the §6.2 CSVs' `executedLogic` for its rows. Null when CMS's logic is routed, or nothing runs.
+   */
+  authoredLogic: string | null;
 }
 
 export interface VersionHistoryItem {
@@ -126,6 +131,7 @@ export interface VersionHistoryItem {
  * route from the ValueSetStore; defaults to [] for callers that don't resolve them.
  */
 export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): MeasureDetail {
+  const kind = classifyRunnable(r.measureId, process.env).kind;
   return {
     id: r.measureId,
     name: r.name,
@@ -146,11 +152,8 @@ export function toMeasureDetail(r: MeasureRecord, valueSets: unknown[] = []): Me
     rule: r.spec.rule,
     ruleBindings: r.spec.ruleBindings,
     jurisdiction: MEASURES[r.measureId]?.jurisdiction ?? "US",
-    identity: measureIdentityPayloadFor(
-      r.measureId,
-      classifyRunnable(r.measureId, process.env).kind === "official",
-      routedTranslationYear(r.measureId) !== null,
-    ),
+    identity: measureIdentityPayloadFor(r.measureId, kind === "official", routedTranslationYear(r.measureId) !== null),
+    authoredLogic: kind === "authored" ? authoredLogicLabel(r.measureId) : null,
   };
 }
 

@@ -345,6 +345,8 @@ async function aggregateCountsForRun(
       evaluationErrors: number;
       official: OfficialReportIdentity | null;
       identityConflict: boolean;
+      /** WorkWell's own CQL scored the evaluated rows (`OfficialRunAggregate.authored`), for the "not a CMS measure" wording. */
+      authored: boolean;
       /** #853: the checks this measure's data failed on the run, or null. */
       dataInsufficient: SufficiencyCheck[] | null;
     }
@@ -380,11 +382,12 @@ async function aggregateCountsForRun(
       evaluationErrors: 0,
       official: null,
       identityConflict: false,
+      authored: aggregate.authored,
       dataInsufficient: aggregate.dataInsufficient,
     };
   }
-  const { rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict, dataInsufficient } = aggregate;
-  return { counts: rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict, dataInsufficient };
+  const { rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict, authored, dataInsufficient } = aggregate;
+  return { counts: rates, strata, unmeasured, evaluationErrors, official: identity, identityConflict, authored, dataInsufficient };
 }
 
 /**
@@ -1506,7 +1509,7 @@ export async function handleRuns(
     // 2026-09-06 rather than emit rate 1 under the measure's identity; the exporter now reports each
     // group under its own criterion names, with its own performance rate and Reporting Strata.
     const counts = aggregate.counts.length > 1 ? aggregate.counts : aggregate.counts[0]!;
-    return auditedExport((await getStores(env)).events, { actor, kind: "qrda3", path: pathname, params: url.searchParams, runId: qrdaId }, () => new Response(buildQrda3DocumentFromCounts(run, measureId, counts, aggregate.official, aggregate.strata), {
+    return auditedExport((await getStores(env)).events, { actor, kind: "qrda3", path: pathname, params: url.searchParams, runId: qrdaId }, () => new Response(buildQrda3DocumentFromCounts(run, measureId, counts, aggregate.official, aggregate.strata, aggregate.authored), {
       status: 200,
       headers: {
         "content-type": "application/xml",
@@ -1559,7 +1562,7 @@ export async function handleRuns(
       if (goneMrAfter) return goneMrAfter;
       if (aggregate.identityConflict) return mixedLogic("summary MeasureReport");
       if (aggregate.dataInsufficient) return dataInsufficientRefusal("summary MeasureReport", measureId, aggregate.dataInsufficient);
-      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official, aggregate.strata), {
+      return fhir(buildSummaryMeasureReportFromCounts(run, measureId, aggregate.counts, generatedAt, aggregate.official, aggregate.strata, aggregate.authored), {
         [UNMEASURED_HEADER]: String(aggregate.unmeasured),
         [EVALUATION_ERRORS_HEADER]: String(aggregate.evaluationErrors),
       });

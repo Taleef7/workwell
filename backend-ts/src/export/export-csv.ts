@@ -13,7 +13,7 @@ import { isWebChartConfigured, type DataSourceEnv } from "../engine/ingress/data
 import { hasActiveSubjectFilters, matchesSubjectFilters, type SubjectFilters } from "../compliance/subject-filters.ts";
 import type { EmployeeProfile } from "../engine/synthetic/employee-catalog.ts";
 import { measureDisplayName } from "../measure/measure-name.ts";
-import { formatScoringLogic, measureVersionOf, scoringLogicOf } from "../measure/measure-identity.ts";
+import { executedLogicLabelOf, measureVersionOf } from "../measure/measure-identity.ts";
 import { caseLogicKey, scoringForCases } from "../case/case-scoring-logic.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { toCsv, csvCell, text } from "./csv.ts";
@@ -33,9 +33,9 @@ const measureName = (measureId: string) => measureDisplayName(measureId);
  * the CSV is the artifact people mail around, and a row's provenance does not change because a flag or
  * the catalog moved later (the evidence-first rule ADR-046 applied to MeasureReport and QRDA). Deriving
  * the version from `MEASURES[id].library` stamped the authored `2.0.0` on rows CMS125FHIR v1.0.000
- * scored, and on errored rows nothing scored at all.
+ * scored, and on errored rows nothing scored at all. A row WorkWell's own CQL scored is named as such
+ * (`executedLogicLabelOf`, item 13), so an empty cell means an errored, seeded or missing row only.
  */
-const executedLogicCell = (evidence: unknown): string => formatScoringLogic(scoringLogicOf(evidence)) ?? "";
 
 // ---- runs (DATA_MODEL §6.1) --------------------------------------------------
 const RUN_HEADERS = [
@@ -172,7 +172,7 @@ function outcomeRowCells(
     o.id, o.runId, text(o.subjectId), text(emp?.name ?? o.subjectId), text(emp?.role ?? "—"), text(emp?.site ?? "—"),
     text(measureName(o.measureId)), measureVersionOf(o.measureId, o.evidence), o.evaluationPeriod, o.status,
     wf.lastExamDate, wf.complianceWindowDays, wf.daysOverdue, true, true, wf.waiverStatus, o.evaluatedAt,
-    text(emp?.providerId ?? ""), text(emp?.payer ?? ""), executedLogicCell(o.evidence),
+    text(emp?.providerId ?? ""), text(emp?.payer ?? ""), executedLogicLabelOf(o.measureId, o.evidence),
   ];
 }
 
@@ -457,7 +457,7 @@ export async function casesCsv(
       c.currentOutcomeStatus, text(c.nextAction), c.lastRunId, c.createdAt, c.updatedAt, c.closedAt, latest,
       text(emp?.providerId ?? ""), text(emp?.payer ?? ""),
       text(c.closedReason ?? ""), text(c.closedBy ?? ""), liveState, liveStatus, fields?.runId ?? "",
-      formatScoringLogic(scored?.logic) ?? "",
+      scored?.executedLogic ?? "",
     ];
   });
   return toCsv(CASE_HEADERS, rows);

@@ -321,10 +321,32 @@ test("the single-rate QRDA III's byte shape is PINNED, for an authored and for a
     .replace(/<effectiveTime value="\d{14}[^"]*"\/>/g, '<effectiveTime value="TS"/>')
     .replace(/<time value="\d{14}[^"]*"\/>/g, '<time value="TS"/>');
   const digest = (xml: string) => createHash("sha256").update(scrubbed(xml), "utf8").digest("hex");
-  assert.equal(digest(buildQrda3Document(run, "audiogram", outcomes)), "f022bf4bf2c63424fb46b96aa8b7ef0bc343cbfcf168b95184a08f71c49213a3", "authored single-rate document moved");
+  // Re-recorded 2026-11-06 (item 13): the authored document now says it is not a CMS measure, in its
+  // title and Measure Section. Removing exactly those two additions gives back the 2026-09-06 pin, so
+  // nothing else in the CVU+-validated shape moved.
+  const authored = buildQrda3Document(run, "audiogram", outcomes);
+  assert.equal(digest(authored), "d79319c8a209277eed26a22b24546c7cd155150e2d44817f6ce994d8a7eaf80b", "authored single-rate document moved");
+  const withoutNote = authored
+    .replace("<title>WorkWell QRDA Category III — audiogram — not a CMS measure</title>", "<title>WorkWell QRDA Category III — audiogram</title>")
+    .replace(/(Aggregate results for measure audiogram \(run [^)]*\)\.) Not a CMS measure: [^<]*/, "$1");
+  assert.notEqual(withoutNote, authored, "both additions are present");
+  assert.equal(digest(withoutNote), "f022bf4bf2c63424fb46b96aa8b7ef0bc343cbfcf168b95184a08f71c49213a3", "only the note was added");
   assert.equal(digest(buildQrda3Document(run, "cms122", [officialOutcome("cms122")])), "87a762d7ff0bcc41100d217b9592a69ff986dbbd8eab947c9a84f56f3a96db14", "official single-rate document moved");
   // The scrub itself must not be vacuous — the pin would then be a pin on random bytes.
   const twice = [buildQrda3Document(run, "cms122", [officialOutcome("cms122")]), buildQrda3Document(run, "cms122", [officialOutcome("cms122")])];
   assert.notEqual(twice[0], twice[1], "two builds differ in their generated ids");
   assert.equal(scrubbed(twice[0]!), scrubbed(twice[1]!), "and in nothing else");
+});
+
+test("a QRDA III with no official identity says it is not a CMS measure, worded by what scored it (item 13)", () => {
+  const authored = buildQrda3Document(run, "audiogram", outcomes);
+  assert.match(authored, /<title>WorkWell QRDA Category III — audiogram — not a CMS measure<\/title>/);
+  assert.match(authored, /Not a CMS measure: audiogram was scored by WorkWell-authored logic/);
+  // Every row errored: nothing scored the counts, so the neutral wording, never "authored".
+  const errored = buildQrda3Document(run, "cms122", [{ ...officialOutcome("cms122"), status: "MISSING_DATA", evidence: { evaluationError: "CQL engine failure", message: "boom" } }]);
+  assert.match(errored, /not computed by CMS's published logic/);
+  assert.doesNotMatch(errored, /WorkWell-authored/);
+  // An official document names its artifact and carries neither.
+  const official = buildQrda3Document(run, "cms122", [officialOutcome("cms122")]);
+  assert.doesNotMatch(official, /not a CMS measure|Not a CMS measure/);
 });

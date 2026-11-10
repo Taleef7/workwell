@@ -6,24 +6,20 @@
  * ## Why the existing gate could not see this
  *
  * That file runs the committed dev-DB fixture through the ingress path, and the fixture is produced by
- * `scripts/webchart-devdb-export.ts` — one of the two SQL→FHIR mappers ADR-042/ADR-044 fixed. So it
- * carries `us-core-sex` and (after ADR-044) a LOINC mammography Observation before normalization ever
- * runs. Both fixes sit **upstream of the live FHIR transport**, and `normalizeWebChartBundle` was
- * untouched by design — so a third-party WebChart server, which supplies only what its own FHIR API
- * emits, got neither. The measured consequences were recorded and left open in ADR-042/ADR-044 and in
- * `WEBCHART_FHIR_MAPPING.md` §3.1:
+ * `scripts/webchart-devdb-export.ts` — one of the two SQL→FHIR mappers ADR-042 fixed. So it carries
+ * `us-core-sex` before normalization ever runs. That fix sits **upstream of the live FHIR transport**:
+ * a third-party WebChart server, which supplies only what its own FHIR API emits, would not carry it,
+ * and official CMS125 then puts the ENTIRE roster out of its initial population, silently, as 100%
+ * MISSING_DATA rather than an error (`WEBCHART_FHIR_MAPPING.md` §3.1).
  *
- *   - no `us-core-sex` ⇒ official CMS125 puts the ENTIRE roster out of its initial population, silently,
- *     as 100% MISSING_DATA rather than an error;
- *   - a CPT/HCPCS mammography `Procedure` and no LOINC `Observation` ⇒ a woman who WAS screened reads
- *     OVERDUE, which `case-logic.ts` escalates to HIGH.
+ * It also pins the opposite rule for a billed mammogram: ingest derives nothing from a CPT/HCPCS
+ * `Procedure`, because official CMS125 counts only a charted LOINC result (owner decision 2026-11-05).
  *
  * ## What this file does
  *
  * It simulates a live server by taking the same fixture and **stripping exactly what our SQL mappers add
- * and a third party's FHIR API would not**: the `us-core-sex` extension, and the LOINC mammography
- * Observation. What is left is `Patient.gender` and a CPT Procedure — the live shape. Then it asserts
- * official CMS125 still admits the roster and still sees the screening.
+ * and a third party's FHIR API would not**: the `us-core-sex` extension. What is left is
+ * `Patient.gender` — the live shape. Then it asserts official CMS125 still admits the roster.
  *
  * The stripping is the point: without it every assertion here would pass on the fixture's own data and
  * prove nothing about a tenant. Each test therefore also pins the NEGATIVE — normalization disabled, the
@@ -77,24 +73,18 @@ function resourcesOf(payload: unknown): Res[] {
 }
 
 /**
- * What a third-party WebChart FHIR server sends: `Patient.gender` and a CPT Procedure, without the two
- * elements our own SQL mappers add. Everything else is the fixture untouched.
+ * What a third-party WebChart FHIR server sends: `Patient.gender`, without the `us-core-sex` our own SQL
+ * mappers add. Everything else is the fixture untouched.
  */
 function asLiveServerWouldSend(): unknown[] {
   return clone(payloads).map((payload) => {
-    const p = payload as { entry?: Array<{ resource?: Res }> };
-    p.entry = (p.entry ?? []).filter((e) => {
-      const r = e.resource;
-      if (!r) return true;
+    for (const r of resourcesOf(payload)) {
       if (r.resourceType === "Patient" && Array.isArray(r.extension)) {
         r.extension = (r.extension as Res[]).filter((x) => x.url !== US_CORE_SEX);
         if ((r.extension as Res[]).length === 0) delete r.extension;
       }
-      // Drop the LOINC mammography Observation our crosswalk dual-stamps; the CPT Procedure stays.
-      const coding = ((r.code as { coding?: Array<{ code?: string }> })?.coding ?? []) as Array<{ code?: string }>;
-      return !(r.resourceType === "Observation" && coding.some((c) => c.code === ECQM_CANONICAL_CODES.mammogram.code));
-    });
-    return p;
+    }
+    return payload;
   });
 }
 
@@ -119,55 +109,34 @@ function liveBundles(mutate: (bundle: unknown) => unknown = (b) => b): unknown[]
 }
 
 /**
- * Undo ONE derivation after normalization, which is what makes the negative arm attributable.
+ * Undo ONLY the derived `us-core-sex` after normalization, which is what makes the negative arm attributable.
  *
  * A first cut compared "normalized" against "not normalized at all" — which also disables terminology
  * reconciliation and the Observation→Procedure synthesis, so the 0 could have come from anywhere and a
  * future change that moved its cause would still read green (review, #390).
  */
-function withoutDerived(kind: "sex" | "mammogram") {
-  return (bundle: unknown) => {
-    const b = clone(bundle) as { entry: Array<{ resource: Res }> };
-    if (kind === "sex") {
-      for (const { resource } of b.entry) {
-        if (resource.resourceType !== "Patient" || !Array.isArray(resource.extension)) continue;
-        const derived = ((resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some(
-          (t) => t.code === "derived-from-gender",
-        );
-        if (derived) resource.extension = (resource.extension as Res[]).filter((x) => x.url !== US_CORE_SEX);
-      }
-      return b;
-    }
-    b.entry = b.entry.filter(
-      (e) =>
-        !((e.resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some(
-          (t) => t.code === "derived-from-procedure",
-        ),
+function withoutDerivedSex(bundle: unknown): unknown {
+  const b = clone(bundle) as { entry: Array<{ resource: Res }> };
+  for (const { resource } of b.entry) {
+    if (resource.resourceType !== "Patient" || !Array.isArray(resource.extension)) continue;
+    const derived = ((resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some(
+      (t) => t.code === "derived-from-gender",
     );
-    return b;
-  };
+    if (derived) resource.extension = (resource.extension as Res[]).filter((x) => x.url !== US_CORE_SEX);
+  }
+  return b;
 }
 
-test("the fixture we strip really did carry both elements — otherwise this file proves nothing", () => {
-  // The guard on the guard. If the fixture ever stops carrying `us-core-sex` or the LOINC mammogram,
-  // every assertion below would pass trivially over data that never had them.
+test("the fixture we strip really did carry us-core-sex — otherwise this file proves nothing", () => {
+  // The guard on the guard. If the fixture ever stops carrying `us-core-sex`, every assertion below
+  // would pass trivially over data that never had it.
   const original = clone(payloads);
   const hasSex = original.some((p) =>
     resourcesOf(p).some(
       (r) => r.resourceType === "Patient" && ((r.extension as Res[]) ?? []).some((x) => x.url === US_CORE_SEX),
     ),
   );
-  const hasMammogramObservation = original.some((p) =>
-    resourcesOf(p).some(
-      (r) =>
-        r.resourceType === "Observation" &&
-        (((r.code as { coding?: Array<{ code?: string }> })?.coding ?? []) as Array<{ code?: string }>).some(
-          (c) => c.code === ECQM_CANONICAL_CODES.mammogram.code,
-        ),
-    ),
-  );
   assert.ok(hasSex, "the committed fixture must carry us-core-sex for the strip to mean anything");
-  assert.ok(hasMammogramObservation, "and the LOINC mammography Observation (ADR-044)");
 
   const stripped = asLiveServerWouldSend();
   assert.ok(
@@ -181,7 +150,7 @@ test("us-core-sex is derived from gender, so a live roster is not silently empti
   // extension and official CMS125 put every one of them out of the initial population. That fix never
   // reached the live transport.
   const withNormalization = await officialInIpp(liveBundles());
-  const without = await officialInIpp(liveBundles(withoutDerived("sex")));
+  const without = await officialInIpp(liveBundles(withoutDerivedSex));
   assert.equal(without, 0, "removing ONLY the derived extension empties the initial population again");
   // The measured number, pinned: 4 of 56 — the same four `devdb-official-eval.test.ts` finds actionable
   // (wc-8, wc-36, wc-45, wc-47), reached from the LIVE shape rather than from our own SQL mapper's output.
@@ -234,302 +203,87 @@ test("a server that already supplies us-core-sex is left exactly as it is", () =
   assert.deepEqual(patient.extension, [supplied], "never overwrite what the source stated");
 });
 
-test("a CPT mammography Procedure gains the LOINC imaging Observation the official numerator reads", () => {
-  const bundle = normalizeWebChartBundle({
-    resourceType: "Bundle",
-    entry: [
-      {
-        resource: {
-          resourceType: "Procedure",
-          status: "completed",
-          code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
-          performedDateTime: "2024-03-01T10:00:00Z",
-        },
-      },
-    ],
-  });
-  const observations = (bundle.entry as Array<{ resource: Res }>)
-    .map((e) => e.resource)
-    .filter((r) => r.resourceType === "Observation");
-  assert.equal(observations.length, 1);
-  const [observation] = observations;
-  assert.equal(
-    ((observation!.code as { coding: Array<{ code: string }> }).coding[0]!).code,
-    ECQM_CANONICAL_CODES.mammogram.code,
-  );
-  // `Status.isDiagnosticStudyPerformed` requires it; without the category the retrieve matches and the
-  // predicate still rejects — the same invisible failure one step later.
-  assert.equal(
-    ((observation!.category as Array<{ coding: Array<{ code: string }> }>)[0]!.coding[0]!).code,
-    "imaging",
-  );
-  assert.equal(observation!.status, "final");
-  assert.equal(observation!.effectiveDateTime, "2024-03-01T10:00:00Z");
-  assert.deepEqual((observation!.meta as { tag: Array<{ code: string }> }).tag[0]!.code, "derived-from-procedure");
+// A billed mammogram is not a result (owner decision 2026-11-05). Official CMS125's Mammography value set is
+// 92 LOINC codes with no CPT and no HCPCS, so ingest derives nothing from a billed Procedure: the gap stays
+// open until the result is charted, as WebChart's own report reads it. These replace the derivation's
+// tests (ADR-057), which pinned the opposite.
+
+const billedMammogram = (system: string, code: string): Res => ({
+  resourceType: "Procedure",
+  status: "completed",
+  code: { coding: [{ system, code }] },
+  performedDateTime: "2024-03-01T10:00:00Z",
 });
 
-test("a server that already sends the LOINC Observation gets no derived duplicate", () => {
-  // Both numerators are `exists(...)`, so a duplicate cannot inflate them — but a COUNTING measure would
-  // double-count, and the honest place to prevent that is here rather than in a warning nobody reads.
-  const bundle = normalizeWebChartBundle({
-    resourceType: "Bundle",
-    entry: [
-      {
-        resource: {
-          resourceType: "Procedure",
-          status: "completed",
-          code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
-          performedDateTime: "2024-03-01T10:00:00Z",
-        },
-      },
-      {
-        resource: {
-          resourceType: "Observation",
-          status: "final",
-          category: [{ coding: [{ code: "imaging" }] }],
-          code: { coding: [{ system: ECQM_CANONICAL_CODES.mammogram.system, code: ECQM_CANONICAL_CODES.mammogram.code }] },
-          effectiveDateTime: "2024-03-01T10:00:00Z",
-        },
-      },
-    ],
-  });
-  const observations = (bundle.entry as Array<{ resource: Res }>)
-    .map((e) => e.resource)
-    .filter((r) => r.resourceType === "Observation");
-  assert.equal(observations.length, 1, "the server's own Observation is the only one");
-  assert.equal(observations[0]!.meta, undefined, "and it is not tagged as derived");
+/** A mammogram result as a server that charts it sends it: final, LOINC 24606-6, category imaging. */
+const chartedMammogramResult = (): Res => ({
+  resourceType: "Observation",
+  status: "final",
+  category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "imaging" }] }],
+  code: { coding: [{ system: "http://loinc.org", code: ECQM_CANONICAL_CODES.mammogram.code }] },
+  effectiveDateTime: "2024-03-01T10:00:00Z",
 });
 
-test("a NON-final mammography Procedure derives nothing", () => {
-  // `not-done` / `entered-in-error` means the screening did not happen. Deriving an Observation from it
-  // would read as compliant — the failure `isFinalEvent` exists to prevent, one door along.
-  for (const status of ["not-done", "entered-in-error", undefined]) {
-    const bundle = normalizeWebChartBundle({
-      resourceType: "Bundle",
-      entry: [
-        {
-          resource: {
-            resourceType: "Procedure",
-            ...(status ? { status } : {}),
-            code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
-            performedDateTime: "2024-03-01T10:00:00Z",
-          },
-        },
-      ],
-    });
-    const observations = (bundle.entry as Array<{ resource: Res }>)
-      .map((e) => e.resource)
-      .filter((r) => r.resourceType === "Observation");
-    assert.equal(observations.length, 0, `status '${status}' must derive nothing`);
-  }
-});
-
-test("a Procedure that is not a mammogram derives nothing — this is an allowlist, not a sweep", () => {
-  const bundle = normalizeWebChartBundle({
-    resourceType: "Bundle",
-    entry: [
-      {
-        resource: {
-          resourceType: "Procedure",
-          status: "completed",
-          code: { coding: [{ system: "http://www.ama-assn.org/go/cpt", code: "99213" }] },
-          performedDateTime: "2024-03-01T10:00:00Z",
-        },
-      },
-    ],
-  });
-  const observations = (bundle.entry as Array<{ resource: Res }>)
-    .map((e) => e.resource)
-    .filter((r) => r.resourceType === "Observation");
-  assert.equal(observations.length, 0);
-});
-
-test("the mammography allowlist matches every coding the CROSSWALK matches", () => {
-  // The two comparisons sat fifty lines apart and disagreed: the crosswalk normalizes system aliases and
-  // upcases the code, an exact `system|code` match does neither. Measured in review (#390): a CPT-as-OID
-  // mammogram reconciled to a cms125 event — so the AUTHORED engine read COMPLIANT — while the derivation
-  // did not fire, so OFFICIAL read OVERDUE. The derivation created the divergence it exists to remove.
-  const derivedCount = (system: string, code: string) => {
-    const bundle = normalizeWebChartBundle({
-      resourceType: "Bundle",
-      entry: [
-        {
-          resource: {
-            resourceType: "Procedure",
-            status: "completed",
-            code: { coding: [{ system, code }] },
-            performedDateTime: "2024-03-01T10:00:00Z",
-          },
-        },
-      ],
-    });
-    return (bundle.entry as Array<{ resource: Res }>).filter((e) => e.resource.resourceType === "Observation").length;
-  };
+test("a billed mammogram (CPT 77067 or HCPCS G0202) derives no Observation; the Procedure passes through", () => {
   for (const [label, system, code] of [
-    ["canonical CPT", "http://www.ama-assn.org/go/cpt", "77067"],
+    ["canonical CPT", MAMMOGRAPHY_PROCEDURE_CPT.system, MAMMOGRAPHY_PROCEDURE_CPT.code],
     ["CPT as OID", "urn:oid:2.16.840.1.113883.6.12", "77067"],
-    ["CPT over https", "https://www.ama-assn.org/go/cpt", "77067"],
-    ["CPT bare name", "cpt", "77067"],
     ["canonical HCPCS", "http://www.cms.gov/Medicare/Coding/HCPCSReleaseCodeSets", "G0202"],
     ["HCPCS as OID, lowercase code", "urn:oid:2.16.840.1.113883.6.285", "g0202"],
-    ["code with surrounding space", "http://www.ama-assn.org/go/cpt", " 77067 "],
   ] as const) {
-    assert.equal(derivedCount(system, code), 1, `${label} must derive the Observation`);
+    const bundle = normalizeWebChartBundle({ resourceType: "Bundle", entry: [{ resource: billedMammogram(system, code) }] });
+    const resources = (bundle.entry as Array<{ resource: Res }>).map((e) => e.resource);
+    assert.equal(resources.filter((r) => r.resourceType === "Observation").length, 0, `${label}: no Observation`);
+    const procedures = resources.filter((r) => r.resourceType === "Procedure");
+    assert.equal(procedures.length, 1, `${label}: the Procedure stays, and only it`);
+    assert.equal(procedures[0]!.performedDateTime, "2024-03-01T10:00:00Z");
+    assert.ok(
+      ((procedures[0]!.code as { coding: Array<{ system?: string; code?: string }> }).coding).some((c) => c.system === system && c.code === code),
+      `${label}: its own coding is kept`,
+    );
   }
-  assert.equal(derivedCount("http://snomed.info/sct", "77067"), 0, "and a different SYSTEM must not");
 });
 
-test("the derived Observation actually satisfies the OFFICIAL NUMERATOR, not merely its shape", { skip }, async () => {
-  // Every other mammography test here asserts the shape of a resource in a hand-built bundle. ADR-042
-  // paid a measurement pass to learn that a retrieve can match while the predicate still rejects — so a
-  // shape assertion is exactly the test that cannot see the failure it is written for (review, #390). The
-  // fixture cannot close this either: its only mammogram belongs to wc-49, age 33 and dated 2015, so it
-  // is outside both the age band and every measurement period. So inject one in-window screening into the
-  // four subjects the IPP admits and read the numerator.
-  const screened = (bundle: unknown) => {
-    const b = clone(bundle) as { entry: Array<{ resource: Res }> };
-    const patient = b.entry.find((e) => e.resource.resourceType === "Patient")?.resource;
-    if (patient && CMS125_ACTIONABLE.includes(String(patient.id))) {
-      b.entry.push({
-        resource: {
-          resourceType: "Procedure",
-          status: "completed",
-          code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
-          performedDateTime: "2024-03-01T10:00:00Z",
-        },
-      });
-    }
-    return b;
-  };
+test("a charted mammogram result passes through untouched", () => {
+  const sent = chartedMammogramResult();
+  const bundle = normalizeWebChartBundle({ resourceType: "Bundle", entry: [{ resource: clone(sent) }] });
+  const observations = (bundle.entry as Array<{ resource: Res }>).map((e) => e.resource).filter((r) => r.resourceType === "Observation");
+  assert.equal(observations.length, 1);
+  assert.deepEqual(observations[0]!.category, sent.category, "its category is the server's own");
+  assert.equal(observations[0]!.meta, undefined, "nothing is tagged as derived");
+});
 
-  // Injected BEFORE normalization, so the derivation sees it exactly as a live server's Procedure.
-  const withScreening = asLiveServerWouldSend()
-    .map((p) => screened({ resourceType: "Bundle", type: "collection", entry: resourcesOf(p).map((resource) => ({ resource })) }))
-    .map((b) => normalizeWebChartBundle(b))
-    .map((b) => withQualifyingVisit(b));
+test("official CMS125: a billed screening leaves the numerator unmet; a charted result meets it", { skip }, async () => {
+  // Injected BEFORE normalization, into the four subjects the IPP admits, exactly as a live server's
+  // resources would arrive. wc-49's 2015 mammogram is outside every age band and period, so the fixture
+  // alone cannot show this.
+  const withExtra = (extra: () => Res) =>
+    asLiveServerWouldSend()
+      .map((p) => {
+        const resources = resourcesOf(p);
+        const patient = resources.find((r) => r.resourceType === "Patient");
+        const add = patient && CMS125_ACTIONABLE.includes(String(patient.id)) ? [{ ...extra(), subject: { reference: `Patient/${String(patient.id)}` } }] : [];
+        return { resourceType: "Bundle", type: "collection", entry: [...resources, ...add].map((resource) => ({ resource })) };
+      })
+      .map((b) => normalizeWebChartBundle(b))
+      .map((b) => withQualifyingVisit(b));
 
-  const numerator = async (bundles: readonly unknown[]) => {
+  const populations = async (bundles: readonly unknown[]) => {
     const executor = officialMeasureExecutor({ expand: officialTerminologyExpander(loadOfficialArtifact) });
     const subjects: OfficialBatchSubject[] = bundles.map((b) => ({ subjectId: patientIdOf(b), patientBundle: b }));
     const results = await executor.evaluateBatch("cms125", subjects, EVAL);
-    return [...results.entries()]
-      .filter(([, r]) => (r.evidence as { official?: { populationResults?: Array<{ populationType: string; result: boolean }> } })?.official?.populationResults?.some((p) => p.populationType === "numerator" && p.result))
-      .map(([id]) => id)
-      .sort();
+    const met = (type: string) =>
+      [...results.entries()]
+        .filter(([, r]) => (r.evidence as { official?: { populationResults?: Array<{ populationType: string; result: boolean }> } })?.official?.populationResults?.some((p) => p.populationType === type && p.result))
+        .map(([id]) => id)
+        .sort();
+    return { ipp: met("initial-population"), numerator: met("numerator") };
   };
 
-  assert.deepEqual(await numerator(withScreening), [...CMS125_ACTIONABLE].sort(), "the screening is SEEN");
-  assert.deepEqual(
-    await numerator(withScreening.map((b) => withoutDerived("mammogram")(b))),
-    [],
-    "and with only the CPT Procedure the official numerator sees nothing — the false OVERDUE this closes",
-  );
-});
+  const billed = await populations(withExtra(() => billedMammogram(MAMMOGRAPHY_PROCEDURE_CPT.system, MAMMOGRAPHY_PROCEDURE_CPT.code)));
+  assert.deepEqual(billed.ipp, [...CMS125_ACTIONABLE].sort(), "the four stay in the initial population");
+  assert.deepEqual(billed.numerator, [], "a bill is not a result: none of them meets the numerator");
 
-test("an UNUSABLE mammography Observation does not suppress derivation from a valid Procedure", () => {
-  // Presence of the code is not usability. An Observation the measure cannot count — preliminary,
-  // entered-in-error, or missing `category ~ imaging` — would otherwise suppress the derivation and the
-  // patient reads OVERDUE and is escalated HIGH (Codex, #390). Each unusable shape is pinned separately,
-  // because each fails the official predicate for a different reason.
-  const unusable: Array<[string, Res]> = [
-    ["preliminary status", { status: "preliminary", category: [{ coding: [{ code: "imaging" }] }] }],
-    ["entered-in-error", { status: "entered-in-error", category: [{ coding: [{ code: "imaging" }] }] }],
-    ["no imaging category", { status: "final" }],
-    ["wrong category", { status: "final", category: [{ coding: [{ code: "laboratory" }] }] }],
-  ];
-  for (const [label, shape] of unusable) {
-    const bundle = normalizeWebChartBundle({
-      resourceType: "Bundle",
-      entry: [
-        {
-          resource: {
-            resourceType: "Observation",
-            ...shape,
-            code: { coding: [{ system: ECQM_CANONICAL_CODES.mammogram.system, code: ECQM_CANONICAL_CODES.mammogram.code }] },
-            effectiveDateTime: "2024-03-01T10:00:00Z",
-          },
-        },
-        {
-          resource: {
-            resourceType: "Procedure",
-            status: "completed",
-            code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
-            performedDateTime: "2024-03-01T10:00:00Z",
-          },
-        },
-      ],
-    });
-    const derived = (bundle.entry as Array<{ resource: Res }>).filter(
-      (e) => ((e.resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some((t) => t.code === "derived-from-procedure"),
-    );
-    assert.equal(derived.length, 1, `an Observation with ${label} must not suppress a valid Procedure`);
-  }
-});
-
-test("an OLD qualifying Observation does not suppress derivation from a RECENT Procedure", () => {
-  // Suppression is per (subject, day). A screening from years ago is a real Observation the measure can
-  // count — for its own date. Suppressing this year's Procedure because of it is how a currently-screened
-  // woman reads OVERDUE.
-  const bundle = normalizeWebChartBundle({
-    resourceType: "Bundle",
-    entry: [
-      {
-        resource: {
-          resourceType: "Observation",
-          status: "final",
-          category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "imaging" }] }],
-          code: { coding: [{ system: ECQM_CANONICAL_CODES.mammogram.system, code: ECQM_CANONICAL_CODES.mammogram.code }] },
-          effectiveDateTime: "2015-07-05T10:00:00Z",
-        },
-      },
-      {
-        resource: {
-          resourceType: "Procedure",
-          status: "completed",
-          code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
-          performedDateTime: "2024-03-01T10:00:00Z",
-        },
-      },
-    ],
-  });
-  const derived = (bundle.entry as Array<{ resource: Res }>).filter(
-    (e) => ((e.resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some((t) => t.code === "derived-from-procedure"),
-  );
-  assert.equal(derived.length, 1);
-  assert.equal((derived[0]!.resource as Res).effectiveDateTime, "2024-03-01T10:00:00Z", "and it carries the RECENT date");
-});
-
-test("two patients in one payload do not suppress each other", () => {
-  // `normalizeWebChartBundle` is exported and `extractResources` flattens arrays of bundles, so the
-  // one-patient-per-payload invariant the HTTP transport happens to satisfy is not this function's to
-  // assume. Bundle-wide, patient B's screening would vanish because patient A recorded theirs.
-  const mammogramFor = (subject: string, kind: "observation" | "procedure") =>
-    kind === "observation"
-      ? {
-          resourceType: "Observation",
-          status: "final",
-          subject: { reference: subject },
-          category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "imaging" }] }],
-          code: { coding: [{ system: ECQM_CANONICAL_CODES.mammogram.system, code: ECQM_CANONICAL_CODES.mammogram.code }] },
-          effectiveDateTime: "2024-03-01T10:00:00Z",
-        }
-      : {
-          resourceType: "Procedure",
-          status: "completed",
-          subject: { reference: subject },
-          code: { coding: [{ system: MAMMOGRAPHY_PROCEDURE_CPT.system, code: MAMMOGRAPHY_PROCEDURE_CPT.code }] },
-          performedDateTime: "2024-03-01T10:00:00Z",
-        };
-  const bundle = normalizeWebChartBundle({
-    resourceType: "Bundle",
-    entry: [
-      { resource: mammogramFor("Patient/A", "observation") },
-      { resource: mammogramFor("Patient/B", "procedure") },
-    ],
-  });
-  const derived = (bundle.entry as Array<{ resource: Res }>).filter(
-    (e) => ((e.resource.meta as { tag?: Array<{ code?: string }> })?.tag ?? []).some((t) => t.code === "derived-from-procedure"),
-  );
-  assert.equal(derived.length, 1, "B's Procedure must still derive");
-  assert.deepEqual((derived[0]!.resource as Res).subject, { reference: "Patient/B" });
+  const charted = await populations(withExtra(chartedMammogramResult));
+  assert.deepEqual(charted.numerator, [...CMS125_ACTIONABLE].sort(), "a charted LOINC result is SEEN");
 });

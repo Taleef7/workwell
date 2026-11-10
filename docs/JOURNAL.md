@@ -5,6 +5,14 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-06
+
+- **Custom measures kept apart from the CMS set (item 13).** Authored runs still export, now labelled:
+  QRDA III and MeasureReport say "not a CMS measure", and the CSVs' `executedLogic` names
+  `WorkWell-authored <Library> <version>`. The Measures grid and Studio label authored and unrunnable rows.
+  Studio refuses CMS eCQM / MIPS ids in a name or policy reference, and duplicate names; MCP's by-name lookup
+  answers `MEASURE_AMBIGUOUS` rather than pick. No schema change; authored cms122/cms125 keep the CMS id.
+
 ## 2026-11-05
 
 - **CMS137 retired on Maui (#889).** The CY2027 final rule (CMS-1848-F) removed Quality IDs 305 (CMS137) and
@@ -15,6 +23,15 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
   Cards skip a measure the deployment does not run. The artifact, its MADiE gate and the 2027 translation
   stay, routed nowhere. Standing correction 1 now says the final rule left the FHIR timeline unproposed.
   No schema change. A rollback to a six-measure image reopens the closed cases (DEPLOY.md).
+- **A billed mammogram is not a result (owner decision).** CMS125's Mammography value set is LOINC only, and
+  WebChart's own report does not count a bill, so the shim, the dev-DB export and live ingest no longer derive
+  a LOINC imaging Observation from a CPT 77067 / HCPCS G0202 Procedure (ADR-044/057's mammogram half
+  withdrawn; us-core-sex stays). No deployed outcome moves: TWH and Maui run on the corpus, and staging runs
+  authored cms125. Over the dev-DB sample official CMS125 now retrieves nothing and refuses the batch. Open
+  questions: where WebChart charts a result, and whether a mapper may supply `category` (#892).
+- **Housekeeping.** Filed #892 (MIE's answers to the 24 data asks) and #893 (live payer and site); Coverage
+  comments cite #893, not #533/#591. E22 is recorded in LOCKED §4A.9 and the API-limit answer in
+  OPEN_QUESTIONS 4.2. #626 and #584 were re-scoped to what remains.
 
 ## 2026-11-04
 

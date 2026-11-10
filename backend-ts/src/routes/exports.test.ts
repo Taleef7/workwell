@@ -196,7 +196,11 @@ test("GET /api/exports/outcomes?runId carries derived why_flagged columns", asyn
 test("§6.2: measureVersion and executedLogic are read from each row's own evidence (#769)", async () => {
   const lines = await text(`/api/exports/outcomes?format=csv&runId=${runId}`);
   const pair = (subject: string) => [column(lines, subject, "measureVersion"), column(lines, subject, "executedLogic")];
-  assert.deepEqual(pair("emp-006"), ["1.0.0", ""], "an authored row: the authored library's version, no named logic");
+  assert.deepEqual(
+    pair("emp-006"),
+    ["1.0.0", "WorkWell-authored AnnualAudiogramCompleted 1.0.0"],
+    "an authored row: WorkWell's own CQL, named as such beside its library's version (item 13)",
+  );
   assert.deepEqual(pair("emp-007"), ["1.0.000", "CMS125FHIR v1.0.000"], "CMS's artifact, never the authored 2.0.0");
   assert.deepEqual(pair("emp-008"), ["", ""], "an errored row: nothing scored it");
   assert.deepEqual(
@@ -230,7 +234,7 @@ test("§6.3: measureVersion and executedLogic name the logic that scored each ca
   // exercised, not a fake.
   const lines = await text("/api/exports/cases?format=csv&status=open");
   assert.equal(column(lines, caseId, "measureVersion"), "1.0.0", "the authored audiogram row");
-  assert.equal(column(lines, caseId, "executedLogic"), "");
+  assert.equal(column(lines, caseId, "executedLogic"), "WorkWell-authored AnnualAudiogramCompleted 1.0.0", "named, never blank (item 13)");
   assert.equal(column(lines, officialCaseId, "measureVersion"), "1.0.000", "the artifact's version, not the authored 2.0.0");
   assert.equal(column(lines, officialCaseId, "executedLogic"), "CMS125FHIR v1.0.000");
 });

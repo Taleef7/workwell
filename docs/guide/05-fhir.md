@@ -97,19 +97,18 @@ row becomes an `Observation` with that LOINC code. Two mappings do more work tha
 - **The birth sex extension**, described above. Both places that map `patients.sex` into FHIR emit
   it, carrying the SNOMED concept — an extension carrying a bare `"F"` is indistinguishable from
   one that is absent, which is a lesson that cost a full measurement pass to learn.
-- **Mammography is dual-stamped.** Our authored measure retrieves a `Procedure` with a CPT or
+- **A billed mammogram is not a result.** Our authored measure retrieves a `Procedure` with a CPT or
   HCPCS code; CMS's official measure retrieves an `Observation` from a 92-entry LOINC list, and on top of
-  that requires `category` set to imaging. Each single representation fails in the opposite
-  direction — Procedure only, and the official measure reports a screened woman as overdue;
-  Observation only, and ours does. So one screening-mammogram row emits both, derived strictly from
-  the same real row. This is normalization, not fabrication: an explicit code allowlist, never a
-  category sweep, and non-inflating because both measures ask "does one exist", not "how many".
+  that requires `category` set to imaging. Until 2026-11-05 a billed mammogram row also emitted that
+  Observation. It no longer does (owner decision): CMS's list has no billing codes, so official
+  CMS125 counts only a charted result, as WebChart's own report does. A woman whose mammogram is only
+  billed reads overdue in the official measure until the result is charted; the authored measure
+  still reads the bill.
 
-The **live tenant path** applies the same two derivations in `normalizeWebChartBundle` — the birth
-sex extension derived from `gender` through a two-value allowlist, the LOINC imaging observation
-derived from a mammography procedure — both tagged as derived, and both suppressed when the server
-supplies the real thing itself (ADR-057). Reading a server's own recorded "female" as not-female
-would also be an inference, and a worse one.
+The **live tenant path** applies the birth sex derivation in `normalizeWebChartBundle`: the extension
+is derived from `gender` through a two-value allowlist, tagged as derived, and suppressed when the
+server supplies it itself (ADR-057). Reading a server's own recorded "female" as not-female would also
+be an inference, and a worse one. It derives nothing from a mammography procedure.
 
 ## FHIR and the standards documents on the way out
 

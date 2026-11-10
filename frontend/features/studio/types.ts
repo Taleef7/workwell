@@ -47,6 +47,8 @@ export type MeasureDetail = {
    * CMS's artifact: what runs, as distinct from this authoring record (#769). Null for an authored measure.
    */
   identity?: MeasureIdentity | null;
+  /** "WorkWell-authored <Library> <version>" when WorkWell's own CQL runs it here (item 13); else null. */
+  authoredLogic?: string | null;
 };
 
 export type ValueSetRef = {

@@ -31,7 +31,7 @@ export const WEBCHART_SERVED_RESOURCES: readonly ServedResource[] = [
     type: "Observation",
     how: "fetched",
     optional: false,
-    derived: "a LOINC 24606-6 imaging Observation from a CPT 77067/G0202 mammography Procedure",
+    derived: "",
     caveat: "",
   },
   { type: "Condition", how: "fetched", optional: false, derived: "", caveat: "" },

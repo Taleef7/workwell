@@ -10,7 +10,7 @@ import type { RunRecord } from "../stores/run-store.ts";
 import type { OutcomeRecord, OutcomeStatusCount } from "../stores/outcome-store.ts";
 import { MEASURE_BINDINGS } from "../engine/synthetic/measure-bindings.ts";
 import { loadDerivedArtifact, loadOfficialArtifact, type OfficialArtifact } from "../wiring/official-artifacts.ts";
-import { scoredByCurrentLogic } from "../measure/measure-identity.ts";
+import { authoredScored, noCmsIdentityStatement, scoredByCurrentLogic } from "../measure/measure-identity.ts";
 import { improvementNotationFor, officialMeasureSemantics } from "../wiring/official-measure-semantics.ts";
 
 const POP_SYSTEM = "http://terminology.hl7.org/CodeSystem/measure-population";
@@ -62,6 +62,12 @@ export interface Population {
 export interface MeasureReport {
   resourceType: "MeasureReport";
   id: string;
+  /**
+   * Only on a report that claims no published eMeasure identity (item 13): it says so in words, so a custom
+   * or WorkWell-authored measure's report is never read as a CMS one. `additional`, not `generated`: the
+   * sentence is not rendered from the structured elements.
+   */
+  text?: { status: "additional"; div: string };
   extension?: Extension[];
   status: "complete";
   type: "summary" | "individual";
@@ -746,6 +752,23 @@ const improvementNotation = (
   return MEASURE_BINDINGS[measureId]?.improvementNotation ?? "increase";
 };
 
+const xhtmlText = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** The narrative a report with no official identity carries (`MeasureReport.text`); none for an official or translation report. */
+const noCmsIdentityNarrative = (
+  measureId: string,
+  official: OfficialReportIdentity | null,
+  authored: boolean,
+): { text?: { status: "additional"; div: string } } =>
+  official
+    ? {}
+    : {
+        text: {
+          status: "additional",
+          div: `<div xmlns="http://www.w3.org/1999/xhtml"><p>${xhtmlText(noCmsIdentityStatement(measureId, authored))} The measure is identified by WorkWell's own canonical.</p></div>`,
+        },
+      };
+
 const REPORTER_ID = "workwell-measure-studio";
 const reportMetadata = (generatedAt: string) => ({
   id: crypto.randomUUID(),
@@ -798,7 +821,8 @@ export function buildSummaryMeasureReport(
   // names the artifact the rest were scored by (ADR-046).
   const official = outcomes.map((o) => officialReportIdentity(o.evidence)).find((i) => i !== null) ?? null;
   const { rates, strata } = aggregateByRate(outcomes, measureId);
-  return buildSummaryMeasureReportFromCounts(run, measureId, rates.length > 1 ? rates : rates[0]!, generatedAt, official, strata);
+  const authored = official === null && outcomes.some((o) => authoredScored(o.evidence));
+  return buildSummaryMeasureReportFromCounts(run, measureId, rates.length > 1 ? rates : rates[0]!, generatedAt, official, strata, authored);
 }
 
 /** Summary MeasureReport from pre-aggregated counts (the bounded Fable H4 path). */
@@ -820,6 +844,8 @@ export function buildSummaryMeasureReportFromCounts(
   official: OfficialReportIdentity | null = null,
   /** Per rate, the strata the group declares (empty for an unstratified group). Index-aligned with `c`. */
   strata: StratumCounts[][] = [],
+  /** WorkWell's own CQL scored the counts; read only without `official`, for the narrative's wording (item 13). */
+  authored = false,
 ): MeasureReport {
   const rates = Array.isArray(c) ? c : [c];
   const artifact = artifactGroups(reportArtifact(measureId, official), rates.length);
@@ -843,6 +869,7 @@ export function buildSummaryMeasureReportFromCounts(
   return {
     resourceType: "MeasureReport",
     ...reportMetadata(generatedAt),
+    ...noCmsIdentityNarrative(measureId, official, authored),
     extension: scoringExtension(),
     status: "complete",
     type: "summary",
@@ -882,6 +909,7 @@ export function buildIndividualMeasureReport(
   return {
     resourceType: "MeasureReport",
     ...reportMetadata(generatedAt),
+    ...noCmsIdentityNarrative(measureId, official, authoredScored(outcome.evidence)),
     extension: scoringExtension(),
     status: "complete",
     type: "individual",

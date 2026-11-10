@@ -285,25 +285,74 @@ export function formatScoringLogic(logic: ScoringLogic | null | undefined): stri
   return logic.kind === "workwell-translation" ? `${logic.label} (${logic.version})` : `${logic.ecqmId} v${logic.version}`;
 }
 
-/** The authored CQL library's version ("2.0.0"), or "" for a measure with no authored library. */
-function authoredLibraryVersion(measureId: string): string {
+/** The authored CQL library split into its name and version, or null for a measure with no authored library. */
+function authoredLibrary(measureId: string): { name: string; version: string } | null {
   const lib = MEASURES[measureId]?.library ?? "";
   const dash = lib.lastIndexOf("-");
-  return dash >= 0 ? lib.slice(dash + 1) : "";
+  return dash > 0 ? { name: lib.slice(0, dash), version: lib.slice(dash + 1) } : null;
+}
+
+/**
+ * Whether WorkWell's own authored CQL scored this row: an evaluated row (no `evaluationError`) carrying
+ * no official block (absent, or null as the SQL projection and `officialReportIdentity` read it), and not
+ * a seeded row. `seedTrendHistory` rows are demo history and `scale` rows are generated (or trimmed to
+ * that marker), so neither may be said to have been scored by any named logic. ONE test, so a row's
+ * version and its logic label always agree (item 13).
+ */
+export function authoredScored(evidence: unknown): boolean {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return false;
+  const e = evidence as Record<string, unknown>;
+  if (e.evaluationError !== undefined) return false;
+  if (e.official !== undefined && e.official !== null) return false;
+  return e.seedTrendHistory === undefined && e.scale === undefined;
+}
+
+/**
+ * "WorkWell-authored BreastCancerScreeningCQL 2.0.0": the name a row WorkWell's own CQL scored is given
+ * wherever a CMS artifact's row names "CMS125FHIR v1.0.000", so the two can never be read as the same
+ * logic. Null for a measure with no authored library.
+ */
+export function authoredLogicLabel(measureId: string): string | null {
+  const lib = authoredLibrary(measureId);
+  return lib ? `WorkWell-authored ${lib.name} ${lib.version}` : null;
+}
+
+/**
+ * What a report (QRDA III, a MeasureReport) says about its measure when it claims no published eMeasure
+ * identity, so a custom or WorkWell-authored measure is never read as a CMS one (item 13). The authored
+ * wording only when WorkWell's own CQL really scored rows; otherwise (nothing evaluated, e.g. an
+ * all-errored run of a routed measure) the neutral one, which is true either way. Plain text: the
+ * caller escapes it for its format.
+ */
+export function noCmsIdentityStatement(measureId: string, authored: boolean): string {
+  return authored
+    ? `Not a CMS measure: ${measureId} was scored by WorkWell-authored logic, which has no published eMeasure identifier, and this report claims none.`
+    : `Not a CMS measure report: the counts for ${measureId} were not computed by CMS's published logic, and this report claims no published eMeasure identity.`;
+}
+
+/** The authored library's version ("2.0.0"), or null for a measure with no authored library. */
+export function authoredLogicVersion(measureId: string): string | null {
+  return authoredLibrary(measureId)?.version ?? null;
+}
+
+/**
+ * The §6.2/§6.3 `executedLogic` cell for one row: CMS's artifact or a translation by name, WorkWell's
+ * own CQL by `authoredLogicLabel`, and "" for an errored or seeded row (nothing scored it by name).
+ */
+export function executedLogicLabelOf(measureId: string, evidence: unknown): string {
+  return formatScoringLogic(scoringLogicOf(evidence)) ?? (authoredScored(evidence) ? authoredLogicLabel(measureId) : null) ?? "";
 }
 
 /**
  * The version of the logic that scored a row. The evidence's version when CMS's artifact or a
- * translation scored it; "" for an errored row or a row of a measure with no authored library (nothing
- * scored it by name); the authored library's version only for a row authored CQL scored (true on TWH,
- * and on rows from before a measure was routed). Never the catalog record's "v1.0".
+ * translation scored it; "" for an errored or seeded row or a row of a measure with no authored library
+ * (nothing scored it by name); the authored library's version only for a row authored CQL scored (true
+ * on TWH, and on rows from before a measure was routed). Never the catalog record's "v1.0".
  */
 export function measureVersionOf(measureId: string, evidence: unknown): string {
   const logic = scoringLogicOf(evidence);
   if (logic) return logic.version;
-  const e = evidence as { official?: unknown; evaluationError?: unknown } | null | undefined;
-  if (e && typeof e === "object" && (e.evaluationError !== undefined || e.official !== undefined)) return "";
-  return authoredLibraryVersion(measureId);
+  return authoredScored(evidence) ? (authoredLibrary(measureId)?.version ?? "") : "";
 }
 
 /** The vendored artifact's executed-logic identity, or null when nothing is vendored under this id. */

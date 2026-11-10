@@ -19,7 +19,9 @@ test("parseArgs: repeatable --measure, --json, and a refusal for anything else",
 test("the text report names the source it describes, each logic, and why a type is not served", () => {
   const text = renderText(dataCoverage(["cms165", "cms137"]));
   assert.match(text, /This is the WebChart live-tenant path/);
-  assert.match(text, /^Ingest also derives Observation: a LOINC 24606-6 imaging Observation/m, "derivations print once, in the header");
+  assert.match(text, /^Ingest also derives Procedure: a Procedure from a final Observation/m, "derivations print once, in the header");
+  // A billed mammogram is not a result (owner decision 2026-11-05): ingest derives no Observation from it.
+  assert.doesNotMatch(text, /^Ingest also derives Observation/m);
   assert.match(text, /^cms165 · CMS165FHIR v1\.0\.000 \(CMS's artifact\)$/m);
   assert.match(text, /^cms137 · WorkWell translation of CMS137v15 \(ww-2027\.1\) \(a WorkWell translation\)$/m);
   assert.match(text, /^ {2}Retrieves by profile only for us-core-blood-pressure:$/m);

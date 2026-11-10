@@ -451,8 +451,12 @@ test("measureVersion and executedLogic name the logic that scored each case's ci
   assert.deepEqual(cell("k-translation"), ["ww-2027.1", "WorkWell translation of CMS137v15 (ww-2027.1)"], "the translation by its own name; never a CMS id");
   assert.deepEqual(cell("k-cms137"), ["1.0.000", "CMS137FHIR v1.0.000"], "the same measure, scored by CMS's artifact, in the same run");
   assert.deepEqual(cell("k-errored"), ["", ""], "nothing scored an errored row");
-  assert.deepEqual(cell("k-authored-cms125"), ["2.0.0", ""], "an authored row keeps the authored library's version");
-  assert.deepEqual(cell("k-authored"), ["1.0.0", ""]);
+  assert.deepEqual(
+    cell("k-authored-cms125"),
+    ["2.0.0", "WorkWell-authored BreastCancerScreeningCQL 2.0.0"],
+    "an authored row keeps the authored library's version and names WorkWell's logic (item 13)",
+  );
+  assert.deepEqual(cell("k-authored"), ["1.0.0", "WorkWell-authored AnnualAudiogramCompleted 1.0.0"]);
   assert.deepEqual(cell("k-missing"), ["", ""], "no cited row, no claim");
   assert.ok(!rows.some((r) => r.measureVersion === "v1.0"), "never the catalog record's version");
 

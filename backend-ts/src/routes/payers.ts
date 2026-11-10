@@ -6,7 +6,7 @@
  * Read-only and authenticated like `/api/providers` (the /api/** catch-all GET → AUTHENTICATED), and
  * profile-scoped the same way: it reports the payers PRESENT in this deployment's directory, never the
  * Source of Payment Typology in the abstract. A deployment whose roster records no payer — the
- * occupational directory, and a live WebChart directory until Coverage extraction lands (#533) —
+ * occupational directory, and a live WebChart directory until Coverage extraction lands (#893) —
  * returns `[]`, which is what a UI needs to hide the filter rather than render an empty select.
  *
  * **`subjectCount` is here so the Medicare grouping is VISIBLE.** The typology is hierarchical: `1` is

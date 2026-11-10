@@ -84,6 +84,12 @@ test("scoringForCases carries the cited row's version: the artifact's, '' for an
   ];
   const s = await scoringForCases(store, refs);
   assert.deepEqual(refs.map((r) => s.get(caseLogicKey(r))?.version), ["1.0.000", "", "2.0.0", ""]);
+  // §6.3's `executedLogic`, from the same cited row: WorkWell's own CQL is named, never blank (item 13).
+  assert.deepEqual(
+    refs.map((r) => s.get(caseLogicKey(r))?.executedLogic),
+    [s.get(caseLogicKey(refs[0]!))?.executedLogic, "", "WorkWell-authored BreastCancerScreeningCQL 2.0.0", ""],
+  );
+  assert.notEqual(s.get(caseLogicKey(refs[0]!))?.executedLogic, "", "the artifact's row is named");
 });
 
 test("one run holding a subject's 2026 and 2027 rows: each case names the row of ITS period, whichever was written first", async () => {

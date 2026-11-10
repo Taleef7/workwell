@@ -89,7 +89,8 @@ The plan is `docs/ROADMAP_2026-08-30.md`; the verification bar stays §4 decisio
    MeasureReport files, and MCP stay with the lead (`ROLE_CASE_MANAGER`) and admins. Single assign stays
    with staff: the split limits the volume of a change, not who may make it. A rule that does not name the
    staff role refuses it. Logging a contact and setting a patient's contact preference are the staff
-   seat's too (owner decision, 2026-11-03, #886).
+   seat's too (owner decision, 2026-11-03, #886). Close, escalate, schedule and evidence upload stay on the
+   case page; the patient page offers re-check and outreach per gap (owner decision, 2026-10-29, #868).
 10. **The year change** (owner decision, 2026-11-02, #882). The 1 January rollover stays: the year's first
     run closes every open case of the year before. From then on a cycle that has ended never opens or reopens
     a case: a run, a re-check or outreach over it records what it found and leaves its cases closed, and

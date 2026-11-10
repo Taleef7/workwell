@@ -148,14 +148,34 @@ function measureFilterRef(args: JsonRecord): string | null {
   return name || null;
 }
 
-/** Resolve a measure record from measureId (slug) or measureName (case-insensitive); null if unresolved. */
-async function resolveMeasure(deps: McpToolDeps, args: JsonRecord): Promise<MeasureRecord | null> {
+/** A measureName that names more than one record: the ids it could mean, none of them chosen. */
+interface AmbiguousMeasure {
+  ambiguous: string[];
+}
+
+/** The structured error for a name that names several measures (item 13): never an arbitrary pick. */
+function ambiguousMeasureError(name: string, found: AmbiguousMeasure): JsonRecord {
+  return safeError("MEASURE_AMBIGUOUS", `More than one measure is named "${name}" (${found.ambiguous.join(", ")}); ask by measureId`);
+}
+
+const isAmbiguous = (r: MeasureRecord | AmbiguousMeasure | null): r is AmbiguousMeasure => r != null && "ambiguous" in r;
+
+/**
+ * Resolve a measure record from measureId (slug) or measureName (case-insensitive); null if unresolved.
+ * A name matching several records (item 13: older stacks keep deprecated legacy rows under an active
+ * measure's name) resolves to the one record that is not Deprecated; with no single such record it is
+ * AMBIGUOUS, so a client is never answered about whichever record the store listed first.
+ */
+async function resolveMeasure(deps: McpToolDeps, args: JsonRecord): Promise<MeasureRecord | AmbiguousMeasure | null> {
   const rawId = args.measureId != null ? String(args.measureId).trim() : "";
   if (rawId) return deps.measureStore.getLatest(rawId);
   const rawName = args.measureName != null ? String(args.measureName).trim() : "";
   if (rawName) {
     const all = await deps.measureStore.listLatest();
-    return all.find((m) => m.name.toLowerCase() === rawName.toLowerCase()) ?? null;
+    const named = all.filter((m) => m.name.toLowerCase() === rawName.toLowerCase());
+    if (named.length <= 1) return named[0] ?? null;
+    const live = named.filter((m) => m.status !== "Deprecated");
+    return live.length === 1 ? live[0]! : { ambiguous: named.map((m) => m.measureId).sort() };
   }
   return null;
 }
@@ -249,6 +269,7 @@ async function listCases(args: JsonRecord, deps: McpToolDeps): Promise<unknown> 
   // unrelated restricted cases) — error instead. Java throws "Measure not found"; we return safeError.
   const ref = measureFilterRef(args);
   const measure = ref ? await resolveMeasure(deps, args) : null;
+  if (isAmbiguous(measure)) return ambiguousMeasureError(ref!, measure);
   if (ref && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${ref}`);
   let rows = await deps.caseStore.listCases({ ...caseStatusQueryFor(status), measureId: measure?.measureId, limit: 100000, offset: 0 });
   const directory = directoryForSubjects(deps, rows.map((c) => c.employeeId));
@@ -361,6 +382,7 @@ async function getMeasureVersion(args: JsonRecord, deps: McpToolDeps): Promise<u
     throw new ToolArgError("measureId or measureName is required");
   }
   const rec = await resolveMeasure(deps, args);
+  if (isAmbiguous(rec)) throw new ToolArgError(String(ambiguousMeasureError(String(args.measureName), rec).message));
   if (!rec) throw new ToolArgError("Measure not found");
   const detail = toMeasureDetail(rec);
   const cqlText = detail.cqlText ?? "";
@@ -502,6 +524,7 @@ async function checkCompliance(args: JsonRecord, deps: McpToolDeps): Promise<unk
   const mode = args.mode != null ? String(args.mode) : "latest";
   if (mode !== "latest" && mode !== "preview") return safeError("INVALID_ARGUMENT", "mode must be 'latest' or 'preview'");
   const rec = await resolveMeasure(deps, { measureName });
+  if (isAmbiguous(rec)) return ambiguousMeasureError(measureName, rec);
   // An unresolved measure is an ERROR, not a lookalike absence (review on #492): the NO_OUTCOME
   // message advises waiting for a run, which for a measure that does not exist sends an AI client
   // into an endless retry. Same rule as list_cases / list_noncompliant.
@@ -598,6 +621,7 @@ async function listNoncompliant(args: JsonRecord, deps: McpToolDeps): Promise<un
     (panelFilters as { listSubjectIds?: ReadonlySet<string> }).listSubjectIds = resolved.subjectIds;
   }
   const measure = measureNameFilter ? await resolveMeasure(deps, { measureName: measureNameFilter }) : null;
+  if (isAmbiguous(measure)) return ambiguousMeasureError(measureNameFilter, measure);
   // Same leak guard as list_cases: an unresolved measure filter must error, not return all cases.
   if (measureNameFilter && !measure) return safeError("MEASURE_NOT_FOUND", `Measure not found: ${measureNameFilter}`);
   // ACTIVE, not OPEN-only: an IN_PROGRESS case is still a non-compliant subject someone is working,
@@ -653,6 +677,7 @@ async function explainRule(args: JsonRecord, deps: McpToolDeps): Promise<unknown
     return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
   }
   const rec = await resolveMeasure(deps, args);
+  if (isAmbiguous(rec)) return ambiguousMeasureError(String(args.measureName), rec);
   if (!rec) return safeError("MEASURE_NOT_FOUND", "Measure not found");
   const detail = toMeasureDetail(rec);
   const cqlText = detail.cqlText ?? "";
@@ -700,6 +725,7 @@ async function getMeasureTraceability(args: JsonRecord, deps: McpToolDeps): Prom
     return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
   }
   const rec = await resolveMeasure(deps, args);
+  if (isAmbiguous(rec)) return ambiguousMeasureError(String(args.measureName), rec);
   if (!rec) return safeError("MEASURE_NOT_FOUND", "Measure not found");
   return generateTraceability(rec);
 }
@@ -709,6 +735,7 @@ async function listDataQualityGaps(args: JsonRecord, deps: McpToolDeps): Promise
     return safeError("INVALID_ARGUMENT", "measureId or measureName is required");
   }
   const rec = await resolveMeasure(deps, args);
+  if (isAmbiguous(rec)) return ambiguousMeasureError(String(args.measureName), rec);
   if (!rec) return safeError("MEASURE_NOT_FOUND", "Measure not found");
   const readiness = await computeDataReadiness({ outcomes: deps.outcomeStore }, rec);
   return {
