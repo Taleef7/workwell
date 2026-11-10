@@ -7,6 +7,41 @@ and this project follows [Semantic Versioning](https://semver.org/) intent for r
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-10
+
+The handoff release (`docs/HANDOFF.md`). It covers the work from mid-August to November 2026, mostly the
+Maui pilot sandbox. Each change has its PR and a few lines in `docs/JOURNAL.md`; the highlights:
+
+### Added
+- **The Maui pilot sandbox:** a patient-driven deployment for a primary-care group entering an MSSP ACO
+  in 2027, running the ACO's five computable measures (CMS122, CMS125, CMS2, CMS130, CMS165) on CMS's
+  FHIR drafts over a 20,000-patient generated corpus, with provider panels, a patient-first work list and
+  the MIPS↔CMS crosswalk.
+- **2027 logic:** CMS has published no FHIR measures for 2027, so WorkWell translates each one itself,
+  labelled as its own and scoring only the year it covers (#767, #779, #782, #816, #818, #822, #820).
+  Every result names the logic that scored it (#769).
+- **The ACO's attributed list** end to end: import, the list filter on the staff screens, and a report
+  with each patient's result and its date from CQL's own values (#557, #874, #875).
+- **The provider scorecard** (#852), kept warm in the worker (#884); a clinician's own patients (#870).
+- **Staff work:** the lead and the staff seat (#880), the patient page (#868), logging a contact and
+  each patient's contact preference (#886), order options with admin-approved codes on the cards (#620).
+- **The year change:** the 1 January rollover, ended cycles that open nothing, and a rehearsal tool
+  (#882, #854).
+- **Trust in the numbers:** a run that says when its data is too thin (#853), evaluation errors that never
+  change a case, MeasureReports meeting DEQM 1.0.0 (#849), and every bulk download recorded before it
+  leaves.
+- **MCP** on the 2026-07-28 spec with OAuth sign-in (#704).
+
+### Changed
+- **CMS137 retired on Maui** after the CY2027 final rule removed Quality ID 305 from APP Plus; its open
+  cases close at the next all-programs run (#889).
+- **A billed mammogram is not a result:** no ingest path derives an imaging Observation from a CPT or
+  HCPCS procedure (#894).
+- **Custom measures are kept apart from the CMS set** in labels, exports and naming (#895).
+- The licensed value-set expansions left the published images; terminology is fetched from the bucket.
+
+## [2026-08] - official-first execution and the WebChart convergence
+
 ### Added
 - **Official-first eCQM execution — built, gated, and dark (roadmap §7.4; PRs #333–#346; ADR-036/037/038/039).**
   The capability to run CMS's *published* measure artifacts verbatim, rather than an authored
