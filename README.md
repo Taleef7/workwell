@@ -19,9 +19,9 @@ WorkWell Measure Studio evaluates patients against quality measures with a CQL e
 - **Maui**: a sandbox for a primary-care group entering a Medicare Shared Savings Program ACO (performance year 2027). Its subjects are patients, and it runs the ACO's five computable CMS measures on CMS's FHIR drafts.
 - **TWH**: the occupational instance, for Total Worker Health. Its subjects are employees, and it runs WorkWell's own occupational and wellness measures alongside two CMS measures.
 
-A staging stack reads FHIR from a live WebChart trial tenant. All three run on synthetic data.
+A staging stack read FHIR from a live WebChart trial tenant. All three ran on synthetic data.
 
-> **Status, November 2026:** `v1.0.0` is the handoff release; [`docs/HANDOFF.md`](docs/HANDOFF.md) says what is finished, what waits on whom, and how to take the stacks over or shut them down. The hosted stacks may be offline after that, and the whole app still runs offline from a clone ([Quick start](#quick-start)).
+> **Status, November 2026:** `v1.0.0` is the handoff release; [`docs/HANDOFF.md`](docs/HANDOFF.md) says what is finished, what waits on whom, and how to bring the stacks back. The hosted stacks were shut down on 2026-11-27. The whole app still runs offline from a clone ([Quick start](#quick-start)).
 
 **Where it sits in the JS ecosystem.** It **composes** [`fqm-execution`](https://github.com/projecttacoma/fqm-execution) and [`cql-execution`](https://github.com/cqframework/cql-execution) rather than competing with them: CMS's FHIR draft measures run through `fqm-execution` where they are routed, the authored engine runs on `cql-execution`, and the packaging ([`@work-well/measure-engine`](https://www.npmjs.com/package/@work-well/measure-engine), [`docs/PACKAGES.md`](docs/PACKAGES.md)) exists so a consumer can take the engine without WorkWell's measure catalog.
 

@@ -4,6 +4,14 @@ Taleef Tamsal built WorkWell from April 2026 and hands it over on 2026-11-15. Th
 picks it up: what is finished, what waits on whom, which accounts the running stacks depend on, and how to
 take them over or shut them down. The rules are in `CLAUDE.md`; how the system works is in `docs/guide/`.
 
+> **2026-11-27: the hosted stacks are shut down.** Following §5, the schedule, backup and deploy workflows
+> are disabled and the three Neon projects and the R2 buckets are deleted, with them the stored
+> `terminology/` copies. Dumps of the three databases as of that day (`workwell_spike`, `pg_dump` custom
+> format) are held by the original developer. Bringing a stack back is §4 on new accounts: re-enable the
+> workflows, restore a dump if run history matters (BACKUP_DR_RUNBOOK §3.5), and expect each deploy's
+> terminology to come from VSAC alone. The VSAC key was removed too, so CI skips the Maui Playwright
+> suite (the `VSAC key present` job); set `WORKWELL_VSAC_API_KEY_VENDOR` to your own UMLS key to run it.
+
 ## 1. Where it stands
 
 - **`main` is tagged `v1.0.0`** (the handoff release). CI is green: 4,372 backend tests in three shards

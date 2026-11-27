@@ -73,6 +73,7 @@ docs/transcripts/
 **/*transcript*.md
 **/*transcript*.vtt
 **/*transcript*.srt
+**/*transcript*.zip
 
 # QRDA Schematron artifacts — third-party, ~585 KB, downloaded per reporting year for
 # backend-ts/scripts/qrda-schematron-check.py (pinned by SHA-256 in the script, never vendored).

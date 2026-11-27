@@ -5,6 +5,13 @@ Newest first. A few lines per working day: what changed, and what's next.
 Entries before 2026-09-23 are in git history: `git show before-docs-trim:docs/JOURNAL.md` is the last long-form
 version, and earlier months were in `docs/archive/` (`git show before-docs-trim:docs/archive/JOURNAL_2026-07.md`).
 
+## 2026-11-27
+
+- **The hosted stacks are shut down** (HANDOFF.md §5). Workflows that deploy, heal, back up or rebuild are
+  disabled; the Neon projects and R2 buckets are deleted after a final local dump of each database. CI
+  still runs without the bucket and VSAC credentials. The Maui E2E refuses to run over capped
+  expansions, so it is now skipped when `WORKWELL_VSAC_API_KEY_VENDOR` is unset, as on Dependabot's pushes.
+
 ## 2026-11-10
 
 - **Handoff, and `v1.0.0`.** `docs/HANDOFF.md` is new: what is left and who it waits on, the accounts the

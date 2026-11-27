@@ -757,13 +757,34 @@ jobs:
       - name: Pack, install, run and typecheck outside the workspace
         run: pnpm verify:publish
 
+  # Whether the VSAC key is set. A job-level `if` cannot read a secret, so this job reads it in a step
+  # and reports only a boolean. The key was removed when the hosted stacks shut down (2026-11-27).
+  vsac-key:
+    name: VSAC key present
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          WORKWELL_VSAC_API_KEY: ${{ secrets.WORKWELL_VSAC_API_KEY_VENDOR }}
+        run: |
+          if [ -n "$WORKWELL_VSAC_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No WORKWELL_VSAC_API_KEY_VENDOR secret: the Maui E2E is skipped. Set the secret to run it."
+          fi
+
   e2e-maui:
     name: Playwright E2E — Maui pilot
     runs-on: ubuntu-latest
-    # Every push and every dispatch. Not Dependabot's pushes: they get no secrets, and the vendor step
-    # below refuses to run without the VSAC key. It finishes inside the backend shards, so it adds no
-    # wait; it was dispatch-only until 2026-09-23, and twice a broken screen went unnoticed that way.
-    if: github.actor != 'dependabot[bot]'
+    # Every push and every dispatch where the VSAC key is set. Not Dependabot's pushes, which get no
+    # secrets, and not a repository without the key: the vendor step below refuses to run over capped
+    # expansions, so the job is skipped, never run untested. It finishes inside the backend shards, so it
+    # adds no wait; it was dispatch-only until 2026-09-23, and twice a broken screen went unnoticed that way.
+    needs: vsac-key
+    if: github.actor != 'dependabot[bot]' && needs.vsac-key.outputs.present == 'true'
     timeout-minutes: 45
     # The Maui project runs against a stack THIS RUNNER boots — backend on the SQLite floor with
     # WORKWELL_INSTANCE=maui, frontend built in patient terminology with the public-demo affordances
