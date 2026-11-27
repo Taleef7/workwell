@@ -9,7 +9,8 @@ take them over or shut them down. The rules are in `CLAUDE.md`; how the system w
 > `terminology/` copies. Dumps of the three databases as of that day (`workwell_spike`, `pg_dump` custom
 > format) are held by the original developer. Bringing a stack back is §4 on new accounts: re-enable the
 > workflows, restore a dump if run history matters (BACKUP_DR_RUNBOOK §3.5), and expect each deploy's
-> terminology to come from VSAC alone.
+> terminology to come from VSAC alone. The VSAC key was removed too, so CI skips the Maui Playwright
+> suite (the `VSAC key present` job); set `WORKWELL_VSAC_API_KEY_VENDOR` to your own UMLS key to run it.
 
 ## 1. Where it stands
 
