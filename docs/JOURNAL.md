@@ -9,7 +9,8 @@ version, and earlier months were in `docs/archive/` (`git show before-docs-trim:
 
 - **The hosted stacks are shut down** (HANDOFF.md §5). Workflows that deploy, heal, back up or rebuild are
   disabled; the Neon projects and R2 buckets are deleted after a final local dump of each database. CI
-  still runs, without the bucket and VSAC credentials, as on Dependabot's pushes.
+  still runs without the bucket credentials (the restore is best effort), but it keeps
+  `WORKWELL_VSAC_API_KEY_VENDOR`: the Maui E2E refuses to run over capped expansions without it.
 
 ## 2026-11-10
 
